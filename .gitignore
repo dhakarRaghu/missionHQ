@@ -1,0 +1,15 @@
+.env
+.env.local
+node_modules/
+__pycache__/
+.venv/
+data/snapshots/
+HALT
+*.sqlite
+.next/
+
+# macOS
+.DS_Store
+
+# The vault is its own git repo (own history, own private remote)
+vault/

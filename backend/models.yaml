@@ -1,0 +1,33 @@
+# The ONLY place a provider or model id is named. Agent code passes names/roles.
+# Each entry: provider (gateway | openai | anthropic), model id at that provider,
+# and pricing per 1M tokens (used for real cost accounting; gateway aliases are
+# not priced correctly by any auto-pricing library).
+
+models:
+  gw-large:
+    provider: gateway
+    model: claude-opus-5
+    input_per_mtok: 5.00
+    output_per_mtok: 25.00
+  gw-default:
+    provider: gateway
+    model: claude-sonnet-5
+    input_per_mtok: 2.00
+    output_per_mtok: 10.00
+  gw-mini:
+    provider: gateway
+    model: claude-haiku-4-5
+    input_per_mtok: 1.00
+    output_per_mtok: 5.00
+  # Second-provider entry proving multi-provider: used by the Phase 0 check.
+  openai-mini:
+    provider: openai
+    model: gpt-5-mini
+    input_per_mtok: 0.25
+    output_per_mtok: 2.00
+
+# Roles are aliases into the registry. Agents may declare a role or a model name.
+roles:
+  deep: gw-large      # main/orchestrator agent, deep review
+  default: gw-default # routine agent tasks
+  cheap: gw-mini      # ledger checks, quarantined reader, filing, extraction
