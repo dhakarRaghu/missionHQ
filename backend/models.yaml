@@ -1,33 +1,26 @@
-# The ONLY place a provider or model id is named. Agent code passes names/roles.
-# Each entry: provider (gateway | openai | anthropic), model id at that provider,
-# and pricing per 1M tokens (used for real cost accounting; gateway aliases are
-# not priced correctly by any auto-pricing library).
+# The ONLY place a provider or model id is named. Agent code passes a role
+# ("deep" / "default" / "cheap") or a registry name; never a provider.
+#
+# The gateway (Juspay Grid, https://grid.ai.juspay.net) is a LiteLLM proxy
+# speaking OpenAI-compatible /v1, so adding a model later is one entry here and
+# nothing else. `uv run python -m hq.cli models` lists everything the gateway
+# serves and flags entries it no longer has.
+#
+# Pricing is per 1M tokens and drives our own cost accounting: gateway aliases
+# cannot be priced by any public pricing library, so these numbers are the
+# source of truth. Set them to 0 if internal usage is not billed to you.
 
 models:
-  gw-large:
+  kimi:
     provider: gateway
-    model: claude-opus-5
-    input_per_mtok: 5.00
-    output_per_mtok: 25.00
-  gw-default:
-    provider: gateway
-    model: claude-sonnet-5
-    input_per_mtok: 2.00
-    output_per_mtok: 10.00
-  gw-mini:
-    provider: gateway
-    model: claude-haiku-4-5
-    input_per_mtok: 1.00
-    output_per_mtok: 5.00
-  # Second-provider entry proving multi-provider: used by the Phase 0 check.
-  openai-mini:
-    provider: openai
-    model: gpt-5-mini
-    input_per_mtok: 0.25
-    output_per_mtok: 2.00
+    model: kimi-latest    # 256k context
+    input_per_mtok: 0.60
+    output_per_mtok: 2.50
 
-# Roles are aliases into the registry. Agents may declare a role or a model name.
+# Roles are what agents declare. All three point at one model for now; split
+# them (deep -> a stronger model, cheap -> a faster one) by editing these three
+# lines, with no change to any agent or any code.
 roles:
-  deep: gw-large      # main/orchestrator agent, deep review
-  default: gw-default # routine agent tasks
-  cheap: gw-mini      # ledger checks, quarantined reader, filing, extraction
+  deep: kimi
+  default: kimi
+  cheap: kimi

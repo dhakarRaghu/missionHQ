@@ -33,6 +33,26 @@ async def list_tasks(status: str | None = None, limit: int = 100) -> list[dict]:
         " created_at, updated_at FROM hq.tasks ORDER BY updated_at DESC LIMIT %s", (limit,))
 
 
+class CreateTaskBody(BaseModel):
+    agent: str
+    title: str
+    brief: str = ""
+
+
+@router.post("/tasks", operation_id="createTask", status_code=201)
+async def create_task(body: CreateTaskBody) -> dict:
+    """Queue work for an agent. Goes through engine.dispatch like cron and chat
+    do, so there is still exactly one enqueue path."""
+    from hq import engine
+
+    if body.agent not in engine.registered_agents():
+        raise HTTPException(404, f"unknown agent {body.agent}")
+    task_id = await engine.dispatch(
+        agent=body.agent, title=body.title, brief=body.brief, source="web"
+    )
+    return {"task_id": task_id}
+
+
 @router.get("/tasks/{task_id}/events", operation_id="listTaskEvents")
 async def list_task_events(task_id: str) -> list[dict]:
     return await db.fetch(

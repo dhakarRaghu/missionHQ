@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 import hq.dbos_app  # noqa: F401 — constructs DBOS before any decorated import
-from hq import db, engine, obs
+from hq import db, engine, llm, obs
 from hq.channels import telegram
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI):
     await db.migrate()
     _ensure_vault_repo()
     engine.bootstrap_pre_launch()   # agents + cron workflows, BEFORE launch
+    await llm.verify_against_gateway()  # a retired model alias must fail loudly now,
+                                        # not at 3am inside a cron run
     DBOS.launch()
     await engine.bootstrap_post_launch()  # queues need a launched executor
     await engine.reap()             # reconcile stale state from the last crash

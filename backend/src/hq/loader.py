@@ -17,7 +17,13 @@ from pydantic_ai.tools import Tool
 
 from hq import memory
 from hq.config import Caps, settings
-from hq.tools.registry import TOOL_REGISTRY, WEB_READ_TOOLS, HQDeps, get_tools
+from hq.tools.registry import (
+    OUTBOUND_ACTIONS,
+    TOOL_REGISTRY,
+    WEB_READ_TOOLS,
+    HQDeps,
+    get_tools,
+)
 
 
 class CronEntry(BaseModel):
@@ -54,23 +60,20 @@ class AgentSpec(BaseModel):
         return scopes
 
     def validate_trifecta(self) -> None:
+        """An agent that reads the web must not also be able to act outward or
+        write trusted memory: one poisoned page would otherwise become a
+        permanent instruction. Enforced at load so the failure is loud."""
         names = self.base_tool_names()
-        has_web = bool(names & WEB_READ_TOOLS)
-        if not has_web:
+        if not names & WEB_READ_TOOLS:
             return
         outbound = {
             n for n in names
-            if n in TOOL_REGISTRY and TOOL_REGISTRY[n].requires_approval is False
-            and TOOL_REGISTRY[n].action.value in ("external_write", "spend")
+            if n in TOOL_REGISTRY
+            and TOOL_REGISTRY[n].action in OUTBOUND_ACTIONS
         }
-        # Any outbound-send tool at all is forbidden alongside web reads.
-        gated = {
-            n for n in names
-            if n in TOOL_REGISTRY and TOOL_REGISTRY[n].action.value in ("external_write", "spend")
-        }
-        if gated or outbound:
+        if outbound:
             raise ValueError(
-                f"agent {self.name}: web-read tools cannot combine with outbound tools {gated}"
+                f"agent {self.name}: web-read tools cannot combine with outbound tools {outbound}"
             )
         for scope in self.vault_write_scopes():
             if not scope.startswith("quarantine"):

@@ -58,7 +58,7 @@ async def execute(
         else:
             result = await agent.run(prompt if rounds == 1 else None, **kwargs)
 
-        usage = result.usage()
+        usage = result.usage
         total_in += usage.input_tokens or 0
         total_out += usage.output_tokens or 0
 
