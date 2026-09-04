@@ -100,26 +100,34 @@ export function Transcript({
   }
   if (!count) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6">
-        <p className="text-muted-foreground max-w-md text-center text-sm">
-          Nothing here yet. Ask a question and the agent replies in this thread.
-          Each turn is a real run, so it can read your vault and use its tools.
-        </p>
-        {starters.length && onStart ? (
-          <ul className="flex w-full max-w-md flex-col gap-2">
-            {starters.map((text) => (
-              <li key={text}>
-                <button
-                  type="button"
-                  onClick={() => onStart(text)}
-                  className="hover:border-ring/60 hover:bg-muted/50 w-full rounded-lg border border-dashed px-3 py-2 text-left text-sm transition-colors"
-                >
-                  {text}
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+      <div className="pane-scroll flex flex-col justify-center p-6">
+        <div className="mx-auto w-full max-w-lg">
+          <p className="text-sm font-medium">Start the conversation</p>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Each turn is a real run, so the agent can read your memory and use
+            its tools. A reply usually takes 20 to 60 seconds.
+          </p>
+          {starters.length && onStart ? (
+            <>
+              <p className="text-muted-foreground mt-5 text-xs font-medium tracking-wide uppercase">
+                Try one of these
+              </p>
+              <ul className="mt-2 flex flex-col gap-2">
+                {starters.map((text) => (
+                  <li key={text}>
+                    <button
+                      type="button"
+                      onClick={() => onStart(text)}
+                      className="bg-card hover:border-ring/60 hover:bg-muted/40 w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors"
+                    >
+                      {text}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
       </div>
     );
   }

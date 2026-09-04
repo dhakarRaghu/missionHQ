@@ -216,8 +216,12 @@ function HaltedBanner() {
  * viewport tall and the content area scrolls. Views that need to fill the
  * height (chat, vault) use `flex-1 min-h-0` and scroll their own panes.
  */
+/** Views that fill the viewport and scroll their own panes. */
+const FULL_HEIGHT = ["/chat", "/vault"];
+
 export function ConsoleShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const fillsHeight = FULL_HEIGHT.some((href) => pathname.startsWith(href));
   // Pending approvals are the only count that means "you are the blocker",
   // so the Inbox entry carries it and nothing else does.
   const tickets = useQuery({
@@ -289,8 +293,27 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         <HaltedBanner />
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex min-h-full w-full max-w-7xl min-w-0 flex-col p-5 lg:p-7">
+        {/* Two shapes, chosen by the route.
+            A normal page grows with its content: the wrapper is min-h-full so
+            its bottom padding still sits under the last row, and this
+            container scrolls.
+            A full-height view (chat, memory) must instead give its panes a
+            definite height to scroll inside. That needs h-full, not
+            min-h-full: with a minimum the flex basis stays indefinite, the
+            panes grow to their content, and the page header is pushed off
+            screen. This container then never scrolls. */}
+        <div
+          className={cn(
+            "min-h-0 flex-1",
+            fillsHeight ? "overflow-hidden" : "overflow-y-auto",
+          )}
+        >
+          <div
+            className={cn(
+              "mx-auto flex w-full max-w-7xl min-w-0 flex-col p-5 lg:p-7",
+              fillsHeight ? "h-full" : "min-h-full",
+            )}
+          >
             {children}
           </div>
         </div>

@@ -192,6 +192,10 @@
   @media (width >= 48rem) {
     .console-split {
       grid-template-columns: var(--pane-width, 17rem) minmax(0, 1fr);
+      /* The row must not grow past the grid box. Without this an auto row
+       * sizes to its tallest child, so a long chat list pushed the whole page
+       * taller than the viewport and scrolled the header out of view. */
+      grid-template-rows: minmax(0, 1fr);
       gap: 1.5rem;
     }
   }

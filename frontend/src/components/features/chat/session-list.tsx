@@ -1,19 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -24,8 +18,25 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, qk } from "@/lib/api/client";
 import type { ChatSession } from "@/lib/api/types";
-import { exactTime, timeAgo } from "@/lib/time";
+import { clockTime, exactTime, timeAgo } from "@/lib/time";
 import { cn } from "@/lib/utils";
+
+/** Day buckets, so a long list reads as a history instead of a wall. */
+const BUCKETS = ["Today", "Yesterday", "Earlier"] as const;
+type Bucket = (typeof BUCKETS)[number];
+
+function bucketOf(iso: string): Bucket {
+  const then = new Date(iso);
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  if (then.getTime() >= startOfToday) return "Today";
+  if (then.getTime() >= startOfToday - 86_400_000) return "Yesterday";
+  return "Earlier";
+}
 
 export function SessionList({
   sessions,
@@ -49,52 +60,66 @@ export function SessionList({
     onError: (error: Error) => toast.error(error.message),
   });
 
+  const grouped = useMemo(() => {
+    const map = new Map<Bucket, ChatSession[]>();
+    for (const session of sessions.data ?? []) {
+      const key = bucketOf(session.last_active);
+      map.set(key, [...(map.get(key) ?? []), session]);
+    }
+    return map;
+  }, [sessions.data]);
+
   return (
-    <div className="flex min-h-0 flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       <NewChatForm onCreated={onSelect} />
 
-      <div className="flex min-h-0 flex-1 flex-col gap-1.5">
-        <h2 className="text-muted-foreground px-1 text-xs font-medium tracking-wide uppercase">
-          Chats
-        </h2>
-        <div className="pane-scroll -mx-1 px-1">
-          {sessions.isLoading ? (
-            <div
-              role="status"
-              aria-busy="true"
-              aria-label="Loading chats"
-              className="flex flex-col gap-1"
-            >
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-            </div>
-          ) : sessions.isError ? (
-            <ErrorState
-              message={sessions.error.message}
-              onRetry={() => sessions.refetch()}
-              retrying={sessions.isFetching}
-            />
-          ) : !sessions.data?.length ? (
-            <EmptyState compact>No chats yet. Start one above.</EmptyState>
-          ) : (
-            <ul className="flex flex-col gap-1" aria-label="Chats">
-              {sessions.data.map((session) => (
-                <li key={session.id}>
-                  <SessionRow
-                    session={session}
-                    active={session.id === activeId}
-                    onSelect={() => onSelect(session.id)}
-                    onDelete={() => remove.mutate(session.id)}
-                    deleting={
-                      remove.isPending && remove.variables === session.id
-                    }
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+      <div className="pane-scroll -mx-1 px-1">
+        {sessions.isLoading ? (
+          <div
+            role="status"
+            aria-busy="true"
+            aria-label="Loading chats"
+            className="flex flex-col gap-1"
+          >
+            <Skeleton className="h-11 w-full" />
+            <Skeleton className="h-11 w-full" />
+            <Skeleton className="h-11 w-full" />
+          </div>
+        ) : sessions.isError ? (
+          <ErrorState
+            message={sessions.error.message}
+            onRetry={() => sessions.refetch()}
+            retrying={sessions.isFetching}
+          />
+        ) : !sessions.data?.length ? (
+          <EmptyState compact title="No chats yet">
+            Pick an agent above to start one.
+          </EmptyState>
+        ) : (
+          BUCKETS.filter((bucket) => grouped.has(bucket)).map((bucket) => (
+            <section key={bucket} className="mb-3 last:mb-0">
+              <h3 className="text-muted-foreground bg-background/85 sticky top-0 z-10 px-1 py-1 text-xs font-medium backdrop-blur">
+                {bucket}
+              </h3>
+              <ul className="flex flex-col gap-0.5" aria-label={bucket}>
+                {(grouped.get(bucket) ?? []).map((session) => (
+                  <li key={session.id}>
+                    <SessionRow
+                      session={session}
+                      active={session.id === activeId}
+                      sameDay={bucket === "Today"}
+                      onSelect={() => onSelect(session.id)}
+                      onDelete={() => remove.mutate(session.id)}
+                      deleting={
+                        remove.isPending && remove.variables === session.id
+                      }
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))
+        )}
       </div>
     </div>
   );
@@ -107,12 +132,15 @@ export function useSessionsQuery() {
 function SessionRow({
   session,
   active,
+  sameDay,
   onSelect,
   onDelete,
   deleting,
 }: {
   session: ChatSession;
   active: boolean;
+  /** Today's rows show a clock time; older ones show how long ago. */
+  sameDay: boolean;
   onSelect: () => void;
   onDelete: () => void;
   deleting: boolean;
@@ -120,56 +148,48 @@ function SessionRow({
   return (
     <div
       className={cn(
-        "group hover:bg-muted/70 relative rounded-lg border border-transparent transition-colors",
-        active && "bg-muted border-border",
+        "group relative rounded-lg transition-colors",
+        active ? "bg-muted" : "hover:bg-muted/60",
       )}
     >
       <button
         type="button"
         onClick={onSelect}
         aria-current={active ? "true" : undefined}
-        className="flex w-full flex-col items-start gap-1 px-2.5 py-2 text-left text-sm"
+        className="flex w-full flex-col gap-0.5 px-2.5 py-2 pr-8 text-left"
       >
-        <span className="flex w-full items-center justify-between gap-2">
-          <Badge variant="outline" className="font-normal">
-            {session.agent}
-          </Badge>
-          <span
-            className="text-muted-foreground text-xs whitespace-nowrap group-hover:invisible"
-            title={exactTime(session.last_active)}
-          >
-            {timeAgo(session.last_active)}
-          </span>
-        </span>
         <span
           className={cn(
-            "line-clamp-2 w-full text-xs leading-snug",
-            session.preview
-              ? "text-foreground"
-              : "text-muted-foreground italic",
+            "line-clamp-2 text-sm leading-snug",
+            session.preview ? "text-foreground" : "text-muted-foreground italic",
           )}
         >
           {session.preview ?? "New chat"}
         </span>
+        <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
+          <span>{session.agent}</span>
+          <span aria-hidden>·</span>
+          <span title={exactTime(session.last_active)}>
+            {sameDay
+              ? clockTime(session.last_active)
+              : timeAgo(session.last_active)}
+          </span>
+        </span>
       </button>
       {/* Test chats pile up fast. Deleting one removes its history only; the
           runs it produced stay in Runs as the cost and audit record. */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            disabled={deleting}
-            aria-label={`Delete this ${session.agent} chat`}
-            onClick={onDelete}
-            className="text-muted-foreground hover:text-status-danger absolute top-1 right-1 size-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-          >
-            <Trash2 className="size-3.5" aria-hidden />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Delete chat. Its runs are kept.</TooltipContent>
-      </Tooltip>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        disabled={deleting}
+        aria-label={`Delete this ${session.agent} chat`}
+        title="Delete chat. Its runs are kept."
+        onClick={onDelete}
+        className="text-muted-foreground hover:text-status-danger absolute top-1.5 right-1 size-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+      >
+        <Trash2 className="size-3.5" aria-hidden />
+      </Button>
     </div>
   );
 }

@@ -206,14 +206,18 @@ function AgentSwitch({
     onError: (error: Error) => toast.error(error.message),
   });
 
+  const info = agents.data?.find((row) => row.name === agent) ?? null;
+
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-      <label
-        htmlFor={`agent-${sessionId}`}
-        className="text-muted-foreground text-sm"
-      >
-        Talking to
-      </label>
+    <div className="flex shrink-0 items-start gap-3 border-b px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold">{agent ?? "No agent"}</p>
+        <p className="text-muted-foreground mt-0.5 truncate text-xs">
+          {disabled
+            ? "Working. You can send the next message when this turn finishes."
+            : (info?.description ?? "")}
+        </p>
+      </div>
       <Select
         value={agent ?? ""}
         onValueChange={(next) => {
@@ -224,25 +228,19 @@ function AgentSwitch({
         <SelectTrigger
           id={`agent-${sessionId}`}
           size="sm"
-          aria-label="Agent for this chat"
-          className="w-36 font-medium"
+          aria-label="Switch the agent for this chat"
+          className="w-36 shrink-0"
         >
           <SelectValue placeholder="Pick an agent" />
         </SelectTrigger>
         <SelectContent>
-          {(agents.data ?? []).map((info) => (
-            <SelectItem key={info.name} value={info.name}>
-              {info.name}
+          {(agents.data ?? []).map((row) => (
+            <SelectItem key={row.name} value={row.name}>
+              {row.name}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      <span className="text-muted-foreground ml-auto max-w-md truncate text-xs">
-        {disabled
-          ? "Switching is locked while a turn is running."
-          : (agents.data?.find((info) => info.name === agent)?.description ??
-            "")}
-      </span>
     </div>
   );
 }
