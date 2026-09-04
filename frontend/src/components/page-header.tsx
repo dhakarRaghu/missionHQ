@@ -8,22 +8,16 @@ export function PageHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <header className="mb-6 flex items-start justify-between gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+    <header className="mb-5 flex shrink-0 flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
         {description ? (
-          <p className="text-muted-foreground mt-1 text-sm">{description}</p>
+          <p className="text-muted-foreground mt-1 max-w-prose text-sm text-balance">
+            {description}
+          </p>
         ) : null}
       </div>
-      {action}
+      {action ? <div className="shrink-0">{action}</div> : null}
     </header>
-  );
-}
-
-export function EmptyState({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="text-muted-foreground rounded-lg border border-dashed p-10 text-center text-sm">
-      {children}
-    </div>
   );
 }

@@ -3,7 +3,8 @@
 node_modules/
 __pycache__/
 .venv/
-data/snapshots/
+# Runtime state: logs hold chat text and vault paths, snapshots hold dumps.
+data/
 HALT
 *.sqlite
 .next/

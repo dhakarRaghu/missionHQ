@@ -33,6 +33,7 @@ async def emit(
         """,
         (run_id, task_id, agent, kind, db.jsonb(payload or {})),
     )
+    assert row is not None
     envelope = {
         "seq": row["id"],
         "ts": row["ts"].isoformat(),

@@ -1,14 +1,17 @@
-// Shapes returned by the backend. Phase 2 replaces this file with a client
-// generated from FastAPI's OpenAPI schema (@hey-api/openapi-ts); the component
-// code keeps the same names either way.
+// Shapes returned by the backend. Field names follow the FastAPI responses
+// one to one; operation ids are noted on the client methods in client.ts.
 
-export type TaskStatus =
-  | "backlog"
-  | "running"
-  | "blocked"
-  | "needs_approval"
-  | "done"
-  | "failed";
+/** Task states. The order is the display order on the board. */
+export const TASK_STATUSES = [
+  "needs_approval",
+  "running",
+  "blocked",
+  "backlog",
+  "done",
+  "failed",
+] as const;
+
+export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export interface Task {
   id: string;
@@ -20,6 +23,15 @@ export interface Task {
   parent_id: string | null;
   created_at: string;
   updated_at: string;
+  /** Latest run of this task, if any (LEFT JOIN in GET /api/tasks). */
+  run_id: string | null;
+}
+
+/** Body of POST /api/tasks. */
+export interface NewTask {
+  agent: string;
+  title: string;
+  brief: string;
 }
 
 export interface TaskEvent {
@@ -30,6 +42,8 @@ export interface TaskEvent {
   data: Record<string, unknown>;
 }
 
+export type RunOutcome = "done" | "blocked" | "failed";
+
 export interface Run {
   id: string;
   task_id: string | null;
@@ -38,20 +52,86 @@ export interface Run {
   job_hash: string;
   started_at: string;
   ended_at: string | null;
-  outcome: string | null;
+  outcome: RunOutcome | null;
   input_tokens: number;
   output_tokens: number;
-  cost_usd: string | number;
+  /** Always a number. The client coerces the backend's decimal string. */
+  cost_usd: number;
   error: string | null;
 }
+
+/** One hq.events row for a run, as returned by GET /api/runs/{id}. */
+export interface RunEvent {
+  id: number;
+  ts: string;
+  task_id: string | null;
+  agent: string | null;
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
+/** Payload of a "tool.called" event (written by the @hq_tool wrapper). */
+export interface ToolCalledPayload {
+  tool: string;
+  args: Record<string, unknown>;
+  duration_ms: number;
+  ok: boolean;
+  error?: string;
+  /** First 400 chars of the tool's return value (JSON for dicts and lists). */
+  result?: string;
+}
+
+/** Payload of a "ledger" event (progress-ledger verdict after a tool round). */
+export interface LedgerPayload {
+  satisfied: boolean;
+  progress: boolean;
+  looping: boolean;
+  reason: string;
+  next_instruction: string;
+  stall: number;
+}
+
+export interface RunDetailRun extends Run {
+  wf_id: string | null;
+  stall_count: number;
+  /** Set when the run belongs to a task. */
+  task_title: string | null;
+  task_brief: string | null;
+}
+
+export interface RunDetail {
+  run: RunDetailRun;
+  /** All events for the run, ordered by id. */
+  events: RunEvent[];
+  /** Approval tickets opened during the run. */
+  tickets: Ticket[];
+  /** Chat runs only: the user/assistant turns of the round this run answered.
+   * null when not derivable; transcript_reason says why. */
+  transcript: ChatMessage[] | null;
+  transcript_reason: string | null;
+}
+
+/** One row of GET /api/costs/daily: spend per calendar day (CRON_TZ) and agent. */
+export interface DailyCost {
+  date: string;
+  agent: string;
+  usd: number;
+  runs: number;
+}
+
+/** Verdict sent to POST /api/tickets/{id}/resolve. */
+export type Verdict = "approved" | "denied";
 
 export interface Ticket {
   id: string;
   task_id: string | null;
+  run_id: string | null;
+  /** Agent of the run that asked (LEFT JOIN hq.runs); null for orphan tickets. */
+  agent: string | null;
   tool_name: string;
   tool_args: Record<string, unknown>;
   action_class: string;
-  status: "pending" | "approved" | "denied" | "expired";
+  status: "pending" | Verdict | "expired";
   created_at: string;
   resolved_at: string | null;
   resolved_via: string | null;
@@ -66,12 +146,32 @@ export interface AgentInfo {
   paused: boolean;
   spend_today_usd: number;
   daily_cap_usd: number;
+  caps: { cost_per_run_usd: number; tool_calls: number; daily_usd: number };
+  /** Scopes granted through vault_write:<scope> tool entries ("**" = whole vault). */
+  vault_write_scopes: string[];
+}
+
+/** One row of GET /api/agents/drafts: a folder whose job.md says status: draft. */
+export interface AgentDraft {
+  name: string;
+  description: string;
+  model: string;
+  tools: string[];
+  cron: { schedule: string; prompt: string }[];
+  caps: Partial<AgentInfo["caps"]>;
+}
+
+/** POST /api/agents/{name}/activate. The backend restarts after replying. */
+export interface ActivateResult {
+  activated: string;
+  restarting: boolean;
+  message: string;
 }
 
 export interface Costs {
   today_usd: number;
   daily_cap_usd: number;
-  week_by_agent: { agent: string; usd: string | number; runs: number }[];
+  week_by_agent: { agent: string; usd: number; runs: number }[];
 }
 
 export interface Health {
@@ -79,13 +179,95 @@ export interface Health {
   halted: boolean;
 }
 
+/** A web chat session (hq.sessions row with channel = 'web'). */
+export interface ChatSession {
+  id: string;
+  agent: string;
+  last_active: string;
+  /** First user message of the stored transcript, if any. */
+  preview: string | null;
+}
+
+export type ChatRole = "user" | "assistant";
+
+export interface ChatMessage {
+  role: ChatRole;
+  text: string;
+  ts: string | null;
+  /** Assistant turns only, when the backend matched the run: else null. */
+  run_id?: string | null;
+  cost_usd?: number | null;
+  tools?: string[] | null;
+}
+
+/** Body of POST /api/chat/sessions/{id}/messages. */
+export interface SendChatBody {
+  text: string;
+  /** Client-generated UUID. The backend derives the workflow id from it, so a
+   * retried request cannot start a second run. */
+  client_id: string;
+}
+
+/** "pending" means the run is still going (usually waiting for an approval
+ * ticket). The reply arrives in the transcript after an SSE invalidation. */
+export type SendChatResult =
+  | {
+      status: "done";
+      reply: string;
+      run_id: string | null;
+      cost_usd: number | null;
+      tools: string[] | null;
+    }
+  | { status: "pending" }
+  | {
+      /** the turn ran but ended in "failed: …" / "blocked: …" */
+      status: "failed";
+      reply: string;
+      run_id: string | null;
+      cost_usd: number | null;
+      tools: string[] | null;
+    };
+
+/** Named SSE frame types on GET /api/events. Each is registered as a listener. */
+export const HQ_EVENT_TYPES = [
+  "task.created",
+  "task.updated",
+  "run.started",
+  "run.finished",
+  "run.failed",
+  "run.no_artifact",
+  "tool.called",
+  "ledger",
+  "ticket.created",
+  "ticket.resolved",
+  "approval_resolved",
+  "guardrail.denied",
+  "notify",
+  "notify_digested",
+  "digest",
+  "cron.caught_up",
+  "cron.missed",
+  "vault.reindexed",
+  "fact.recorded",
+  "fact.retired",
+  "policy.added",
+  "injection_detected",
+  "owner.action",
+  "announce",
+] as const;
+
+export type HqEventType = (typeof HQ_EVENT_TYPES)[number];
+
 /** Envelope pushed on the /api/events SSE stream. */
 export interface HqEvent {
   seq: number;
   ts: string;
-  type: string;
+  type: HqEventType;
   task_id: string | null;
   run_id: string | null;
   agent: string | null;
   payload: Record<string, unknown>;
 }
+
+/** State of the single console-wide EventSource. */
+export type SseStatus = "connecting" | "connected" | "reconnecting";

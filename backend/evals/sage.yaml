@@ -1,0 +1,97 @@
+- id: 3def6e8a-168d-4340-b29a-f37fd8a8e60d
+  prompt: Write a short note to learnings/mission-hq-smoke.md confirming the durable pipeline works, then
+    reply DONE.
+  reference: DONE
+  tags:
+  - source:web
+- id: 6a6f6eee-cd6f-40c2-9bfc-ecd1c8dec8ff
+  prompt: 'Reply with exactly: pipeline check ok. Do not use tools.'
+  reference: pipeline check ok
+  tags:
+  - source:web
+- id: 2708be0e-7595-45fc-88f0-3689e199997e
+  prompt: 'Reply with exactly: sse timing check. Do not use tools.'
+  reference: sse timing check
+  tags:
+  - source:web
+- id: 390196bc-8128-4e18-93e3-19514a2891e2
+  prompt: dedup A
+  reference: 'I need more info: "A" isn''t identifiable. The vault has nothing matching "A", no duplicates
+    I can see, and the board just shows the task "dedup A" with no details.
+
+
+    What does "A" refer to — a file, a list, a dataset, a folder? Point me at it and I''ll dedup it.'
+  tags:
+  - source:cron
+- id: 1be8d6d9-e7df-48bb-a406-318508d34cf9
+  prompt: SSE live test
+  reference: 'Loud and clear. SSE live test received — board shows the task (`c4078f4a`) as running, assigned
+    to me.
+
+
+    If you''re watching this arrive token-by-token in real time, the stream is working end to end: message
+    in → task created → live response out.
+
+
+    Vault context: the earlier smoke test in `learnings/mission-hq-smoke.md` already confirmed the durable
+    write pipeline. If this test passes on your end, I can log SSE streaming as confirmed there too —
+    say the word.
+
+
+    Anything specific you want me to check'
+  tags:
+  - source:system
+- id: 207cedda-afb9-4db2-bb19-a6da452bd22c
+  prompt: Write a 150-word explanation of why durable execution matters for unattended agents. Do not
+    use tools.
+  reference: 'Durable execution means persisting an agent''s progress so work survives crashes, restarts,
+    and interruptions. For unattended agents, this is essential precisely because no human is watching.
+    A supervised task tolerates fragility; an unattended one does not. Failures are inevitable — network
+    timeouts, API outages, process kills — and without durability, every failure means starting over or,
+    worse, leaving work half-done in an unknown state.
+
+
+    Durability provides three things. First, recovery: the'
+  tags:
+  - source:web
+- id: 0684c27f-f683-45b2-8c50-2770402e342c
+  prompt: 'Write a note to learnings/kill-test-c.md containing exactly one line: kill test C. Then reply
+    done.'
+  reference: done
+  tags:
+  - source:web
+- id: 40cdb117-78c5-4b6f-9761-f28dcbf8ed1d
+  prompt: Write a 150-word explanation of why durable execution matters for unattended agents. Do not
+    use tools.
+  reference: 'Durable execution means an agent''s progress is persisted, so a crash, restart, or deploy
+    doesn''t erase it. For unattended agents this is the difference between a reliable worker and a liability.
+    Nobody is watching to notice a failure or press retry—and the failures are guaranteed: long-running
+    tasks will outlive the process that started them.
+
+
+    Without durable state, a crash mid-task forces a bad choice: restart from scratch and risk duplicate
+    side effects (a second email sent, a second charge ma'
+  tags:
+  - source:web
+- id: 7a5fa57e-2ae4-4db7-837e-f15cf320f257
+  prompt: Write a 150-word explanation of why durable execution matters for unattended agents. Do not
+    use tools.
+  reference: 'Unattended agents run without anyone watching, so any failure is silent until the damage
+    surfaces. Durable execution means the agent''s progress is persisted as it works: each completed step
+    is checkpointed, and pending work survives a crash, restart, or redeploy. Without it, a process dying
+    mid-task either loses everything (the task never finishes) or restarts from scratch and repeats side
+    effects — sending the same email twice, charging a customer again. With durability, recovery means
+    resuming'
+  tags:
+  - source:web
+- id: afe29099-9f1c-4b2f-a109-295506565c49
+  prompt: 'Use the announce tool once with the exact text: kill test B passed. Then reply done.'
+  reference: done
+  tags:
+  - source:web
+- id: 6057c8f4-5d5f-4179-a2df-047a33467592
+  prompt: 'Write a note to learnings/kill-test-c.md containing exactly one line: kill test C. Then reply
+    done.'
+  reference: done
+  tags:
+  - source:web

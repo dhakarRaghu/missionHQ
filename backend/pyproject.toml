@@ -13,6 +13,7 @@ dependencies = [
     "psycopg-pool>=3.3.1",
     "psycopg[binary]>=3.3.5",
     "pydantic-ai-slim[dbos,openai]>=2.37.0",
+    "pydantic-evals>=2.37.0",
     "pydantic-settings>=2.15.0",
     "python-telegram-bot>=22.8",
     "pyyaml>=6.0.3",
@@ -20,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-hq = "hq:main"
+hq = "hq.__main__:main"
 
 [build-system]
 requires = ["uv_build>=0.12.8,<0.13.0"]
@@ -32,4 +33,5 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.5",
+    "types-pyyaml>=6.0.12.20260815",
 ]

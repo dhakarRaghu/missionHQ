@@ -4,7 +4,14 @@ Import order matters only in that these modules must be imported before any
 agent manifest is validated or any agent is constructed.
 """
 
-from hq.tools import board_tools, vault_tools, web_tools  # noqa: F401
+from hq.tools import (  # noqa: F401
+    board_tools,
+    factory_tools,
+    facts_tools,
+    policy_tools,
+    vault_tools,
+    web_tools,
+)
 from hq.tools.registry import TOOL_REGISTRY, HQDeps, hq_tool
 
 __all__ = ["TOOL_REGISTRY", "HQDeps", "hq_tool"]

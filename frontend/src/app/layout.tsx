@@ -21,16 +21,28 @@ export const metadata: Metadata = {
   description: "Personal multi-agent console",
 };
 
+/**
+ * Applies the stored accent before first paint, the same way next-themes
+ * applies light/dark. Without it the page paints the default accent and then
+ * swaps, which shows as a flash on every load.
+ */
+const ACCENT_SCRIPT = `try{var a=localStorage.getItem("hq.accent");if(a)document.documentElement.dataset.accent=a}catch(e){}`;
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
+    // suppressHydrationWarning: next-themes sets the class on <html> before hydration.
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: ACCENT_SCRIPT }} />
+      </head>
       <body className="bg-background text-foreground flex min-h-full flex-col">
         <Providers>{children}</Providers>
         <Toaster />

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.missionhq.caddy</string>
+
+  <!-- Assumes `brew install caddy` (Apple Silicon path). On an Intel Mac
+       Homebrew installs to /usr/local/bin/caddy; edit the path below. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/caddy</string>
+    <string>run</string>
+    <string>--config</string>
+    <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/ops/Caddyfile</string>
+    <string>--adapter</string>
+    <string>caddyfile</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!-- Caddy keeps its state (no certificates here: the site is plain http
+         on 127.0.0.1) under this directory instead of ~/Library. -->
+    <key>XDG_DATA_HOME</key>
+    <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/caddy</string>
+    <key>XDG_CONFIG_HOME</key>
+    <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/caddy</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/caddy.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/caddy.log</string>
+</dict>
+</plist>

@@ -8,7 +8,11 @@ DeferredToolRequests. Sandboxing later swaps the executor here (one seam).
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
+import json
+import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -16,9 +20,19 @@ from typing import Any
 from hq.dbos_app import DBOS
 from hq.safety import ActionClass, Trust
 
+log = logging.getLogger(__name__)
+
+# Audit event written once per tool call (see ``_audited``).
+TOOL_EVENT_KIND = "tool.called"
+ARG_CHARS = 120     # each argument value is truncated to this many chars
+ERROR_CHARS = 200
+RESULT_CHARS = 400  # the tool result is truncated to this many chars
+
 # Retry policy for steps that hit the network (models are auto-stepped by
 # DBOSDurability with their own config; this is for tool I/O like web fetches).
-NETWORK_RETRIES = {"retries_allowed": True, "max_attempts": 3, "interval_seconds": 2.0}
+NETWORK_RETRIES: dict[str, Any] = {
+    "retries_allowed": True, "max_attempts": 3, "interval_seconds": 2.0,
+}
 
 
 @dataclass
@@ -44,7 +58,91 @@ TOOL_REGISTRY: dict[str, ToolDef] = {}
 
 # Tools that may NEVER be granted to an agent that also holds web-read tools.
 OUTBOUND_ACTIONS = {ActionClass.EXTERNAL_WRITE, ActionClass.SPEND}
-WEB_READ_TOOLS = {"web_fetch"}
+# Also barred for web-read agents: they reach the owner or other agents
+# directly, so one poisoned page could otherwise fan out.
+WEB_FORBIDDEN_TOOLS = {"create_subtask", "notify_owner"}
+
+
+def web_read_tools() -> set[str]:
+    """Registered tools whose results carry web provenance."""
+    return {n for n, t in TOOL_REGISTRY.items() if t.trust == Trust.WEB}
+
+
+def _truncate(value: Any, limit: int) -> Any:
+    """Bounded, JSON-safe rendering of one tool argument."""
+    text = value if isinstance(value, str) else repr(value)
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _render_result(value: Any) -> str:
+    """Bounded text of a tool result: JSON for dicts/lists, str() otherwise."""
+    if isinstance(value, (dict, list)):
+        try:
+            text = json.dumps(value, default=str)
+        except (TypeError, ValueError):
+            text = repr(value)
+    else:
+        text = str(value)
+    return text if len(text) <= RESULT_CHARS else text[:RESULT_CHARS] + "..."
+
+
+def _run_context(args: tuple[Any, ...]) -> Any:
+    """Every tool takes RunContext[HQDeps] as its first positional argument."""
+    deps = getattr(args[0], "deps", None) if args else None
+    return deps if isinstance(deps, HQDeps) else None
+
+
+def _audited(tool_name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Emit one ``tool.called`` hq.events row per call. Logging must never
+    break the tool: emit failures are swallowed and the tool result (or its
+    exception) is always passed through unchanged."""
+
+    @functools.wraps(fn)
+    async def audited(*args: Any, **kwargs: Any) -> Any:
+        started = time.monotonic()
+        ok = True
+        error: str | None = None
+        result: Any = None
+        try:
+            result = await fn(*args, **kwargs)
+            return result
+        except BaseException as exc:
+            ok = False
+            error = str(exc)[:ERROR_CHARS] or type(exc).__name__
+            raise
+        finally:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            try:
+                from hq.obs import (
+                    emit,  # late import: obs -> db, keep module load light
+                )
+
+                deps = _run_context(args)
+                arg_names = [n for n in inspect.signature(fn).parameters][1:]
+                shown: dict[str, Any] = {
+                    n: _truncate(v, ARG_CHARS)
+                    for n, v in zip(arg_names, args[1:], strict=False)
+                }
+                shown.update({k: _truncate(v, ARG_CHARS) for k, v in kwargs.items()})
+                payload: dict[str, Any] = {
+                    "tool": tool_name, "args": shown,
+                    "duration_ms": duration_ms, "ok": ok,
+                }
+                if error is not None:
+                    payload["error"] = error
+                else:
+                    payload["result"] = _render_result(result)
+                await emit(
+                    TOOL_EVENT_KIND,
+                    run_id=deps.run_id if deps else None,
+                    task_id=deps.task_id if deps else None,
+                    agent=deps.agent if deps else None,
+                    payload=payload,
+                )
+            except Exception as exc:  # noqa: BLE001 — audit failure must not break the tool
+                log.warning("tool.called emit failed for %s: %s", tool_name, exc)
+
+    return audited
 
 
 def hq_tool(
@@ -56,18 +154,20 @@ def hq_tool(
 ):
     def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
         tool_name = name or fn.__name__
+        wrapped: Callable[..., Any]
         if not inspect.iscoroutinefunction(fn):
             plain = fn
 
+            @functools.wraps(plain)
             async def fn_async(*args: Any, **kwargs: Any) -> Any:
                 return await asyncio.to_thread(plain, *args, **kwargs)
 
-            fn_async.__name__ = plain.__name__
-            fn_async.__doc__ = plain.__doc__
             wrapped = fn_async
         else:
             wrapped = fn
-        stepped = DBOS.step(name=f"tool.{tool_name}", **(NETWORK_RETRIES if network else {}))(wrapped)
+        stepped = DBOS.step(name=f"tool.{tool_name}", **(NETWORK_RETRIES if network else {}))(
+            _audited(tool_name, wrapped)
+        )
         TOOL_REGISTRY[tool_name] = ToolDef(
             name=tool_name,
             fn=stepped,

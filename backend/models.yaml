@@ -16,6 +16,13 @@ models:
     model: kimi-latest    # 256k context
     input_per_mtok: 0.60
     output_per_mtok: 2.50
+    # kimi-latest is a reasoning model. At default effort it can spend 8k+
+    # hidden reasoning tokens on a 4k prompt and stall for minutes; "low"
+    # answers in tens of seconds with the same quality for our tasks.
+    settings:
+      reasoning_effort: low
+      max_tokens: 4000
+      timeout_s: 180
 
 # Roles are what agents declare. All three point at one model for now; split
 # them (deep -> a stronger model, cheap -> a faster one) by editing these three
@@ -24,3 +31,14 @@ roles:
   deep: kimi
   default: kimi
   cheap: kimi
+
+# Vault semantic search (memory.py). One model, no pricing: embedding calls
+# are not billed to our cost accounting. `dimensions` is sent as the OpenAI
+# `dimensions` parameter; the gateway truncates gemini-embedding-001's native
+# 3072-dim vector to 768 so it fits a pgvector HNSW index (max 2000 dims).
+# Changing it requires a new migration (the column is vector(768)) and a
+# full reindex. Verified 2026-09-02: the gateway honors dimensions=768.
+embeddings:
+  provider: gateway
+  model: gemini-embedding-001
+  dimensions: 768

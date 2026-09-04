@@ -1,26 +1,63 @@
 """Executes one agent run inside a DBOS workflow, including the approval loop.
 
-Flow: agent.run -> if DeferredToolRequests, open tickets + notify owner, block on
-DBOS.recv('approval') until every ticket is resolved, resume with the verdicts.
-The ticket table is the source of truth; the DBOS message is only the wake-up.
+Flow: agent.run -> if DeferredToolRequests, open tickets + notify owner, then
+poll: short DBOS.recv('approval') rounds, re-reading hq.tickets each round,
+until every ticket is resolved or the 24h deadline passes. The ticket table is
+the source of truth; the DBOS message is only the wake-up.
+
+Progress ledger (Magentic-One style): after a tool-using round, a zero-tool
+"ledger" agent on the cheap model judges whether the request is satisfied,
+whether progress was made, and whether the agent is looping. Not satisfied ->
+re-run with the ledger's next instruction; two stalled verdicts -> the run
+blocks itself with a readable reason instead of burning tokens overnight.
+
+Typed guardrails: before a ticket is opened for an approval-gated tool call,
+a deterministic check (``safety.guard_deterministic``) and then a cheap
+zero-tool "guard" agent judge the call against the agent's standing policies.
+A denial creates the ticket already resolved (no owner prompt), records a
+``guardrail.denied`` event, and returns a denial to the agent so the run
+continues. Anything the guard allows goes to the owner exactly as before.
+
+Also hosts the durable wrappers (``*_step``) that workflow bodies use for
+board/outbox/event writes, so a replayed workflow never duplicates rows.
 """
 
 from __future__ import annotations
 
+import contextlib
+import logging
 from dataclasses import dataclass
+from typing import Any
 
-from pydantic_ai import DeferredToolRequests, DeferredToolResults
+from pydantic import BaseModel
+from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, ToolDenied
+from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.usage import UsageLimits
 
-from hq import board, llm
+from hq import board, db, llm, safety
 from hq.dbos_app import DBOS
 from hq.loader import AgentSpec
 from hq.obs import emit
 from hq.tools.registry import HQDeps
 
+log = logging.getLogger(__name__)
+
 APPROVAL_TOPIC = "approval"
-APPROVAL_TIMEOUT_S = 86400  # 24h; recv default of 60s is a trap
+APPROVAL_TIMEOUT_S = 86400  # 24h total; after that the run is blocked
+APPROVAL_POLL_S = 60        # one recv round; the ticket table is re-read each round
 MAX_RESUME_ROUNDS = 5       # hard stop against approval/answer loops
+REQUEST_LIMIT = 30          # model requests per run
+
+LEDGER_MODEL = "cheap"          # registry role for the ledger judge
+LEDGER_MIN_COST_USD = 0.01      # runs cheaper than this are not the failure mode
+LEDGER_MAX_CONTINUATIONS = 3    # ledger-driven "keep going" re-runs per execute()
+STALL_LIMIT = 2                 # stalled verdicts before the run blocks itself
+LEDGER_OUTPUT_CHARS = 2000
+LEDGER_ARGS_CHARS = 80
+
+GUARD_MODEL = "cheap"           # registry role for the guardrail judge
+GUARD_POLICY_CHARS = 6000       # policy.md text handed to the guard
+GUARD_ARGS_CHARS = 4000         # serialized tool args handed to the guard
 
 
 @dataclass
@@ -32,20 +69,331 @@ class RunOutcome:
     cost_usd: float
     error: str | None = None
     messages_json: bytes | None = None
+    stall_count: int = 0
 
+
+# --- progress ledger ---------------------------------------------------------
+
+class LedgerVerdict(BaseModel):
+    request_satisfied: bool
+    progress_being_made: bool
+    looping: bool
+    reason: str             # one sentence
+    next_instruction: str   # what to do next; empty when satisfied
+
+
+LEDGER_INSTRUCTIONS = """\
+You are the progress ledger for an autonomous agent. You never act; you judge.
+You receive the owner's original request, the agent's latest answer, and the
+tool calls the agent made in this round.
+
+Decide:
+- request_satisfied: the original request is fully done or answered. Also true
+  when the agent stopped for a valid reason: it needs information only the
+  owner can give, or the request is impossible and the agent explains why.
+  False when the answer only promises future work or restates the plan.
+- progress_being_made: this round added real, new progress toward the request.
+- looping: the agent repeats the same tool calls or the same answer without
+  new information.
+- reason: one plain sentence.
+- next_instruction: when not satisfied, one concrete next step for the agent,
+  written as an instruction to it. Empty string when satisfied.
+"""
+
+_ledger_agent: Agent[None, LedgerVerdict] | None = None
+
+
+def _ledger() -> Agent[None, LedgerVerdict]:
+    """Built once, lazily. Deliberately NOT wrapped in DBOSDurability: the whole
+    check runs inside one DBOS step, so it is durable as a unit, and any model
+    request made inside a step degrades to a plain call anyway."""
+    global _ledger_agent
+    if _ledger_agent is None:
+        _ledger_agent = Agent[None, LedgerVerdict](
+            llm.registry().resolve(LEDGER_MODEL),
+            name="hq-ledger",
+            model_settings=llm.registry().model_settings_for(LEDGER_MODEL),
+            output_type=LedgerVerdict,
+            instructions=LEDGER_INSTRUCTIONS,
+        )
+    return _ledger_agent
+
+
+def _tool_call_lines(messages: list[Any]) -> list[str]:
+    """Compact ``name(args)`` lines for every tool call in ``messages``."""
+    lines: list[str] = []
+    for msg in messages:
+        if not isinstance(msg, ModelResponse):
+            continue
+        for part in msg.parts:
+            if isinstance(part, ToolCallPart):
+                args = part.args_as_json_str()
+                if len(args) > LEDGER_ARGS_CHARS:
+                    args = args[:LEDGER_ARGS_CHARS] + "..."
+                lines.append(f"{part.tool_name}({args})")
+    return lines
+
+
+@DBOS.step(name="ledger.check")
+async def _ledger_check_step(prompt: str, output: str, tool_calls: list[str]) -> dict[str, Any]:
+    """One durable unit: model call + parse. Never raises; a failure is reported
+    as ``error`` and treated by the caller as satisfied so the run continues."""
+    text = (
+        f"Original request:\n{prompt}\n\n"
+        f"Agent's latest answer (truncated to {LEDGER_OUTPUT_CHARS} chars):\n"
+        f"{output[:LEDGER_OUTPUT_CHARS]}\n\n"
+        f"Tool calls this round ({len(tool_calls)}):\n"
+        + ("\n".join(f"- {line}" for line in tool_calls) or "- (none)")
+    )
+    try:
+        res = await _ledger().run(text)
+    except Exception as exc:  # noqa: BLE001 — the ledger must never fail the run
+        log.warning("ledger check failed, treating as satisfied: %s", exc)
+        return {
+            "verdict": LedgerVerdict(
+                request_satisfied=True, progress_being_made=True, looping=False,
+                reason=f"ledger unavailable: {str(exc)[:200]}", next_instruction="",
+            ).model_dump(),
+            "input_tokens": 0, "output_tokens": 0, "error": str(exc)[:500],
+        }
+    usage = res.usage
+    return {
+        "verdict": res.output.model_dump(),
+        "input_tokens": usage.input_tokens or 0,
+        "output_tokens": usage.output_tokens or 0,
+        "error": None,
+    }
+
+
+@DBOS.step()
+async def record_stall_count(run_id: str, n: int) -> None:
+    await db.execute("UPDATE hq.runs SET stall_count = %s WHERE id = %s", (n, run_id))
+
+
+# --- typed guardrails --------------------------------------------------------
+
+class GuardVerdict(BaseModel):
+    allow: bool
+    reason: str             # one sentence
+
+
+GUARD_INSTRUCTIONS = """\
+You are the guardrail for an autonomous agent's outbound tool call. You never
+act; you judge one call. You receive the agent's name, its standing policies
+(owner-approved rules), and the tool name with its arguments.
+
+Set allow=false ONLY when the call:
+- clearly violates one of the standing policies, or
+- targets a third party the policies forbid, or
+- is obviously not what the task asked for.
+
+When unsure, set allow=true: the owner still approves every allowed call by
+hand, so a false allow costs nothing and a false deny blocks real work.
+reason: one plain sentence.
+"""
+
+_guard_agent: Agent[None, GuardVerdict] | None = None
+
+
+def _guard() -> Agent[None, GuardVerdict]:
+    """Built once, lazily; same shape and reasoning as ``_ledger``."""
+    global _guard_agent
+    if _guard_agent is None:
+        _guard_agent = Agent[None, GuardVerdict](
+            llm.registry().resolve(GUARD_MODEL),
+            name="hq-guard",
+            model_settings=llm.registry().model_settings_for(GUARD_MODEL),
+            output_type=GuardVerdict,
+            instructions=GUARD_INSTRUCTIONS,
+        )
+    return _guard_agent
+
+
+def _current_policy(spec: AgentSpec) -> str:
+    """policy.md re-read at call time, so a rule the owner approved minutes ago
+    reaches the guardrail on the very next call — not after a restart."""
+    try:
+        return (spec.dir / "policy.md").read_text().strip()
+    except OSError:
+        return spec.policy
+
+
+@DBOS.step(name="guard.check")
+async def _guard_step(
+    agent_name: str, policy: str, tool_name: str, args: dict[str, Any],
+) -> dict[str, Any]:
+    """One durable unit: deterministic check, then the model check. Returns a
+    plain dict ``{allow, reason, via, input_tokens, output_tokens}``. Never
+    raises: any failure allows the call, because the owner still decides."""
+    try:
+        reason = await safety.guard_deterministic(tool_name, args, agent_name)
+    except Exception as exc:  # noqa: BLE001 — the guard must never fail the run
+        log.warning("deterministic guard failed, allowing %s: %s", tool_name, exc)
+        reason = None
+    if reason is not None:
+        return {"allow": False, "reason": reason, "via": "guardrail:deterministic",
+                "input_tokens": 0, "output_tokens": 0}
+
+    args_text = safety.serialize_args(args)
+    if len(args_text) > GUARD_ARGS_CHARS:
+        args_text = args_text[:GUARD_ARGS_CHARS] + "..."
+    text = (
+        f"Agent: {agent_name}\n\n"
+        f"Standing policies:\n{policy[:GUARD_POLICY_CHARS] or '(none)'}\n\n"
+        f"Tool call: {tool_name}\nArguments (JSON):\n{args_text}"
+    )
+    try:
+        res = await _guard().run(text)
+    except Exception as exc:  # noqa: BLE001 — unavailable judge means allow
+        log.warning("guard check failed, allowing %s: %s", tool_name, exc)
+        return {"allow": True, "reason": f"guard unavailable: {str(exc)[:200]}",
+                "via": "guardrail:llm", "input_tokens": 0, "output_tokens": 0}
+    usage = res.usage
+    return {
+        "allow": bool(res.output.allow), "reason": res.output.reason[:500],
+        "via": "guardrail:llm",
+        "input_tokens": usage.input_tokens or 0,
+        "output_tokens": usage.output_tokens or 0,
+    }
+
+
+# --- durable wrappers --------------------------------------------------------
+# Outside a workflow a DBOS step runs as a plain function, so these are safe
+# to call from anywhere; inside a workflow they are recorded and not replayed.
+
+@DBOS.step()
+async def apply_step(
+    task_id: str, event_type: str, *, actor: str = "system",
+    data: dict[str, Any] | None = None, status: str | None = None,
+) -> None:
+    await board.apply(task_id, event_type, actor=actor, data=data, status=status)
+
+
+@DBOS.step()
+async def queue_outbound_step(intent: dict[str, Any], *, idempotency_key: str) -> None:
+    await board.queue_outbound(intent, idempotency_key=idempotency_key)
+
+
+@DBOS.step()
+async def emit_step(
+    kind: str, *, run_id: str | None = None, task_id: str | None = None,
+    agent: str | None = None, payload: dict[str, Any] | None = None,
+) -> int:
+    return await emit(kind, run_id=run_id, task_id=task_id, agent=agent, payload=payload)
+
+
+@DBOS.step()
+async def flush_outbox_step() -> None:
+    """Immediate delivery attempt; the 1-min scheduled drain is the backstop."""
+    from hq.channels import telegram  # late import to avoid cycles
+
+    await telegram.drain_outbox()
+
+
+@DBOS.step()
+async def _open_ticket_step(
+    *, task_id: str | None, run_id: str | None, wf_id: str, tool_name: str,
+    tool_args: dict[str, Any], tool_call_id: str,
+    status: str = "pending", resolved_via: str | None = None,
+) -> str:
+    return await board.create_ticket(
+        task_id=task_id, run_id=run_id, wf_id=wf_id, tool_name=tool_name,
+        tool_args=tool_args, tool_call_id=tool_call_id, action_class="external_write",
+        status=status, resolved_via=resolved_via,
+    )
+
+
+@DBOS.step()
+async def _ticket_statuses_step(ticket_ids: list[str]) -> dict[str, str]:
+    return await board.ticket_statuses(ticket_ids)
+
+
+@DBOS.step()
+async def expire_ticket_step(ticket_id: str, via: str) -> str | None:
+    """Returns the owning workflow id if this call expired the ticket."""
+    row = await board.resolve_ticket(ticket_id, "expired", via=via)
+    return str(row["wf_id"]) if row else None
+
+
+# --- run loop ----------------------------------------------------------------
 
 async def execute(
     agent, spec: AgentSpec, *, prompt: str, deps: HQDeps,
     message_history=None,
 ) -> RunOutcome:
-    usage_limits = UsageLimits(tool_calls_limit=spec.caps.tool_calls)
-    total_in = total_out = 0
+    usage_limits = UsageLimits(
+        request_limit=REQUEST_LIMIT,
+        tool_calls_limit=spec.caps.tool_calls,
+        total_tokens_limit=llm.registry().token_budget(spec.model, spec.caps.cost_per_run_usd),
+    )
+    # Agent and ledger tokens are priced on different models, so they are
+    # tracked apart and only joined in the RunOutcome totals.
+    agent_in = agent_out = 0
+    ledger_in = ledger_out = 0
+    ledger_cost = 0.0
     result = None
-    rounds = 0
+    rounds = 0          # initial run + approval resumes (MAX_RESUME_ROUNDS)
+    continuations = 0   # ledger-driven re-runs (LEDGER_MAX_CONTINUATIONS)
+    stall = 0
     deferred_results: DeferredToolResults | None = None
+    next_prompt: str | None = prompt
 
-    while rounds < MAX_RESUME_ROUNDS:
-        rounds += 1
+    async def finish(
+        output: str, outcome: str, *, error: str | None = None,
+        messages_json: bytes | None = None,
+    ) -> RunOutcome:
+        if stall > 0 and deps.run_id:
+            await record_stall_count(deps.run_id, stall)
+        return RunOutcome(
+            output=output, outcome=outcome,
+            input_tokens=agent_in + ledger_in, output_tokens=agent_out + ledger_out,
+            cost_usd=llm.registry().cost_usd(spec.model, agent_in, agent_out) + ledger_cost,
+            error=error, messages_json=messages_json, stall_count=stall,
+        )
+
+    async def run_model(*args: Any, **kwargs: Any) -> Any:
+        """``agent.run`` with cost accounting that survives an exception.
+        If the run blows up (usage limit, model error, tool crash) the tokens
+        seen so far are still recorded: Pydantic AI exposes partial usage only
+        on ``RunCancelled`` (``exc.usage``), so for other errors the total is
+        the completed rounds. A ``run.exception`` event names the exception
+        and the partial cost, and the same numbers ride on the exception as
+        ``partial_outcome`` for the caller; then it is re-raised."""
+        try:
+            return await agent.run(*args, **kwargs)
+        except Exception as exc:
+            partial_in, partial_out = agent_in, agent_out
+            usage = getattr(exc, "usage", None)
+            if usage is not None:
+                partial_in += getattr(usage, "input_tokens", 0) or 0
+                partial_out += getattr(usage, "output_tokens", 0) or 0
+            cost = llm.registry().cost_usd(spec.model, partial_in, partial_out) + ledger_cost
+            partial = RunOutcome(
+                output="", outcome="failed",
+                input_tokens=partial_in + ledger_in, output_tokens=partial_out + ledger_out,
+                cost_usd=cost, error=f"{type(exc).__name__}: {str(exc)[:500]}",
+                stall_count=stall,
+            )
+            with contextlib.suppress(Exception):  # some exception types reject attributes
+                exc.partial_outcome = partial  # type: ignore[attr-defined]
+            try:
+                await emit_step(
+                    "run.exception", run_id=deps.run_id, task_id=deps.task_id, agent=spec.name,
+                    payload={
+                        "exception": type(exc).__name__, "message": str(exc)[:500],
+                        "input_tokens": partial.input_tokens,
+                        "output_tokens": partial.output_tokens,
+                        "cost_usd": partial.cost_usd,
+                        "partial_usage_from_exception": usage is not None,
+                    },
+                )
+            except Exception as emit_exc:  # noqa: BLE001 — never mask the real error
+                log.warning("run.exception emit failed for %s: %s", deps.run_id, emit_exc)
+            log.error("run %s (%s) raised %s: %s", deps.run_id, spec.name,
+                      type(exc).__name__, str(exc)[:300])
+            raise
+
+    while True:
         kwargs: dict = {"deps": deps, "usage_limits": usage_limits}
         if result is not None:
             kwargs["message_history"] = result.all_messages()
@@ -54,80 +402,165 @@ async def execute(
         if deferred_results is not None:
             kwargs["deferred_tool_results"] = deferred_results
             deferred_results = None
-            result = await agent.run(deps=kwargs.pop("deps"), **kwargs)
+            result = await run_model(deps=kwargs.pop("deps"), **kwargs)
         else:
-            result = await agent.run(prompt if rounds == 1 else None, **kwargs)
+            if result is None:
+                rounds = 1  # the initial run; ledger continuations do not count
+            result = await run_model(next_prompt, **kwargs)
+            next_prompt = None
 
         usage = result.usage
-        total_in += usage.input_tokens or 0
-        total_out += usage.output_tokens or 0
+        agent_in += usage.input_tokens or 0
+        agent_out += usage.output_tokens or 0
 
-        if not isinstance(result.output, DeferredToolRequests):
-            cost = llm.registry().cost_usd(spec.model, total_in, total_out)
-            return RunOutcome(
-                output=str(result.output), outcome="done",
-                input_tokens=total_in, output_tokens=total_out, cost_usd=cost,
-                messages_json=result.all_messages_json(),
+        if isinstance(result.output, DeferredToolRequests):
+            guard_usage = {"input_tokens": 0, "output_tokens": 0}
+            verdicts = await _await_approvals(result.output, spec, deps, guard_usage)
+            # Guard tokens are priced on the cheap model, like the ledger's.
+            ledger_in += guard_usage["input_tokens"]
+            ledger_out += guard_usage["output_tokens"]
+            ledger_cost += llm.registry().cost_usd(
+                GUARD_MODEL, guard_usage["input_tokens"], guard_usage["output_tokens"]
             )
+            if verdicts is None:
+                return await finish(
+                    "approval timed out", "blocked", error="approval ticket expired after 24h",
+                )
+            if rounds >= MAX_RESUME_ROUNDS:
+                return await finish(
+                    "stopped: too many approval rounds", "failed",
+                    error=f"exceeded {MAX_RESUME_ROUNDS} resume rounds",
+                )
+            rounds += 1
+            deferred_results = DeferredToolResults(approvals=verdicts)
+            continue
 
-        verdicts = await _await_approvals(result.output, spec, deps)
-        if verdicts is None:
-            cost = llm.registry().cost_usd(spec.model, total_in, total_out)
-            return RunOutcome(
-                output="approval timed out", outcome="blocked",
-                input_tokens=total_in, output_tokens=total_out, cost_usd=cost,
-                error="approval ticket expired after 24h",
+        output = str(result.output)
+        messages_json = result.all_messages_json()
+
+        # A plain answer with no tool calls is done by definition, and cheap
+        # runs are not the failure mode: no ledger call for either.
+        agent_cost = llm.registry().cost_usd(spec.model, agent_in, agent_out)
+        if (usage.tool_calls or 0) == 0 or agent_cost < LEDGER_MIN_COST_USD:
+            return await finish(output, "done", messages_json=messages_json)
+
+        check = await _ledger_check_step(prompt, output, _tool_call_lines(result.new_messages()))
+        ledger_in += int(check["input_tokens"])
+        ledger_out += int(check["output_tokens"])
+        ledger_cost += llm.registry().cost_usd(
+            LEDGER_MODEL, int(check["input_tokens"]), int(check["output_tokens"])
+        )
+        verdict = LedgerVerdict.model_validate(check["verdict"])
+        if not verdict.request_satisfied and (not verdict.progress_being_made or verdict.looping):
+            stall += 1
+        record = {
+            "satisfied": verdict.request_satisfied,
+            "progress": verdict.progress_being_made,
+            "looping": verdict.looping,
+            "reason": verdict.reason,
+            "next_instruction": verdict.next_instruction[:200],
+            "stall": stall,
+        }
+        await emit_step("ledger", run_id=deps.run_id, task_id=deps.task_id,
+                        agent=spec.name, payload=record)
+        if deps.task_id:
+            await apply_step(deps.task_id, "ledger", data=record)
+
+        if verdict.request_satisfied:
+            return await finish(output, "done", messages_json=messages_json)
+        if stall >= STALL_LIMIT:
+            return await finish(
+                output, "blocked", error=f"stalled: {verdict.reason}",
+                messages_json=messages_json,
             )
-        deferred_results = DeferredToolResults(approvals=verdicts)
-
-    cost = llm.registry().cost_usd(spec.model, total_in, total_out)
-    return RunOutcome(
-        output="stopped: too many approval rounds", outcome="failed",
-        input_tokens=total_in, output_tokens=total_out, cost_usd=cost,
-        error=f"exceeded {MAX_RESUME_ROUNDS} resume rounds",
-    )
+        if continuations >= LEDGER_MAX_CONTINUATIONS:
+            # Enough nudging: hand back what we have rather than spend more.
+            return await finish(output, "done", messages_json=messages_json)
+        continuations += 1
+        next_prompt = verdict.next_instruction.strip() or (
+            "The request is not complete yet. Continue and finish it."
+        )
 
 
 async def _await_approvals(
-    requests: DeferredToolRequests, spec: AgentSpec, deps: HQDeps
-) -> dict[str, bool] | None:
-    """Open one ticket per approval-needing tool call; block until all resolve.
-    Returns {tool_call_id: approved} or None on timeout."""
-    wf_id = DBOS.workflow_id
+    requests: DeferredToolRequests, spec: AgentSpec, deps: HQDeps,
+    guard_usage: dict[str, int] | None = None,
+) -> dict[str, Any] | None:
+    """Guard-check every approval-needing tool call; open one ticket per call
+    that passes and block until all resolve. Guard denials get a ticket that is
+    already denied, a ``guardrail.denied`` event, and a ``ToolDenied`` verdict;
+    the owner is never prompted for them. ``guard_usage`` accumulates the guard
+    model's tokens. Returns {tool_call_id: verdict} or None if any ticket expired."""
+    wf_id = DBOS.workflow_id or ""
     pending: dict[str, str] = {}  # ticket_id -> tool_call_id
+    verdicts: dict[str, Any] = {}  # tool_call_id -> bool|ToolDenied (DeferredToolResults)
     for call in requests.approvals:
-        ticket_id = await board.create_ticket(
+        args = call.args_as_dict()
+        guard = await _guard_step(spec.name, _current_policy(spec), call.tool_name, args)
+        if guard_usage is not None:
+            guard_usage["input_tokens"] += int(guard["input_tokens"])
+            guard_usage["output_tokens"] += int(guard["output_tokens"])
+        if not guard["allow"]:
+            ticket_id = await _open_ticket_step(
+                task_id=deps.task_id, run_id=deps.run_id, wf_id=wf_id,
+                tool_name=call.tool_name, tool_args=args, tool_call_id=call.tool_call_id,
+                status="denied", resolved_via=str(guard["via"]),
+            )
+            await emit_step(
+                "guardrail.denied", run_id=deps.run_id, task_id=deps.task_id, agent=spec.name,
+                payload={"tool": call.tool_name, "reason": guard["reason"],
+                         "via": guard["via"], "ticket_id": ticket_id},
+            )
+            verdicts[call.tool_call_id] = ToolDenied(
+                f"Blocked by guardrail ({guard['via']}): {guard['reason']}"
+            )
+            continue
+        ticket_id = await _open_ticket_step(
             task_id=deps.task_id, run_id=deps.run_id, wf_id=wf_id,
-            tool_name=call.tool_name, tool_args=call.args_as_dict(),
-            tool_call_id=call.tool_call_id, action_class="external_write",
+            tool_name=call.tool_name, tool_args=args, tool_call_id=call.tool_call_id,
         )
         pending[ticket_id] = call.tool_call_id
-        await board.queue_outbound(
+        await queue_outbound_step(
             {
                 "kind": "confirm", "ticket_id": ticket_id,
                 "summary": f"{spec.name} wants to run {call.tool_name}",
-                "args": call.args_as_dict(),
+                "args": args,
             },
             idempotency_key=f"ticket:{ticket_id}",
         )
+    if not pending:
+        # Every call was denied by the guard: nothing to ask, nothing to wait for.
+        return verdicts
+    await flush_outbox_step()
     if deps.task_id:
-        await board.apply(deps.task_id, "approval_requested", status="needs_approval",
-                          data={"tickets": list(pending)})
+        await apply_step(deps.task_id, "approval_requested", status="needs_approval",
+                         data={"tickets": list(pending)})
 
-    verdicts: dict[str, bool] = {}
-    while pending:
-        msg = await DBOS.recv_async(APPROVAL_TOPIC, timeout_seconds=APPROVAL_TIMEOUT_S)
-        if msg is None:  # timeout
-            for ticket_id in list(pending):
-                await board.resolve_ticket(ticket_id, "expired", via="timeout")
-            return None
-        # message format: "<ticket_id>:<approved|denied>"
-        ticket_id, _, verdict = str(msg).partition(":")
-        call_id = pending.pop(ticket_id, None)
-        if call_id is not None:
-            verdicts[call_id] = verdict == "approved"
-            await emit("approval_resolved", task_id=deps.task_id, run_id=deps.run_id,
-                       payload={"ticket_id": ticket_id, "approved": verdict == "approved"})
+    expired = False
+    max_rounds = APPROVAL_TIMEOUT_S // APPROVAL_POLL_S
+    for round_no in range(max_rounds + 1):
+        statuses = await _ticket_statuses_step(list(pending))
+        for ticket_id, status in statuses.items():
+            if status == "pending":
+                continue
+            call_id = pending.pop(ticket_id)
+            if status == "expired":
+                expired = True
+            else:
+                verdicts[call_id] = status == "approved"
+            await emit_step("approval_resolved", task_id=deps.task_id, run_id=deps.run_id,
+                            payload={"ticket_id": ticket_id, "status": status})
+        if expired or not pending or round_no == max_rounds:
+            break
+        # Wake-up only: the message text is never trusted, the table above decides.
+        await DBOS.recv_async(APPROVAL_TOPIC, timeout_seconds=APPROVAL_POLL_S)
+
+    if pending:  # deadline reached with tickets still open
+        for ticket_id in list(pending):
+            await expire_ticket_step(ticket_id, "timeout")
+        expired = True
+    if expired:
+        return None
     if deps.task_id:
-        await board.apply(deps.task_id, "approval_resolved", status="running")
+        await apply_step(deps.task_id, "approval_resolved", status="running")
     return verdicts

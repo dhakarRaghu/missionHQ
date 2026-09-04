@@ -4,10 +4,13 @@ paths Telegram uses, so both interfaces resolve the same durable state."""
 
 from __future__ import annotations
 
+from datetime import timedelta
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from hq import board, db, safety
+from hq import board, db, engagement, safety
 from hq.api.deps import require_auth
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -21,16 +24,23 @@ async def health() -> dict:
     return {"ok": bool(row), "halted": safety.halted()}
 
 
+# Task rows carry the id of their latest run so the board can link to it.
+TASK_SELECT = (
+    "SELECT t.id::text, t.title, t.brief, t.agent, t.status, t.source, t.parent_id::text,"
+    " t.created_at, t.updated_at, r.id::text AS run_id FROM hq.tasks t"
+    " LEFT JOIN LATERAL (SELECT id FROM hq.runs WHERE task_id = t.id"
+    " ORDER BY started_at DESC LIMIT 1) r ON true"
+)
+
+
 @router.get("/tasks", operation_id="listTasks")
 async def list_tasks(status: str | None = None, limit: int = 100) -> list[dict]:
     if status:
         return await db.fetch(
-            "SELECT id::text, title, brief, agent, status, source, parent_id::text,"
-            " created_at, updated_at FROM hq.tasks WHERE status = %s"
-            " ORDER BY updated_at DESC LIMIT %s", (status, limit))
+            f"{TASK_SELECT} WHERE t.status = %s ORDER BY t.updated_at DESC LIMIT %s",
+            (status, limit))
     return await db.fetch(
-        "SELECT id::text, title, brief, agent, status, source, parent_id::text,"
-        " created_at, updated_at FROM hq.tasks ORDER BY updated_at DESC LIMIT %s", (limit,))
+        f"{TASK_SELECT} ORDER BY t.updated_at DESC LIMIT %s", (limit,))
 
 
 class CreateTaskBody(BaseModel):
@@ -50,6 +60,7 @@ async def create_task(body: CreateTaskBody) -> dict:
     task_id = await engine.dispatch(
         agent=body.agent, title=body.title, brief=body.brief, source="web"
     )
+    await engagement.record_owner_action("web", "new_task")
     return {"task_id": task_id}
 
 
@@ -68,12 +79,95 @@ async def list_runs(limit: int = 50) -> list[dict]:
         " FROM hq.runs ORDER BY started_at DESC LIMIT %s", (limit,))
 
 
-@router.get("/tickets", operation_id="listTickets")
-async def list_tickets(status: str = "pending") -> list[dict]:
-    return await db.fetch(
+RUN_COLUMNS = (
+    "r.id::text, r.task_id::text, r.wf_id, r.agent, r.model, r.job_hash, r.started_at,"
+    " r.ended_at, r.outcome, r.input_tokens, r.output_tokens, r.cost_usd, r.stall_count, r.error"
+)
+# hq.messages has no run reference. A chat run's history row is written right
+# after ended_at; this is how long after ended_at we still accept it.
+TRANSCRIPT_GRACE = timedelta(seconds=60)
+
+
+@router.get("/runs/{run_id}", operation_id="getRunDetail")
+async def get_run_detail(run_id: str) -> dict:
+    """One run with its event timeline, its approval tickets and, for chat
+    runs, the user/assistant turns of that conversation round."""
+    run = await db.fetchone(
+        f"SELECT {RUN_COLUMNS}, t.title AS task_title, t.brief AS task_brief"
+        " FROM hq.runs r LEFT JOIN hq.tasks t ON t.id = r.task_id WHERE r.id = %s::uuid",
+        (run_id,),
+    ) if _is_uuid(run_id) else None
+    if run is None:
+        raise HTTPException(404, f"unknown run {run_id}")
+    events = await db.fetch(
+        "SELECT id, ts, task_id::text, agent, kind, payload FROM hq.events"
+        " WHERE run_id = %s ORDER BY id", (run_id,))
+    tickets = await db.fetch(
         "SELECT id::text, task_id::text, tool_name, tool_args, action_class, status,"
-        " created_at, resolved_at, resolved_via FROM hq.tickets WHERE status = %s"
-        " ORDER BY created_at DESC LIMIT 100", (status,))
+        " created_at, resolved_at, resolved_via FROM hq.tickets WHERE run_id = %s"
+        " ORDER BY created_at", (run_id,))
+    transcript, reason = await _chat_transcript(run)
+    return {
+        "run": run, "events": events, "tickets": tickets,
+        "transcript": transcript, "transcript_reason": reason,
+    }
+
+
+def _is_uuid(value: str) -> bool:
+    import uuid
+
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+async def _chat_transcript(run: dict[str, Any]) -> tuple[list[dict] | None, str | None]:
+    """Turns of the chat round this run answered, or (None, why-not).
+
+    Chat runs have no task and store their history in hq.messages, which does
+    not reference the run. The match is: same agent, history row written
+    between started_at and ended_at + grace, and exactly one such row. Any
+    ambiguity omits the transcript rather than showing another session's chat."""
+    from hq.api.chat import _transcript
+
+    if run["task_id"] is not None:
+        return None, "task run"
+    if run["ended_at"] is None:
+        return None, "run still going"
+    rows = await db.fetch(
+        "SELECT history FROM hq.messages WHERE agent = %s AND ts >= %s AND ts <= %s"
+        " ORDER BY id LIMIT 2",
+        (run["agent"], run["started_at"], run["ended_at"] + TRANSCRIPT_GRACE),
+    )
+    if not rows:
+        return None, "no stored history in the run's time window"
+    if len(rows) > 1:
+        return None, "more than one history row in the run's time window"
+    turns = _transcript(rows[0]["history"])
+    # The stored history is the whole conversation; keep the last round only.
+    last_user = max((i for i, t in enumerate(turns) if t["role"] == "user"), default=None)
+    return (turns[last_user:] if last_user is not None else turns), None
+
+
+TICKET_STATUSES = ("pending", "approved", "denied", "expired")
+
+
+@router.get("/tickets", operation_id="listTickets")
+async def list_tickets(status: str = "pending", limit: int = 100) -> list[dict]:
+    """Tickets in one or more states (``status=approved,denied`` for the
+    resolved view), newest first, with the agent of the run that asked."""
+    wanted = [s.strip() for s in status.split(",") if s.strip()]
+    unknown = [s for s in wanted if s not in TICKET_STATUSES]
+    if not wanted or unknown:
+        raise HTTPException(422, f"status must be one of {', '.join(TICKET_STATUSES)}")
+    return await db.fetch(
+        "SELECT k.id::text, k.task_id::text, k.run_id::text, r.agent, k.tool_name,"
+        " k.tool_args, k.action_class, k.status, k.created_at, k.resolved_at, k.resolved_via"
+        " FROM hq.tickets k LEFT JOIN hq.runs r ON r.id = k.run_id"
+        " WHERE k.status = ANY(%s) ORDER BY k.created_at DESC LIMIT %s",
+        (wanted, max(1, min(limit, 500))))
 
 
 class ResolveTicketBody(BaseModel):
@@ -84,11 +178,27 @@ class ResolveTicketBody(BaseModel):
 async def resolve_ticket(ticket_id: str, body: ResolveTicketBody) -> dict:
     if body.verdict not in {"approved", "denied"}:
         raise HTTPException(422, "verdict must be approved or denied")
+    await engagement.record_owner_action(
+        "web", "approve" if body.verdict == "approved" else "deny")
     row = await board.resolve_ticket(ticket_id, body.verdict, via="web")
     if row is None:
         return {"resolved": False, "reason": "already resolved"}
     await DBOS.send_async(row["wf_id"], f"{ticket_id}:{body.verdict}", topic="approval")
     return {"resolved": True, "verdict": body.verdict}
+
+
+@router.get("/engagement", operation_id="getEngagement")
+async def get_engagement() -> dict:
+    """Value-week status: what was sent, what the owner acted on, the verdict."""
+    return await engagement.value_week_status()
+
+
+@router.post("/engagement/start", operation_id="startValueWeek")
+async def start_value_week() -> dict:
+    """Start the 7-day value week (no-op when already started). Returns the
+    same shape as GET /engagement."""
+    await engagement.start_value_week()
+    return await engagement.value_week_status()
 
 
 @router.get("/agents", operation_id="listAgents")
@@ -106,8 +216,42 @@ async def list_agents() -> list[dict]:
             "paused": await safety.agent_paused(name),
             "spend_today_usd": await safety.spend_today_usd(name),
             "daily_cap_usd": spec.caps.daily_usd,
+            "caps": spec.caps.model_dump(),
+            "vault_write_scopes": spec.vault_write_scopes(),
         })
     return out
+
+
+@router.get("/agents/drafts", operation_id="listAgentDrafts")
+async def list_agent_drafts() -> list[dict]:
+    """Agent folders whose job.md says ``status: draft`` (written by the
+    factory agent after the owner approved the draft ticket)."""
+    import asyncio
+
+    from hq.tools import factory_tools
+
+    return await asyncio.to_thread(factory_tools.list_drafts)
+
+
+@router.post("/agents/{name}/activate", operation_id="activateAgent")
+async def activate_agent(name: str) -> dict:
+    """Owner-only: flip a draft to active after re-validation, then restart.
+
+    Agents load only at startup (DBOSDurability agents are built before
+    DBOS.launch()), so the process exits 2 s after this reply and launchd
+    (KeepAlive) starts it again with the new agent loaded."""
+    import asyncio
+
+    from hq.tools import factory_tools
+
+    try:
+        message = await asyncio.to_thread(factory_tools.activate_agent, name)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    factory_tools.schedule_restart()
+    return {"activated": name, "restarting": True, "message": message}
 
 
 class PauseBody(BaseModel):
@@ -122,6 +266,38 @@ async def set_agent_paused(name: str, body: PauseBody) -> dict:
         raise HTTPException(404, f"unknown agent {name}")
     await safety.set_agent_paused(name, body.paused)
     return {"agent": name, "paused": body.paused}
+
+
+@router.get("/evals", operation_id="listEvalRuns")
+async def list_eval_runs(agent: str | None = None, limit: int = 20) -> list[dict]:
+    """Recent eval runs (newest first), optionally for one agent."""
+    from hq import evals
+
+    return await evals.history(agent, limit=limit)
+
+
+@router.get("/evals/latest", operation_id="latestEvalScores")
+async def latest_eval_scores() -> list[dict]:
+    """One row per agent: its most recent eval score, case count and time."""
+    from hq import evals
+
+    return await evals.latest_scores()
+
+
+@router.get("/costs/daily", operation_id="getDailyCosts")
+async def daily_costs(days: int = 14) -> list[dict]:
+    """Spend and run count per (day, agent) for the last ``days`` days.
+    Days are calendar days in CRON_TZ, the owner's scheduling timezone."""
+    days = max(1, min(days, 90))
+    tz = settings().cron_tz
+    rows = await db.fetch(
+        "SELECT to_char((started_at AT TIME ZONE %s)::date, 'YYYY-MM-DD') AS date, agent,"
+        " sum(cost_usd) AS usd, count(*) AS runs FROM hq.runs"
+        " WHERE started_at >= ((now() AT TIME ZONE %s)::date - make_interval(days => %s))"
+        " AT TIME ZONE %s GROUP BY 1, 2 ORDER BY 1, 2",
+        (tz, tz, days - 1, tz),
+    )
+    return [{**r, "usd": float(r["usd"])} for r in rows]
 
 
 @router.get("/costs", operation_id="getCosts")

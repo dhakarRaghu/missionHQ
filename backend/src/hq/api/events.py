@@ -51,6 +51,11 @@ async def stream_events(
                 for env in missed:
                     if env["seq"] not in sent:
                         yield _frame(env)
+            # First bytes right away: EventSource only reports "open" once the
+            # response body starts, and proxies (the Next dev rewrite included)
+            # hold small bodies until ~2 KB has accumulated. Comment lines are
+            # ignored by clients, so the padding is invisible.
+            yield ": connected" + " " * 2048 + "\n\n"
             while True:
                 if await request.is_disconnected():
                     return

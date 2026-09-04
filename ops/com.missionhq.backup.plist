@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.missionhq.backup</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/ops/backup.sh</string>
+    <string>run</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- pg_dump/psql: Postgres.app, Homebrew postgresql@16, or /usr/local/bin. -->
+    <key>PATH</key>
+    <string>/Applications/Postgres.app/Contents/Versions/latest/bin:/opt/homebrew/opt/postgresql@16/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <!-- Every night at 03:30 local time. If the Mac was asleep at 03:30,
+       launchd runs the job on wake. If it was powered off, the run is skipped. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <!-- Not KeepAlive: this is a one-shot job, not a server. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/backup.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/backup.log</string>
+</dict>
+</plist>

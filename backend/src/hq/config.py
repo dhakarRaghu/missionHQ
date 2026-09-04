@@ -26,16 +26,25 @@ class Settings(BaseSettings):
     gateway_base_url: str = ""
     gateway_api_key: str = ""
     openai_api_key: str = ""
-    anthropic_api_key: str = ""
 
     telegram_bot_token: str = ""
     owner_chat_id: int = 0
+
+    # and never reaches prompts, tool args, results, or the vault.  # comma-separated owner/repo list, e.g. "me/app,me/site"
 
     cron_tz: str = "Asia/Kolkata"
     daily_spend_cap_usd: float = 5.00
     notifications_per_day: int = 5
     api_bearer_token: str = ""
+    # Tailscale Serve identity that may skip the bearer token. Empty = never.
+    tailscale_owner_login: str = ""
     healthchecks_ping_url: str = ""
+    # Comma-separated exact origins allowed by CORS, e.g. "https://hq.vercel.app".
+    # Empty = CORS middleware off (same-origin console behind Caddy/Tailscale).
+    cors_origins: str = ""
+    # Listen address. Keep 127.0.0.1 behind Caddy; Caddy owns the public port.
+    bind_host: str = "127.0.0.1"
+    bind_port: int = 8000
 
     # Paths (relative to the repo root; overridable for tests)
     agents_dir: Path = REPO_DIR / "agents"

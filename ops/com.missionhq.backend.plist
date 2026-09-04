@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.missionhq.backend</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/raghvendra.dhakar/.local/bin/uv</string>
+    <string>run</string>
+    <string>python</string>
+    <string>-m</string>
+    <string>hq</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/backend</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/raghvendra.dhakar/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <!-- Start at login and restart whenever the process exits, crash or not. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- Back off so a crash loop cannot hammer the database. -->
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/backend.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/backend.log</string>
+</dict>
+</plist>

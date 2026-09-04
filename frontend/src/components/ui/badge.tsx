@@ -20,6 +20,15 @@ const badgeVariants = cva(
           "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
         link: "text-primary underline-offset-4 hover:underline",
       },
+      // Semantic status colours. Tokens live in globals.css (--status-*).
+      tone: {
+        running: "bg-status-running/15 text-status-running",
+        blocked: "bg-status-blocked/15 text-status-blocked",
+        approval: "bg-status-approval/15 text-status-approval",
+        success: "bg-status-success/15 text-status-success",
+        danger: "bg-status-danger/15 text-status-danger",
+        muted: "bg-status-muted/15 text-status-muted",
+      },
     },
     defaultVariants: {
       variant: "default",
@@ -30,6 +39,7 @@ const badgeVariants = cva(
 function Badge({
   className,
   variant = "default",
+  tone,
   asChild = false,
   ...props
 }: React.ComponentProps<"span"> &
@@ -40,7 +50,8 @@ function Badge({
     <Comp
       data-slot="badge"
       data-variant={variant}
-      className={cn(badgeVariants({ variant }), className)}
+      data-tone={tone ?? undefined}
+      className={cn(badgeVariants({ variant, tone }), className)}
       {...props}
     />
   )

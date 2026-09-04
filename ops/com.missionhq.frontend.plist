@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.missionhq.frontend</string>
+
+  <!-- `npm run start` is `next start`. It serves the last `npm run build`.
+       Run `npm run build` in frontend/ after every frontend change, then
+       `ops/frontend.sh restart`. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>npm</string>
+    <string>run</string>
+    <string>start</string>
+    <string>--</string>
+    <string>-p</string>
+    <string>3000</string>
+    <string>-H</string>
+    <string>127.0.0.1</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/frontend</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- npm/node come from Homebrew or nvm; both are on this PATH. -->
+    <key>PATH</key>
+    <string>/Users/raghvendra.dhakar/.nvm/versions/node/v20.19.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <!-- Server-only. next.config.ts rewrites /api/* here. Caddy also routes
+         /api/* to the backend directly, so this is only a fallback. -->
+    <key>BACKEND_ORIGIN</key>
+    <string>http://127.0.0.1:8000</string>
+    <key>PORT</key>
+    <string>3000</string>
+  </dict>
+
+  <!-- Start at login and restart whenever the process exits, crash or not. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/frontend.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/frontend.log</string>
+</dict>
+</plist>
