@@ -93,9 +93,9 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(makeQueryClient);
   return (
-    // Light is the designed default; the header toggle offers dark and system,
-    // and next-themes remembers the choice per browser.
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+    // Two skins, no system option: light is the designed default and the
+    // header toggle switches to dark. next-themes remembers the choice.
+    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
       <QueryClientProvider client={client}>
         <TooltipProvider delayDuration={200}>
           <SseBridge client={client} />

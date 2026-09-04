@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { api, qk } from "@/lib/api/client";
 import type { Task, TaskEvent, TaskStatus } from "@/lib/api/types";
 import { exactTime, timeAgo } from "@/lib/time";
@@ -40,6 +41,24 @@ function isToday(iso: string): boolean {
     then.getDate() === now.getDate()
   );
 }
+
+const COLUMN_LABEL: Record<TaskStatus, string> = {
+  needs_approval: "Needs you",
+  running: "In flight",
+  blocked: "Blocked",
+  backlog: "Backlog",
+  done: "Done",
+  failed: "Failed",
+};
+
+const COLUMN_DOT: Record<TaskStatus, string> = {
+  needs_approval: "bg-status-approval",
+  running: "bg-status-running",
+  blocked: "bg-status-blocked",
+  backlog: "bg-status-muted",
+  done: "bg-status-success",
+  failed: "bg-status-danger",
+};
 
 const COLUMN_HINT: Record<TaskStatus, string> = {
   needs_approval: "Waiting for your decision in Inbox.",
@@ -117,24 +136,27 @@ export function TaskBoard() {
 
   return (
     <>
-      <p className="text-muted-foreground mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        <span>
+      <p className="text-muted-foreground mb-5 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden className="bg-status-success size-2 rounded-full" />
           <span className="text-foreground font-medium tabular-nums">
-            {needsYou}
+            {doneToday}
           </span>{" "}
-          need you
+          done today
         </span>
-        <span>
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden className="bg-status-running size-2 rounded-full" />
           <span className="text-foreground font-medium tabular-nums">
             {inFlight}
           </span>{" "}
           in flight
         </span>
-        <span>
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden className="bg-status-approval size-2 rounded-full" />
           <span className="text-foreground font-medium tabular-nums">
-            {doneToday}
+            {needsYou}
           </span>{" "}
-          done today
+          need you
         </span>
       </p>
 
@@ -171,11 +193,17 @@ function Column({
   onOpen: (id: string) => void;
 }) {
   return (
-    <section aria-label={status} className="flex min-w-0 flex-col gap-2">
+    <section aria-label={status} className="flex min-w-0 flex-col gap-3">
       <div>
         <div className="flex items-center gap-2">
-          <StatusBadge status={status} />
-          <span className="text-muted-foreground text-xs tabular-nums">
+          <span
+            aria-hidden
+            className={cn("size-2 rounded-full", COLUMN_DOT[status])}
+          />
+          <h2 className="text-xs font-semibold tracking-wider uppercase">
+            {COLUMN_LABEL[status]}
+          </h2>
+          <span className="bg-muted text-muted-foreground rounded-md px-1.5 py-0.5 text-xs tabular-nums">
             {tasks.length}
           </span>
         </div>
@@ -185,7 +213,7 @@ function Column({
       </div>
 
       {tasks.length ? (
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-2.5">
           {tasks.map((task) => (
             <li key={task.id}>
               <TaskCard task={task} onOpen={() => onOpen(task.id)} />
@@ -193,7 +221,7 @@ function Column({
           ))}
         </ul>
       ) : (
-        <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-4 text-center text-xs">
+        <p className="text-muted-foreground rounded-xl border border-dashed px-3 py-5 text-center text-xs">
           Nothing here
         </p>
       )}
@@ -201,18 +229,50 @@ function Column({
   );
 }
 
+/** Where a task came from, in one word the owner recognises. */
+const SOURCE_LABEL: Record<string, string> = {
+  cron: "schedule",
+  web: "you",
+  chat: "chat",
+  telegram: "telegram",
+  subtask: "another agent",
+};
+
 function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
+  const running = task.status === "running";
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="bg-card hover:border-ring/60 hover:bg-muted/40 flex w-full flex-col gap-1.5 rounded-lg border px-3 py-2.5 text-left transition-colors"
+      className={cn(
+        "bg-card flex w-full flex-col gap-2 rounded-xl border px-3.5 py-3 text-left transition-shadow hover:shadow-sm",
+        // A queued task has not been picked up yet, so its card is drawn as an
+        // outline. One waiting on the owner is the only card with a heavy edge.
+        task.status === "backlog" && "border-dashed",
+        task.status === "needs_approval" && "border-foreground/60 border-2",
+      )}
     >
-      <span className="line-clamp-3 text-sm leading-snug">{task.title}</span>
-      <span className="text-muted-foreground flex w-full items-center justify-between gap-2 text-xs">
-        <span className="truncate">
-          {task.agent} · {task.source}
+      <span className="flex items-center justify-between gap-2">
+        <span className="bg-muted text-muted-foreground rounded-md px-1.5 py-0.5 text-xs">
+          {SOURCE_LABEL[task.source] ?? task.source}
         </span>
+        {running ? (
+          <span className="text-status-success flex items-center gap-1 text-xs">
+            <span
+              aria-hidden
+              className="bg-status-success size-1.5 rounded-full motion-safe:animate-pulse"
+            />
+            live
+          </span>
+        ) : null}
+      </span>
+
+      <span className="line-clamp-3 text-sm leading-snug font-medium">
+        {task.title}
+      </span>
+
+      <span className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
+        <span className="truncate">{task.agent}</span>
         <span className="whitespace-nowrap" title={exactTime(task.updated_at)}>
           {timeAgo(task.updated_at)}
         </span>

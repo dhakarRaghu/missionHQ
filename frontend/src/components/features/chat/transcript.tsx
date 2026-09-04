@@ -289,34 +289,42 @@ function Bubble({
   text: string;
   ts: string | null;
   run?: RunLink | null;
+  /** Agent name, used for the avatar letter on assistant turns. */
+  agent?: string | null;
 }) {
   const mine = role === "user";
   return (
-    <div
-      className={cn(
-        "group flex flex-col gap-1",
-        mine ? "items-end" : "items-start",
-      )}
-    >
-      <div
+    <div className={cn("group flex gap-3", mine && "flex-row-reverse")}>
+      <span
+        aria-hidden
         className={cn(
-          "max-w-[min(46rem,88%)] px-4 py-2.5 text-sm",
+          "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-medium",
           mine
-            ? "bg-primary text-primary-foreground rounded-2xl rounded-br-sm break-words whitespace-pre-wrap"
-            : "bg-muted rounded-2xl rounded-bl-sm",
+            ? "bg-primary text-primary-foreground"
+            : "bg-muted text-muted-foreground",
         )}
       >
-        {/* Agents answer in markdown: paths, lists and emphasis are common. */}
-        {mine ? text : <Markdown content={text} />}
-      </div>
-      <span className="text-muted-foreground flex items-center gap-1 px-1 text-xs">
-        <span title={exactTime(ts)}>
-          {mine ? "you" : "agent"}
-          {ts ? ` · ${clockTime(ts)}` : ""}
-        </span>
-        {!mine && run ? <RunMeta run={run} /> : null}
-        {!mine ? <CopyButton text={text} /> : null}
+        {mine ? "You" : "HQ"}
       </span>
+
+      <div className={cn("flex min-w-0 flex-col gap-1", mine && "items-end")}>
+        <div
+          className={cn(
+            "max-w-[min(46rem,100%)] px-4 py-3 text-sm",
+            mine
+              ? "bg-primary text-primary-foreground rounded-2xl rounded-tr-sm break-words whitespace-pre-wrap"
+              : "bg-card rounded-2xl rounded-tl-sm border",
+          )}
+        >
+          {/* Agents answer in markdown: paths, lists and emphasis are common. */}
+          {mine ? text : <Markdown content={text} />}
+        </div>
+        <span className="text-muted-foreground flex items-center gap-1 px-1 text-xs">
+          <span title={exactTime(ts)}>{ts ? clockTime(ts) : ""}</span>
+          {!mine && run ? <RunMeta run={run} /> : null}
+          {!mine ? <CopyButton text={text} /> : null}
+        </span>
+      </div>
     </div>
   );
 }

@@ -13,6 +13,8 @@ import {
   LogOut,
   MessageSquare,
   NotebookText,
+  Settings,
+  Wrench,
 } from "lucide-react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -48,6 +50,8 @@ const NAV = [
   { href: "/runs", label: "Runs", icon: ListChecks },
   { href: "/feed", label: "Live feed", icon: Activity },
   { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/tools", label: "Tools", icon: Wrench },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function isActive(pathname: string, href: string) {

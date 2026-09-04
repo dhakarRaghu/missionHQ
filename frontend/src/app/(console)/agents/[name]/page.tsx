@@ -2,20 +2,9 @@
 
 import { useParams } from "next/navigation";
 
-import { AgentEditor } from "@/components/features/agents/agent-editor/agent-editor";
-import { PageHeader } from "@/components/page-header";
+import { AgentProfile } from "@/components/features/agents/agent-profile";
 
-export default function AgentConfigPage() {
+export default function AgentPage() {
   const params = useParams<{ name: string }>();
-  const name = decodeURIComponent(params.name);
-
-  return (
-    <>
-      <PageHeader
-        title={name}
-        description="Edit agents/<name>/job.md and policy.md. A saved job.md loads after a restart; policy.md applies on the next run."
-      />
-      <AgentEditor name={name} />
-    </>
-  );
+  return <AgentProfile name={decodeURIComponent(params.name)} />;
 }

@@ -200,7 +200,14 @@ export function AgentList() {
                   </Button>
                   <Button size="sm" variant="ghost" asChild>
                     <Link href={`/agents/${encodeURIComponent(agent.name)}`}>
-                      Edit config
+                      Open
+                    </Link>
+                  </Button>
+                  <Button size="sm" variant="ghost" asChild>
+                    <Link
+                      href={`/agents/${encodeURIComponent(agent.name)}/config`}
+                    >
+                      Configure
                     </Link>
                   </Button>
                 </div>
