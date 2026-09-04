@@ -1,7 +1,9 @@
-"""Read-only vault endpoints for the console: the folder tree, one note with
-its git history, and hybrid search. Every client-supplied path goes through
-``memory.normalize`` and is refused outside the vault. ``.git`` is never
-listed or served. Nothing here writes; ``memory.write`` stays the only writer."""
+"""Vault endpoints for the console: the folder tree, one note with its git
+history, hybrid search, and one owner edit. Every client-supplied path goes
+through ``memory.normalize`` and is refused outside the vault. ``.git`` is
+never listed or served. Writing still goes through ``memory.write``, which
+stays the only writer, so an owner edit gets the same gates and the same one
+commit per write as an agent's."""
 
 from __future__ import annotations
 
@@ -13,8 +15,9 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
-from hq import memory
+from hq import engagement, memory
 from hq.api.deps import require_auth
 from hq.config import settings
 
@@ -167,6 +170,35 @@ def _git_show(commit: str, rel: str) -> str:
     if len(text) > DIFF_MAX_CHARS:
         text = text[:DIFF_MAX_CHARS] + "\n... (diff truncated)\n"
     return text
+
+
+class NoteBody(BaseModel):
+    """New full content for one note. Empty is allowed: a memory block the
+    owner clears is a deliberate reset, not a mistake."""
+
+    content: str = Field(max_length=200_000)
+
+
+@router.put("/note", operation_id="putVaultNote")
+async def put_vault_note(
+    path: Annotated[str, Query(min_length=1)], body: NoteBody
+) -> dict:
+    """Save one note as the owner.
+
+    The owner may rewrite anything, including the rules block agents cannot
+    touch and a consolidation that drops most of a file. The one gate that
+    still applies is a memory block's size cap, because the cap is what keeps
+    the block readable inside every agent's prompt.
+    """
+    rel = _validated(path)
+    if not rel.lower().endswith(".md"):
+        raise HTTPException(400, "only markdown notes can be edited here")
+    try:
+        await memory.write(rel, body.content, actor="owner")
+    except memory.WriteRefused as exc:
+        raise HTTPException(422, str(exc)) from exc
+    await engagement.record_owner_action("web", "vault_edit")
+    return _read_note(rel)
 
 
 @router.get("/note/diff", operation_id="getVaultNoteDiff")

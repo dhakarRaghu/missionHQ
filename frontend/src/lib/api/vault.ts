@@ -1,4 +1,4 @@
-import { getJson, queryString } from "@/lib/api/request";
+import { getJson, queryString, sendJson } from "@/lib/api/request";
 
 // Client, types and query keys for the read-only Vault view (GET /api/vault/*).
 
@@ -94,6 +94,11 @@ export const vaultKeys = {
 };
 
 export const vaultApi = {
+  /** Save one note as the owner (PUT /api/vault/note). */
+  saveNote: (path: string, content: string) =>
+    sendJson<VaultNote>("PUT", `/vault/note${queryString({ path })}`, {
+      content,
+    }),
   tree: () => getJson<VaultTree>("/vault/tree"),
   note: (path: string) =>
     getJson<VaultNote>(`/vault/note${queryString({ path })}`),

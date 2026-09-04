@@ -37,7 +37,9 @@ EVENT_KIND = "owner.action"
 RECALL_TOOLS = ("memory_search", "recall_facts", "vault_read")
 
 Via = Literal["telegram", "web"]
-Action = Literal["message", "command", "approve", "deny", "new_task", "chat"]
+Action = Literal[
+    "message", "command", "approve", "deny", "new_task", "chat", "vault_edit"
+]
 
 
 # --- owner actions ------------------------------------------------------------

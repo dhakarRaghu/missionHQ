@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Check, Copy } from "lucide-react";
 
 import { ErrorState } from "@/components/error-state";
+import { MentionText } from "@/components/features/chat/mention-text";
 import { Markdown } from "@/components/features/vault/markdown";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ChatMessage, ChatRole } from "@/lib/api/types";
@@ -316,8 +317,10 @@ function Bubble({
               : "bg-card rounded-2xl rounded-tl-sm border",
           )}
         >
-          {/* Agents answer in markdown: paths, lists and emphasis are common. */}
-          {mine ? text : <Markdown content={text} />}
+          {/* Agents answer in markdown: paths, lists and emphasis are common.
+              Your own text is shown as typed, with mentions and note links
+              rendered as chips. */}
+          {mine ? <MentionText text={text} /> : <Markdown content={text} />}
         </div>
         <span className="text-muted-foreground flex items-center gap-1 px-1 text-xs">
           <span title={exactTime(ts)}>{ts ? clockTime(ts) : ""}</span>

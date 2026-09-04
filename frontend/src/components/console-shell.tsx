@@ -46,7 +46,7 @@ const NAV = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/board", label: "Board", icon: LayoutList },
   { href: "/chat", label: "Chat", icon: MessageSquare },
-  { href: "/vault", label: "Vault", icon: NotebookText },
+  { href: "/vault", label: "Memory", icon: NotebookText },
   { href: "/runs", label: "Runs", icon: ListChecks },
   { href: "/feed", label: "Live feed", icon: Activity },
   { href: "/agents", label: "Agents", icon: Bot },
