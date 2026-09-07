@@ -61,7 +61,7 @@ async def tx():
         yield conn
 
 
-async def fetch(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+async def fetch(sql: str, params: tuple | dict[str, Any] = ()) -> list[dict[str, Any]]:
     async with pool().connection() as conn:
         cur = await conn.execute(sql, params)
         return cast(list[dict[str, Any]], await cur.fetchall())  # pool uses dict_row

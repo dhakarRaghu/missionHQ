@@ -153,6 +153,50 @@ async def list_messages(session_id: str) -> list[dict]:
     return messages
 
 
+@router.get("/sessions/{session_id}/tickets", operation_id="listChatTickets")
+async def list_chat_tickets(session_id: str) -> list[dict]:
+    """Approvals blocking work this chat started.
+
+    An approval reaches the owner in the Inbox and on Telegram, but the run
+    that raised it was started here, so answering it here is the shortest
+    path. Two ways a ticket belongs to this chat: its run is this session's
+    chat run, or its task was delegated from this session.
+    """
+    session = await _web_session(session_id)
+    # Runs have no session column: a chat run is linked through the message
+    # row it produced, and a delegated task through origin_session_id.
+    rows = await db.fetch(
+        """
+        SELECT tk.id::text, tk.tool_name, tk.tool_args, tk.action_class,
+               tk.created_at, r.agent
+        FROM hq.tickets tk
+        LEFT JOIN hq.runs r ON r.id = tk.run_id
+        LEFT JOIN hq.tasks t ON t.id = tk.task_id
+        WHERE tk.status = 'pending'
+          AND (
+            t.origin_session_id = %(sid)s
+            OR tk.run_id IN (
+              SELECT run_id FROM hq.messages
+              WHERE conversation_id = %(conv)s AND run_id IS NOT NULL
+            )
+          )
+        ORDER BY tk.created_at
+        """,
+        {"sid": session_id, "conv": session["conversation_id"]},
+    )
+    return [
+        {
+            "id": row["id"],
+            "tool_name": row["tool_name"],
+            "tool_args": row["tool_args"],
+            "action_class": row["action_class"],
+            "agent": row["agent"],
+            "created_at": row["created_at"],
+        }
+        for row in rows
+    ]
+
+
 @router.post("/sessions/{session_id}/messages", operation_id="sendChatMessage")
 async def send_message(session_id: str, body: SendMessageBody) -> dict:
     from hq import engine
@@ -226,7 +270,7 @@ async def _chat_deliveries(session_id: str) -> list[dict[str, Any]]:
     """System-delivered task results shown in chat but excluded from model history."""
     rows = await db.fetch(
         """
-        SELECT d.ts, d.text, d.run_id::text, r.cost_usd
+        SELECT d.ts, d.text, d.run_id::text, r.cost_usd, r.agent
         FROM hq.chat_deliveries d
         LEFT JOIN hq.runs r ON r.id = d.run_id
         WHERE d.session_id = %s
@@ -238,6 +282,11 @@ async def _chat_deliveries(session_id: str) -> list[dict[str, Any]]:
     return [
         {
             "role": "assistant",
+            # Which agent actually produced this. A delegated result is not
+            # from the agent the owner is talking to, and saying otherwise
+            # hides the whole point of handing work over.
+            "agent": row["agent"],
+            "delivered": True,
             "text": row["text"],
             "ts": row["ts"].isoformat(),
             "run_id": row["run_id"],

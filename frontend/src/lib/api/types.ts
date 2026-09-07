@@ -194,6 +194,11 @@ export interface ChatMessage {
   role: ChatRole;
   text: string;
   ts: string | null;
+  /** Which agent produced this turn. A delegated result is not from the agent
+   * you are talking to, and labelling it as such hides the handover. */
+  agent?: string | null;
+  /** True when Mission HQ posted this in, rather than the agent replying. */
+  delivered?: boolean;
   /** Assistant turns only, when the backend matched the run: else null. */
   run_id?: string | null;
   cost_usd?: number | null;
@@ -272,3 +277,13 @@ export interface HqEvent {
 
 /** State of the single console-wide EventSource. */
 export type SseStatus = "connecting" | "connected" | "reconnecting";
+
+/** One approval blocking work this chat started. */
+export interface ChatTicket {
+  id: string;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  action_class: string;
+  agent: string | null;
+  created_at: string;
+}

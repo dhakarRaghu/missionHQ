@@ -147,6 +147,8 @@ export function Transcript({
             text={message.text}
             ts={message.ts}
             run={message.role === "assistant" ? message : null}
+            agent={message.agent}
+            delivered={message.delivered}
           />
         ))}
         {local.map((turn) => (
@@ -315,15 +317,20 @@ function Bubble({
   text,
   ts,
   run,
+  agent,
+  delivered,
 }: {
   role: ChatRole;
   text: string;
   ts: string | null;
   run?: RunLink | null;
-  /** Agent name, used for the avatar letter on assistant turns. */
+  /** Which agent produced this turn, when it is not the one being talked to. */
   agent?: string | null;
+  /** Posted in by Mission HQ after a delegated task finished. */
+  delivered?: boolean;
 }) {
   const mine = role === "user";
+  const who = mine ? "you" : (agent ?? "agent");
   return (
     <div className={cn("group flex gap-3", mine && "flex-row-reverse")}>
       <span
@@ -335,7 +342,7 @@ function Bubble({
             : "bg-muted text-muted-foreground",
         )}
       >
-        {mine ? "You" : "HQ"}
+        {mine ? "You" : (agent ?? "HQ").slice(0, 2)}
       </span>
 
       <div className={cn("flex min-w-0 flex-col gap-1", mine && "items-end")}>
@@ -353,7 +360,11 @@ function Bubble({
           {mine ? <MentionText text={text} /> : <Markdown content={text} />}
         </div>
         <span className="text-muted-foreground flex items-center gap-1 px-1 text-xs">
-          <span title={exactTime(ts)}>{ts ? clockTime(ts) : ""}</span>
+          <span title={exactTime(ts)}>
+            {who}
+            {delivered ? " · delegated" : ""}
+            {ts ? ` · ${clockTime(ts)}` : ""}
+          </span>
           {!mine && run ? <RunMeta run={run} /> : null}
           {!mine ? <CopyButton text={text} /> : null}
         </span>

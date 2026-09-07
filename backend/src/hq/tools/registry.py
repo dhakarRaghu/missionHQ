@@ -54,6 +54,10 @@ class ToolDef:
     action: ActionClass
     trust: Trust
     requires_approval: bool
+    # True when only the owner may answer the ticket. False lets the guard
+    # resolve it without waking him, for an action whose whole effect stays
+    # inside Mission HQ and is reversible.
+    owner_only: bool
     description: str
 
 
@@ -154,7 +158,15 @@ def hq_tool(
     trust: Trust = Trust.TOOL,
     name: str | None = None,
     network: bool = False,
+    owner_only: bool = True,
 ):
+    """Register one tool.
+
+    ``owner_only`` defaults to True and should stay that way for anything the
+    owner would want to see before it happens. Setting it False says: this
+    action is contained, reversible, and the coordinator can decide. It is a
+    promise about consequences, not about how often the tool is used.
+    """
     def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
         tool_name = name or fn.__name__
         wrapped: Callable[..., Any]
@@ -177,6 +189,7 @@ def hq_tool(
             action=action,
             trust=trust,
             requires_approval=action in OUTBOUND_ACTIONS,
+            owner_only=owner_only,
             description=(fn.__doc__ or "").strip().splitlines()[0] if fn.__doc__ else "",
         )
         return stepped

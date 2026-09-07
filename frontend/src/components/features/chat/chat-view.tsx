@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { ChatApprovals } from "@/components/features/chat/approval-card";
 import { Composer } from "@/components/features/chat/composer";
 import {
   SessionList,
@@ -219,6 +220,11 @@ function Thread({
         onRetry={busy ? undefined : onRetry}
       />
       <div className="shrink-0 border-t p-3">
+        {/* Above the composer: an approval is the thing standing between the
+            owner and the answer he is waiting for. */}
+        <div className="mb-3 empty:mb-0">
+          <ChatApprovals sessionId={sessionId} />
+        </div>
         <Composer disabled={busy || messages.isLoading} onSend={onSend} />
       </div>
     </>

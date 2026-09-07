@@ -39,7 +39,7 @@ from hq.dbos_app import DBOS
 from hq.loader import AgentSpec
 from hq.obs import emit
 from hq.runtimes import claude_cli, codex_cli
-from hq.tools.registry import HQDeps
+from hq.tools.registry import TOOL_REGISTRY, HQDeps
 
 log = logging.getLogger(__name__)
 
@@ -644,6 +644,27 @@ async def _await_approvals(
                 f"Blocked by guardrail ({guard['via']}): {guard['reason']}"
             )
             continue
+
+        # A tool marked owner_only=False has passed the guard and its whole
+        # effect stays inside Mission HQ, so it is resolved here rather than
+        # waking the owner. The ticket is still written, already approved and
+        # attributed, so the decision is on the record like any other.
+        entry = TOOL_REGISTRY.get(call.tool_name)
+        if entry is not None and not entry.owner_only:
+            ticket_id = await _open_ticket_step(
+                task_id=deps.task_id, run_id=deps.run_id, wf_id=wf_id,
+                tool_name=call.tool_name, tool_args=args,
+                tool_call_id=call.tool_call_id,
+                status="approved", resolved_via="guard",
+            )
+            await emit_step(
+                "approval_resolved", run_id=deps.run_id, task_id=deps.task_id,
+                payload={"ticket_id": ticket_id, "status": "approved",
+                         "via": "guard", "tool": call.tool_name},
+            )
+            verdicts[call.tool_call_id] = True
+            continue
+
         ticket_id = await _open_ticket_step(
             task_id=deps.task_id, run_id=deps.run_id, wf_id=wf_id,
             tool_name=call.tool_name, tool_args=args, tool_call_id=call.tool_call_id,

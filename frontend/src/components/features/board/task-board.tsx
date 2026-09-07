@@ -3,7 +3,8 @@
 import { useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { skipToken, useQuery } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
@@ -20,7 +21,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { api, qk } from "@/lib/api/client";
-import type { Task, TaskEvent, TaskStatus } from "@/lib/api/types";
+import type { Task, TaskEvent, TaskStatus, Verdict } from "@/lib/api/types";
 import { exactTime, timeAgo } from "@/lib/time";
 
 // Read-only columns, not a drag board: every transition is written by
@@ -371,6 +372,11 @@ function TaskDrawer({
                 </Button>
               ) : null}
             </div>
+            {/* Answerable here as well as in the Inbox: a task that is waiting
+                is most often opened from the board, and sending the owner to
+                another page to unblock what he is already looking at is the
+                long way round. */}
+            <TaskApproval taskId={taskId} />
             {task?.brief ? (
               <div>
                 <p className="mb-1 text-sm font-medium">Brief</p>
@@ -399,6 +405,63 @@ function TaskDrawer({
         ) : null}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Approve or reject the ticket blocking this task, without leaving the board. */
+function TaskApproval({ taskId }: { taskId: string }) {
+  const queryClient = useQueryClient();
+  const tickets = useQuery({
+    queryKey: qk.tickets("pending"),
+    queryFn: () => api.tickets("pending"),
+  });
+  const ticket = (tickets.data ?? []).find((row) => row.task_id === taskId);
+
+  const resolve = useMutation({
+    mutationFn: (verdict: Verdict) => api.resolveTicket(ticket!.id, verdict),
+    onSuccess: (result, verdict) => {
+      toast(
+        result.resolved
+          ? `Ticket ${verdict}`
+          : (result.reason ?? "Already resolved elsewhere"),
+      );
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  if (!ticket) return null;
+  return (
+    <div className="border-status-approval/50 rounded-lg border-2 p-3">
+      <p className="text-sm font-medium">
+        {ticket.agent ? `${ticket.agent} wants to run ` : "Waiting to run "}
+        <span className="font-mono">{ticket.tool_name}</span>
+      </p>
+      <pre className="bg-muted mt-2 max-h-40 overflow-auto rounded-md p-2 text-xs">
+        {JSON.stringify(ticket.tool_args, null, 2)}
+      </pre>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          disabled={resolve.isPending}
+          onClick={() => resolve.mutate("approved")}
+        >
+          Approve
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={resolve.isPending}
+          onClick={() => resolve.mutate("denied")}
+        >
+          Reject
+        </Button>
+        <span className="text-muted-foreground self-center text-xs">
+          Same ticket as the Inbox and Telegram.
+        </span>
+      </div>
+    </div>
   );
 }
 

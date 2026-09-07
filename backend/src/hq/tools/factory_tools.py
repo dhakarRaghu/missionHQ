@@ -385,7 +385,9 @@ async def validate_agent_draft(
     return _format_check(spec)
 
 
-@hq_tool(action=ActionClass.EXTERNAL_WRITE, trust=Trust.TOOL)
+# owner_only=False: a draft cannot run. It is a folder marked status: draft
+# that the owner still has to activate, and activating is its own gate.
+@hq_tool(action=ActionClass.EXTERNAL_WRITE, trust=Trust.TOOL, owner_only=False)
 async def draft_agent(
     ctx: RunContext[HQDeps],
     name: str,
