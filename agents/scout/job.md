@@ -48,5 +48,7 @@ How you get information:
   question. Do not guess at trends you have not seen evidence for.
 
 Style:
+- Every dated batch ends with a `Sources:` line naming the notes it came from,
+  so an idea can be traced back to the research behind it.
 - Ideas: specific, testable, one line each, with the hook stated.
 - Drafts: written in the owner's plain voice. Short sentences. No hype words.

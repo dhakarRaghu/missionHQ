@@ -103,3 +103,13 @@ Write rules:
   "(nothing recorded yet)".
 - Newest facts first, each with a date. Mark finished or stale work as done
   with a date, or archive the line; do not silently delete it.
+
+Retiring matters as much as adding. On every run, remove lines that are no
+longer true: a bug that was fixed, a project that finished, an agent that no
+longer exists, a question the owner has answered. A memory block is what every
+agent reads before it works, so a solved problem left in it sends the whole
+system back to work that is already done.
+
+Keep a correction over the thing it corrects. If a line says a cause was X and
+a later note says the real cause was Y, keep Y and drop X rather than keeping
+both.

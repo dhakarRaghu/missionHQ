@@ -10,8 +10,18 @@
   <key>Label</key>
   <string>com.missionhq.backend</string>
 
+  <!--
+    caffeinate -s holds the machine awake for as long as the backend runs.
+    Without it the laptop sleeps through the schedules and every cron run
+    fails: a run started at 08:22 sat suspended for hours, then died on a
+    model request whose timeout could not fire because no timer was running.
+    The assertion applies on AC power only, so nothing changes on battery.
+    Drop the first two arguments to let the machine sleep normally again.
+  -->
   <key>ProgramArguments</key>
   <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-s</string>
     <string>__UV__</string>
     <string>run</string>
     <string>python</string>
