@@ -83,7 +83,7 @@ def _public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-async def _check_url(url: str) -> None:
+async def check_url(url: str) -> None:
     """Scheme + hostname + every resolved address must be public. The fetch
     itself still connects by hostname, so a DNS rebind between this check and
     the connect is not covered."""
@@ -108,7 +108,7 @@ async def _fetch_text(url: str) -> str:
     """GET with manual redirects (each hop re-checked) and a byte cap."""
     async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
         for _ in range(MAX_HOPS + 1):
-            await _check_url(url)
+            await check_url(url)
             async with client.stream("GET", url, headers={"User-Agent": "MissionHQ/1.0"}) as resp:
                 if resp.is_redirect and resp.headers.get("location"):
                     url = urljoin(url, resp.headers["location"])

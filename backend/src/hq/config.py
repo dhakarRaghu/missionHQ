@@ -46,6 +46,20 @@ class Settings(BaseSettings):
     bind_host: str = "127.0.0.1"
     bind_port: int = 8000
 
+    # --- headed browser (browser_read) --------------------------------------
+    # Off by default: it opens a real window, so it must be a deliberate choice.
+    browser_enabled: bool = False
+    # A REAL Chrome, launched by us with a debug port and its own profile. Not
+    # the one you browse in: your Chrome holds a lock on its own profile, and a
+    # separate profile also means an agent can never see your other tabs.
+    browser_chrome_path: str = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    browser_debug_port: int = 9223
+    browser_profile_dir: Path = REPO_DIR / "data" / "browser-profile"
+    # Seconds between page loads. A burst of requests is what looks automated;
+    # reading at human pace is both politer and safer.
+    browser_min_interval_s: float = 3.0
+    browser_page_timeout_s: float = 45.0
+
     # Paths (relative to the repo root; overridable for tests)
     agents_dir: Path = REPO_DIR / "agents"
     vault_dir: Path = REPO_DIR / "vault"
