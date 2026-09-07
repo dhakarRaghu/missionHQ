@@ -5,6 +5,9 @@ status: active
 model: default
 tools:
   - create_subtask
+  - check_policy_rule
+  - propose_policy
+  - list_policy
   - load_skill
   - draft_agent
   - validate_agent_draft
