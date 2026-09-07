@@ -1,7 +1,58 @@
-import ReactMarkdown from "react-markdown";
+"use client";
+
+import { useMemo } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-export function Markdown({ content }: { content: string }) {
+import { resolveVaultLink } from "@/components/features/vault/format";
+
+/**
+ * Renders GFM markdown.
+ *
+ * In the vault (`onSelect` given), a link to another .md file opens that note
+ * in place instead of a new tab, so following a reference keeps you in the
+ * Memory view. Other callers (the board drawer, a run's output) omit
+ * `onSelect` and get plain links.
+ */
+export function Markdown({
+  content,
+  path = "",
+  onSelect,
+}: {
+  content: string;
+  /** Path of the note being rendered; relative links resolve against it. */
+  path?: string;
+  onSelect?: (path: string) => void;
+}) {
+  const link = useMemo<Components["a"]>(
+    () =>
+      function Anchor({ children, href }) {
+        const target = href && onSelect ? resolveVaultLink(href, path) : null;
+        if (target && onSelect) {
+          return (
+            <button
+              type="button"
+              onClick={() => onSelect(target)}
+              className="text-primary underline underline-offset-2"
+            >
+              {children}
+            </button>
+          );
+        }
+        return (
+          <a
+            className="text-primary underline underline-offset-2"
+            href={href}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {children}
+          </a>
+        );
+      },
+    [path, onSelect],
+  );
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -17,16 +68,7 @@ export function Markdown({ content }: { content: string }) {
             {children}
           </blockquote>
         ),
-        a: ({ children, href }) => (
-          <a
-            className="text-primary underline underline-offset-2"
-            href={href}
-            rel="noreferrer"
-            target="_blank"
-          >
-            {children}
-          </a>
-        ),
+        a: link,
         code: ({ children, className }) => (
           <code className={`${className ?? ""} bg-muted rounded px-1 py-0.5 font-mono text-xs`}>
             {children}

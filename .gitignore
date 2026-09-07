@@ -3,8 +3,9 @@
 node_modules/
 __pycache__/
 .venv/
-# Runtime state: logs hold chat text and vault paths, snapshots hold dumps.
-data/
+# Runtime state at the repo root: logs hold chat text and vault paths,
+# snapshots hold dumps. Anchored so a source folder named "data" is trackable.
+/data/
 HALT
 *.sqlite
 .next/
