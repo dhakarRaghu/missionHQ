@@ -1,9 +1,14 @@
 "use client";
 
-import { useCallback } from "react";
+import { Fragment, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  skipToken,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
@@ -23,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { api, qk } from "@/lib/api/client";
 import type { Task, TaskEvent, TaskStatus, Verdict } from "@/lib/api/types";
 import { exactTime, timeAgo } from "@/lib/time";
+import { ticketDetails, ticketHeadline } from "@/lib/tickets";
 
 // Read-only columns, not a drag board: every transition is written by
 // board.apply() on the backend, so a draggable card would promise a move the
@@ -153,7 +159,10 @@ export function TaskBoard() {
           in flight
         </span>
         <span className="flex items-center gap-1.5">
-          <span aria-hidden className="bg-status-approval size-2 rounded-full" />
+          <span
+            aria-hidden
+            className="bg-status-approval size-2 rounded-full"
+          />
           <span className="text-foreground font-medium tabular-nums">
             {needsYou}
           </span>{" "}
@@ -432,15 +441,33 @@ function TaskApproval({ taskId }: { taskId: string }) {
   });
 
   if (!ticket) return null;
+  const text = ticketHeadline(ticket.tool_args);
+  const details = ticketDetails(ticket.tool_args);
   return (
     <div className="border-status-approval/50 rounded-lg border-2 p-3">
       <p className="text-sm font-medium">
         {ticket.agent ? `${ticket.agent} wants to run ` : "Waiting to run "}
         <span className="font-mono">{ticket.tool_name}</span>
       </p>
-      <pre className="bg-muted mt-2 max-h-40 overflow-auto rounded-md p-2 text-xs">
-        {JSON.stringify(ticket.tool_args, null, 2)}
-      </pre>
+
+      {text ? (
+        <p className="text-muted-foreground border-border mt-2 max-h-40 overflow-auto border-l-2 pl-3 text-sm break-words whitespace-pre-wrap">
+          {text}
+        </p>
+      ) : null}
+
+      {details.length > 0 ? (
+        <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+          {details.map((row) => (
+            <Fragment key={row.key}>
+              <dt className="text-muted-foreground font-mono">{row.key}</dt>
+              <dd className="truncate" title={row.value}>
+                {row.value}
+              </dd>
+            </Fragment>
+          ))}
+        </dl>
+      ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <Button
           size="sm"

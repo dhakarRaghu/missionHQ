@@ -9,6 +9,11 @@ restart) does not disable the channel for good. ``ensure_started`` retries
 with exponential backoff (30 s, 60 s, 120 s ... up to 10 min) and is called
 from ``drain_outbox``, which the engine ticks every minute, so queued outbox
 rows go out as soon as Telegram is reachable again.
+
+Sending and polling are separate. Only the process that called ``start`` (the
+API process) polls, because Telegram delivers each update to one caller only.
+Any other process, such as ``hq.cli ask``, still drains the outbox, using a
+send-only client from ``_sender``.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ import json
 import logging
 import time
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
@@ -34,6 +39,8 @@ from hq.dbos_app import DBOS
 
 log = logging.getLogger(__name__)
 _app: Application | None = None
+_bot: Bot | None = None      # send-only client for a process that does not poll
+_owns_channel = False        # only the process that called start() may poll
 REPLY_CHUNK = 3500  # Telegram caps a message at 4096 chars
 
 # Reconnect state (module-level so any caller sees the same backoff).
@@ -290,7 +297,9 @@ async def _session_for(update: Update) -> dict:
 async def drain_outbox() -> None:
     """Send unsent outbox rows to the owner. Safe to call from anywhere.
     Reconnects the channel first when it is down (backoff-limited)."""
-    if not await ensure_started():
+    await ensure_started()  # reconnect the poller, in the process that owns it
+    bot = await _sender()
+    if bot is None:
         return
     rows = await db.fetch(
         "SELECT id, intent FROM hq.outbox WHERE sent_at IS NULL AND attempts < 5"
@@ -299,7 +308,7 @@ async def drain_outbox() -> None:
     for row in rows:
         intent = row["intent"] if isinstance(row["intent"], dict) else json.loads(row["intent"])
         try:
-            await _send_intent(intent)
+            await _send_intent(intent, bot)
             await db.execute("UPDATE hq.outbox SET sent_at = now() WHERE id = %s", (row["id"],))
         except Exception as exc:  # noqa: BLE001
             await db.execute(
@@ -308,9 +317,7 @@ async def drain_outbox() -> None:
             )
 
 
-async def _send_intent(intent: dict) -> None:
-    assert _app is not None
-    bot = _app.bot
+async def _send_intent(intent: dict, bot: Bot) -> None:
     owner = settings().owner_chat_id
     kind = intent.get("kind")
     if kind == "confirm":
@@ -346,6 +353,27 @@ def _configured() -> bool:
     return bool(token) and token != "replace-me"
 
 
+async def _sender() -> Bot | None:
+    """A client for sending, which is not the same as polling.
+
+    The API process sends through its own polling Application. Any other
+    process, for example ``hq.cli ask``, gets a send-only client instead.
+    Sending needs no ``getUpdates`` call, and a second poller would fight the
+    API process for it: Telegram gives updates to one caller only, so the
+    owner's approval buttons would reach whichever process won the race.
+    """
+    global _bot
+    if _app is not None:
+        return _app.bot
+    if not _configured():
+        return None
+    if _bot is None:
+        bot = Bot(settings().telegram_bot_token)
+        await bot.initialize()
+        _bot = bot
+    return _bot
+
+
 def _polling() -> bool:
     return _app is not None and _app.updater is not None and bool(_app.updater.running)
 
@@ -372,7 +400,8 @@ async def start() -> bool:
     channel is already up. Best-effort: a missing or bad token, or a Telegram
     timeout, never stops the rest of Mission HQ (the web console still
     works); ``ensure_started`` retries later. Returns whether polling is on."""
-    global _app, _starting, attempts, next_retry_at, last_error
+    global _app, _starting, attempts, next_retry_at, last_error, _owns_channel
+    _owns_channel = True
     if _polling():
         return True
     if not _configured():
@@ -422,7 +451,7 @@ async def ensure_started() -> bool:
     attempts). Cheap when the channel is up or not configured."""
     if _polling():
         return True
-    if not _configured():
+    if not _configured() or not _owns_channel:
         return False
     if time.monotonic() < next_retry_at:
         return False

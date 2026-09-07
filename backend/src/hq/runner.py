@@ -24,6 +24,7 @@ board/outbox/event writes, so a replayed workflow never duplicates rows.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass
@@ -745,7 +746,12 @@ async def _await_approvals(
         if expired or not pending or round_no == max_rounds:
             break
         # Wake-up only: the message text is never trusted, the table above decides.
-        await DBOS.recv_async(APPROVAL_TOPIC, timeout_seconds=APPROVAL_POLL_S)
+        # `hq.cli ask` runs an agent outside a workflow, where recv() raises. The
+        # table is the authority either way, so there we just sleep and re-read.
+        if wf_id:
+            await DBOS.recv_async(APPROVAL_TOPIC, timeout_seconds=APPROVAL_POLL_S)
+        else:
+            await asyncio.sleep(APPROVAL_POLL_S)
 
     if pending:  # deadline reached with tickets still open
         for ticket_id in list(pending):

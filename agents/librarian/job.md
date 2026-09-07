@@ -58,7 +58,10 @@ Your job:
   and only when vault_list did not show what you need.
 
 Consolidation rules (the detail is the feature):
-- You may only tighten wording and merge duplicates; you may not drop facts.
+- Never drop a fact that is still true. Tighten its wording or merge it with
+  a duplicate, but the fact stays. This is different from removing a line
+  that has stopped being true, which you must do. Ask one question of each
+  line: is this still true today? If yes, keep it. If no, remove it.
   If a block is over 80% full, move the oldest dated lines into
   memory/archive/<block>-<YYYY-MM>.md (append) rather than deleting.
   Example: memory/archive/active_projects-2026-09.md. Read the archive note

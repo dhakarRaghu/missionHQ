@@ -45,6 +45,9 @@ _CLI_FALLBACKS = (
 # Codex answers normally when its browser backend is absent, so a run that
 # read nothing would otherwise look like a successful answer.
 _NO_BROWSER = (
+    # Verbatim from cua_repl's getBrowser() when Codex runs outside the
+    # ChatGPT app, which is the usual way this fails.
+    "no browser is available",
     "browser is not available",
     "no_browser_tool",
     "browser extension is not connected",

@@ -6,18 +6,9 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api, qk } from "@/lib/api/client";
-import type { ChatTicket, Verdict } from "@/lib/api/types";
+import type { Verdict } from "@/lib/api/types";
 import { exactTime, timeAgo } from "@/lib/time";
-
-/** The value the decision usually turns on, rather than the whole argument set. */
-function headline(ticket: ChatTicket): string | null {
-  const args = ticket.tool_args ?? {};
-  for (const key of ["text", "path", "rule", "title"]) {
-    const value = args[key];
-    if (typeof value === "string" && value.trim()) return value;
-  }
-  return null;
-}
+import { ticketHeadline } from "@/lib/tickets";
 
 /**
  * An approval, answerable where it was raised.
@@ -56,7 +47,7 @@ export function ChatApprovals({ sessionId }: { sessionId: string }) {
   return (
     <div className="flex flex-col gap-3">
       {rows.map((ticket) => {
-        const text = headline(ticket);
+        const text = ticketHeadline(ticket.tool_args);
         const pending =
           resolve.isPending && resolve.variables?.id === ticket.id;
         return (
