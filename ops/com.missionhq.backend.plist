@@ -11,20 +11,20 @@
   <string>com.missionhq.backend</string>
 
   <!--
-    caffeinate -s holds the machine awake for as long as the backend runs.
-    Without it the laptop sleeps through the schedules and every cron run
-    fails: a run started at 08:22 sat suspended for hours, then died on a
-    model request whose timeout could not fire because no timer was running.
-    The assertion applies on AC power only, so nothing changes on battery.
-    Drop the first two arguments to let the machine sleep normally again.
+    launchd must supervise the backend itself, with nothing in between: a
+    wrapper here would take the job's pid, and restarting the job would kill
+    only the wrapper while the real process kept the port. The machine is
+    held awake from inside the process instead (see api/app.py).
+  -->
+  <!--
+    The venv's python directly, not `uv run python`. uv spawns python as a
+    child, so launchd would supervise uv: killing the job would kill uv while
+    the python it started kept the port and kept polling Telegram, and the
+    replacement could never bind. Restarting then silently did nothing.
   -->
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/caffeinate</string>
-    <string>-s</string>
-    <string>__UV__</string>
-    <string>run</string>
-    <string>python</string>
+    <string>__PYTHON__</string>
     <string>-m</string>
     <string>hq</string>
   </array>

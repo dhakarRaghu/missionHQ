@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from contextlib import asynccontextmanager
 
@@ -25,12 +26,42 @@ def _ensure_vault_repo() -> None:
         subprocess.run(["git", "init", "-b", "main"], cwd=vault, check=True, capture_output=True)
 
 
+def _hold_awake() -> subprocess.Popen[bytes] | None:
+    """Keep the machine awake for as long as this process lives.
+
+    A laptop that sleeps at 02:00 does not run the 02:00 job: the process is
+    suspended mid-run and the model request dies on wake, its timeout unable
+    to fire because no timer advanced. Every scheduled run was failing this
+    way, with durations of hours and no tokens spent.
+
+    caffeinate is spawned as our CHILD with -w on our own pid, so it exits
+    when we do. Wrapping the whole process in caffeinate instead looks
+    simpler and is wrong: launchd would then be supervising caffeinate, and
+    restarting the job would kill only the wrapper while the Python it
+    started kept the port and kept polling Telegram.
+
+    -s asserts on AC power only, so nothing changes on battery.
+    """
+    try:
+        proc = subprocess.Popen(
+            ["/usr/bin/caffeinate", "-s", "-w", str(os.getpid())],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:  # noqa: BLE001 - not being able to sleep-block is
+        log.warning("could not hold the machine awake: %s", exc)  # not fatal
+        return None
+    log.info("holding the machine awake while this process runs")
+    return proc
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
         obs.configure_tracing()
     except Exception as exc:  # noqa: BLE001 — tracing must never block startup
         log.warning("tracing disabled: %s", exc)
+    awake = _hold_awake()
     await db.open_pool()
     await db.migrate()
     _ensure_vault_repo()
@@ -47,6 +78,9 @@ async def lifespan(app: FastAPI):
     await telegram.stop()
     DBOS.destroy()
     await db.close_pool()
+    # -w already makes it exit with us; this closes it promptly on a clean stop.
+    if awake and awake.poll() is None:
+        awake.terminate()
 
 
 app = FastAPI(title="Mission HQ", lifespan=lifespan)

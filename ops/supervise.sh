@@ -26,12 +26,12 @@ case "${1:-status}" in
     # The plist is a template: it must not name a user, because this repo is
     # cloned onto other machines. Fill it in for this one at install time.
     REPO="$(cd "$HERE/.." && pwd)"
-    UV="$(command -v uv || true)"
-    if [ -z "$UV" ]; then
-      echo "uv not found on PATH. Install it, then run install again." >&2
+    PYTHON="$REPO/backend/.venv/bin/python"
+    if [ ! -x "$PYTHON" ]; then
+      echo "No virtualenv at $PYTHON. Run 'uv sync' in backend/ first." >&2
       exit 1
     fi
-    sed -e "s|__UV__|$UV|g" -e "s|__REPO__|$REPO|g" -e "s|__HOME__|$HOME|g" \
+    sed -e "s|__PYTHON__|$PYTHON|g" -e "s|__REPO__|$REPO|g" -e "s|__HOME__|$HOME|g" \
       "$SRC" > "$DST"
     launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
     launchctl bootstrap "$DOMAIN" "$DST"
@@ -43,8 +43,22 @@ case "${1:-status}" in
     echo "removed $LABEL"
     ;;
   restart)
+    before="$(lsof -ti:8000 2>/dev/null | head -1 || true)"
     launchctl kickstart -k "$DOMAIN/$LABEL"
-    echo "restarted $LABEL"
+    # Verify rather than assume. A restart that silently does nothing leaves
+    # you testing an old process against new code, which is worse than an
+    # error: every result looks like the change did not work.
+    for _ in $(seq 1 30); do
+      sleep 1
+      after="$(lsof -ti:8000 2>/dev/null | head -1 || true)"
+      if [ -n "$after" ] && [ "$after" != "$before" ]; then
+        echo "restarted $LABEL (pid ${before:-none} -> $after)"
+        exit 0
+      fi
+    done
+    echo "WARNING: $LABEL still serving on the old pid (${before:-none})." >&2
+    echo "Run: $0 uninstall && $0 install" >&2
+    exit 1
     ;;
   status)
     if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then

@@ -45,6 +45,12 @@ class CronEntry(BaseModel):
     prompt: str
 
 
+# Who else is loaded, for an agent that can delegate. Filled by scan(), read
+# by instructions_for(). A delegating agent needs to know what each of the
+# others is for; a list of bare names is not enough to route by.
+ROSTER: dict[str, str] = {}
+
+
 # Runtimes that hand the turn to an external agent CLI. Each is treated as a
 # web reader by the trifecta rule, whatever its manifest lists.
 EXTERNAL_RUNTIMES = frozenset({"claude", "codex"})
@@ -215,6 +221,7 @@ def scan(*, strict: bool = False) -> dict[str, AgentSpec]:
     """
     specs: dict[str, AgentSpec] = {}
     LOAD_ERRORS.clear()
+    ROSTER.clear()
     root = settings().agents_dir
     for agent_dir in sorted(p for p in root.iterdir() if p.is_dir()):
         if not (agent_dir / "job.md").exists():
@@ -233,6 +240,9 @@ def scan(*, strict: bool = False) -> dict[str, AgentSpec]:
             log.error("agent folder %s skipped: %s", agent_dir.name, reason)
             continue
         specs[spec.name] = spec
+    for name, spec in specs.items():
+        writes = ", ".join(spec.vault_write_scopes()) or "nothing"
+        ROSTER[name] = f"{spec.description} Writes to: {writes}."
     if not specs and LOAD_ERRORS:
         raise RuntimeError(
             "no agent could be loaded: "
@@ -305,6 +315,15 @@ def instructions_for(spec: AgentSpec) -> str:
             " for the owner. Keep it current; drop stale lines. It is your own notebook:"
             " nobody else reads it, and it is not shared memory."
         )
+    if "create_subtask" in spec.base_tool_names():
+        others = [f"- {n}: {d}" for n, d in sorted(ROSTER.items()) if n != spec.name]
+        if others:
+            parts.append(
+                "# The other agents, and what each one is for\n"
+                "Hand work to one of these with create_subtask when the request"
+                " is theirs. Give a precise title and a brief that says exactly"
+                " what you want back.\n" + "\n".join(others)
+            )
     skills = skills_index(spec.dir)
     if skills:
         parts.append(
