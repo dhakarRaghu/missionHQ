@@ -104,7 +104,11 @@ async def notify_owner(ctx: RunContext[HQDeps], text: str) -> str:
     return "daily notification budget reached; message stored for the digest"
 
 
-@hq_tool(action=ActionClass.EXTERNAL_WRITE)
+# world_facing: this is the one tool whose effect leaves Mission HQ and lands
+# in front of other people. No agent may hold it. Kept registered so the rule
+# has something to refuse, and so the catalog can say plainly that publishing
+# is the owner's alone.
+@hq_tool(action=ActionClass.EXTERNAL_WRITE, world_facing=True)
 async def announce(ctx: RunContext[HQDeps], text: str) -> str:
     """Send a message outward on the owner's behalf. Always requires the owner's
     approval first. Until a real outward channel exists (phase 3), the approved

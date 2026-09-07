@@ -58,6 +58,10 @@ class ToolDef:
     # resolve it without waking him, for an action whose whole effect stays
     # inside Mission HQ and is reversible.
     owner_only: bool
+    # True when the effect leaves Mission HQ and reaches other people. No
+    # agent may hold one of these at all: the owner decided that agents read
+    # and draft, and he acts. Enforced at load, not by an approval prompt.
+    world_facing: bool
     description: str
 
 
@@ -159,6 +163,7 @@ def hq_tool(
     name: str | None = None,
     network: bool = False,
     owner_only: bool = True,
+    world_facing: bool = False,
 ):
     """Register one tool.
 
@@ -166,6 +171,11 @@ def hq_tool(
     owner would want to see before it happens. Setting it False says: this
     action is contained, reversible, and the coordinator can decide. It is a
     promise about consequences, not about how often the tool is used.
+
+    ``world_facing`` is stronger: it means the effect reaches other people.
+    No agent may be granted such a tool, with or without approval. The owner
+    is the only one who acts outward; the agents read, draft, and tell him
+    what he can do.
     """
     def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
         tool_name = name or fn.__name__
@@ -190,6 +200,7 @@ def hq_tool(
             trust=trust,
             requires_approval=action in OUTBOUND_ACTIONS,
             owner_only=owner_only,
+            world_facing=world_facing,
             description=(fn.__doc__ or "").strip().splitlines()[0] if fn.__doc__ else "",
         )
         return stepped

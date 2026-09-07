@@ -119,6 +119,25 @@ class AgentSpec(BaseModel):
                 f"agent {self.name}: {why} cannot combine with outbound tools {outbound}"
             )
 
+    def validate_no_outward_action(self) -> None:
+        """No agent may act on the world. Refused at load, for every agent.
+
+        The owner's rule: the agents read, write notes, and tell him what he
+        can do. He decides and he acts. An approval prompt is not enough here,
+        because a prompt can be answered in a hurry and a granted tool stays
+        granted. Refusing the manifest means a future edit cannot quietly put
+        publishing back.
+        """
+        held = {
+            n for n in self.base_tool_names()
+            if n in TOOL_REGISTRY and TOOL_REGISTRY[n].world_facing
+        }
+        if held:
+            raise ValueError(
+                f"agent {self.name}: {sorted(held)} act on the world, and no agent"
+                " may hold one. Agents draft; the owner publishes."
+            )
+
     def validate_trifecta(self) -> None:
         """An agent that reads the web must not also be able to act outward or
         write trusted memory: one poisoned page would otherwise become a
@@ -231,6 +250,7 @@ def scan(*, strict: bool = False) -> dict[str, AgentSpec]:
             if spec.status == "draft":
                 continue
             get_tools(spec.tools)  # unknown tool names fail here
+            spec.validate_no_outward_action()
             spec.validate_trifecta()
         except Exception as exc:
             if strict:

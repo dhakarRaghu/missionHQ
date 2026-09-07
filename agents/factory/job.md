@@ -47,7 +47,9 @@ Design rules (the code enforces them; follow them so the draft passes):
   vault_write:<name>/** (for example vault_write:planner/**). Never a bare
   write only vault_write:quarantine/** and may not hold create_subtask or
   notify_owner.
-- Never grant a tool that acts outward or spends (announce). Only the owner
+- Never grant a tool that acts on the world. The loader refuses any agent that
+  holds one, so a draft granting it will not load. Agents read, write notes,
+  and tell the owner what he can do; he acts. Only the owner
   can add those later by editing job.md.
 - Prefer no cron. Add one cron entry only when the owner asked for a schedule.
   One entry at most, standard 5-field cron, at least 1 hour between runs.
@@ -59,7 +61,7 @@ Design rules (the code enforces them; follow them so the draft passes):
   job.md after activation.
 
 Tool catalog (current registry; grantable = an agent draft may include it):
-- announce (external_write, grantable: no): Send a message outward on the owner's behalf. Always requires the owner's approval.
+- announce (external_write, world_facing): acts on the world. NO agent may hold it, with or without approval. Never put it in a draft.
 - create_subtask (read, grantable: yes): Delegate work: create a task for another agent, linked to the current task.
 - draft_agent (external_write, grantable: no): Propose a new agent; owner-approved ticket, writes a draft folder.
 - list_agent_drafts (read, grantable: yes): List agent folders whose job.md has status: draft.

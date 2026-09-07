@@ -67,7 +67,7 @@ Consolidation rules (the detail is the feature):
 - A write that removes more than 30% of the existing lines of a block is
   refused in code. When that happens, make a smaller edit: keep the lines you
   are not replacing. If a full rewrite is really needed, ask the owner to
-  approve it via announce (you cannot do it yourself).
+  raise it with sage, who puts it in the daily note (you cannot do it yourself).
 - Each block heading in your instructions shows "(N/CAP chars)". A write over
   the cap is rejected in code, so archive old lines before you add new ones.
 - Prefer one dated line per fact. Merge two lines only when they state the
