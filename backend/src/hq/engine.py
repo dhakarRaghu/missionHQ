@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -268,7 +269,20 @@ async def run_task(task_id: str) -> str:
     prompt = _anchored_prompt(agent_name, spec, task["title"], task["brief"])
 
     try:
-        outcome = await runner.execute(agent, spec, prompt=prompt, deps=deps)
+        if spec.runtime == "claude":
+            # This runtime drives a browser the owner is signed into, outside
+            # our loop, so the whole run is approved before it starts rather
+            # than one tool call at a time.
+            if not await runner.await_runtime_approval(spec, deps, task_text):
+                await _finish_run(run_id, "blocked", 0, 0, 0.0,
+                                  error="the owner did not approve this run")
+                await runner.apply_step(task_id, "run_blocked", status="blocked",
+                                        data={"reason": "runtime approval not granted"})
+                return "blocked: not approved"
+            outcome = await runner.execute_claude(spec, prompt=prompt, deps=deps)
+            outcome = await _file_claude_output(spec, task_id, run_id, outcome)
+        else:
+            outcome = await runner.execute(agent, spec, prompt=prompt, deps=deps)
     except Exception as exc:  # noqa: BLE001 — a run must never wedge the board
         exc_text = friendly_error(exc)
         p_in, p_out, p_cost = _partial_usage(exc)
@@ -526,6 +540,38 @@ async def reap() -> None:
     # Re-enqueue is safe: the workflow id is derived from the task id.
     for row in await db.fetch("SELECT id::text FROM hq.tasks WHERE status = 'backlog'"):
         await _enqueue(row["id"])
+
+
+async def _file_claude_output(
+    spec: AgentSpec, task_id: str, run_id: str, outcome: runner.RunOutcome,
+) -> runner.RunOutcome:
+    """Write what the external agent reported into quarantine, as web-derived.
+
+    The CLI process cannot write anywhere: Mission HQ does it here, through
+    ``memory.write``, so the note gets the same provenance stamp, path scope
+    and single git commit as anything an in-process agent writes. It lands in
+    quarantine because it came from web pages, which is exactly the material
+    the quarantine rule exists for.
+    """
+    if outcome.outcome != "done" or not outcome.output.strip():
+        return outcome
+    today = datetime.now(ZoneInfo(settings().cron_tz)).date()
+    rel = f"quarantine/{today:%Y-%m-%d}-{spec.name}-{task_id[:8]}.md"
+    body = (
+        f"# {spec.name}: browser session {today:%Y-%m-%d}\n\n"
+        f"{outcome.output.strip()}\n"
+    )
+    try:
+        await memory.write(rel, body, actor=spec.name)
+    except Exception as exc:  # noqa: BLE001 — the reading still happened
+        await runner.emit_step("run.no_artifact", run_id=run_id, task_id=task_id,
+                               agent=spec.name,
+                               payload={"reason": f"could not file the result: {exc}"[:200]})
+        return outcome
+    await runner.emit_step("tool.called", run_id=run_id, task_id=task_id, agent=spec.name,
+                           payload={"tool": "vault_write", "ok": True,
+                                    "args": {"path": rel}, "duration_ms": 0})
+    return replace(outcome, output=f"{outcome.output.strip()}\n\nFiled to {rel}")
 
 
 # --- helpers -----------------------------------------------------------------

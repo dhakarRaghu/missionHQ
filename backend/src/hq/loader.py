@@ -50,6 +50,10 @@ class AgentSpec(BaseModel):
     description: str = ""
     status: str = "active"  # active | paused | draft
     model: str = "default"  # registry name or role alias
+    # "hq" is the in-process loop where every tool call passes our gates.
+    # "claude" hands the turn to the Claude Code CLI, which can reach a browser
+    # the owner is signed into. See hq.runtimes.claude_cli for the trade.
+    runtime: str = "hq"
     tools: list[str] = []
     caps: Caps = Field(default_factory=lambda: settings().default_caps.model_copy())
     cron: list[CronEntry] = []
@@ -57,6 +61,12 @@ class AgentSpec(BaseModel):
     policy: str = ""
     dir: Path
     job_hash: str = ""  # git short hash of the agent folder, computed once at scan
+
+    @field_validator("runtime")
+    @classmethod
+    def _runtime_ok(cls, v: str) -> str:
+        assert v in {"hq", "claude"}, "runtime must be 'hq' or 'claude'"
+        return v
 
     @field_validator("name")
     @classmethod
@@ -84,33 +94,41 @@ class AgentSpec(BaseModel):
             scopes.append(own)
         return scopes
 
+    def _forbid_outbound(self, names: set[str], *, why: str) -> None:
+        """No tool that acts outward or spends, for this reason."""
+        outbound = {
+            n for n in names
+            if n in TOOL_REGISTRY and TOOL_REGISTRY[n].action in OUTBOUND_ACTIONS
+        }
+        if outbound:
+            raise ValueError(
+                f"agent {self.name}: {why} cannot combine with outbound tools {outbound}"
+            )
+
     def validate_trifecta(self) -> None:
         """An agent that reads the web must not also be able to act outward or
         write trusted memory: one poisoned page would otherwise become a
         permanent instruction. Enforced at load so the failure is loud."""
         names = self.base_tool_names()
-        if not names & web_read_tools():
+        # A claude-runtime agent reads the web through a browser it drives
+        # outside our loop, so it is a web reader whatever its manifest lists,
+        # and every rule below applies to it unchanged.
+        by_runtime = self.runtime == "claude"
+        if not by_runtime and not names & web_read_tools():
             return
-        outbound = {
-            n for n in names
-            if n in TOOL_REGISTRY
-            and TOOL_REGISTRY[n].action in OUTBOUND_ACTIONS
-        }
-        if outbound:
-            raise ValueError(
-                f"agent {self.name}: web-read tools cannot combine with outbound tools {outbound}"
-            )
+        why = "agents on the claude runtime" if by_runtime else "web-read tools"
+        self._forbid_outbound(names, why=why)
         forbidden = names & WEB_FORBIDDEN_TOOLS
         if forbidden:
             raise ValueError(
-                f"agent {self.name}: web-read tools cannot combine with {sorted(forbidden)}"
+                f"agent {self.name}: {why} cannot combine with {sorted(forbidden)}"
             )
         for scope in self.vault_write_scopes():
             if scope == self.working_memory_path():
                 continue  # its own scratch block; nothing else reads it
             if scope != "quarantine/**":
                 raise ValueError(
-                    f"agent {self.name}: web-read agents may write only vault_write:quarantine/**,"
+                    f"agent {self.name}: {why} may write only vault_write:quarantine/**,"
                     f" got scope {scope!r}"
                 )
 
