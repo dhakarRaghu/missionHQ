@@ -542,36 +542,66 @@ async def reap() -> None:
         await _enqueue(row["id"])
 
 
+_URL_RE = re.compile(r"https?://[^\s<>\)\]\"']+")
+
+
 async def _file_claude_output(
     spec: AgentSpec, task_id: str, run_id: str, outcome: runner.RunOutcome,
 ) -> runner.RunOutcome:
     """Write what the external agent reported into quarantine, as web-derived.
 
-    The CLI process cannot write anywhere: Mission HQ does it here, through
-    ``memory.write``, so the note gets the same provenance stamp, path scope
-    and single git commit as anything an in-process agent writes. It lands in
-    quarantine because it came from web pages, which is exactly the material
-    the quarantine rule exists for.
+    The CLI process cannot write anywhere; Mission HQ does it here. It runs the
+    same gates ``vault_write`` runs, in the same order, rather than calling
+    ``memory.write`` directly: a quarantine note must cite its sources, and the
+    frontmatter is stamped by code so the note carries the same author and
+    provenance as anything an in-process agent writes. Routing around those
+    checks would make this the one note in the vault that nobody vouched for.
     """
     if outcome.outcome != "done" or not outcome.output.strip():
         return outcome
+    text = outcome.output.strip()
     today = datetime.now(ZoneInfo(settings().cron_tz)).date()
     rel = f"quarantine/{today:%Y-%m-%d}-{spec.name}-{task_id[:8]}.md"
-    body = (
-        f"# {spec.name}: browser session {today:%Y-%m-%d}\n\n"
-        f"{outcome.output.strip()}\n"
+
+    # The pages it read are the sources. The gate requires them, and an answer
+    # with no URL in it is an answer we cannot attribute, so it is not filed.
+    urls = list(dict.fromkeys(_URL_RE.findall(text)))[:20]
+    if not urls:
+        await runner.emit_step(
+            "run.no_artifact", run_id=run_id, task_id=task_id, agent=spec.name,
+            payload={"reason": "the reply named no source URL, so it was not filed"},
+        )
+        return outcome
+
+    front = "\n".join(f"  - {u}" for u in urls)
+    content = (
+        f"---\nsource_urls:\n{front}\nconfidence: medium\n---\n"
+        f"# {spec.name}: browser session {today:%Y-%m-%d}\n\n{text}\n"
     )
     try:
-        await memory.write(rel, body, actor=spec.name)
+        meta, _body = memory.parse_frontmatter(content)
+        problem = memory.quarantine_problem(rel, meta)
+        if problem:
+            raise ValueError(problem)
+        content = memory.stamp_frontmatter(
+            content, author=spec.name, provenance="web",
+        )
+        problem = memory.write_problem(rel, content, actor=spec.name, existing=None)
+        if problem:
+            raise ValueError(problem)
+        await memory.write(rel, content, actor=spec.name)
     except Exception as exc:  # noqa: BLE001 — the reading still happened
-        await runner.emit_step("run.no_artifact", run_id=run_id, task_id=task_id,
-                               agent=spec.name,
-                               payload={"reason": f"could not file the result: {exc}"[:200]})
+        await runner.emit_step(
+            "run.no_artifact", run_id=run_id, task_id=task_id, agent=spec.name,
+            payload={"reason": f"could not file the result: {exc}"[:200]},
+        )
         return outcome
-    await runner.emit_step("tool.called", run_id=run_id, task_id=task_id, agent=spec.name,
-                           payload={"tool": "vault_write", "ok": True,
-                                    "args": {"path": rel}, "duration_ms": 0})
-    return replace(outcome, output=f"{outcome.output.strip()}\n\nFiled to {rel}")
+    await runner.emit_step(
+        "tool.called", run_id=run_id, task_id=task_id, agent=spec.name,
+        payload={"tool": "vault_write", "ok": True, "args": {"path": rel},
+                 "duration_ms": 0},
+    )
+    return replace(outcome, output=f"{text}\n\nFiled to {rel}")
 
 
 # --- helpers -----------------------------------------------------------------

@@ -29,7 +29,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from hq.config import settings
@@ -45,6 +47,21 @@ class ClaudeRuntimeError(RuntimeError):
     """The CLI could not be run, or answered with something unusable."""
 
 
+# Phrases the CLI uses when it ran fine but had no browser to drive. Without
+# this the run reads as a normal answer that happens to contain nothing.
+_NO_BROWSER = (
+    "browser extension is not connected",
+    "no browser is connected",
+    "browser is not available",
+    "no chrome browser is connected",
+)
+
+
+def missing_browser(text: str) -> bool:
+    low = text.lower()
+    return any(phrase in low for phrase in _NO_BROWSER)
+
+
 @dataclass(frozen=True)
 class ClaudeResult:
     text: str
@@ -56,6 +73,30 @@ class ClaudeResult:
     is_error: bool
 
 
+# Where the CLI installs itself. The backend runs under launchd with a PATH
+# from its plist, which names one user's home directory, so a bare "claude"
+# resolves on the machine that wrote the plist and nowhere else. Looking in
+# the known locations makes a fresh clone work without editing the plist.
+_CLI_FALLBACKS = (
+    Path.home() / ".local/bin/claude",
+    Path("/opt/homebrew/bin/claude"),
+    Path("/usr/local/bin/claude"),
+)
+
+
+def resolve_cli() -> str | None:
+    """Absolute path to the claude CLI, or None when it cannot be found."""
+    configured = settings().claude_cli_path
+    if not configured:
+        return None
+    if "/" in configured:
+        return configured if Path(configured).exists() else None
+    found = shutil.which(configured)
+    if found:
+        return found
+    return next((str(p) for p in _CLI_FALLBACKS if p.exists()), None)
+
+
 def available() -> str | None:
     """The reason this runtime cannot be used, or None when it can."""
     cfg = settings()
@@ -63,6 +104,12 @@ def available() -> str | None:
         return "the claude runtime is switched off (CLAUDE_RUNTIME_ENABLED=true)"
     if not cfg.claude_cli_path:
         return "CLAUDE_CLI_PATH is empty"
+    if resolve_cli() is None:
+        return (
+            f"the claude CLI ({cfg.claude_cli_path!r}) is not on this machine's"
+            " PATH. Install Claude Code, or set CLAUDE_CLI_PATH in .env to its"
+            " full path."
+        )
     return None
 
 
@@ -98,8 +145,11 @@ async def run_turn(
         raise ClaudeRuntimeError(reason)
     cfg = settings()
 
+    cli = resolve_cli()
+    if cli is None:  # pragma: no cover - available() checked this already
+        raise ClaudeRuntimeError("the claude CLI could not be found")
     argv = [
-        cfg.claude_cli_path,
+        cli,
         "-p",
         prompt,
         "--chrome",
@@ -123,9 +173,16 @@ async def run_turn(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        raw, err = await asyncio.wait_for(
-            proc.communicate(), timeout=cfg.claude_timeout_s
-        )
+        try:
+            raw, err = await asyncio.wait_for(
+                proc.communicate(), timeout=cfg.claude_timeout_s
+            )
+        except TimeoutError:
+            # Cancelling the await does not stop the child. Kill it, or it
+            # keeps the browser and keeps spending.
+            proc.kill()
+            await proc.wait()
+            raise
     except FileNotFoundError as exc:
         raise ClaudeRuntimeError(
             f"claude CLI not found at {cfg.claude_cli_path!r}. Install it, or set"

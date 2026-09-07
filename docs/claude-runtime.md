@@ -38,7 +38,10 @@ CLI, which drives your real Chrome through the Claude in Chrome extension.
    in-process loop asks per tool call because it sees each one; this runtime
    cannot, so the unit of consent is the run, and the ticket shows the task.
 3. On approval it starts `claude -p --chrome`, with the run id as the session
-   id, a turn cap, and a hard dollar ceiling.
+   id, a turn cap, and a hard dollar ceiling. One turn per run: the CLI loops
+   internally as much as its turn cap allows, but Mission HQ does not yet send
+   a follow-up. The session id makes that a small change later, because
+   `--resume` would still have everything the first turn read.
 4. Claude reads pages in your browser and returns text.
 5. **Mission HQ writes that text** into `quarantine/`, through the same
    `memory.write` every agent uses: same provenance stamp, same path scope,
@@ -65,6 +68,17 @@ own browsing; walking a hundred profiles is not, and it is the account you are
 signed into that carries the risk. Use those platforms' APIs for anything at
 volume. `operator`'s manifest says this, and it is the reason the rule exists
 rather than a suggestion.
+
+## When something is wrong
+
+Each failure names itself rather than looking like a failed agent.
+
+| What you see | What it means |
+|---|---|
+| `the claude runtime is switched off` | `CLAUDE_RUNTIME_ENABLED` is false |
+| `the claude CLI ... is not on this machine's PATH` | Claude Code is not installed, or set `CLAUDE_CLI_PATH` to its full path |
+| `the Claude in Chrome extension is not connected` | Step 2 is incomplete. The CLI answers normally with no browser, so this is detected and the run is blocked rather than filed as a success |
+| `the reply named no source URL, so it was not filed` | A quarantine note must cite its sources, so an answer that names no page is reported but not written |
 
 ## Turning it off
 

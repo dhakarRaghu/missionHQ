@@ -23,7 +23,16 @@ LOG="$HERE/../data/logs/backend.log"
 case "${1:-status}" in
   install)
     mkdir -p "$HOME/Library/LaunchAgents" "$HERE/../data/logs"
-    cp "$SRC" "$DST"
+    # The plist is a template: it must not name a user, because this repo is
+    # cloned onto other machines. Fill it in for this one at install time.
+    REPO="$(cd "$HERE/.." && pwd)"
+    UV="$(command -v uv || true)"
+    if [ -z "$UV" ]; then
+      echo "uv not found on PATH. Install it, then run install again." >&2
+      exit 1
+    fi
+    sed -e "s|__UV__|$UV|g" -e "s|__REPO__|$REPO|g" -e "s|__HOME__|$HOME|g" \
+      "$SRC" > "$DST"
     launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
     launchctl bootstrap "$DOMAIN" "$DST"
     echo "installed and started $LABEL"

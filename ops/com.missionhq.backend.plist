@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template. `ops/supervise.sh install` substitutes __UV__, __REPO__ and
+  __HOME__ for this machine and writes the result to ~/Library/LaunchAgents.
+  Nothing here may name a user: the repo is cloned onto other machines.
+-->
 <plist version="1.0">
 <dict>
   <key>Label</key>
@@ -7,7 +12,7 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/raghvendra.dhakar/.local/bin/uv</string>
+    <string>__UV__</string>
     <string>run</string>
     <string>python</string>
     <string>-m</string>
@@ -15,12 +20,14 @@
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/backend</string>
+  <string>__REPO__/backend</string>
 
   <key>EnvironmentVariables</key>
   <dict>
+    <!-- launchd starts with almost no PATH. Anything the backend shells out
+         to (uv, git, the claude CLI) has to be reachable from here. -->
     <key>PATH</key>
-    <string>/Users/raghvendra.dhakar/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
 
   <!-- Start at login and restart whenever the process exits, crash or not. -->
@@ -33,8 +40,8 @@
   <integer>15</integer>
 
   <key>StandardOutPath</key>
-  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/backend.log</string>
+  <string>__REPO__/data/logs/backend.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/backend.log</string>
+  <string>__REPO__/data/logs/backend.log</string>
 </dict>
 </plist>

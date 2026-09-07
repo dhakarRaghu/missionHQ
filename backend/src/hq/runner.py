@@ -405,6 +405,16 @@ async def execute_claude(
         return RunOutcome(output="", outcome="failed", input_tokens=0,
                           output_tokens=0, cost_usd=0.0, error=str(exc))
     text = str(payload["text"])
+    if claude_cli.missing_browser(text):
+        # The CLI answers normally with no browser attached, so this would
+        # otherwise be filed as a successful run that read nothing.
+        return RunOutcome(
+            output=text, outcome="blocked",
+            input_tokens=int(payload["input_tokens"]),
+            output_tokens=int(payload["output_tokens"]),
+            cost_usd=float(payload["cost_usd"]),
+            error="the Claude in Chrome extension is not connected in this browser",
+        )
     return RunOutcome(
         output=text,
         outcome="failed" if payload["is_error"] else ("done" if text.strip() else "blocked"),
