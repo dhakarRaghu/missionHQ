@@ -83,6 +83,7 @@ async def create_subtask(ctx: RunContext[HQDeps], title: str, brief: str, agent:
     task_id = await engine.dispatch(
         agent=agent, title=title, brief=brief, source="agent",
         parent_task_id=ctx.deps.task_id,
+        origin_session_id=ctx.deps.session_id,
         payload={"provenance": "agent", "run_id": ctx.deps.run_id},
     )
     return f"created task {task_id} for {agent}"

@@ -52,6 +52,7 @@ async def create_task(
     source: str,
     brief: str = "",
     parent_id: str | None = None,
+    origin_session_id: str | None = None,
     payload: dict[str, Any] | None = None,
     dedup_key: str | None = None,
 ) -> tuple[str, str, bool]:
@@ -60,12 +61,17 @@ async def create_task(
     async with db.tx() as conn:
         cur = await conn.execute(
             """
-            INSERT INTO hq.tasks (title, brief, agent, source, parent_id, payload, dedup_key)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO hq.tasks (
+              title, brief, agent, source, parent_id, origin_session_id, payload, dedup_key
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (dedup_key) DO UPDATE SET dedup_key = excluded.dedup_key
             RETURNING id, status, (xmax = 0) AS inserted
             """,
-            (title, brief, agent, source, parent_id, db.jsonb(payload or {}), dedup_key),
+            (
+                title, brief, agent, source, parent_id, origin_session_id,
+                db.jsonb(payload or {}), dedup_key,
+            ),
         )
         row = await cur.fetchone()
         assert row is not None

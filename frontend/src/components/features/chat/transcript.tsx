@@ -7,6 +7,7 @@ import { Check, Copy } from "lucide-react";
 import { ErrorState } from "@/components/error-state";
 import { MentionText } from "@/components/features/chat/mention-text";
 import { Markdown } from "@/components/features/vault/markdown";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ChatMessage, ChatRole } from "@/lib/api/types";
 import { clockTime, exactTime } from "@/lib/time";
@@ -46,6 +47,7 @@ export function Transcript({
   local,
   starters = [],
   onStart,
+  onRetry,
 }: {
   isLoading: boolean;
   isError: boolean;
@@ -57,6 +59,8 @@ export function Transcript({
   /** Suggested first questions, shown only while the thread is empty. */
   starters?: string[];
   onStart?: (text: string) => void;
+  /** Retry a transport failure with the original durable client id. */
+  onRetry?: (turn: LocalTurn) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const count = messages.length + local.length;
@@ -146,14 +150,20 @@ export function Transcript({
           />
         ))}
         {local.map((turn) => (
-          <LocalTurnRows key={turn.id} turn={turn} />
+          <LocalTurnRows key={turn.id} turn={turn} onRetry={onRetry} />
         ))}
       </div>
     </div>
   );
 }
 
-function LocalTurnRows({ turn }: { turn: LocalTurn }) {
+function LocalTurnRows({
+  turn,
+  onRetry,
+}: {
+  turn: LocalTurn;
+  onRetry?: (turn: LocalTurn) => void;
+}) {
   return (
     <>
       <Bubble role="user" text={turn.text} ts={null} />
@@ -161,11 +171,23 @@ function LocalTurnRows({ turn }: { turn: LocalTurn }) {
         <Thinking />
       ) : turn.state === "waiting" ? (
         <StatusRow>
-          Waiting for your approval in Inbox. The reply appears here once the
-          run finishes.
+          Still working. If approval is needed, it will appear in Inbox. The
+          reply will appear here when the run finishes.
         </StatusRow>
       ) : turn.state === "error" ? (
-        <StatusRow tone="danger">{turn.error ?? "Send failed"}</StatusRow>
+        <StatusRow tone="danger">
+          <span>{turn.error ?? "Send failed"}</span>
+          {onRetry ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={() => onRetry(turn)}
+            >
+              Retry
+            </Button>
+          ) : null}
+        </StatusRow>
       ) : turn.reply ? (
         <Bubble role="assistant" text={turn.reply} ts={null} run={turn.run} />
       ) : null}
@@ -206,17 +228,17 @@ function StatusRow({
   tone?: "muted" | "danger";
 }) {
   return (
-    <p
+    <div
       role="status"
       className={cn(
-        "rounded-lg border px-3 py-2 text-xs",
+        "flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs",
         tone === "danger"
           ? "border-status-danger/40 bg-status-danger/5 text-status-danger"
           : "text-muted-foreground border-dashed",
       )}
     >
       {children}
-    </p>
+    </div>
   );
 }
 

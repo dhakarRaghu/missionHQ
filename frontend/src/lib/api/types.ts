@@ -236,6 +236,7 @@ export const HQ_EVENT_TYPES = [
   "run.finished",
   "run.failed",
   "run.no_artifact",
+  "chat.updated",
   "tool.called",
   "ledger",
   "ticket.created",

@@ -58,6 +58,7 @@ const LABELS: Record<HqEventType, (p: Payload, e: HqEvent) => string> = {
   "run.failed": (p, e) => join(e.agent, "failed", short(p.error, 100)),
   "run.no_artifact": (p, e) =>
     join(e.agent, "no artifact", short(p.reason, 100)),
+  "chat.updated": (_p, e) => join(e.agent, "result delivered to chat"),
   "tool.called": (p, e) =>
     join(
       e.agent,

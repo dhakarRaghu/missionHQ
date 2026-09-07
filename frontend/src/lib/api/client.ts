@@ -46,6 +46,9 @@ async function errorMessage(res: Response): Promise<string> {
       // fall through to the status text
     }
   }
+  if (res.status >= 500) {
+    return "Connection to Mission HQ dropped before it confirmed the result. Refresh or retry safely.";
+  }
   return res.statusText || `HTTP ${res.status}`;
 }
 
@@ -59,7 +62,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set(name, value);
   }
 
-  const res = await fetch(`${BASE}${path}`, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { ...init, headers });
+  } catch {
+    throw new ApiError(
+      0,
+      "Cannot reach Mission HQ. The turn may still be running; refresh or retry safely.",
+    );
+  }
   if (!res.ok) {
     // Token missing or rejected: drop it and send the browser to /login.
     if (res.status === 401) onUnauthorized();

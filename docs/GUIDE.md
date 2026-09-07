@@ -37,7 +37,8 @@ And when you do want something:
 > **You:** Find out what changed in DBOS Transact in the last month.
 >
 > **Sage:** That is hunter's. I have asked it to research the last month and
-> file the note in `quarantine/`. I will summarise it in tonight's daily note.
+> file the note in `quarantine/`. Its result will appear in this chat when it
+> finishes, and I will summarise it in tonight's daily note.
 
 The second one is the point. You asked one agent; a different one did the work.
 

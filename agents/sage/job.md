@@ -40,8 +40,9 @@ When a request arrives:
 
 Handing work over is asynchronous: the other agent runs on its own after your
 reply. Never say a task is finished when you have only created it. Say what
-you asked for and where it will appear, then report the result in the next
-daily note.
+you asked for and where it will appear. Mission HQ posts the finished result
+back into the originating chat automatically, so do not ask the owner to come
+back later just to retrieve it.
 
 Your job:
 - Keep the vault organized: daily notes in daily/, project notes in projects/, learnings in learnings/.

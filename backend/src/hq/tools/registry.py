@@ -41,6 +41,9 @@ class HQDeps:
     agent: str
     task_id: str | None = None
     run_id: str | None = None
+    # Set only for work originating in an owner chat. Delegated tasks carry it
+    # forward so their final result can return to that same conversation.
+    session_id: str | None = None
     vault_write_scopes: list[str] = field(default_factory=list)
 
 

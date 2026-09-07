@@ -28,7 +28,7 @@ from pydantic_ai import Agent, DeferredToolRequests
 from pydantic_ai.durable_exec.dbos import DBOSDurability
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-from hq import board, db, digest, llm, memory, runner, safety
+from hq import board, db, digest, llm, memory, obs, runner, safety
 from hq.config import settings
 from hq.dbos_app import DBOS
 from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, scan
@@ -169,7 +169,8 @@ async def bootstrap_post_launch() -> None:
 
 async def dispatch(
     *, agent: str, title: str, brief: str = "", source: str = "system",
-    parent_task_id: str | None = None, dedup_key: str | None = None,
+    parent_task_id: str | None = None, origin_session_id: str | None = None,
+    dedup_key: str | None = None,
     payload: dict | None = None,
 ) -> str:
     """Create (or find, on dedup_key) a task and make sure it is enqueued."""
@@ -177,7 +178,8 @@ async def dispatch(
         raise KeyError(f"unknown agent {agent!r}; loaded: {sorted(AGENTS)}")
     task_id, status, inserted = await board.create_task(
         title=title, brief=brief, agent=agent, source=source,
-        parent_id=parent_task_id, payload=payload, dedup_key=dedup_key,
+        parent_id=parent_task_id, origin_session_id=origin_session_id,
+        payload=payload, dedup_key=dedup_key,
     )
     if inserted or status == "backlog":
         await _enqueue(task_id)
@@ -257,12 +259,16 @@ async def run_task(task_id: str) -> str:
     reason = await _preflight(agent_name, spec)
     if reason:
         await runner.apply_step(task_id, "blocked", status="blocked", data={"reason": reason})
+        await _deliver_task_result_step(
+            task_id, None, agent_name, "blocked", f"Blocked: {reason}"
+        )
         return f"blocked: {reason}"
 
     await runner.apply_step(task_id, "status_changed", status="running")
     run_id = await _start_run(task_id, spec)
     deps = runner.HQDeps(
         agent=agent_name, task_id=task_id, run_id=run_id,
+        session_id=task["origin_session_id"],
         vault_write_scopes=spec.vault_write_scopes(),
     )
     task_text = task["title"] + ("\n\n" + task["brief"] if task["brief"] else "")
@@ -278,6 +284,10 @@ async def run_task(task_id: str) -> str:
                                   error="the owner did not approve this run")
                 await runner.apply_step(task_id, "run_blocked", status="blocked",
                                         data={"reason": "runtime approval not granted"})
+                await _deliver_task_result_step(
+                    task_id, run_id, agent_name, "blocked",
+                    "The owner did not approve this run.",
+                )
                 return "blocked: not approved"
             outcome = await runner.execute_external(spec, prompt=prompt, deps=deps)
             outcome = await _file_external_output(spec, task_id, run_id, outcome)
@@ -292,6 +302,9 @@ async def run_task(task_id: str) -> str:
         await runner.emit_step("run.failed", run_id=run_id, task_id=task_id, agent=agent_name,
                                payload={"error": exc_text[:500],
                                         "exit_status": exit_status("failed", exc_text)})
+        await _deliver_task_result_step(
+            task_id, run_id, agent_name, "failed", f"Run failed: {exc_text}"
+        )
         return "failed"
 
     # Artifact assertion: "done" without a recorded side effect is not done.
@@ -316,6 +329,9 @@ async def run_task(task_id: str) -> str:
     await runner.emit_step("run.finished", run_id=run_id, task_id=task_id, agent=agent_name,
                            payload={"outcome": result, "exit_status": exit_status(result, error),
                                     "cost_usd": outcome.cost_usd})
+    await _deliver_task_result_step(
+        task_id, run_id, agent_name, result, outcome.output[:TASK_OUTPUT_CHARS]
+    )
     await enqueue_agent_tasks(run_id)
     if task["source"] == "cron" and await safety.notification_budget_left():
         head = f"[{agent_name}] {task['title']}"
@@ -361,7 +377,7 @@ async def chat_turn(session_id: str, text: str) -> str:
         return f"blocked: {reason}"
 
     run_id = await _start_run(None, spec)
-    deps = runner.HQDeps(agent=agent_name, run_id=run_id,
+    deps = runner.HQDeps(agent=agent_name, run_id=run_id, session_id=session_id,
                          vault_write_scopes=spec.vault_write_scopes())
     history = await _load_history(str(session["conversation_id"]))
     try:
@@ -618,11 +634,68 @@ async def _preflight(agent_name: str, spec: AgentSpec) -> str | None:
 
 async def _load_task(task_id: str) -> dict:
     row = await db.fetchone(
-        "SELECT id::text, title, brief, agent, status, source FROM hq.tasks WHERE id = %s",
+        "SELECT id::text, title, brief, agent, status, source,"
+        " origin_session_id::text FROM hq.tasks WHERE id = %s",
         (task_id,),
     )
     assert row is not None, f"task {task_id} missing"
     return row
+
+
+@DBOS.step()
+async def _deliver_task_result_step(
+    task_id: str,
+    run_id: str | None,
+    agent_name: str,
+    outcome: str,
+    output: str,
+) -> None:
+    """Return delegated work to its originating owner chat exactly once.
+
+    Deliveries are deliberately separate from the pydantic-ai message history:
+    an operator or web-reading agent may return untrusted page text, and that
+    text must be visible to the owner without becoming input to privileged
+    Sage on the next turn.
+    """
+    task = await db.fetchone(
+        "SELECT title, origin_session_id::text FROM hq.tasks WHERE id = %s",
+        (task_id,),
+    )
+    if task is None or task["origin_session_id"] is None:
+        return
+
+    verb = {
+        "done": "finished",
+        "blocked": "was blocked",
+        "no_artifact": "finished without the required artifact",
+    }.get(outcome, "failed")
+    body = output.strip() or f"The run ended with status `{outcome}`."
+    text = f"{agent_name.capitalize()} {verb} **{task['title']}**.\n\n{body}"
+    inserted = False
+    async with db.tx() as conn:
+        cur = await conn.execute(
+            """
+            INSERT INTO hq.chat_deliveries (session_id, task_id, run_id, text)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (task_id) DO NOTHING
+            RETURNING id
+            """,
+            (task["origin_session_id"], task_id, run_id, text),
+        )
+        inserted = await cur.fetchone() is not None
+        if inserted:
+            await conn.execute(
+                "UPDATE hq.sessions SET last_active = now() WHERE id = %s",
+                (task["origin_session_id"],),
+            )
+    if inserted:
+        await obs.emit(
+            "chat.updated",
+            run_id=run_id,
+            task_id=task_id,
+            agent=agent_name,
+            payload={"session_id": task["origin_session_id"]},
+        )
 
 
 @DBOS.step()

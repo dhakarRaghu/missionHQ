@@ -79,6 +79,10 @@ function invalidateFor(queryClient: QueryClient, event: HqEvent) {
         inv(qk.chatSessions);
       }
       break;
+    case "chat.updated":
+      inv(["chat-messages"]);
+      inv(qk.chatSessions);
+      break;
     case "ticket.created":
     case "ticket.resolved":
     case "approval_resolved":

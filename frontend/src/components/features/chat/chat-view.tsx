@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api, qk } from "@/lib/api/client";
-import type { SendChatResult } from "@/lib/api/types";
+import type { ChatMessage, SendChatResult } from "@/lib/api/types";
 import { startersFor } from "@/lib/chat-starters";
 
 /**
@@ -85,6 +85,17 @@ export function ChatView() {
 
 const EMPTY: LocalTurn[] = [];
 
+function transcriptHasTurn(turn: LocalTurn, transcript: ChatMessage[]): boolean {
+  const newer = transcript.slice(turn.baseCount);
+  const userIndex = newer.findIndex(
+    (message) => message.role === "user" && message.text === turn.text,
+  );
+  return (
+    userIndex >= 0 &&
+    newer.slice(userIndex + 1).some((message) => message.role === "assistant")
+  );
+}
+
 function Thread({
   sessionId,
   agent,
@@ -106,16 +117,12 @@ function Thread({
   // A turn is complete once the transcript holds its user message and the
   // reply (two more rows than when it was sent). Then its local row hides.
   const local = useMemo(
-    () =>
-      sent.filter(
-        (turn) =>
-          turn.state === "error" || transcript.length < turn.baseCount + 2,
-      ),
-    [sent, transcript.length],
+    () => sent.filter((turn) => !transcriptHasTurn(turn, transcript)),
+    [sent, transcript],
   );
 
   const send = useMutation({
-    mutationFn: ({ id, text }: { id: string; text: string }) =>
+    mutationFn: ({ id, text }: { id: string; text: string; baseCount: number }) =>
       api.sendChatMessage(sessionId, { text, client_id: id }),
     onSuccess: (result: SendChatResult, { id }) => {
       setLocal((prev) =>
@@ -141,7 +148,25 @@ function Thread({
       queryClient.invalidateQueries({ queryKey: qk.chatMessages(sessionId) });
       queryClient.invalidateQueries({ queryKey: qk.chatSessions });
     },
-    onError: (error: Error, { id }) => {
+    onError: async (error: Error, { id, text, baseCount }) => {
+      // A proxy can lose the response after the durable workflow finished.
+      // Reconcile with the server before showing a failure or offering retry.
+      let refreshed: ChatMessage[] | undefined;
+      try {
+        refreshed = (await messages.refetch()).data;
+      } catch {
+        // Keep the original send error; Retry below uses the same client id.
+      }
+      const submitted = sent.find((turn) => turn.id === id) ?? {
+        id,
+        text,
+        baseCount,
+        state: "error" as const,
+      };
+      if (refreshed && transcriptHasTurn(submitted, refreshed)) {
+        setLocal((prev) => prev.filter((turn) => turn.id !== id));
+        return;
+      }
       toast.error(error.message);
       setLocal((prev) =>
         prev.map((turn) =>
@@ -157,11 +182,25 @@ function Thread({
 
   const onSend = (text: string) => {
     const id = crypto.randomUUID();
+    const baseCount = transcript.length;
     setLocal((prev) => [
       ...prev,
-      { id, text, baseCount: transcript.length, state: "sending" },
+      { id, text, baseCount, state: "sending" },
     ]);
-    send.mutate({ id, text });
+    send.mutate({ id, text, baseCount });
+  };
+
+  const onRetry = (turn: LocalTurn) => {
+    setLocal((prev) =>
+      prev.map((row) =>
+        row.id === turn.id
+          ? { ...row, state: "sending", error: undefined }
+          : row,
+      ),
+    );
+    // Reusing the id is what makes a retry safe: DBOS returns the existing
+    // workflow instead of starting a duplicate if the first POST got through.
+    send.mutate({ id: turn.id, text: turn.text, baseCount: turn.baseCount });
   };
 
   return (
@@ -177,6 +216,7 @@ function Thread({
         local={local}
         starters={startersFor(agent)}
         onStart={busy ? undefined : onSend}
+        onRetry={busy ? undefined : onRetry}
       />
       <div className="shrink-0 border-t p-3">
         <Composer disabled={busy || messages.isLoading} onSend={onSend} />

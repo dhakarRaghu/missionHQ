@@ -22,7 +22,10 @@ router = APIRouter(prefix="/chat", dependencies=[Depends(require_auth)])
 
 WEB_CHANNEL = "web"
 WEB_USER = "owner"
-REPLY_WAIT_S = 120
+# Next's rewrite proxy closes upstream requests after 30 seconds by default.
+# Return "pending" first; the durable workflow keeps running and its SSE event
+# refreshes the transcript when the reply lands.
+REPLY_WAIT_S = 20
 # hq.messages rows written before migration 007 carry no run_id. An assistant
 # turn is matched to the chat run of the same agent whose start..end window,
 # widened by this much on both sides, contains the turn's timestamp.
@@ -141,7 +144,13 @@ async def list_messages(session_id: str) -> list[dict]:
         (session["conversation_id"],),
     )
     turns = _transcript(row["history"] if row else None)
-    return await _attach_runs(turns, session["agent"])
+    messages = await _attach_runs(turns, session["agent"])
+    messages.extend(await _chat_deliveries(session_id))
+    # History timestamps and PostgreSQL timestamps may use different timezone
+    # offsets, so compare parsed instants rather than their ISO strings.
+    floor = datetime.min.replace(tzinfo=UTC)
+    messages.sort(key=lambda message: _parse_ts(message.get("ts")) or floor)
+    return messages
 
 
 @router.post("/sessions/{session_id}/messages", operation_id="sendChatMessage")
@@ -211,6 +220,32 @@ async def _run_fields(run: dict[str, Any] | None) -> dict[str, Any]:
     tools = await _tools_by_run([run["id"]])
     return {"run_id": run["id"], "cost_usd": float(run["cost_usd"]),
             "tools": tools.get(run["id"], [])}
+
+
+async def _chat_deliveries(session_id: str) -> list[dict[str, Any]]:
+    """System-delivered task results shown in chat but excluded from model history."""
+    rows = await db.fetch(
+        """
+        SELECT d.ts, d.text, d.run_id::text, r.cost_usd
+        FROM hq.chat_deliveries d
+        LEFT JOIN hq.runs r ON r.id = d.run_id
+        WHERE d.session_id = %s
+        ORDER BY d.ts, d.id
+        """,
+        (session_id,),
+    )
+    tools = await _tools_by_run([row["run_id"] for row in rows if row["run_id"]])
+    return [
+        {
+            "role": "assistant",
+            "text": row["text"],
+            "ts": row["ts"].isoformat(),
+            "run_id": row["run_id"],
+            "cost_usd": float(row["cost_usd"]) if row["cost_usd"] is not None else None,
+            "tools": tools.get(row["run_id"], []) if row["run_id"] else None,
+        }
+        for row in rows
+    ]
 
 
 def _parse_ts(value: Any) -> datetime | None:
