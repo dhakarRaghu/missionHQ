@@ -18,6 +18,7 @@ import logging
 import time
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -27,6 +28,7 @@ from telegram.ext import (
 )
 
 from hq import board, db, engagement
+from hq.channels import cards
 from hq.config import settings
 from hq.dbos_app import DBOS
 
@@ -61,7 +63,7 @@ async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if text.startswith("/"):
         reply = await _command(text, session)
         for chunk in _chunks(reply, REPLY_CHUNK):
-            await update.message.reply_text(chunk)
+            await update.message.reply_text(chunk, parse_mode=ParseMode.HTML)
         return
 
     agent = session["agent"]
@@ -91,11 +93,48 @@ async def _command(text: str, session: dict) -> str:
             "SELECT title, agent, status FROM hq.tasks WHERE status NOT IN ('done','failed')"
             " ORDER BY updated_at DESC LIMIT 15"
         )
-        return "\n".join(f"[{r['status']}] {r['agent']}: {r['title'][:60]}" for r in rows) or "board empty"
+        if not rows:
+            return cards.card(
+                cards.title("Board", icon="📋"),
+                "Nothing open. The agents run on their schedules.",
+            )
+        # Grouped by state, most urgent first: the reason to open the board is
+        # almost always to find what is stuck or waiting.
+        order = ["needs_approval", "running", "blocked", "backlog"]
+        blocks = [cards.title("Board", icon="📋", count=len(rows))]
+        for state in order:
+            group = [r for r in rows if r["status"] == state]
+            if not group:
+                continue
+            blocks.append(cards.lines(
+                f"{cards.STATE_DOT.get(state, '•')} <b>{cards.STATE_LABEL.get(state, state)}</b>"
+                f" ({len(group)})",
+                *(cards.bullet(cards.truncate(r["title"], 62), sub=r["agent"]) for r in group),
+            ))
+        return cards.card(*blocks)
     if cmd == "/tickets":
         rows = await db.fetch(
-            "SELECT id::text, tool_name FROM hq.tickets WHERE status = 'pending'")
-        return "\n".join(f"{r['id'][:8]}… {r['tool_name']}" for r in rows) or "no pending tickets"
+            "SELECT t.tool_name, r.agent,"
+            " extract(epoch from now() - t.created_at) AS age"
+            " FROM hq.tickets t LEFT JOIN hq.runs r ON r.id = t.run_id"
+            " WHERE t.status = 'pending' ORDER BY t.created_at"
+        )
+        if not rows:
+            return cards.card(
+                cards.title("All caught up", icon="✅"),
+                "Nothing needs your decision.",
+            )
+        return cards.card(
+            cards.title("Waiting on you", icon="🎫", count=len(rows)),
+            cards.lines(*(
+                cards.bullet(
+                    r["tool_name"],
+                    sub=f"{r['agent'] or 'unknown'} · {cards.ago(float(r['age']))} ago",
+                )
+                for r in rows
+            )),
+            "<i>Each has Approve and Reject buttons on its own message.</i>",
+        )
     if cmd == "/pause" and arg:
         await safety.set_agent_paused(arg, True)
         return f"paused {arg}"
@@ -104,9 +143,42 @@ async def _command(text: str, session: dict) -> str:
         return f"resumed {arg}"
     if cmd == "/costs":
         spend = await safety.spend_today_usd()
-        return f"today: ${spend:.2f} of ${settings().daily_spend_cap_usd:.2f} cap"
+        cap = settings().daily_spend_cap_usd
+        row = await db.fetchone(
+            "SELECT count(*) AS runs FROM hq.runs WHERE started_at::date = current_date")
+        pct = (spend / cap) if cap else 0.0
+        return cards.card(
+            cards.title("Spend today", icon="💰"),
+            cards.lines(
+                f"<b>${spend:.4f}</b> of ${cap:.2f}",
+                f"<code>{cards.bar(pct)}</code> {round(pct * 100)}%",
+            ),
+            f"{row['runs'] if row else 0} run(s) today",
+        )
     if cmd == "/agents":
-        return "\n".join(sorted(engine.registered_agents()))
+        # Paused and working are the two states worth a glance; the rest idle.
+        busy = {
+            r["agent"] for r in await db.fetch(
+                "SELECT DISTINCT agent FROM hq.tasks WHERE status = 'running'")
+        }
+        paused = {
+            r["key"].split(":", 1)[1] for r in await db.fetch(
+                "SELECT key FROM hq.control WHERE key LIKE %s"
+                " AND value::text = 'true'", ("paused:%",))
+        }
+        listed: list[str] = []
+        for name in sorted(engine.registered_agents()):
+            if name in paused:
+                listed.append(f"🟡 <b>{cards.esc(name)}</b> <i>paused</i>")
+            elif name in busy:
+                listed.append(f"🟢 <b>{cards.esc(name)}</b> <i>working</i>")
+            else:
+                listed.append(f"⚪️ {cards.esc(name)}")
+        return cards.card(
+            cards.title("Agents", icon="🤖", count=len(listed)),
+            cards.lines(*listed),
+            "<i>/pause &lt;name&gt; · /resume &lt;name&gt;</i>",
+        )
     if cmd == "/digest":
         from hq import digest
 
@@ -121,11 +193,22 @@ async def _command(text: str, session: dict) -> str:
         from hq.tools import factory_tools
 
         drafts = await asyncio.to_thread(factory_tools.list_drafts)
-        return "\n".join(
-            f"{d['name']}: {d['description'][:80]} | tools: {', '.join(d['tools'])}"
-            f" | cron: {d['cron'][0]['schedule'] if d['cron'] else 'none'}"
-            for d in drafts
-        ) or "no drafts (the factory agent creates them; activate with /activate <name>)"
+        if not drafts:
+            return cards.card(
+                cards.title("No drafts", icon="📦"),
+                "The factory agent writes them. Ask sage for a new agent.",
+            )
+        blocks = [cards.title("Drafts", icon="📦", count=len(drafts))]
+        for d in drafts:
+            schedule = d["cron"][0]["schedule"] if d["cron"] else "no schedule"
+            blocks.append(cards.lines(
+                f"<b>{cards.esc(d['name'])}</b>",
+                cards.esc(cards.truncate(d["description"], 110)),
+                f"<i>{cards.esc(', '.join(d['tools']) or 'no tools')} · "
+                f"{cards.esc(schedule)}</i>",
+                f"<code>/activate {cards.esc(d['name'])}</code>",
+            ))
+        return cards.card(*blocks)
     if cmd == "/activate" and arg:
         import asyncio
 
@@ -137,9 +220,15 @@ async def _command(text: str, session: dict) -> str:
             return f"not activated: {exc}"
         factory_tools.schedule_restart()  # 2 s delay: the reply goes out first; launchd restarts us
         return reply
-    return (
-        "commands: /board /tickets /costs /agents /digest /week /drafts"
-        " /pause <agent> /resume <agent> /activate <agent>"
+    return cards.card(
+        cards.title("Mission HQ", icon="🧭"),
+        cards.lines(
+            "<b>See</b>  /board  /tickets  /costs  /agents",
+            "<b>Read</b>  /digest  /week  /drafts",
+            "<b>Do</b>  /pause &lt;agent&gt;  /resume &lt;agent&gt;",
+            "        /activate &lt;agent&gt;",
+        ),
+        "<i>Or just write. Sage answers and hands work to the right agent.</i>",
     )
 
 
@@ -230,10 +319,24 @@ async def _send_intent(intent: dict) -> None:
             InlineKeyboardButton("✅ Approve", callback_data=f"t:{ticket}:a"),
             InlineKeyboardButton("❌ Reject", callback_data=f"t:{ticket}:d"),
         ]])
-        args = json.dumps(intent.get("args", {}), indent=0)[:800]
-        await bot.send_message(owner, f"{intent['summary']}\n\nargs: {args}", reply_markup=markup)
+        args = intent.get("args") or {}
+        body = cards.readable_args(str(intent.get("tool") or ""), args)
+        await bot.send_message(
+            owner,
+            cards.card(
+                cards.title("Approval needed", icon="🎫"),
+                cards.esc(intent["summary"]),
+                body,
+            ),
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+        )
     else:
-        await bot.send_message(owner, intent.get("text", "")[:4000])
+        await bot.send_message(
+            owner,
+            cards.esc(intent.get("text", ""))[:4000],
+            parse_mode=ParseMode.HTML,
+        )
 
 
 # --- lifecycle ---------------------------------------------------------------

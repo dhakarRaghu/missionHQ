@@ -653,6 +653,9 @@ async def _await_approvals(
             {
                 "kind": "confirm", "ticket_id": ticket_id,
                 "summary": f"{spec.name} wants to run {call.tool_name}",
+                # The channel lays the arguments out by tool: an announce
+                # shows its text, a vault write shows its path.
+                "tool": call.tool_name,
                 "args": args,
             },
             idempotency_key=f"ticket:{ticket_id}",
