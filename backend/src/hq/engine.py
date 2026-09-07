@@ -31,7 +31,7 @@ from pydantic_ai.messages import ModelMessagesTypeAdapter
 from hq import board, db, digest, llm, memory, runner, safety
 from hq.config import settings
 from hq.dbos_app import DBOS
-from hq.loader import AgentSpec, build_agent, scan
+from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, scan
 
 TASK_TIMEOUT_S = 20 * 60   # a cron/board run may not exceed 20 minutes
 CHAT_TIMEOUT_S = 6 * 60    # a chat turn may not exceed 6 minutes (approval waits excluded: they block in recv)
@@ -269,7 +269,7 @@ async def run_task(task_id: str) -> str:
     prompt = _anchored_prompt(agent_name, spec, task["title"], task["brief"])
 
     try:
-        if spec.runtime == "claude":
+        if spec.runtime in EXTERNAL_RUNTIMES:
             # This runtime drives a browser the owner is signed into, outside
             # our loop, so the whole run is approved before it starts rather
             # than one tool call at a time.
@@ -279,8 +279,8 @@ async def run_task(task_id: str) -> str:
                 await runner.apply_step(task_id, "run_blocked", status="blocked",
                                         data={"reason": "runtime approval not granted"})
                 return "blocked: not approved"
-            outcome = await runner.execute_claude(spec, prompt=prompt, deps=deps)
-            outcome = await _file_claude_output(spec, task_id, run_id, outcome)
+            outcome = await runner.execute_external(spec, prompt=prompt, deps=deps)
+            outcome = await _file_external_output(spec, task_id, run_id, outcome)
         else:
             outcome = await runner.execute(agent, spec, prompt=prompt, deps=deps)
     except Exception as exc:  # noqa: BLE001 — a run must never wedge the board
@@ -545,7 +545,7 @@ async def reap() -> None:
 _URL_RE = re.compile(r"https?://[^\s<>\)\]\"']+")
 
 
-async def _file_claude_output(
+async def _file_external_output(
     spec: AgentSpec, task_id: str, run_id: str, outcome: runner.RunOutcome,
 ) -> runner.RunOutcome:
     """Write what the external agent reported into quarantine, as web-derived.

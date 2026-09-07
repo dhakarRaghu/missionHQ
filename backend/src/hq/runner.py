@@ -38,7 +38,7 @@ from hq import board, db, llm, safety
 from hq.dbos_app import DBOS
 from hq.loader import AgentSpec
 from hq.obs import emit
-from hq.runtimes import claude_cli
+from hq.runtimes import claude_cli, codex_cli
 from hq.tools.registry import HQDeps
 
 log = logging.getLogger(__name__)
@@ -359,6 +359,17 @@ async def await_runtime_approval(spec: AgentSpec, deps: HQDeps, summary: str) ->
     return status == "approved"
 
 
+@DBOS.step(name="runtime.codex")
+async def codex_turn_step(prompt: str, *, system_suffix: str) -> dict[str, Any]:
+    """One Codex turn, as a durable step so a crash does not repeat the work."""
+    result = await codex_cli.run_turn(f"{system_suffix}\n\n{prompt}")
+    return {
+        "text": result.text, "cost_usd": 0.0,
+        "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
+        "is_error": result.is_error,
+    }
+
+
 @DBOS.step(name="runtime.claude")
 async def claude_turn_step(
     prompt: str, *, session_id: str, resume: bool, system_suffix: str
@@ -377,7 +388,7 @@ async def claude_turn_step(
 # The child process reads. Mission HQ writes. Saying so in the prompt is not
 # the control (the tool allowlist is), but it stops the model wasting turns
 # trying to save a file it is not allowed to touch.
-CLAUDE_SYSTEM_SUFFIX = (
+EXTERNAL_SYSTEM_SUFFIX = (
     "You are running as an agent inside Mission HQ, a personal multi-agent"
     " system. You can read the web through the browser the owner is signed"
     " into. You cannot write files, run commands, or send anything: Mission HQ"
@@ -387,25 +398,31 @@ CLAUDE_SYSTEM_SUFFIX = (
 )
 
 
-async def execute_claude(
+async def execute_external(
     spec: AgentSpec, *, prompt: str, deps: HQDeps,
 ) -> RunOutcome:
-    """One turn on the claude runtime, already approved by the caller."""
-    reason = claude_cli.available()
+    """One turn on an external CLI runtime, already approved by the caller."""
+    runtime = spec.runtime
+    module = codex_cli if runtime == "codex" else claude_cli
+    reason = module.available()
     if reason:
         return RunOutcome(output="", outcome="blocked", input_tokens=0,
                           output_tokens=0, cost_usd=0.0, error=reason)
-    session_id = deps.run_id or (DBOS.workflow_id or "hq")
     try:
-        payload = await claude_turn_step(
-            prompt, session_id=session_id, resume=False,
-            system_suffix=CLAUDE_SYSTEM_SUFFIX,
-        )
-    except claude_cli.ClaudeRuntimeError as exc:
+        if runtime == "codex":
+            payload = await codex_turn_step(
+                prompt, system_suffix=EXTERNAL_SYSTEM_SUFFIX,
+            )
+        else:
+            payload = await claude_turn_step(
+                prompt, session_id=deps.run_id or (DBOS.workflow_id or "hq"),
+                resume=False, system_suffix=EXTERNAL_SYSTEM_SUFFIX,
+            )
+    except (claude_cli.ClaudeRuntimeError, codex_cli.CodexRuntimeError) as exc:
         return RunOutcome(output="", outcome="failed", input_tokens=0,
                           output_tokens=0, cost_usd=0.0, error=str(exc))
     text = str(payload["text"])
-    if claude_cli.missing_browser(text):
+    if module.missing_browser(text):
         # The CLI answers normally with no browser attached, so this would
         # otherwise be filed as a successful run that read nothing.
         return RunOutcome(
@@ -413,7 +430,8 @@ async def execute_claude(
             input_tokens=int(payload["input_tokens"]),
             output_tokens=int(payload["output_tokens"]),
             cost_usd=float(payload["cost_usd"]),
-            error="the Claude in Chrome extension is not connected in this browser",
+            error=(f"the {runtime} browser extension is not connected in this"
+                   " browser, so nothing was read"),
         )
     return RunOutcome(
         output=text,

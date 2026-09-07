@@ -62,6 +62,21 @@ class Settings(BaseSettings):
     claude_max_budget_usd: float = 1.00
     claude_timeout_s: float = 600.0
 
+    # --- codex runtime (agents with `runtime: codex` in job.md) ---------------
+    # Same job as the claude runtime: reach a browser the owner is signed into.
+    # Which CLI a machine can use is a per-machine fact, so both exist.
+    codex_runtime_enabled: bool = False
+    codex_cli_path: str = "codex"
+    # Codex has no budget flag and no tool allowlist, so the timeout is the
+    # only ceiling on one run and --sandbox read-only is the boundary.
+    codex_timeout_s: float = 600.0
+    # Optional. Codex reads ~/.codex/config.toml, and a machine whose default
+    # provider only works inside the ChatGPT app cannot run it headlessly.
+    # These override the model and any config key, e.g.
+    # CODEX_CONFIG="model_provider=grid,model=open-fast".
+    codex_model: str = ""
+    codex_config: str = ""
+
     # --- headed browser (browser_read) --------------------------------------
     # Off by default: it opens a real window, so it must be a deliberate choice.
     browser_enabled: bool = False

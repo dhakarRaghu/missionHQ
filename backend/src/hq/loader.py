@@ -45,14 +45,20 @@ class CronEntry(BaseModel):
     prompt: str
 
 
+# Runtimes that hand the turn to an external agent CLI. Each is treated as a
+# web reader by the trifecta rule, whatever its manifest lists.
+EXTERNAL_RUNTIMES = frozenset({"claude", "codex"})
+
+
 class AgentSpec(BaseModel):
     name: str
     description: str = ""
     status: str = "active"  # active | paused | draft
     model: str = "default"  # registry name or role alias
     # "hq" is the in-process loop where every tool call passes our gates.
-    # "claude" hands the turn to the Claude Code CLI, which can reach a browser
-    # the owner is signed into. See hq.runtimes.claude_cli for the trade.
+    # "claude" and "codex" hand the turn to that CLI, which can reach a browser
+    # the owner is signed into. Which one a machine can use is a per-machine
+    # fact. See hq.runtimes for the trade each one makes.
     runtime: str = "hq"
     tools: list[str] = []
     caps: Caps = Field(default_factory=lambda: settings().default_caps.model_copy())
@@ -65,7 +71,9 @@ class AgentSpec(BaseModel):
     @field_validator("runtime")
     @classmethod
     def _runtime_ok(cls, v: str) -> str:
-        assert v in {"hq", "claude"}, "runtime must be 'hq' or 'claude'"
+        assert v in EXTERNAL_RUNTIMES | {"hq"}, (
+            f"runtime must be 'hq' or one of {sorted(EXTERNAL_RUNTIMES)}"
+        )
         return v
 
     @field_validator("name")
@@ -113,10 +121,10 @@ class AgentSpec(BaseModel):
         # A claude-runtime agent reads the web through a browser it drives
         # outside our loop, so it is a web reader whatever its manifest lists,
         # and every rule below applies to it unchanged.
-        by_runtime = self.runtime == "claude"
+        by_runtime = self.runtime in EXTERNAL_RUNTIMES
         if not by_runtime and not names & web_read_tools():
             return
-        why = "agents on the claude runtime" if by_runtime else "web-read tools"
+        why = f"agents on the {self.runtime} runtime" if by_runtime else "web-read tools"
         self._forbid_outbound(names, why=why)
         forbidden = names & WEB_FORBIDDEN_TOOLS
         if forbidden:
