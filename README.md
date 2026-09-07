@@ -5,6 +5,10 @@ share one markdown vault as memory, and ask for approval before any action that
 leaves the system. Telegram is the channel on the go. The web console is the
 desk view. One owner, one machine, no public exposure.
 
+**New here? Read [docs/GUIDE.md](docs/GUIDE.md).** It covers what the system
+does day to day, the agents, the rules that make it safe to leave running,
+setup from an empty machine, and what to do in your first week.
+
 ## Layout
 
 ```
@@ -41,5 +45,11 @@ Add an agent by creating `agents/<name>/job.md` and restarting the backend.
 | `ops/backup.sh` | `run` (pg_dump + vault push), `list`, `restore-drill` |
 | `ops/backup-schedule.sh` | nightly backup at 03:30 (launchd) |
 
-Production setup, systemd units for Linux, Tailscale Serve, and first-boot
-checks: [docs/deploy.md](docs/deploy.md). Design decisions: [docs/adr/](docs/adr/).
+## Docs
+
+| File | What it covers |
+| --- | --- |
+| [docs/GUIDE.md](docs/GUIDE.md) | Start here: what it does, how to use it, setup, first week |
+| [docs/deploy.md](docs/deploy.md) | Production setup, Linux units, Tailscale Serve, backups |
+| [docs/external-runtimes.md](docs/external-runtimes.md) | Running an agent through the Codex or Claude CLI |
+| [docs/adr/](docs/adr/) | Why particular decisions were made |
