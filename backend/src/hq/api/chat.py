@@ -153,6 +153,28 @@ async def list_messages(session_id: str) -> list[dict]:
     return messages
 
 
+@router.get("/sessions/{session_id}/tasks", operation_id="listChatTasks")
+async def list_chat_tasks(session_id: str) -> list[dict]:
+    """Work this chat handed to another agent that has not landed yet.
+
+    Delegation is asynchronous, so between "I have asked scout" and the result
+    arriving there is nothing on screen. Without this the owner cannot tell a
+    slow run from a lost one, and asks again.
+    """
+    await _web_session(session_id)
+    rows = await db.fetch(
+        """
+        SELECT t.id::text, t.agent, t.title, t.status, t.updated_at
+        FROM hq.tasks t
+        WHERE t.origin_session_id = %s
+          AND t.status NOT IN ('done', 'failed')
+        ORDER BY t.created_at
+        """,
+        (session_id,),
+    )
+    return [dict(row) for row in rows]
+
+
 @router.get("/sessions/{session_id}/tickets", operation_id="listChatTickets")
 async def list_chat_tickets(session_id: str) -> list[dict]:
     """Approvals blocking work this chat started.

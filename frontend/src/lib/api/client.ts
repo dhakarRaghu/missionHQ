@@ -3,6 +3,7 @@ import type {
   AgentDraft,
   AgentInfo,
   ChatMessage,
+  ChatTask,
   ChatTicket,
   ChatSession,
   Costs,
@@ -111,6 +112,7 @@ export const qk = {
   dailyCosts: (days: number) => ["costs", "daily", days] as const,
   chatSessions: ["chat-sessions"] as const,
   chatTickets: (id: string) => ["chat-tickets", id] as const,
+  chatTasks: (id: string) => ["chat-tasks", id] as const,
   chatMessages: (sessionId: string) => ["chat-messages", sessionId] as const,
   /** Written by src/lib/sse.ts, never fetched. */
   feed: ["sse", "feed"] as const,
@@ -188,6 +190,8 @@ export const api = {
     ),
   chatTickets: (sessionId: string) =>
     request<ChatTicket[]>(`/chat/sessions/${seg(sessionId)}/tickets`),
+  chatTasks: (sessionId: string) =>
+    request<ChatTask[]>(`/chat/sessions/${seg(sessionId)}/tasks`),
   chatMessages: (sessionId: string) =>
     request<ChatMessage[]>(`/chat/sessions/${seg(sessionId)}/messages`),
   sendChatMessage: (sessionId: string, body: SendChatBody) =>

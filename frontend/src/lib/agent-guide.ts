@@ -19,6 +19,7 @@ const GUIDE: Record<string, AgentGuide> = {
   sage: {
     does: "Your second brain. It keeps the daily note, the weekly review, and the memory blocks the other agents read before every run.",
     use: [
+      "Ask it anything. It answers what is its own and hands the rest over.",
       "Ask it what happened: “What did the agents do in the last 24 hours?”",
       "Ask it what to deal with: “What is the most important open loop in my vault?”",
       "Leave it alone. It writes a note at 21:00 daily and a review on Sunday at 20:00.",
@@ -50,14 +51,6 @@ const GUIDE: Record<string, AgentGuide> = {
       "Ask it what is close to full: “What is in my memory blocks right now?”",
     ],
     output: "memory/user.md and memory/active_projects.md.",
-  },
-  planner: {
-    does: "Weekly planning. It reads the board and your last seven daily notes and writes one page of what to do next.",
-    use: [
-      "Read the plan on Monday morning. It runs at 09:00.",
-      "Ask it mid-week: “What should I work on, based on the board?”",
-    ],
-    output: "projects/planner/<year>-W<week>.md.",
   },
 };
 

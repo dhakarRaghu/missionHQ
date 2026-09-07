@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, Copy } from "lucide-react";
 
@@ -141,8 +141,11 @@ export function Transcript({
       {/* mt-auto pins a short thread to the bottom, next to the composer. */}
       <div className="mt-auto flex flex-col gap-4 p-4">
         {messages.map((message, index) => (
+          <Fragment key={`m-${index}-${message.ts ?? ""}`}>
+            {dayChanged(messages[index - 1]?.ts, message.ts) ? (
+              <DayDivider iso={message.ts} />
+            ) : null}
           <Bubble
-            key={`${index}-${message.ts ?? ""}`}
             role={message.role}
             text={message.text}
             ts={message.ts}
@@ -150,6 +153,7 @@ export function Transcript({
             agent={message.agent}
             delivered={message.delivered}
           />
+          </Fragment>
         ))}
         {local.map((turn) => (
           <LocalTurnRows key={turn.id} turn={turn} onRetry={onRetry} />
@@ -194,6 +198,41 @@ function LocalTurnRows({
         <Bubble role="assistant" text={turn.reply} ts={null} run={turn.run} />
       ) : null}
     </>
+  );
+}
+
+/** True when these two timestamps fall on different calendar days. */
+function dayChanged(prev: string | null | undefined, next: string | null): boolean {
+  if (!next) return false;
+  if (!prev) return true;
+  const a = new Date(prev);
+  const b = new Date(next);
+  return a.toDateString() !== b.toDateString();
+}
+
+/** "Today", "Yesterday", or a date, on a hairline across the thread. */
+function DayDivider({ iso }: { iso: string | null }) {
+  if (!iso) return null;
+  const day = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const label =
+    day.toDateString() === today.toDateString()
+      ? "Today"
+      : day.toDateString() === yesterday.toDateString()
+        ? "Yesterday"
+        : day.toLocaleDateString(undefined, {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+          });
+  return (
+    <div className="flex items-center gap-3 py-1" role="separator">
+      <span className="border-border flex-1 border-t" />
+      <span className="text-muted-foreground text-xs">{label}</span>
+      <span className="border-border flex-1 border-t" />
+    </div>
   );
 }
 
@@ -282,10 +321,14 @@ function RunMeta({ run }: { run: RunLink }) {
     );
   }
   if (run.tools?.length) {
+    const n = run.tools.length;
     parts.push(
-      <span key="tools" className="font-mono">
-        {run.tools.join(", ")}
-      </span>,
+      <details key="tools" className="inline">
+        <summary className="hover:text-foreground inline cursor-pointer list-none">
+          {n} tool{n === 1 ? "" : "s"}
+        </summary>
+        <span className="font-mono"> {run.tools.join(", ")}</span>
+      </details>,
     );
   }
   if (run.run_id) {

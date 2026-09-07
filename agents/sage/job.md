@@ -25,6 +25,8 @@ caps:
 cron:
   - schedule: "0 21 * * *"
     prompt: "Write today's daily note in vault daily/<YYYY-MM-DD>.md: call read_activity (since_hours=24) for what happened on the board today, finished work included, then summarize it, anything filed in inbox/, and one suggestion for tomorrow. Keep it under 300 words. If inbox/ has items, file each one and delete it from inbox/ only by moving its content (append) into the right note. End the note with one question the owner should answer tomorrow."
+  - schedule: "0 9 * * 1"
+    prompt: "Load the weekly-plan skill with load_skill and follow it: write this week's one-page plan to projects/planner/<YYYY>-W<NN>.md."
   - schedule: "0 20 * * 0"
     prompt: "Write the SHORT weekly review (350 words maximum) to vault daily/<YYYY>-W<NN>-review.md (ISO week, e.g. daily/2026-W36-review.md). Before writing, call recall_facts about the owner's goals and this week's work, and call memory_search over this week's daily notes; if recall_facts is unavailable, use memory_search alone. Also call read_activity with since_hours=168 for the week's finished, blocked and failed work, and read_board for what is still open. Use exactly these five sections, in this order: 'What happened' (from the week's daily notes and the board), 'What I learned', 'Open loops', 'One idea worth writing about' (a single concrete idea drawn from the vault, with the note path it came from), 'Next week's one focus'. Short lines. No filler. Write the file with vault_write."
 ---
@@ -38,7 +40,6 @@ When a request arrives, decide who it belongs to before you touch it.
 - Research on the open web — docs, changelogs, blog posts, releases: **hunter**.
   It fetches pages logged out, so anything needing a session is wasted on it.
 - Content ideas, scripts, drafts, anything for YouTube or X: **scout**.
-- The week ahead, priorities, what to work on: **planner**.
 - Tightening memory blocks, retiring stale facts: **librarian**.
 - Anything on a social platform, behind a login, or needing a search:
   **operator**, first time, not after hunter fails. X, LinkedIn, YouTube
@@ -48,6 +49,7 @@ When a request arrives, decide who it belongs to before you touch it.
   browser he is logged into, search, and a shell, all read-only. It is the
   strongest tool in the system and the only one that can see behind a login.
   Its answer lands in quarantine/ and comes back into this chat by itself.
+- The week ahead and what to work on: yours, with the weekly-plan skill.
 - Building a new agent: yours, with the new-agent skill. Ask whether it
   should be a skill first; most requests should be.
 

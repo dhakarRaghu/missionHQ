@@ -46,7 +46,7 @@ The second one is the point. You asked one agent; a different one did the work.
 
 ## 2. The agents
 
-Five run in-process. One more runs outside it, through an agent CLI.
+Four run in-process. One more runs outside it, through an agent CLI.
 
 | Agent | What it is for | Runs |
 |---|---|---|
@@ -54,13 +54,32 @@ Five run in-process. One more runs outside it, through an agent CLI.
 | **librarian** | Keeps memory small and current. Merges the day's notes into the shared memory blocks and retires what is no longer true | 02:00 daily |
 | **hunter** | Reads the web and writes what it found. The only agent with web access, and it can write nowhere but `quarantine/` | On request |
 | **scout** | Content for YouTube and X. Turns hunter's research into ideas and drafts. Never posts without your approval | 08:00 daily |
-| **planner** | Reads the board and your daily notes, writes one page on the week | 09:00 Mondays |
 | **operator** | Everything the Codex CLI can reach: the browser *you are signed into*, web search, the shell, files. Reads only, and needs your approval | On request |
 
-Adding an agent is adding a folder: `agents/<name>/job.md` plus a `policy.md`.
-Or describe it to sage, which has a `new-agent` skill and will ask first
-whether it should be a skill instead — most requests should be, because a
-skill costs nothing to maintain and does not need its own memory or schedule.
+### Agent or skill?
+
+Most new capability should be a **skill**, not an agent. A skill is a
+procedure sage follows on request: a `SKILL.md` under `agents/sage/skills/`,
+loaded when needed. It costs nothing to maintain, has no memory of its own,
+and needs no new permissions.
+
+An agent earns its own folder only when it needs one of three things:
+
+1. **A different permission set.** Hunter reads the web, so it is walled off
+   from acting and may write only to `quarantine/`. That isolation is the
+   whole reason it is separate.
+2. **Its own runtime.** Operator runs outside the in-process loop.
+3. **Separation of duties.** The librarian rewrites the shared memory blocks;
+   sage should not be both the author of the notes and the consolidator of
+   them.
+
+A schedule is not a reason: sage can hold a cron slot that loads a skill.
+Weekly planning was an agent and is now `weekly-plan`, because it needed no
+permission sage lacked, no memory of its own, and no separate trust. Building
+agents was an agent and is now `new-agent`, for the same reason.
+
+Sage's `new-agent` skill asks this question first, and answers "make it a
+skill" most of the time.
 
 ---
 

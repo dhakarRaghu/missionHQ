@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { ChatApprovals } from "@/components/features/chat/approval-card";
 import { Composer } from "@/components/features/chat/composer";
+import { InFlight } from "@/components/features/chat/in-flight";
 import {
   SessionList,
   useSessionsQuery,
@@ -220,10 +221,12 @@ function Thread({
         onRetry={busy ? undefined : onRetry}
       />
       <div className="shrink-0 border-t p-3">
-        {/* Above the composer: an approval is the thing standing between the
-            owner and the answer he is waiting for. */}
-        <div className="mb-3 empty:mb-0">
+        {/* Above the composer, in the order they block him: an approval is
+            the thing standing between him and an answer, and below it the
+            work already running that he does not need to chase. */}
+        <div className="mb-3 flex flex-col gap-2 empty:mb-0">
           <ChatApprovals sessionId={sessionId} />
+          <InFlight sessionId={sessionId} />
         </div>
         <Composer disabled={busy || messages.isLoading} onSend={onSend} />
       </div>

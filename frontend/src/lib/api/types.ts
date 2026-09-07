@@ -287,3 +287,12 @@ export interface ChatTicket {
   agent: string | null;
   created_at: string;
 }
+
+/** Work this chat handed to another agent, still in flight. */
+export interface ChatTask {
+  id: string;
+  agent: string;
+  title: string;
+  status: TaskStatus;
+  updated_at: string;
+}
