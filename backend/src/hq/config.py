@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     gateway_base_url: str = ""
     gateway_api_key: str = ""
     openai_api_key: str = ""
+    grid_api_key: str = ""
 
     telegram_bot_token: str = ""
     owner_chat_id: int = 0
@@ -73,7 +74,7 @@ class Settings(BaseSettings):
     # Optional. Codex reads ~/.codex/config.toml, and a machine whose default
     # provider only works inside the ChatGPT app cannot run it headlessly.
     # These override the model and any config key, e.g.
-    # CODEX_CONFIG="model_provider=grid,model=open-fast".
+    # CODEX_CONFIG="model_provider=juspay,model=open-large".
     codex_model: str = ""
     codex_config: str = ""
 

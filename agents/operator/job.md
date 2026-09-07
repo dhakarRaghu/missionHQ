@@ -1,7 +1,7 @@
 ---
 name: operator
 description: Reads pages in the browser you are signed into, through the Codex CLI. Every run needs your approval first.
-status: draft
+status: active
 runtime: codex
 model: default
 tools: []

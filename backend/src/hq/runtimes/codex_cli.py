@@ -49,6 +49,10 @@ _NO_BROWSER = (
     "no_browser_tool",
     "browser extension is not connected",
     "no browser is connected",
+    "unable to reach the browser extension",
+    "native messaging host",
+    "unsupported call: mcp__cua_repl",
+    "tool is not currently supported or available",
 )
 
 
@@ -174,11 +178,15 @@ async def run_turn(
         argv.append(prompt)
 
     try:
+        child_env = None
+        if cfg.grid_api_key:
+            child_env = {**os.environ, "GRID_API_KEY": cfg.grid_api_key}
         proc = await asyncio.create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=child_env,
         )
         try:
             raw, err = await asyncio.wait_for(

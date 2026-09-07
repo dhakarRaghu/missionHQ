@@ -12,5 +12,6 @@ HALT
 # macOS
 .DS_Store
 
-# The vault is its own git repo (own history, own private remote)
-vault/
+# The root vault is its own git repo (own history, own private remote). Anchor
+# this rule so frontend feature folders named "vault" remain trackable.
+/vault/

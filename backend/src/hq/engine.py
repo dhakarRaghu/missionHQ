@@ -542,7 +542,7 @@ async def reap() -> None:
         await _enqueue(row["id"])
 
 
-_URL_RE = re.compile(r"https?://[^\s<>\)\]\"']+")
+_URL_RE = re.compile(r"https?://[^\s<>\)\]\"'`]+")
 
 
 async def _file_external_output(

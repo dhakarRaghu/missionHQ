@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
@@ -18,6 +19,7 @@ import { describeCron } from "@/lib/cron";
 import { clockTime, exactTime } from "@/lib/time";
 
 const FEED_ROWS = 6;
+const subscribeToHydration = () => () => {};
 
 function greeting(): string {
   const hour = new Date().getHours();
@@ -43,6 +45,11 @@ function isToday(iso: string): boolean {
  * scheduled, and what just happened.
  */
 export function HomeView() {
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    () => true,
+    () => false,
+  );
   const tickets = useQuery({
     queryKey: qk.tickets("pending"),
     queryFn: () => api.tickets("pending"),
@@ -54,16 +61,20 @@ export function HomeView() {
   const pending = tickets.data ?? [];
   const all: Task[] = tasks.data ?? [];
 
+  const localDate = hydrated
+    ? new Date().toLocaleDateString(undefined, {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      })
+    : "";
+
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{greeting()}</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          {new Date().toLocaleDateString(undefined, {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-          })}
+        <p className="text-muted-foreground mt-1 min-h-5 text-sm">
+          {localDate}
         </p>
       </div>
 
