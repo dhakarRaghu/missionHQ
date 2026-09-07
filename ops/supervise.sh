@@ -43,14 +43,16 @@ case "${1:-status}" in
     echo "removed $LABEL"
     ;;
   restart)
-    before="$(lsof -ti:8000 2>/dev/null | head -1 || true)"
+    before="$(lsof -nP -iTCP:8000 -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
     launchctl kickstart -k "$DOMAIN/$LABEL"
     # Verify rather than assume. A restart that silently does nothing leaves
     # you testing an old process against new code, which is worse than an
     # error: every result looks like the change did not work.
-    for _ in $(seq 1 30); do
+    # Startup is DBOS init plus agent loading plus Telegram, which takes well
+    # over 30s on a cold cache. Too short a wait reports a false failure.
+    for _ in $(seq 1 90); do
       sleep 1
-      after="$(lsof -ti:8000 2>/dev/null | head -1 || true)"
+      after="$(lsof -nP -iTCP:8000 -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
       if [ -n "$after" ] && [ "$after" != "$before" ]; then
         echo "restarted $LABEL (pid ${before:-none} -> $after)"
         exit 0
