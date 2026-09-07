@@ -48,8 +48,9 @@ def _hold_awake() -> subprocess.Popen[bytes] | None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-    except OSError as exc:  # noqa: BLE001 - not being able to sleep-block is
-        log.warning("could not hold the machine awake: %s", exc)  # not fatal
+    except OSError as exc:
+        # Not being able to block sleep is not a reason to refuse to start.
+        log.warning("could not hold the machine awake: %s", exc)
         return None
     log.info("holding the machine awake while this process runs")
     return proc
