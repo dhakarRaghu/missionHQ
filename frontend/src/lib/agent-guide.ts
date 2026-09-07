@@ -59,14 +59,6 @@ const GUIDE: Record<string, AgentGuide> = {
     ],
     output: "projects/planner/<year>-W<week>.md.",
   },
-  factory: {
-    does: "Builds new agents. Describe the agent you want in plain words and it writes the folder, then asks you to approve it.",
-    use: [
-      "Describe the job, the schedule and where output should go, in one message.",
-      "The new agent arrives as a draft. Activate it on this page; the backend restarts to load it.",
-    ],
-    output: "A draft agent folder, listed under Drafts below.",
-  },
 };
 
 export function guideFor(name: string): AgentGuide | null {

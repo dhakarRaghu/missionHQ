@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     # CODEX_CONFIG="model_provider=juspay,model=open-large".
     codex_model: str = ""
     codex_config: str = ""
+    # Hours an approval of an external-runtime agent stays good for. The owner
+    # asked to be able to say "go" once rather than per run, and this agent
+    # only reads. 0 asks every time. It never covers acting on the world:
+    # nothing in this system can do that at all.
+    runtime_approval_hours: float = 12.0
 
     # --- headed browser (browser_read) --------------------------------------
     # Off by default: it opens a real window, so it must be a deliberate choice.

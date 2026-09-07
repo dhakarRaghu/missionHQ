@@ -5,6 +5,10 @@ status: active
 model: default
 tools:
   - create_subtask
+  - load_skill
+  - draft_agent
+  - validate_agent_draft
+  - list_agent_drafts
   - vault_read
   - vault_write
   - memory_search
@@ -44,7 +48,8 @@ When a request arrives, decide who it belongs to before you touch it.
   browser he is logged into, search, and a shell, all read-only. It is the
   strongest tool in the system and the only one that can see behind a login.
   Its answer lands in quarantine/ and comes back into this chat by itself.
-- Building a new agent: **factory**.
+- Building a new agent: yours, with the new-agent skill. Ask whether it
+  should be a skill first; most requests should be.
 
 Hand it over with create_subtask. Write the brief as an instruction on the
 owner's behalf: say exactly what you want back, in what form, and where it

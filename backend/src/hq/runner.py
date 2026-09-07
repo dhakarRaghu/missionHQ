@@ -35,6 +35,7 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.usage import UsageLimits
 
 from hq import board, db, llm, safety
+from hq.config import settings
 from hq.dbos_app import DBOS
 from hq.loader import AgentSpec
 from hq.obs import emit
@@ -318,6 +319,21 @@ async def expire_ticket_step(ticket_id: str, via: str) -> str | None:
 
 # --- claude runtime ----------------------------------------------------------
 
+@DBOS.step()
+async def recent_runtime_approval_step(agent: str, hours: float) -> bool:
+    """True when the owner approved this agent's runtime inside the window."""
+    if hours <= 0:
+        return False
+    row = await db.fetchone(
+        "SELECT 1 FROM hq.tickets"
+        " WHERE tool_name = %s AND status = 'approved'"
+        "   AND resolved_via <> 'guard'"
+        "   AND resolved_at > now() - make_interval(secs => %s) LIMIT 1",
+        (f"runtime:{agent}", hours * 3600.0),
+    )
+    return row is not None
+
+
 async def await_runtime_approval(spec: AgentSpec, deps: HQDeps, summary: str) -> bool:
     """Open one ticket for a whole claude-runtime run and block until answered.
 
@@ -327,9 +343,20 @@ async def await_runtime_approval(spec: AgentSpec, deps: HQDeps, summary: str) ->
     begins, and the ticket carries what it was asked to do.
     """
     wf_id = DBOS.workflow_id or ""
+    # One "go" covers a stretch of reading rather than every page. The agent
+    # cannot act on the world in either case: no agent can, at all. What the
+    # approval gates is driving the browser the owner is signed into, and he
+    # decides how long that permission lasts.
+    if await recent_runtime_approval_step(spec.name, settings().runtime_approval_hours):
+        await emit_step(
+            "approval_resolved", run_id=deps.run_id, task_id=deps.task_id,
+            payload={"status": "approved", "via": "recent-approval",
+                     "tool": f"runtime:{spec.runtime}"},
+        )
+        return True
     ticket_id = await _open_ticket_step(
         task_id=deps.task_id, run_id=deps.run_id, wf_id=wf_id,
-        tool_name=f"runtime:{spec.runtime}",
+        tool_name=f"runtime:{spec.name}",
         tool_args={"agent": spec.name, "task": summary[:600]},
         tool_call_id=f"runtime-{deps.run_id or wf_id}",
     )
