@@ -110,6 +110,13 @@ class Settings(BaseSettings):
     # the softer stops, deliberately far below the tier: 40 a day and 1,200 a
     # month leaves most of the allowance unspent, because these calls are the
     # last resort and not the first. A day of casual testing took 420.
+    # The Scrapers product (LinkedIn and X records) is OFF. It bills per
+    # record, not per request, so one jobs lookup matching forty postings
+    # costs forty credits from a single call. Operator reads those hosts in
+    # the owner's own browser for nothing, so this buys an unpredictable bill
+    # for something already covered. The tool stays in the codebase behind
+    # this flag; no agent is granted it.
+    brightdata_scrapers_enabled: bool = False
     brightdata_daily_calls: int = 40
     brightdata_monthly_calls: int = 1200
 

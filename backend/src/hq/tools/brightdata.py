@@ -272,6 +272,15 @@ async def social_lookup(ctx: RunContext[HQDeps], surface: str, url: str) -> dict
     Look a person up only when the task named them. Walking a list of people
     is bulk collection, and this tool is not for that.
     """
+    if not settings().brightdata_scrapers_enabled:
+        return {
+            "error": (
+                "the scrapers product is switched off: it bills one credit per"
+                " record, so a single jobs lookup can cost dozens. LinkedIn and"
+                " X go to operator, which reads them in the owner's own browser"
+                " for nothing. Hand the question over by name."
+            )
+        }
     surface = (surface or "").strip().lower()
     if surface not in DATASETS:
         return {"error": f"unknown surface {surface!r}; use one of {sorted(DATASETS)}"}

@@ -19,11 +19,10 @@ You cannot read the web. Ask, with `create_subtask`:
   engineering blog, a public careers page, the job posting, a funding
   announcement, a person's GitHub, their own site or conference talk. Job
   search is hunter's main work, so give it the four questions directly.
-- **hunter for LinkedIn and X too.** It holds social_lookup, which reads a
-  profile, company page or job posting through a provider rather than through
-  the owner's account. Give it the page URL and the surface.
-- **operator** only for what is private to the owner: his own analytics, his
-  own profile as he sees it, a page only his session can open.
+- **operator for LinkedIn and X**, and for anything private to the owner: his
+  own analytics, his own profile as he sees it, a page only his session can
+  open. Ask one precise question per task; it reads pages, it does not walk
+  lists.
 
 Operator's browser does not work on every machine. When it answers that no
 browser is available, do not retry and do not fill the gap from memory. Note

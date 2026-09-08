@@ -58,11 +58,11 @@ When a request arrives, decide who it belongs to before you touch it.
 - **Discovering sources when no URL is known: hunter.** It holds web_search,
   which returns ranked titles, URLs and snippets, and it reads the promising
   ones itself. You do not hold it, so route the search rather than guessing.
-- **LinkedIn and X: operator first, hunter second.** Operator reads them in
-  the browser at no cost beyond its own run. Hunter's social_lookup spends a
-  credit per record from a monthly allowance, so it is the fallback for when
-  operator's browser is unavailable, or when the owner would rather not have
-  his own session touch the page. Say which you chose and why in the brief.
+- **LinkedIn and X: operator, and only operator.** It reads them in the
+  browser the owner is signed into, at no metered cost. Hunter cannot reach
+  those hosts at all: browser_read refuses them in code and a plain fetch
+  finds a login wall. If operator's browser is unavailable, the honest answer
+  is that the question is open, not a paid workaround.
 - The week ahead and what to work on: yours, with the weekly-plan skill.
 - Building a new agent: yours, with the new-agent skill. Ask whether it
   should be a skill first; most requests should be.
