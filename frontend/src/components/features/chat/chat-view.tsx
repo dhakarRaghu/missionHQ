@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -87,7 +87,10 @@ export function ChatView() {
 
 const EMPTY: LocalTurn[] = [];
 
-function transcriptHasTurn(turn: LocalTurn, transcript: ChatMessage[]): boolean {
+function transcriptHasTurn(
+  turn: LocalTurn,
+  transcript: ChatMessage[],
+): boolean {
   const newer = transcript.slice(turn.baseCount);
   const userIndex = newer.findIndex(
     (message) => message.role === "user" && message.text === turn.text,
@@ -124,8 +127,26 @@ function Thread({
   );
 
   const send = useMutation({
-    mutationFn: ({ id, text }: { id: string; text: string; baseCount: number }) =>
-      api.sendChatMessage(sessionId, { text, client_id: id }),
+    mutationFn: ({
+      id,
+      text,
+    }: {
+      id: string;
+      text: string;
+      baseCount: number;
+    }) => api.sendChatMessage(sessionId, { text, client_id: id }),
+    onMutate: ({ id, baseCount }) => {
+      // baseCount is stamped here, not when the message was typed. A queued
+      // message waits while the transcript grows, and this number is how the
+      // turn later recognises its own reply.
+      setLocal((prev) =>
+        prev.map((turn) =>
+          turn.id === id && turn.state === "queued"
+            ? { ...turn, state: "sending", baseCount }
+            : turn,
+        ),
+      );
+    },
     onSuccess: (result: SendChatResult, { id }) => {
       setLocal((prev) =>
         prev.map((turn) =>
@@ -172,7 +193,9 @@ function Thread({
       toast.error(error.message);
       setLocal((prev) =>
         prev.map((turn) =>
-          turn.id === id ? { ...turn, state: "error", error: error.message } : turn,
+          turn.id === id
+            ? { ...turn, state: "error", error: error.message }
+            : turn,
         ),
       );
     },
@@ -182,15 +205,34 @@ function Thread({
     (turn) => turn.state === "sending" || turn.state === "waiting",
   );
 
+  // Every message starts queued, and the effect below starts whichever is
+  // next once nothing else is running. The composer therefore never has to be
+  // locked: type while a turn runs and the message waits its turn instead of
+  // being refused. Only one turn runs at a time, and order is preserved.
   const onSend = (text: string) => {
-    const id = crypto.randomUUID();
-    const baseCount = transcript.length;
     setLocal((prev) => [
       ...prev,
-      { id, text, baseCount, state: "sending" },
+      {
+        id: crypto.randomUUID(),
+        text,
+        // Replaced at send time; a queued turn has not been sent yet.
+        baseCount: transcript.length,
+        state: "queued",
+      },
     ]);
-    send.mutate({ id, text, baseCount });
   };
+
+  // Fires the mutation only. The move from "queued" to "sending" happens in
+  // the mutation's onMutate, so no state is set from inside an effect body.
+  // A double fire is harmless: the client id makes the send idempotent, which
+  // is the same property Retry relies on.
+  const next = busy ? undefined : local.find((turn) => turn.state === "queued");
+  const startTurn = send.mutate;
+  const atSend = transcript.length;
+  useEffect(() => {
+    if (!next) return;
+    startTurn({ id: next.id, text: next.text, baseCount: atSend });
+  }, [next, atSend, startTurn]);
 
   const onRetry = (turn: LocalTurn) => {
     setLocal((prev) =>
@@ -208,6 +250,8 @@ function Thread({
   return (
     <>
       <AgentSwitch sessionId={sessionId} agent={agent} disabled={busy} />
+      {/* A starter queues like anything else typed; only Retry still waits,
+          because retrying a turn while another one runs is ambiguous. */}
       <Transcript
         isLoading={messages.isLoading}
         isError={messages.isError}
@@ -217,7 +261,7 @@ function Thread({
         messages={transcript}
         local={local}
         starters={startersFor(agent)}
-        onStart={busy ? undefined : onSend}
+        onStart={onSend}
         onRetry={busy ? undefined : onRetry}
       />
       <div className="shrink-0 border-t p-3">
@@ -228,7 +272,7 @@ function Thread({
           <ChatApprovals sessionId={sessionId} />
           <InFlight sessionId={sessionId} />
         </div>
-        <Composer disabled={busy || messages.isLoading} onSend={onSend} />
+        <Composer disabled={messages.isLoading} busy={busy} onSend={onSend} />
       </div>
     </>
   );

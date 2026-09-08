@@ -31,12 +31,20 @@ function activeToken(text: string, caret: number) {
  * Typing @ offers the agents and # offers vault notes. Both insert plain text,
  * so the same message read in Telegram is still readable; the console renders
  * them as chips.
+ *
+ * `busy` is not `disabled`. While the agent is working you can still type and
+ * still press Enter; the message joins a queue and goes the moment the current
+ * turn ends. Losing a thought because the box was locked is worse than waiting
+ * a moment for it to send. `disabled` is for when the composer genuinely
+ * cannot be used, such as before the transcript has loaded.
  */
 export function Composer({
   disabled,
+  busy,
   onSend,
 }: {
   disabled: boolean;
+  busy: boolean;
   onSend: (text: string) => void;
 }) {
   const [text, setText] = useState("");
@@ -183,22 +191,28 @@ export function Composer({
           }}
           placeholder={
             disabled
-              ? "Waiting for the agent…"
-              : "Message the agent. Use @ to name one, # to link a note"
+              ? "Loading…"
+              : busy
+                ? "Type your next message — it sends when this turn ends"
+                : "Message the agent. Use @ to name one, # to link a note"
           }
           disabled={disabled}
           rows={1}
           className="min-h-9 resize-none"
         />
-        <Button type="submit" disabled={!canSend} aria-label="Send message">
+        <Button
+          type="submit"
+          disabled={!canSend}
+          aria-label={busy ? "Queue message" : "Send message"}
+        >
           <SendHorizonal aria-hidden />
-          <span className="hidden sm:inline">Send</span>
+          <span className="hidden sm:inline">{busy ? "Queue" : "Send"}</span>
         </Button>
       </div>
       <p className="text-muted-foreground px-1 text-xs">
-        Enter sends. Shift and Enter start a new line.{" "}
-        <span className="font-mono">@</span> names an agent,{" "}
-        <span className="font-mono">#</span> links a note.
+        {busy ? "Enter queues; it sends when this turn ends." : "Enter sends."}{" "}
+        Shift and Enter start a new line. <span className="font-mono">@</span>{" "}
+        names an agent, <span className="font-mono">#</span> links a note.
       </p>
     </form>
   );
