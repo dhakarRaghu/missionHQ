@@ -83,6 +83,23 @@ class Settings(BaseSettings):
     # nothing in this system can do that at all.
     runtime_approval_hours: float = 12.0
 
+    # --- Bright Data (web search and social lookups) -------------------------
+    # One key, two products. The SERP API answers "which page has this", and
+    # the Web Scraper API reads a LinkedIn or X page as structured records.
+    #
+    # Both run on Bright Data's own infrastructure, never the owner's browser
+    # or IP, which is the point: browser_read refuses LinkedIn in code because
+    # automated access there risks the account that pays for it, and the
+    # account at risk here is Bright Data's, not his.
+    brightdata_api_key: str = ""
+    # Zone name from the Bright Data console. A zone is the product
+    # configuration a request runs under; SERP requests need a SERP zone.
+    brightdata_serp_zone: str = "serp_api1"
+    # The free tier is 5,000 credits a month and stops dead when they run out.
+    # This is the softer stop: a per-day ceiling so one looping run cannot
+    # spend the month in an afternoon.
+    brightdata_daily_calls: int = 120
+
     # Days a finished task stays on the board before the maintenance tick sets
     # it to `archived`. Nothing is deleted; archived tasks are simply left out
     # of the default list. 0 switches archiving off.

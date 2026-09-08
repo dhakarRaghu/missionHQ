@@ -6,6 +6,7 @@ agent manifest is validated or any agent is constructed.
 
 from hq.tools import (  # noqa: F401
     board_tools,
+    brightdata,
     browser_tools,
     factory_tools,
     facts_tools,
