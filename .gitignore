@@ -16,8 +16,3 @@ HALT
 # The root vault is its own git repo (own history, own private remote). Anchor
 # this rule so frontend feature folders named "vault" remain trackable.
 /vault/
-
-# Personal data. The vault is already ignored for this reason; an agent's own
-# folder is tracked, so anything about the owner himself has to be named here
-# or it goes to a public repo. A resume carries a phone number and an email.
-/agents/*/candidate_data/
