@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 
 START_KEY = "value_week:start"
 WEEK_DAYS = 7
-MIN_SENT_FOR_VERDICT = 5      # below this the sample is too small to judge
+MIN_SENT_FOR_VERDICT = 5  # below this the sample is too small to judge
 RESPONSE_RATE_OK = 0.5
 EVENT_KIND = "owner.action"
 # Recall metrics: did the agents read before they wrote, and did the owner ask?
@@ -38,11 +38,20 @@ RECALL_TOOLS = ("memory_search", "recall_facts", "vault_read")
 
 Via = Literal["telegram", "web"]
 Action = Literal[
-    "message", "command", "approve", "deny", "new_task", "chat", "vault_edit"
+    "message",
+    "command",
+    "approve",
+    "deny",
+    "new_task",
+    "chat",
+    "vault_edit",
+    "cancel_task",
+    "update_job",
 ]
 
 
 # --- owner actions ------------------------------------------------------------
+
 
 async def record_owner_action(via: Via, action: Action) -> None:
     """Log one owner action. Never raises: a logging failure must not break
@@ -54,6 +63,7 @@ async def record_owner_action(via: Via, action: Action) -> None:
 
 
 # --- week lifecycle -----------------------------------------------------------
+
 
 def _tz() -> ZoneInfo:
     return ZoneInfo(settings().cron_tz)
@@ -90,16 +100,25 @@ async def start_value_week(now: datetime | None = None) -> date:
 
 # --- status -------------------------------------------------------------------
 
+
 async def value_week_status(now: datetime | None = None) -> dict[str, Any]:
     local_now = _local_now(now)
     start = await get_start()
     pending_old = await _tickets_pending_over_24h()
     if start is None:
         return {
-            "start": None, "active": False, "day": 0, "days_left": WEEK_DAYS,
-            "sent": 0, "acted": 0, "tickets_pending_over_24h": pending_old,
-            "response_rate": 0.0, "verdict": _verdict(0, 0), "per_day": [],
-            "recall_queries": 0, "owner_questions": 0,
+            "start": None,
+            "active": False,
+            "day": 0,
+            "days_left": WEEK_DAYS,
+            "sent": 0,
+            "acted": 0,
+            "tickets_pending_over_24h": pending_old,
+            "response_rate": 0.0,
+            "verdict": _verdict(0, 0),
+            "per_day": [],
+            "recall_queries": 0,
+            "owner_questions": 0,
         }
 
     start_ts = datetime.combine(start, time.min, tzinfo=_tz())
@@ -126,7 +145,11 @@ async def value_week_status(now: datetime | None = None) -> dict[str, Any]:
 
 def _verdict(sent: int, acted: int) -> str:
     rate = acted / sent if sent else 0.0
-    return "on track" if rate >= RESPONSE_RATE_OK or sent < MIN_SENT_FOR_VERDICT else "at risk"
+    return (
+        "on track"
+        if rate >= RESPONSE_RATE_OK or sent < MIN_SENT_FOR_VERDICT
+        else "at risk"
+    )
 
 
 def format_status(status: dict[str, Any]) -> str:
@@ -151,13 +174,16 @@ def format_report(status: dict[str, Any]) -> str:
             f" · verdict: {status['verdict']}"
         )
         if status["tickets_pending_over_24h"]:
-            lines.append(f"tickets pending over 24h: {status['tickets_pending_over_24h']}")
+            lines.append(
+                f"tickets pending over 24h: {status['tickets_pending_over_24h']}"
+            )
         for row in status["per_day"]:
             lines.append(f"- {row['date']}: sent {row['sent']}, acted {row['acted']}")
     return "\n".join(lines)
 
 
 # --- queries ------------------------------------------------------------------
+
 
 async def _count_sent(since: datetime) -> int:
     row = await db.fetchone(
@@ -225,6 +251,8 @@ async def _per_day(start: date, since: datetime, today: date) -> list[dict[str, 
     d = start
     while d <= last:
         key = d.isoformat()
-        out.append({"date": key, "sent": sent_by.get(key, 0), "acted": acted_by.get(key, 0)})
+        out.append(
+            {"date": key, "sent": sent_by.get(key, 0), "acted": acted_by.get(key, 0)}
+        )
         d += timedelta(days=1)
     return out

@@ -7,9 +7,10 @@ survive even for roles rejected today, or next week's search surfaces them
 again. That reasoning is right. Two hand-edited CSVs are not, when the
 database can dedupe and a dashboard can read it.
 
-``record_job`` upserts on company plus role, deliberately not on the URL: the
-same posting moves between an ATS and a careers page, and the reference
-project's notes call that out as the thing that creates duplicates.
+``record_job`` prefers the ATS provider's stable posting id. When a source has
+no id, it falls back to company, role and location. The URL is deliberately not
+part of the key because the same posting can move between an ATS and a careers
+page.
 """
 
 from __future__ import annotations
@@ -26,9 +27,30 @@ from hq.tools.registry import HQDeps, hq_tool
 log = logging.getLogger(__name__)
 
 BUCKETS = ("strong", "decent", "stretch")
-STATUSES = ("seen", "shortlisted", "applied", "interviewing", "offer",
-            "rejected", "closed")
+STATUSES = (
+    "seen",
+    "shortlisted",
+    "applied",
+    "interviewing",
+    "offer",
+    "rejected",
+    "closed",
+)
 LIST_LIMIT = 50
+
+
+def _normal(value: str) -> str:
+    return " ".join(value.casefold().split())
+
+
+def _dedupe_key(
+    company: str, role: str, location: str, provider: str, external_id: str
+) -> str:
+    """Stable board id when available; conservative content identity otherwise."""
+    provider, external_id = _normal(provider), external_id.strip()
+    if provider and external_id:
+        return f"ats:{provider}:{external_id}"
+    return f"fallback:{_normal(company)}|{_normal(role)}|{_normal(location)}"
 
 
 @hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
@@ -40,9 +62,13 @@ async def record_job(
     fit_score: int,
     why_fit: str,
     location: str = "",
+    remote_policy: str = "",
     experience_band: str = "",
+    compensation: str = "",
     stack: str = "",
     source: str = "",
+    provider: str = "",
+    external_id: str = "",
     next_step: str = "",
 ) -> str:
     """Record one verified role in the job ledger, or update it if already known.
@@ -68,46 +94,87 @@ async def record_job(
     if not why_fit.strip():
         raise ModelRetry("why_fit is required: one sentence saying why this score")
 
-    bucket = "strong" if fit_score >= 8 else ("decent" if fit_score >= 6 else "stretch")
+    score = int(fit_score)
+    bucket = "strong" if score >= 8 else ("decent" if score >= 6 else "stretch")
+    key = _dedupe_key(company, role, location, provider, external_id)
     rows = await db.fetch(
         """
-        INSERT INTO hq.jobs (company, role, url, source, location,
-                             experience_band, stack, fit_score, fit_bucket,
-                             why_fit, next_step)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (lower(company), lower(role)) DO UPDATE SET
-            -- A rediscovery updates freshness and keeps the better link, but
-            -- never overwrites a status the owner moved along.
+        INSERT INTO hq.jobs (company, role, url, source, provider, external_id,
+                             dedupe_key, location, remote_policy, experience_band,
+                             compensation, stack, fit_score, fit_bucket, why_fit,
+                             next_step)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (dedupe_key) DO UPDATE SET
+            -- A rediscovery refreshes facts but never overwrites a status the
+            -- owner moved along.
             last_seen = now(), updated_at = now(),
             seen_count = hq.jobs.seen_count + 1,
             url = EXCLUDED.url,
+            source = COALESCE(NULLIF(EXCLUDED.source, ''), hq.jobs.source),
+            provider = COALESCE(NULLIF(EXCLUDED.provider, ''), hq.jobs.provider),
+            external_id = COALESCE(NULLIF(EXCLUDED.external_id, ''), hq.jobs.external_id),
+            location = COALESCE(NULLIF(EXCLUDED.location, ''), hq.jobs.location),
+            remote_policy = COALESCE(NULLIF(EXCLUDED.remote_policy, ''), hq.jobs.remote_policy),
+            experience_band = COALESCE(NULLIF(EXCLUDED.experience_band, ''), hq.jobs.experience_band),
+            compensation = COALESCE(NULLIF(EXCLUDED.compensation, ''), hq.jobs.compensation),
+            stack = COALESCE(NULLIF(EXCLUDED.stack, ''), hq.jobs.stack),
             fit_score = EXCLUDED.fit_score,
             fit_bucket = EXCLUDED.fit_bucket,
-            why_fit = EXCLUDED.why_fit
+            why_fit = EXCLUDED.why_fit,
+            next_step = COALESCE(NULLIF(EXCLUDED.next_step, ''), hq.jobs.next_step)
         RETURNING id::text, seen_count, status
         """,
-        (company, role, url, source[:60], location[:120], experience_band[:60],
-         stack[:200], int(fit_score), bucket, why_fit[:500], next_step[:300]),
+        (
+            company,
+            role,
+            url,
+            source.strip()[:60],
+            provider.strip().lower()[:40],
+            external_id.strip()[:160],
+            key,
+            location.strip()[:120],
+            remote_policy.strip()[:80],
+            experience_band.strip()[:60],
+            compensation.strip()[:120],
+            stack.strip()[:200],
+            score,
+            bucket,
+            why_fit.strip()[:500],
+            next_step.strip()[:300],
+        ),
     )
     row = rows[0]
-    await emit("job.recorded", run_id=ctx.deps.run_id, task_id=ctx.deps.task_id,
-               agent=ctx.deps.agent,
-               payload={"company": company, "role": role, "fit_score": fit_score,
-                        "seen_count": row["seen_count"]})
+    await emit(
+        "job.recorded",
+        run_id=ctx.deps.run_id,
+        task_id=ctx.deps.task_id,
+        agent=ctx.deps.agent,
+        payload={
+            "company": company,
+            "role": role,
+            "fit_score": fit_score,
+            "seen_count": row["seen_count"],
+        },
+    )
     again = f" (seen {row['seen_count']} times)" if row["seen_count"] > 1 else ""
-    return (f"recorded {company} — {role}: {fit_score}/10 {bucket}{again},"
-            f" status {row['status']}")
+    return (
+        f"recorded {company} — {role}: {fit_score}/10 {bucket}{again},"
+        f" status {row['status']}"
+    )
 
 
 @hq_tool(action=ActionClass.READ, trust=Trust.VAULT)
-async def list_jobs(ctx: RunContext[HQDeps], status: str = "", company: str = "") -> list[dict]:
+async def list_jobs(
+    ctx: RunContext[HQDeps], status: str = "", company: str = ""
+) -> list[dict]:
     """Roles already in the ledger, newest first.
 
     Check this BEFORE researching a company, so you do not spend a run
     rediscovering something already recorded. Pass `company` to see what is
     known about one, or `status` to see a stage of the pipeline.
     """
-    where, params = ["true"], []
+    where: list[str] = ["true"]
+    params: list[object] = []
     if status:
         if status not in STATUSES:
             raise ModelRetry(f"status must be one of {list(STATUSES)}")
@@ -118,8 +185,9 @@ async def list_jobs(ctx: RunContext[HQDeps], status: str = "", company: str = ""
         params.append(f"%{company.strip()}%")
     params.append(LIST_LIMIT)
     return await db.fetch(
-        "SELECT company, role, url, location, fit_score, fit_bucket, status,"
-        " why_fit, next_step, referral, seen_count, last_seen"
+        "SELECT company, role, url, source, provider, external_id, location,"
+        " remote_policy, experience_band, compensation, stack, fit_score,"
+        " fit_bucket, status, why_fit, next_step, referral, seen_count, last_seen"
         f" FROM hq.jobs WHERE {' AND '.join(where)}"
         " ORDER BY fit_score DESC, last_seen DESC LIMIT %s",
         tuple(params),

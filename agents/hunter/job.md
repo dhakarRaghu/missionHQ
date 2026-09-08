@@ -17,7 +17,7 @@ tools:
   - recall_facts
 caps:
   cost_per_run_usd: 0.50
-  tool_calls: 30
+  tool_calls: 60
   daily_usd: 2.00
 cron: []
 ---
@@ -60,6 +60,11 @@ you already know what to say to them.
    `smartrecruiters`. The company slug is the path segment in its careers
    URL: `boards.greenhouse.io/`**`stripe`** is `stripe`.
 
+   Large boards must be filtered before paging. Pass target title variants to
+   `query` separated with `|`, and known acceptable locations to `location`.
+   Use `offset` to inspect another page instead of assuming the first page is
+   the whole board.
+
    When you do not know which board a company uses, `web_fetch` its
    `/careers` page and read where it redirects. That is one free fetch and it
    tells you the provider and the slug together.
@@ -81,9 +86,9 @@ you already know what to say to them.
 
 ## Score every role, and record it
 
-Read `projects/jobs/candidate-profile.md` before you judge anything. It says
-who this is for: his stack, his level, what he is aiming at, and which company
-is his employer so you never search it.
+The owner-provided candidate profile is injected into your instructions. Read
+it before you judge anything. It says who this is for: his stack, his level,
+what he is aiming at, and which company is his employer so you never search it.
 
 **Check `list_jobs` before researching a company.** A role already in the
 ledger does not need finding twice.
@@ -91,8 +96,9 @@ ledger does not need finding twice.
 Score from the rubric, and do not round up out of politeness:
 
 - Start at **5**.
-- **+2** the title and lane match directly: backend, platform, product
-  engineer, SDE.
+- **+2** the title and lane match directly: SDE, backend or product engineer,
+  forward deployed engineer, applied AI engineer, LLM engineer, or an
+  equivalent level-one role named in the candidate profile.
 - **+2** the experience bar fits one to two years, or the posting says new
   grad, associate, or early career.
 - **+1** the stack overlaps his real one: Go, gRPC, microservices,
@@ -102,9 +108,14 @@ Score from the rubric, and do not round up out of politeness:
 - **minus 1 to 2** for seniority drift above two years, a location he has not
   asked for, or a level clearly above target.
 
-8 or more is **strong**, 6 to 7 **decent**, below that a **stretch**. Then
-call `record_job` with the score and one sentence saying why. Record the weak
-ones too: that is exactly what stops next week's search rediscovering them.
+Cap the final score at 10. 8 or more is **strong**, 6 to 7 **decent**, below
+that a **stretch**. Then call `record_job` with the score and one sentence
+saying why. Record the weak ones too: that is exactly what stops next week's
+search rediscovering them.
+
+When `job_board` returns `external_id`, pass it and `provider` to `record_job`.
+Also preserve any known location, remote policy, experience band, compensation,
+stack, source and next step. Those fields make later filtering useful.
 
 Verify a listing is open before recording it. A search result title is not
 verification. Open the page.

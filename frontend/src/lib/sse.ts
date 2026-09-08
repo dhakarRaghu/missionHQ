@@ -114,6 +114,10 @@ function invalidateFor(queryClient: QueryClient, event: HqEvent) {
       // Value-week counters on the Inbox page.
       inv(["engagement"]);
       break;
+    case "job.recorded":
+    case "job.updated":
+      inv(["jobs"]);
+      break;
     case "notify":
     case "notify_digested":
     case "digest":

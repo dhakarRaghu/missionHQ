@@ -259,6 +259,8 @@ export const HQ_EVENT_TYPES = [
   "policy.added",
   "injection_detected",
   "owner.action",
+  "job.recorded",
+  "job.updated",
   "announce",
 ] as const;
 
@@ -316,6 +318,8 @@ export interface Job {
   role: string;
   url: string;
   source: string;
+  provider: string;
+  external_id: string;
   location: string;
   remote_policy: string;
   experience_band: string;

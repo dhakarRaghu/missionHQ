@@ -93,6 +93,9 @@ const LABELS: Record<HqEventType, (p: Payload, e: HqEvent) => string> = {
   "policy.added": (p) => short(p.rule, 120),
   injection_detected: (p) => join(short(p.url, 60), short(p.text, 80)),
   "owner.action": (p) => join(text(p.action), p.via ? `via ${text(p.via)}` : null),
+  "job.recorded": (p) =>
+    join(text(p.company), text(p.role), `${text(p.fit_score)}/10`),
+  "job.updated": (p) => join("job updated", short(p.job_id, 8)),
   announce: (p) => short(p.text, 120),
 };
 
@@ -106,6 +109,7 @@ export function feedLabel(event: HqEvent): string {
 
 /** Where a row leads: the run when it has one, else the task on the board. */
 export function feedHref(event: HqEvent): string | null {
+  if (event.type === "job.recorded" || event.type === "job.updated") return "/jobs";
   if (event.run_id) return `/runs/${encodeURIComponent(event.run_id)}`;
   if (event.task_id) return `/board?task=${encodeURIComponent(event.task_id)}`;
   return null;

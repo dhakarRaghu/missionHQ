@@ -85,7 +85,9 @@ class AgentSpec(BaseModel):
     @field_validator("name")
     @classmethod
     def _name_ok(cls, v: str) -> str:
-        assert v.replace("-", "").replace("_", "").isalnum(), "agent name must be alnum/dash"
+        assert v.replace("-", "").replace("_", "").isalnum(), (
+            "agent name must be alnum/dash"
+        )
         return v
 
     def base_tool_names(self) -> set[str]:
@@ -111,7 +113,8 @@ class AgentSpec(BaseModel):
     def _forbid_outbound(self, names: set[str], *, why: str) -> None:
         """No tool that acts outward or spends, for this reason."""
         outbound = {
-            n for n in names
+            n
+            for n in names
             if n in TOOL_REGISTRY and TOOL_REGISTRY[n].action in OUTBOUND_ACTIONS
         }
         if outbound:
@@ -129,7 +132,8 @@ class AgentSpec(BaseModel):
         publishing back.
         """
         held = {
-            n for n in self.base_tool_names()
+            n
+            for n in self.base_tool_names()
             if n in TOOL_REGISTRY and TOOL_REGISTRY[n].world_facing
         }
         if held:
@@ -149,7 +153,9 @@ class AgentSpec(BaseModel):
         by_runtime = self.runtime in EXTERNAL_RUNTIMES
         if not by_runtime and not names & web_read_tools():
             return
-        why = f"agents on the {self.runtime} runtime" if by_runtime else "web-read tools"
+        why = (
+            f"agents on the {self.runtime} runtime" if by_runtime else "web-read tools"
+        )
         self._forbid_outbound(names, why=why)
         forbidden = names & WEB_FORBIDDEN_TOOLS
         if forbidden:
@@ -180,7 +186,10 @@ def compute_job_hash(agent_dir: Path) -> str:
     try:
         out = subprocess.run(
             ["git", "log", "-1", "--format=%h", "--", str(agent_dir)],
-            cwd=settings().agents_dir.parent, capture_output=True, text=True, check=True,
+            cwd=settings().agents_dir.parent,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
         return out or "uncommitted"
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -212,7 +221,9 @@ def parse_job_md(agent_dir: Path) -> AgentSpec:
         raise ValueError(f"{agent_dir.name}/job.md missing frontmatter")
     _, fm, body = text.split("---", 2)
     meta = yaml.safe_load(fm)
-    if not isinstance(meta, dict):  # ValueError: what the admin pre-restart check catches
+    if not isinstance(
+        meta, dict
+    ):  # ValueError: what the admin pre-restart check catches
         raise ValueError(  # noqa: TRY004
             f"{agent_dir.name}/job.md frontmatter must be a YAML mapping"
         )
@@ -312,6 +323,12 @@ def instructions_for(spec: AgentSpec) -> str:
             + policy
         )
     parts.append(spec.system_prompt)
+    profile_file = spec.dir / "candidate_data" / "candidate-profile.md"
+    if profile_file.exists():
+        parts.append(
+            "# Candidate profile (owner-provided; use as the source of truth)\n"
+            + profile_file.read_text().strip()
+        )
     # Tell an agent to use a tool only when it holds that tool. An instruction
     # to call something ungranted is invisible: the text comes from here and
     # the grant comes from job.md, and nothing else compares the two.
@@ -369,12 +386,15 @@ def instructions_for(spec: AgentSpec) -> str:
     skills = skills_index(spec.dir)
     if skills:
         parts.append(
-            "# Skills available (call load_skill with a name for the full instructions)\n" + skills
+            "# Skills available (call load_skill with a name for the full instructions)\n"
+            + skills
         )
     return "\n\n".join(parts)
 
 
-def build_agent(spec: AgentSpec, durability) -> Agent[HQDeps, str | DeferredToolRequests]:
+def build_agent(
+    spec: AgentSpec, durability
+) -> Agent[HQDeps, str | DeferredToolRequests]:
     """Construct the Pydantic AI Agent. Must happen BEFORE DBOS.launch().
 
     The model is bound here (DBOS forbids choosing it at run time). The manifest

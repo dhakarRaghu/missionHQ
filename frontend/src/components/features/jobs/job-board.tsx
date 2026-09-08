@@ -22,9 +22,7 @@ import { JOB_STATUSES, type Job, type JobStatus } from "@/lib/api/types";
 import { timeAgo } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
-/** The stages worth a column. `closed` and `rejected` are outcomes, not
- * stages, so they live behind the filter rather than taking board width. */
-const COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
+const ACTIVE_COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
   {
     key: "seen",
     label: "Found",
@@ -33,6 +31,12 @@ const COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
   { key: "shortlisted", label: "Shortlisted", hint: "Worth applying to." },
   { key: "applied", label: "Applied", hint: "Sent. Waiting." },
   { key: "interviewing", label: "Interviewing", hint: "In process." },
+];
+
+const OUTCOME_COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
+  { key: "offer", label: "Offers", hint: "Offers will appear here." },
+  { key: "rejected", label: "Rejected", hint: "Rejected roles stay searchable." },
+  { key: "closed", label: "Closed", hint: "Expired or closed roles stay in the ledger." },
 ];
 
 /**
@@ -44,7 +48,9 @@ const COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
  */
 export function JobBoard() {
   const [bucket, setBucket] = useState<string>("all");
+  const [statusView, setStatusView] = useState<"active" | "outcomes">("active");
   const jobs = useQuery({ queryKey: qk.jobs(), queryFn: () => api.jobs() });
+  const columns = statusView === "active" ? ACTIVE_COLUMNS : OUTCOME_COLUMNS;
 
   const rows = useMemo(() => {
     const all = jobs.data ?? [];
@@ -59,7 +65,7 @@ export function JobBoard() {
         aria-busy="true"
         aria-label="Loading roles"
       >
-        {COLUMNS.map((c) => (
+        {ACTIVE_COLUMNS.map((c) => (
           <Skeleton key={c.key} className="h-64 w-full" />
         ))}
       </div>
@@ -111,10 +117,22 @@ export function JobBoard() {
             <SelectItem value="stretch">Stretch</SelectItem>
           </SelectContent>
         </Select>
+        <Select
+          value={statusView}
+          onValueChange={(value) => setStatusView(value as "active" | "outcomes")}
+        >
+          <SelectTrigger size="sm" className="w-40" aria-label="Filter by status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">Active pipeline</SelectItem>
+            <SelectItem value="outcomes">Outcomes</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="board-columns">
-        {COLUMNS.map((column) => {
+        {columns.map((column) => {
           const items = rows.filter((j) => j.status === column.key);
           return (
             <section key={column.key} className="flex min-w-0 flex-col gap-2">
@@ -201,10 +219,33 @@ function JobCard({ job }: { job: Job }) {
         </p>
       ) : null}
 
+      {job.next_step ? (
+        <p className="text-xs">
+          <span className="text-muted-foreground">Next: </span>
+          {job.next_step}
+        </p>
+      ) : null}
+
+      {job.stack ? (
+        <p className="text-muted-foreground line-clamp-2 text-xs" title={job.stack}>
+          {job.stack}
+        </p>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-1.5">
         {job.experience_band ? (
           <Badge variant="secondary" className="text-xs">
             {job.experience_band}
+          </Badge>
+        ) : null}
+        {job.remote_policy ? (
+          <Badge variant="secondary" className="text-xs">
+            {job.remote_policy}
+          </Badge>
+        ) : null}
+        {job.compensation ? (
+          <Badge variant="secondary" className="text-xs">
+            {job.compensation}
           </Badge>
         ) : null}
         {job.seen_count > 1 ? (

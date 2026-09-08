@@ -15,6 +15,7 @@ from hq import board, db, engagement, safety
 from hq.api.deps import require_auth
 from hq.config import settings
 from hq.dbos_app import DBOS
+from hq.obs import emit
 
 log = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(require_auth)])
@@ -40,12 +41,14 @@ async def list_tasks(status: str | None = None, limit: int = 100) -> list[dict]:
     if status:
         return await db.fetch(
             f"{TASK_SELECT} WHERE t.status = %s ORDER BY t.updated_at DESC LIMIT %s",
-            (status, limit))
+            (status, limit),
+        )
     # Archived tasks are left out unless asked for by name: they are finished
     # work the owner has stopped looking at, and the board is for what is live.
     return await db.fetch(
         f"{TASK_SELECT} WHERE t.status <> 'archived' ORDER BY t.updated_at DESC LIMIT %s",
-        (limit,))
+        (limit,),
+    )
 
 
 class CreateTaskBody(BaseModel):
@@ -84,7 +87,9 @@ async def cancel_task(task_id: str) -> dict:
         "SELECT r.wf_id, t.status FROM hq.tasks t"
         " LEFT JOIN LATERAL (SELECT wf_id FROM hq.runs WHERE task_id = t.id"
         "   ORDER BY started_at DESC LIMIT 1) r ON true"
-        " WHERE t.id = %s", (task_id,))
+        " WHERE t.id = %s",
+        (task_id,),
+    )
     if not rows:
         raise HTTPException(404, "no such task")
     if rows[0]["status"] not in {"running", "needs_approval", "backlog"}:
@@ -102,9 +107,14 @@ async def cancel_task(task_id: str) -> dict:
     # A deliberate stop is not a failure, so record it as its own outcome.
     await db.execute(
         "UPDATE hq.runs SET outcome = 'cancelled', ended_at = now()"
-        " WHERE task_id = %s AND ended_at IS NULL", (task_id,))
+        " WHERE task_id = %s AND ended_at IS NULL",
+        (task_id,),
+    )
     await board.apply(
-        task_id, "cancelled", actor="owner", status="failed",
+        task_id,
+        "cancelled",
+        actor="owner",
+        status="failed",
         data={"reason": "cancelled by the owner"},
     )
     await engagement.record_owner_action("web", "cancel_task")
@@ -115,11 +125,14 @@ async def cancel_task(task_id: str) -> dict:
 async def list_task_events(task_id: str) -> list[dict]:
     return await db.fetch(
         "SELECT seq, ts, actor, event_type, data FROM hq.task_events"
-        " WHERE task_id = %s ORDER BY seq", (task_id,))
+        " WHERE task_id = %s ORDER BY seq",
+        (task_id,),
+    )
 
 
 JOB_SELECT = (
-    "SELECT id::text, company, role, url, source, location, remote_policy,"
+    "SELECT id::text, company, role, url, source, provider, external_id,"
+    " location, remote_policy,"
     " experience_band, compensation, stack, fit_score, fit_bucket, status,"
     " why_fit, next_step, notes, referral, seen_count, first_seen, last_seen"
     " FROM hq.jobs"
@@ -130,11 +143,16 @@ JOB_SELECT = (
 async def list_jobs(status: str | None = None, limit: int = 200) -> list[dict]:
     """The job ledger. Everything hunter verified, strongest fit first."""
     if status:
+        if status not in JOB_STATUSES:
+            raise HTTPException(400, f"status must be one of {list(JOB_STATUSES)}")
         return await db.fetch(
             f"{JOB_SELECT} WHERE status = %s ORDER BY fit_score DESC, last_seen DESC"
-            " LIMIT %s", (status, limit))
+            " LIMIT %s",
+            (status, limit),
+        )
     return await db.fetch(
-        f"{JOB_SELECT} ORDER BY fit_score DESC, last_seen DESC LIMIT %s", (limit,))
+        f"{JOB_SELECT} ORDER BY fit_score DESC, last_seen DESC LIMIT %s", (limit,)
+    )
 
 
 class JobPatch(BaseModel):
@@ -147,8 +165,15 @@ class JobPatch(BaseModel):
     referral: str | None = None
 
 
-JOB_STATUSES = ("seen", "shortlisted", "applied", "interviewing", "offer",
-                "rejected", "closed")
+JOB_STATUSES = (
+    "seen",
+    "shortlisted",
+    "applied",
+    "interviewing",
+    "offer",
+    "rejected",
+    "closed",
+)
 
 
 @router.patch("/jobs/{job_id}", operation_id="updateJob")
@@ -170,10 +195,13 @@ async def update_job(job_id: str, body: JobPatch) -> dict:
     sets.append("updated_at = now()")
     params.append(job_id)
     rows = await db.fetch(
-        f"UPDATE hq.jobs SET {', '.join(sets)} WHERE id = %s RETURNING id::text", tuple(params))
+        f"UPDATE hq.jobs SET {', '.join(sets)} WHERE id = %s RETURNING id::text",
+        tuple(params),
+    )
     if not rows:
         raise HTTPException(404, "no such job")
     await engagement.record_owner_action("web", "update_job")
+    await emit("job.updated", payload={"job_id": job_id, "fields": sets[:-1]})
     return {"ok": True}
 
 
@@ -182,7 +210,9 @@ async def list_runs(limit: int = 50) -> list[dict]:
     return await db.fetch(
         "SELECT id::text, task_id::text, agent, model, job_hash, started_at, ended_at,"
         " outcome, input_tokens, output_tokens, cost_usd, error"
-        " FROM hq.runs ORDER BY started_at DESC LIMIT %s", (limit,))
+        " FROM hq.runs ORDER BY started_at DESC LIMIT %s",
+        (limit,),
+    )
 
 
 RUN_COLUMNS = (
@@ -198,24 +228,35 @@ TRANSCRIPT_GRACE = timedelta(seconds=60)
 async def get_run_detail(run_id: str) -> dict:
     """One run with its event timeline, its approval tickets and, for chat
     runs, the user/assistant turns of that conversation round."""
-    run = await db.fetchone(
-        f"SELECT {RUN_COLUMNS}, t.title AS task_title, t.brief AS task_brief"
-        " FROM hq.runs r LEFT JOIN hq.tasks t ON t.id = r.task_id WHERE r.id = %s::uuid",
-        (run_id,),
-    ) if _is_uuid(run_id) else None
+    run = (
+        await db.fetchone(
+            f"SELECT {RUN_COLUMNS}, t.title AS task_title, t.brief AS task_brief"
+            " FROM hq.runs r LEFT JOIN hq.tasks t ON t.id = r.task_id WHERE r.id = %s::uuid",
+            (run_id,),
+        )
+        if _is_uuid(run_id)
+        else None
+    )
     if run is None:
         raise HTTPException(404, f"unknown run {run_id}")
     events = await db.fetch(
         "SELECT id, ts, task_id::text, agent, kind, payload FROM hq.events"
-        " WHERE run_id = %s ORDER BY id", (run_id,))
+        " WHERE run_id = %s ORDER BY id",
+        (run_id,),
+    )
     tickets = await db.fetch(
         "SELECT id::text, task_id::text, tool_name, tool_args, action_class, status,"
         " created_at, resolved_at, resolved_via FROM hq.tickets WHERE run_id = %s"
-        " ORDER BY created_at", (run_id,))
+        " ORDER BY created_at",
+        (run_id,),
+    )
     transcript, reason = await _chat_transcript(run)
     return {
-        "run": run, "events": events, "tickets": tickets,
-        "transcript": transcript, "transcript_reason": reason,
+        "run": run,
+        "events": events,
+        "tickets": tickets,
+        "transcript": transcript,
+        "transcript_reason": reason,
     }
 
 
@@ -253,7 +294,9 @@ async def _chat_transcript(run: dict[str, Any]) -> tuple[list[dict] | None, str 
         return None, "more than one history row in the run's time window"
     turns = _transcript(rows[0]["history"])
     # The stored history is the whole conversation; keep the last round only.
-    last_user = max((i for i, t in enumerate(turns) if t["role"] == "user"), default=None)
+    last_user = max(
+        (i for i, t in enumerate(turns) if t["role"] == "user"), default=None
+    )
     return (turns[last_user:] if last_user is not None else turns), None
 
 
@@ -273,7 +316,8 @@ async def list_tickets(status: str = "pending", limit: int = 100) -> list[dict]:
         " k.tool_args, k.action_class, k.status, k.created_at, k.resolved_at, k.resolved_via"
         " FROM hq.tickets k LEFT JOIN hq.runs r ON r.id = k.run_id"
         " WHERE k.status = ANY(%s) ORDER BY k.created_at DESC LIMIT %s",
-        (wanted, max(1, min(limit, 500))))
+        (wanted, max(1, min(limit, 500))),
+    )
 
 
 class ResolveTicketBody(BaseModel):
@@ -285,7 +329,8 @@ async def resolve_ticket(ticket_id: str, body: ResolveTicketBody) -> dict:
     if body.verdict not in {"approved", "denied"}:
         raise HTTPException(422, "verdict must be approved or denied")
     await engagement.record_owner_action(
-        "web", "approve" if body.verdict == "approved" else "deny")
+        "web", "approve" if body.verdict == "approved" else "deny"
+    )
     row = await board.resolve_ticket(ticket_id, body.verdict, via="web")
     if row is None:
         return {"resolved": False, "reason": "already resolved"}
@@ -313,18 +358,20 @@ async def list_agents() -> list[dict]:
 
     out = []
     for name, (spec, _agent) in sorted(engine.registered_agents().items()):
-        out.append({
-            "name": name,
-            "description": spec.description,
-            "model": spec.model,
-            "tools": spec.tools,
-            "cron": [c.model_dump() for c in spec.cron],
-            "paused": await safety.agent_paused(name),
-            "spend_today_usd": await safety.spend_today_usd(name),
-            "daily_cap_usd": spec.caps.daily_usd,
-            "caps": spec.caps.model_dump(),
-            "vault_write_scopes": spec.vault_write_scopes(),
-        })
+        out.append(
+            {
+                "name": name,
+                "description": spec.description,
+                "model": spec.model,
+                "tools": spec.tools,
+                "cron": [c.model_dump() for c in spec.cron],
+                "paused": await safety.agent_paused(name),
+                "spend_today_usd": await safety.spend_today_usd(name),
+                "daily_cap_usd": spec.caps.daily_usd,
+                "caps": spec.caps.model_dump(),
+                "vault_write_scopes": spec.vault_write_scopes(),
+            }
+        )
     return out
 
 
@@ -411,7 +458,8 @@ async def costs() -> dict:
     today = await safety.spend_today_usd()
     per_agent = await db.fetch(
         "SELECT agent, sum(cost_usd) AS usd, count(*) AS runs FROM hq.runs"
-        " WHERE started_at >= now() - interval '7 days' GROUP BY agent ORDER BY usd DESC")
+        " WHERE started_at >= now() - interval '7 days' GROUP BY agent ORDER BY usd DESC"
+    )
     return {
         "today_usd": today,
         "daily_cap_usd": settings().daily_spend_cap_usd,
