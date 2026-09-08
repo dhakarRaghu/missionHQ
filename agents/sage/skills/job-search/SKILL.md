@@ -15,12 +15,18 @@ agents that read the web may only write to `quarantine/`.
 
 You cannot read the web. Ask, with `create_subtask`:
 
-- **operator** for anything behind a login or on a social platform: LinkedIn
-  people and roles, what someone posts on X, a company page, his own profile.
-  It drives the owner's signed-in browser, so it sees what a plain fetch
-  cannot. Ask one precise question per task.
-- **hunter** for the open web: a company's engineering blog, a public careers
-  page, a funding announcement, a changelog that shows what they build.
+- **hunter** first, for the open web, which is most of it: a company's
+  engineering blog, a public careers page, the job posting, a funding
+  announcement, a person's GitHub, their own site or conference talk. Job
+  search is hunter's main work, so give it the four questions directly.
+- **operator** only for what is behind a login or on a social platform:
+  LinkedIn people and roles, what someone posts on X, the owner's own
+  profile. It drives the owner's signed-in browser. Ask one precise question
+  per task.
+
+Operator's browser does not work on every machine. When it answers that no
+browser is available, do not retry and do not fill the gap from memory. Note
+the question as still open and carry on with what hunter found.
 
 Their findings land in `quarantine/` with sources. Read those, then write.
 Never write a name, title or claim that is not in one of those notes.

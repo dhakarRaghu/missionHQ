@@ -34,7 +34,7 @@ import time
 from urllib.parse import urlparse
 
 import httpx
-from pydantic_ai import ModelRetry, RunContext
+from pydantic_ai import RunContext
 
 from hq.config import settings
 from hq.obs import emit
@@ -174,11 +174,18 @@ async def browser_read(ctx: RunContext[HQDeps], url: str) -> dict:
             "browser.refused", run_id=ctx.deps.run_id, task_id=ctx.deps.task_id,
             agent=ctx.deps.agent, payload={"url": url, "domain": blocked},
         )
-        raise ModelRetry(
-            f"{blocked} is not readable with a browser: automated access breaks "
-            "its terms and risks the owner's account. Use its official API, or "
-            "ask the owner to read it. Pick another source."
-        )
+        # Not ModelRetry: retrying this URL can never work, and pydantic-ai
+        # counts a ModelRetry against a per-tool budget of 1, so a second
+        # refusal would kill the whole run and throw away everything already
+        # read. An error result lets the agent move to another source.
+        return {
+            "url": url,
+            "error": (
+                f"{blocked} is not readable with a browser: automated access "
+                "breaks its terms and risks the owner's account. Use its "
+                "official API, or ask the owner to read it. Pick another source."
+            ),
+        }
 
     await check_url(url)
     await _launch_chrome()
@@ -186,17 +193,23 @@ async def browser_read(ctx: RunContext[HQDeps], url: str) -> dict:
 
     try:
         title, body = await _read_page(url)
-    except Exception as exc:
-        raise ModelRetry(
-            f"could not read {url} in the browser ({type(exc).__name__}). "
-            "Try web_fetch, or another source."
-        ) from exc
+    except Exception as exc:  # noqa: BLE001 — any read failure means: use another source
+        return {
+            "url": url,
+            "error": (
+                f"could not read {url} in the browser ({type(exc).__name__}). "
+                "Try web_fetch, or another source."
+            ),
+        }
 
     if not body.strip():
-        raise ModelRetry(
-            f"{url} rendered but showed no text. It may need a sign-in. "
-            "Pick another source."
-        )
+        return {
+            "url": url,
+            "error": (
+                f"{url} rendered but showed no text. It may need a sign-in. "
+                "Pick another source."
+            ),
+        }
 
     result = await reader_agent().run(
         f"Untrusted page content from {url}:\n\n<page>\n{body}\n</page>"
