@@ -17,8 +17,8 @@ import { cn } from "@/lib/utils";
  * A turn the user sent from this browser that the server transcript does not
  * show yet. "done" carries the reply until the refetched transcript includes
  * it; "waiting" means the run outlived the HTTP wait (usually an approval).
- * "queued" is typed but not yet sent: the composer stays usable while a turn
- * runs, so a second message waits here rather than being lost to a locked box.
+ * "queued" is typed but not yet sent. Queued turns are displayed beside the
+ * composer; the transcript receives them once they actually start sending.
  */
 export interface LocalTurn {
   id: string;
@@ -175,11 +175,7 @@ function LocalTurnRows({
   return (
     <>
       <Bubble role="user" text={turn.text} ts={null} />
-      {turn.state === "queued" ? (
-        <p className="text-muted-foreground text-xs">
-          Queued — sends when this turn ends
-        </p>
-      ) : turn.state === "sending" ? (
+      {turn.state === "sending" ? (
         <Thinking />
       ) : turn.state === "waiting" ? (
         <StatusRow>

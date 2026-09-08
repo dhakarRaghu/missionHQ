@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CornerDownRight, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { ChatApprovals } from "@/components/features/chat/approval-card";
@@ -16,6 +17,7 @@ import {
   Transcript,
 } from "@/components/features/chat/transcript";
 import { EmptyState } from "@/components/empty-state";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -204,6 +206,14 @@ function Thread({
   const busy = local.some(
     (turn) => turn.state === "sending" || turn.state === "waiting",
   );
+  const queued = useMemo(
+    () => local.filter((turn) => turn.state === "queued"),
+    [local],
+  );
+  const visibleInTranscript = useMemo(
+    () => local.filter((turn) => turn.state !== "queued"),
+    [local],
+  );
 
   // Every message starts queued, and the effect below starts whichever is
   // next once nothing else is running. The composer therefore never has to be
@@ -259,7 +269,7 @@ function Thread({
         isFetching={messages.isFetching}
         refetch={() => messages.refetch()}
         messages={transcript}
-        local={local}
+        local={visibleInTranscript}
         starters={startersFor(agent)}
         onStart={onSend}
         onRetry={busy ? undefined : onRetry}
@@ -272,9 +282,58 @@ function Thread({
           <ChatApprovals sessionId={sessionId} />
           <InFlight sessionId={sessionId} />
         </div>
+        <QueuedMessages
+          turns={queued}
+          onRemove={(id) =>
+            setLocal((prev) => prev.filter((turn) => turn.id !== id))
+          }
+        />
         <Composer disabled={messages.isLoading} busy={busy} onSend={onSend} />
       </div>
     </>
+  );
+}
+
+/** Messages waiting behind the active turn, kept beside the composer so they
+ * remain visible without looking like messages that have already been sent. */
+function QueuedMessages({
+  turns,
+  onRemove,
+}: {
+  turns: LocalTurn[];
+  onRemove: (id: string) => void;
+}) {
+  if (!turns.length) return null;
+
+  return (
+    <ul className="mb-2 flex flex-col gap-1.5" aria-label="Queued messages">
+      {turns.map((turn, index) => (
+        <li
+          key={turn.id}
+          className="bg-muted/40 flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2"
+        >
+          <CornerDownRight
+            aria-hidden
+            className="text-muted-foreground size-3.5 shrink-0"
+          />
+          <span className="min-w-0 flex-1 truncate text-sm">{turn.text}</span>
+          <span className="text-muted-foreground shrink-0 text-xs">
+            {index === 0 ? "Up next" : `Queued ${index + 1}`}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground hover:text-foreground shrink-0"
+            aria-label={`Remove queued message: ${turn.text}`}
+            title="Remove from queue"
+            onClick={() => onRemove(turn.id)}
+          >
+            <Trash2 aria-hidden />
+          </Button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
