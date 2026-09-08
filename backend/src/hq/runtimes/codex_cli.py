@@ -181,9 +181,18 @@ async def run_turn(
         argv.append(prompt)
 
     try:
-        child_env = None
-        if cfg.grid_api_key:
-            child_env = {**os.environ, "GRID_API_KEY": cfg.grid_api_key}
+        # Forward whatever provider key Codex needs. The backend runs under
+        # launchd, which does not source a login shell, so a key exported in
+        # ~/.zshrc reaches the terminal and not this process. Anything unset
+        # in .env is left alone rather than blanked, so a machine that really
+        # does inherit the key from its environment still works.
+        forwarded = {
+            "GRID_API_KEY": cfg.grid_api_key,
+            "AZURE_OPENAI_API_KEY": cfg.azure_openai_api_key,
+            "OPENAI_API_KEY": cfg.openai_api_key_for_codex,
+        }
+        present = {k: v for k, v in forwarded.items() if v}
+        child_env = {**os.environ, **present} if present else None
         proc = await asyncio.create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.DEVNULL,

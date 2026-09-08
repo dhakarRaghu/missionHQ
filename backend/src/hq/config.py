@@ -83,6 +83,16 @@ class Settings(BaseSettings):
     # nothing in this system can do that at all.
     runtime_approval_hours: float = 12.0
 
+    # Credentials Codex itself needs, forwarded to the child process.
+    #
+    # The backend runs under launchd, which does not read ~/.zshrc, so a key
+    # that works in your terminal is simply absent here: every operator run
+    # failed with "Missing environment variable: AZURE_OPENAI_API_KEY" until
+    # this existed. Codex reads ~/.codex/config.toml to decide its provider;
+    # whichever one it names, its key has to be set here too.
+    azure_openai_api_key: str = ""
+    openai_api_key_for_codex: str = ""
+
     # --- Bright Data (web search and social lookups) -------------------------
     # One key, two products. The SERP API answers "which page has this", and
     # the Web Scraper API reads a LinkedIn or X page as structured records.
