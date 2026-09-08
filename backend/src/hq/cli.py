@@ -257,10 +257,23 @@ async def cmd_health() -> int:
 
         composite = sum(weight * score for _, weight, score, _ in rows)
 
+        # Not scored: it is a budget, not a fault. But it belongs on the one
+        # screen you check, because the free tier stops dead and a quiet month
+        # looks exactly like a working one until you need a search.
+        from hq.tools.brightdata import usage as bd_usage
+
+        credits = await bd_usage()
+
         prev = await db.fetch("SELECT value FROM hq.control WHERE key = 'health_last'")
         trend = ""
         if prev:
-            before = float(json.loads(prev[0]["value"])["score"])
+            # psycopg gives jsonb back as a dict, not a string. Passing it to
+            # json.loads raised on every run after the first, which the first
+            # run could not show because there was nothing to compare against.
+            stored = prev[0]["value"]
+            if isinstance(stored, (str, bytes, bytearray)):
+                stored = json.loads(stored)
+            before = float(stored["score"])
             delta = composite - before
             way = "up" if delta > 0.05 else ("down" if delta < -0.05 else "level")
             trend = f"  ({way} from {before:.1f})"
@@ -272,6 +285,10 @@ async def cmd_health() -> int:
         weakest = min(rows, key=lambda r: r[2])
         if weakest[2] < 10:
             print(f"\n  weakest: {weakest[0]} — {weakest[3]}")
+        print(
+            f"\n  search credits   {credits['today']}/{credits['day_cap']} today,"
+            f" {credits['month']}/{credits['month_cap']} this month"
+        )
         print()
 
         await db.execute(

@@ -23,7 +23,6 @@ from __future__ import annotations
 import html
 import logging
 import re
-from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote_plus
 
@@ -71,26 +70,48 @@ def configured() -> str | None:
     return None
 
 
-async def _spend(kind: str) -> str | None:
-    """Count one call against today's ceiling. Returns a refusal, or None.
-
-    The free tier stops dead at 5,000 credits a month with no bill, so the
-    real risk is not cost but a quiet month: one looping run could spend the
-    whole allowance in an afternoon and leave nothing for the days after.
-    """
-    cap = settings().brightdata_daily_calls
-    today = datetime.now(UTC).date().isoformat()
+async def usage() -> dict[str, int]:
+    """Calls made today and this month, with their ceilings."""
+    cfg = settings()
     rows = await db.fetch(
-        "SELECT count(*) AS n FROM hq.events"
-        " WHERE kind = 'brightdata.call' AND ts::date = %s::date", (today,))
-    used = rows[0]["n"] if rows else 0
-    if used >= cap:
+        "SELECT"
+        "  count(*) FILTER (WHERE ts >= date_trunc('day', now())) AS today,"
+        "  count(*) FILTER (WHERE ts >= date_trunc('month', now())) AS month"
+        " FROM hq.events WHERE kind = 'brightdata.call'"
+    )
+    row = rows[0] if rows else {"today": 0, "month": 0}
+    return {
+        "today": row["today"], "day_cap": cfg.brightdata_daily_calls,
+        "month": row["month"], "month_cap": cfg.brightdata_monthly_calls,
+    }
+
+
+async def _spend(kind: str) -> str | None:
+    """Count one call against both ceilings. Returns a refusal, or None.
+
+    The free tier is 5,000 credits a month and stops dead with no bill, so
+    the risk is not a surprise cost but a quiet month: spend the allowance in
+    an afternoon and there is nothing left for the days after. These ceilings
+    sit far below the tier on purpose, because a paid call is the last resort.
+    A free web_fetch of a URL you can already name costs nothing at all.
+    """
+    u = await usage()
+    if u["month"] >= u["month_cap"]:
         return (
-            f"the daily Bright Data ceiling of {cap} calls is used up"
-            f" ({used} today). It resets tomorrow. Work from URLs you already"
-            " know, or ask the owner to raise BRIGHTDATA_DAILY_CALLS."
+            f"the monthly Bright Data ceiling of {u['month_cap']} calls is used"
+            f" up ({u['month']} this month). It resets on the 1st. Work from"
+            " URLs you already know, or hand the question to operator."
         )
-    await emit("brightdata.call", payload={"kind": kind, "used": used + 1, "cap": cap})
+    if u["today"] >= u["day_cap"]:
+        return (
+            f"the daily Bright Data ceiling of {u['day_cap']} calls is used up"
+            f" ({u['today']} today). It resets tomorrow. Work from URLs you"
+            " already know, or hand the question to operator."
+        )
+    await emit("brightdata.call", payload={
+        "kind": kind, "today": u["today"] + 1, "day_cap": u["day_cap"],
+        "month": u["month"] + 1, "month_cap": u["month_cap"],
+    })
     return None
 
 

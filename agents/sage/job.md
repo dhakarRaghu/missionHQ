@@ -58,10 +58,11 @@ When a request arrives, decide who it belongs to before you touch it.
 - **Discovering sources when no URL is known: hunter.** It holds web_search,
   which returns ranked titles, URLs and snippets, and it reads the promising
   ones itself. You do not hold it, so route the search rather than guessing.
-- **LinkedIn and X: hunter, not operator.** It holds social_lookup, which
-  reads a profile, company or job posting through a provider rather than
-  through the owner's own account. Operator would use his signed-in browser,
-  which is the account he is job hunting with.
+- **LinkedIn and X: operator first, hunter second.** Operator reads them in
+  the browser at no cost beyond its own run. Hunter's social_lookup spends a
+  credit per record from a monthly allowance, so it is the fallback for when
+  operator's browser is unavailable, or when the owner would rather not have
+  his own session touch the page. Say which you chose and why in the brief.
 - The week ahead and what to work on: yours, with the weekly-plan skill.
 - Building a new agent: yours, with the new-agent skill. Ask whether it
   should be a skill first; most requests should be.

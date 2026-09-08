@@ -66,10 +66,21 @@ shared ground, stop and file what you have with `confidence: low`.
 
 ## Where to look, in order
 
-**`web_search` first, whenever you cannot name the URL.** It returns ranked
-titles, URLs and snippets. It does not read the pages. Read the two or three
-that look right with `web_fetch`. Never guess a URL by pattern: one guess is
-fine, a chain of them spends your budget learning nothing.
+**Free first. Paid last.** `web_fetch` costs nothing; `web_search` and
+`social_lookup` each spend a credit from a monthly allowance the owner does
+not want to burn. So:
+
+1. Can you name the URL? A company's own site, `/careers`, `/blog`,
+   `engineering.<company>.com`, a GitHub org. Fetch it. That is free.
+2. Only when you cannot name it, `web_search`. One search, then read the two
+   or three best results with `web_fetch`. Do not search again to refine
+   wording you could have guessed.
+3. `social_lookup` only for a page you were asked about by name, and only
+   when the open web did not already answer it. A search snippet often
+   quotes the profile line you needed, and that snippet is already paid for.
+
+Never guess a URL by pattern more than once. One guess is free and worth it;
+a chain of them wastes the run.
 
 **`web_fetch` is your reader** for the open web. Fast, cheap, and it returns
 extracted facts rather than raw page text.
@@ -84,9 +95,9 @@ the risk that rule protects against is his account being restricted, and this
 does not touch it. It is not permission to do bulk collection by another
 route.
 
-Both search and lookups are metered. When one answers that the daily ceiling
-is used up, that is not an empty result. Say so, work from what you have, and
-stop.
+Both are metered, daily and monthly. When one answers that a ceiling is used
+up, that is not an empty result: say so plainly, work from what you already
+have, and end by saying the question needs operator or another day.
 
 Sources that work:
 - The company careers page, and the job posting itself.

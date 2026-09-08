@@ -105,10 +105,13 @@ class Settings(BaseSettings):
     # Zone name from the Bright Data console. A zone is the product
     # configuration a request runs under; SERP requests need a SERP zone.
     brightdata_serp_zone: str = "serp_api1"
-    # The free tier is 5,000 credits a month and stops dead when they run out.
-    # This is the softer stop: a per-day ceiling so one looping run cannot
-    # spend the month in an afternoon.
-    brightdata_daily_calls: int = 120
+    # The free tier is 5,000 credits a month, one credit per SERP request and
+    # one per scraped record, and it stops dead when they run out. These are
+    # the softer stops, deliberately far below the tier: 40 a day and 1,200 a
+    # month leaves most of the allowance unspent, because these calls are the
+    # last resort and not the first. A day of casual testing took 420.
+    brightdata_daily_calls: int = 40
+    brightdata_monthly_calls: int = 1200
 
     # Days a finished task stays on the board before the maintenance tick sets
     # it to `archived`. Nothing is deleted; archived tasks are simply left out
