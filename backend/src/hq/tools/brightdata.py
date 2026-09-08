@@ -167,7 +167,17 @@ async def web_search(ctx: RunContext[HQDeps], query: str) -> dict:
     # ("/goto?url=CAEShwEB6zsw..."), which no agent can fetch. Bing returns the
     # real destination. Same API, same cost, usable answer. Verified against
     # both on 2026-09-09.
-    target = f"https://www.bing.com/search?q={quote_plus(query)}&count={MAX_RESULTS}"
+    # mkt/cc localise the result set. Without them the same words return US
+    # postings and US salary pages, which is a different question from the one
+    # the owner is asking. brd_json=1 asks Bright Data to parse rather than
+    # returning a page of HTML.
+    market = settings().brightdata_search_market
+    country = market.split("-")[-1].lower() if "-" in market else ""
+    target = (
+        f"https://www.bing.com/search?q={quote_plus(query)}"
+        f"&count={MAX_RESULTS}&mkt={market}"
+        + (f"&cc={country}" if country else "")
+    )
     try:
         resp = await _post(REQUEST_URL, {
             "zone": settings().brightdata_serp_zone,

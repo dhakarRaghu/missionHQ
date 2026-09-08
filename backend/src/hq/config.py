@@ -116,6 +116,12 @@ class Settings(BaseSettings):
     # the owner's own browser for nothing, so this buys an unpredictable bill
     # for something already covered. The tool stays in the codebase behind
     # this flag; no agent is granted it.
+    # Market for search, as Bing's mkt/cc pair. The owner works and job hunts
+    # in India, and an unlocalised search answers a different question: the
+    # same words return US postings and US salary pages. Set to the market you
+    # actually hire and read in.
+    brightdata_search_market: str = "en-IN"
+
     brightdata_scrapers_enabled: bool = False
     brightdata_daily_calls: int = 40
     brightdata_monthly_calls: int = 1200
