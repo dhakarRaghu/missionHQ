@@ -141,16 +141,21 @@ async def web_search(ctx: RunContext[HQDeps], query: str) -> dict:
     if reason:
         return {"query": query, "provenance": "web", "error": reason}
 
-    target = f"https://www.google.com/search?q={quote_plus(query)}&num={MAX_RESULTS}"
+    # Bing, not Google, and for one concrete reason: Google's parsed results
+    # return every organic link as an opaque redirect stub
+    # ("/goto?url=CAEShwEB6zsw..."), which no agent can fetch. Bing returns the
+    # real destination. Same API, same cost, usable answer. Verified against
+    # both on 2026-09-09.
+    target = f"https://www.bing.com/search?q={quote_plus(query)}&count={MAX_RESULTS}"
     try:
         resp = await _post(REQUEST_URL, {
             "zone": settings().brightdata_serp_zone,
             "url": target,
             "format": "json",
-            # The parsed form returns organic results as fields. Without it the
-            # answer is a page of Google's HTML, which is exactly the raw web
-            # text this system keeps away from agents.
-            "data_format": "parsed_light",
+            # The parsed form returns organic results as fields. Without it
+            # the answer is a page of search-engine HTML, which is exactly the
+            # raw web text this system keeps away from agents.
+            "data_format": "parsed",
         })
     except httpx.HTTPError as exc:
         return {"query": query, "provenance": "web",
