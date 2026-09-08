@@ -55,13 +55,27 @@ async def cmd_ask(agent_name: str, prompt: str) -> int:
             print(f"unknown agent {agent_name!r}; have: {sorted(specs)}", file=sys.stderr)
             return 2
         spec = specs[agent_name]
-        agent = loader.build_agent(spec, DBOSDurability(models=llm.registry().all_instances()))
         deps = HQDeps(agent=agent_name, vault_write_scopes=spec.vault_write_scopes())
-        outcome = await runner.execute(agent, spec, prompt=prompt, deps=deps)
+        if spec.runtime in loader.EXTERNAL_RUNTIMES:
+            # An agent on an external runtime is a different program. Running
+            # it through the in-process loop used to silently work, on the
+            # house model, with none of its tools, and it answered from its
+            # notebook as if it had really tried. The answer looked plausible
+            # and was worthless, which is worse than a failure.
+            #
+            # No approval gate here: the board's gate exists because cron and
+            # Telegram start runs the owner is not watching. He typed this one.
+            outcome = await runner.execute_external(spec, prompt=prompt, deps=deps)
+        else:
+            agent = loader.build_agent(
+                spec, DBOSDurability(models=llm.registry().all_instances()))
+            outcome = await runner.execute(agent, spec, prompt=prompt, deps=deps)
         print(outcome.output)
         print(
             f"\n[{outcome.outcome}] {outcome.input_tokens} in / {outcome.output_tokens} out"
-            f" = ${outcome.cost_usd:.6f} on {llm.registry().canonical(spec.model)}",
+            f" = ${outcome.cost_usd:.6f} on "
+            + (spec.runtime if spec.runtime in loader.EXTERNAL_RUNTIMES
+               else llm.registry().canonical(spec.model)),
             file=sys.stderr,
         )
         return 0 if outcome.outcome == "done" else 1

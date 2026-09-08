@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -43,18 +44,30 @@ _CLI_FALLBACKS = (
 )
 
 # Codex answers normally when its browser backend is absent, so a run that
-# read nothing would otherwise look like a successful answer.
-_NO_BROWSER = (
-    # Verbatim from cua_repl's getBrowser() when Codex runs outside the
-    # ChatGPT app, which is the usual way this fails.
-    "no browser is available",
-    "browser is not available",
+# reached no page would otherwise look like a successful answer.
+#
+# Exact phrases were not enough. The list below started as literal strings and
+# missed "Browser unavailable." — two words, no verb, and the run was filed as
+# a success. The model paraphrases its own failure, so match the shape of the
+# sentence rather than its wording: something browser-ish near something
+# absent-ish, in either order.
+_BROWSER_WORD = r"(?:browser|chrome|browser extension|cua_repl)"
+_ABSENT_WORD = (
+    r"(?:unavailable|not available|no longer available|not connected|"
+    r"unreachable|cannot be reached|could not connect|unable to reach|"
+    r"could not reach|failed to (?:reach|connect|start)|"
+    r"isn'?t available|isn'?t connected|not supported|unsupported)"
+)
+_NO_BROWSER_RE = re.compile(
+    rf"(?:\bno\s+{_BROWSER_WORD}\b)"                 # "no browser is available"
+    rf"|(?:{_BROWSER_WORD}.{{0,30}}?{_ABSENT_WORD})"   # "browser is not available"
+    rf"|(?:{_ABSENT_WORD}.{{0,30}}?{_BROWSER_WORD})",  # "unable to reach the browser"
+    re.IGNORECASE,
+)
+# Kept verbatim because they do not fit the shape above.
+_NO_BROWSER_EXACT = (
     "no_browser_tool",
-    "browser extension is not connected",
-    "no browser is connected",
-    "unable to reach the browser extension",
     "native messaging host",
-    "unsupported call: mcp__cua_repl",
     "tool is not currently supported or available",
 )
 
@@ -73,8 +86,11 @@ class CodexResult:
 
 
 def missing_browser(text: str) -> bool:
+    """True when Codex answered without ever reaching a browser."""
     low = text.lower()
-    return any(phrase in low for phrase in _NO_BROWSER)
+    if any(phrase in low for phrase in _NO_BROWSER_EXACT):
+        return True
+    return _NO_BROWSER_RE.search(low) is not None
 
 
 def resolve_cli() -> str | None:
