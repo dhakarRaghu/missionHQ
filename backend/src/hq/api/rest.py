@@ -4,6 +4,7 @@ paths Telegram uses, so both interfaces resolve the same durable state."""
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from typing import Any
 
@@ -15,6 +16,7 @@ from hq.api.deps import require_auth
 from hq.config import settings
 from hq.dbos_app import DBOS
 
+log = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(require_auth)])
 
 
@@ -65,6 +67,48 @@ async def create_task(body: CreateTaskBody) -> dict:
     )
     await engagement.record_owner_action("web", "new_task")
     return {"task_id": task_id}
+
+
+@router.post("/tasks/{task_id}/cancel", operation_id="cancelTask")
+async def cancel_task(task_id: str) -> dict:
+    """Stop a run that is still going.
+
+    A run can take minutes, and until now the only way to end one was to wait
+    or restart the backend. Cancelling the DBOS workflow stops it at its next
+    step boundary; completed steps stay committed, which is the point of them
+    being steps. The board is marked from here rather than from inside the
+    workflow, because a cancelled workflow does not get to run its own
+    bookkeeping.
+    """
+    rows = await db.fetch(
+        "SELECT r.wf_id, t.status FROM hq.tasks t"
+        " LEFT JOIN LATERAL (SELECT wf_id FROM hq.runs WHERE task_id = t.id"
+        "   ORDER BY started_at DESC LIMIT 1) r ON true"
+        " WHERE t.id = %s", (task_id,))
+    if not rows:
+        raise HTTPException(404, "no such task")
+    if rows[0]["status"] not in {"running", "needs_approval", "backlog"}:
+        return {"cancelled": False, "reason": f"task is {rows[0]['status']}"}
+
+    wf_id = rows[0]["wf_id"]
+    if wf_id:
+        try:
+            await DBOS.cancel_workflow_async(wf_id)
+        except Exception as exc:  # noqa: BLE001 — mark the board even if it already ended
+            log.warning("cancel of workflow %s failed: %s", wf_id, exc)
+
+    # The workflow cannot close its own run row once cancelled, and a row left
+    # with outcome NULL would count against the success rate in `hq.cli health`.
+    # A deliberate stop is not a failure, so record it as its own outcome.
+    await db.execute(
+        "UPDATE hq.runs SET outcome = 'cancelled', ended_at = now()"
+        " WHERE task_id = %s AND ended_at IS NULL", (task_id,))
+    await board.apply(
+        task_id, "cancelled", actor="owner", status="failed",
+        data={"reason": "cancelled by the owner"},
+    )
+    await engagement.record_owner_action("web", "cancel_task")
+    return {"cancelled": True}
 
 
 @router.get("/tasks/{task_id}/events", operation_id="listTaskEvents")

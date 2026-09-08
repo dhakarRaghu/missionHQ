@@ -143,11 +143,20 @@ def registered_agents() -> dict[str, tuple[AgentSpec, Agent[runner.HQDeps, str |
 
 def bootstrap_pre_launch() -> None:
     """Agents + cron workflows. MUST run BEFORE DBOS.launch()."""
-    # One durable retry on model requests: the OpenAI client has max_retries=0
-    # (DBOS owns retries), so a single gateway hiccup must not fail a whole run.
+    # Durable retries on model requests: the OpenAI client has max_retries=0
+    # (DBOS owns retries), so a gateway hiccup must not fail a whole run.
+    #
+    # Two attempts two seconds apart was too tight to survive a real outage:
+    # eight runs in one week died reporting "the model gateway kept failing
+    # after several attempts", where several meant two. Four attempts doubling
+    # from two seconds covers about thirty. Past that, FallbackModel moves the
+    # request to another model rather than retrying the same failing one.
     durability = DBOSDurability(
         models=llm.registry().all_instances(),
-        model_step_config={"retries_allowed": True, "max_attempts": 2, "interval_seconds": 2.0},
+        model_step_config={
+            "retries_allowed": True, "max_attempts": 4,
+            "interval_seconds": 2.0, "backoff_rate": 2.0,
+        },
     )
     for name, spec in scan().items():
         AGENTS[name] = (spec, build_agent(spec, durability))

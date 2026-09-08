@@ -138,8 +138,7 @@ export const api = {
     request<Task[]>(`/tasks${query({ status, limit })}`),
   createTask: (body: NewTask) =>
     request<Task>("/tasks", { method: "POST", body: JSON.stringify(body) }),
-  taskEvents: (id: string) =>
-    request<TaskEvent[]>(`/tasks/${seg(id)}/events`),
+  taskEvents: (id: string) => request<TaskEvent[]>(`/tasks/${seg(id)}/events`),
 
   runs: async (limit = 50): Promise<Run[]> => {
     const rows = await request<RawRun[]>(`/runs${query({ limit })}`);
@@ -154,6 +153,11 @@ export const api = {
   /** `status` may list several states: "approved,denied". */
   tickets: (status = "pending", limit?: number) =>
     request<Ticket[]>(`/tickets${query({ status, limit })}`),
+  cancelTask: (id: string) =>
+    request<{ cancelled: boolean; reason?: string }>(
+      `/tasks/${seg(id)}/cancel`,
+      { method: "POST" },
+    ),
   resolveTicket: (id: string, verdict: Verdict) =>
     request<{ resolved: boolean; reason?: string }>(
       `/tickets/${seg(id)}/resolve`,
@@ -201,7 +205,9 @@ export const api = {
     }),
 
   dailyCosts: async (days = 14): Promise<DailyCost[]> => {
-    const rows = await request<RawDailyCost[]>(`/costs/daily${query({ days })}`);
+    const rows = await request<RawDailyCost[]>(
+      `/costs/daily${query({ days })}`,
+    );
     return rows.map((row) => ({ ...row, usd: Number(row.usd) }));
   },
 

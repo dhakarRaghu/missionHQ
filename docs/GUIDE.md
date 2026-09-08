@@ -200,17 +200,54 @@ give you. It is worth more than any code you could add.
 
 ## 7. Keeping it healthy
 
+Start here. One number for whether the machine is working:
+
 ```bash
 cd backend
+uv run python -m hq.cli health             # one score, and the trend since last run
+```
+
+It reads data already recorded and calls no model, so it is free to run as
+often as you like. It weights run success at 30% and vault quality at 25%,
+because a system that fails a quarter of its runs, or fills its vault with
+near-duplicates, is not healthy however clean the code is. It prints the
+weakest line so you know what to fix first.
+
+The rest, when you want the detail behind a low score:
+
+```bash
 uv run python -m hq.cli prompt-check all   # contradictions in an agent's instructions
 uv run python -m hq.cli vault-health       # duplicates, orphans, unsourced notes
 uv run python -m hq.cli board-check        # every task matches its event log
+uv run python -m hq.cli reindex            # rebuild the vault full-text index
 ```
 
 Run `prompt-check` after editing any agent, and `vault-health` weekly. A
 separate judge reads what an agent actually sees and reports contradictions,
 buried rules and gaps, because an agent cannot detect a contradiction in its
 own instructions.
+
+### Talking to one agent from the terminal
+
+The fastest way to see whether an agent's instructions produce anything worth
+reading. No Telegram, no board, straight to stdout:
+
+```bash
+uv run python -m hq.cli ask hunter "What changed in DBOS Transact this month?"
+uv run python -m hq.cli models             # what the gateway serves vs models.yaml
+```
+
+`ask` is the command to reach for when an agent behaves oddly: change its
+`job.md`, run `ask`, read the answer, repeat. Approvals still work, so a run
+that needs one waits for you on Telegram.
+
+### Scoring an agent against past runs
+
+```bash
+uv run python -m hq.cli evals export hunter   # build evals/hunter.yaml from finished runs
+uv run python -m hq.cli evals run hunter      # score it against the stored answers
+uv run python -m hq.cli evals history hunter  # how the score moved over time
+```
 
 `./ops/backup.sh run` dumps the database and pushes the vault.
 `./ops/backup.sh restore-drill` proves the backup actually restores.

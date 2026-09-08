@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
+import { Button } from "@/components/ui/button";
 import { api, qk } from "@/lib/api/client";
 import { timeAgo } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -21,8 +23,24 @@ const LABEL: Record<string, string> = {
  * arriving there is nothing on screen, so a slow run and a lost one look the
  * same and the owner asks again. This is the strip that tells them apart.
  * It empties itself, because a finished task posts its result as a message.
+ *
+ * Each row can also be stopped. A run takes minutes, and without this the only
+ * way out of one you did not want is to wait for it to finish.
  */
 export function InFlight({ sessionId }: { sessionId: string }) {
+  const queryClient = useQueryClient();
+  const cancel = useMutation({
+    mutationFn: (id: string) => api.cancelTask(id),
+    onSuccess: (result) => {
+      toast(
+        result.cancelled ? "Stopped" : (result.reason ?? "Already finished"),
+      );
+      queryClient.invalidateQueries({ queryKey: qk.chatTasks(sessionId) });
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
   const tasks = useQuery({
     queryKey: qk.chatTasks(sessionId),
     queryFn: () => api.chatTasks(sessionId),
@@ -36,7 +54,7 @@ export function InFlight({ sessionId }: { sessionId: string }) {
   return (
     <ul className="flex flex-col gap-1.5">
       {rows.map((task) => (
-        <li key={task.id}>
+        <li key={task.id} className="flex items-center gap-1.5">
           <Link
             href={`/board?task=${encodeURIComponent(task.id)}`}
             className="bg-muted/40 hover:bg-muted flex items-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors"
@@ -63,6 +81,16 @@ export function InFlight({ sessionId }: { sessionId: string }) {
               {timeAgo(task.updated_at)}
             </span>
           </Link>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground hover:text-foreground h-7 shrink-0 px-2 text-xs"
+            aria-label={`Stop ${task.agent}: ${task.title}`}
+            disabled={cancel.isPending && cancel.variables === task.id}
+            onClick={() => cancel.mutate(task.id)}
+          >
+            Stop
+          </Button>
         </li>
       ))}
     </ul>

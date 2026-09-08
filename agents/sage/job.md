@@ -27,7 +27,7 @@ caps:
   daily_usd: 2.00
 cron:
   - schedule: "0 21 * * *"
-    prompt: "Write today's daily note in vault daily/<YYYY-MM-DD>.md: call read_activity (since_hours=24) for what happened on the board today, finished work included, then summarize it, anything filed in inbox/, and one suggestion for tomorrow. Keep it under 300 words. If inbox/ has items, file each one and delete it from inbox/ only by moving its content (append) into the right note. End the note with one question the owner should answer tomorrow."
+    prompt: "Load the daily-note skill with load_skill and follow it: write today's note to vault daily/<YYYY-MM-DD>.md. Lead with one thing the owner did not know, taken from what actually landed in the vault, with its source. Board status is a footnote, not the body."
   - schedule: "0 9 * * 1"
     prompt: "Load the weekly-plan skill with load_skill and follow it: write this week's one-page plan to projects/planner/<YYYY>-W<NN>.md."
   - schedule: "0 20 * * 0"

@@ -32,6 +32,12 @@ from hq import db
 from hq.config import settings
 from hq.memory import BLOCK_CAPS
 
+# Words in a fact that name an agent. Only names we know were retired count as
+# stale: a fact mentioning "hunter" is fine, one mentioning "forge" is not.
+AGENT_WORD_RE = re.compile(r"\b([a-z]{4,12})\b")
+KNOWN_RETIRED = {"forge", "planner"}
+
+
 DUP_DISTANCE = 0.12
 STALE_DAYS = 14
 # Folders that are not notes for link purposes: memory blocks are injected
@@ -284,6 +290,57 @@ def _sync_checks(notes: dict[str, str]) -> dict:
     }
 
 
+async def stale_facts() -> list[dict]:
+    """Facts that can no longer be true, and facts that may disagree.
+
+    Two failure modes, both found in the real store and neither visible before:
+
+    * A fact about an agent that no longer exists. `forge` was retired and two
+      `confidence: high` facts about its failures stayed behind, one of them
+      recording a guess ("sage suspects a shared root cause") that later turned
+      out to be wrong. An agent recalling that reads it as settled fact.
+    * Two facts under one subject. They may be an update or a contradiction,
+      and nothing decides which, so both get recalled together.
+
+    Read-only. It reports; the librarian and the owner decide.
+    """
+    from hq import db
+    from hq.loader import scan
+
+    live = set(scan())
+    out: list[dict] = []
+
+    rows = await db.fetch(
+        "SELECT id::text, subject, fact, confidence, created_at FROM hq.facts"
+        " ORDER BY created_at"
+    )
+    for row in rows:
+        text = f"{row['subject']} {row['fact']}".lower()
+        gone = sorted({
+            word for word in AGENT_WORD_RE.findall(text)
+            if word not in live and word in KNOWN_RETIRED
+        })
+        if gone:
+            out.append({
+                "kind": "retired agent",
+                "id": row["id"], "subject": row["subject"],
+                "detail": f"mentions {', '.join(gone)}, which no longer exists",
+                "confidence": row["confidence"],
+            })
+
+    dupes = await db.fetch(
+        "SELECT subject, count(*) AS n FROM hq.facts GROUP BY subject HAVING count(*) > 1"
+    )
+    for row in dupes:
+        out.append({
+            "kind": "same subject",
+            "id": "", "subject": row["subject"],
+            "detail": f"{row['n']} facts share this subject; one may contradict the other",
+            "confidence": "",
+        })
+    return out
+
+
 async def report() -> dict:
     """Full read-only health report. ``counts`` has one entry per check;
     ``notes`` is the number of markdown files scanned."""
@@ -292,8 +349,10 @@ async def report() -> dict:
     out["near_duplicates"] = await near_duplicates(notes)
     out["notes"] = len(notes)
     out["today"] = today().isoformat()
+    out["stale_facts"] = await stale_facts()
     out["counts"] = {
         "near_duplicates": len(out["near_duplicates"]),
+        "stale_facts": len(out["stale_facts"]),
         "orphans": len(out["orphans"]),
         "unsourced": len(out["unsourced"]),
         "stale_quarantine": len(out["stale_quarantine"]),
@@ -357,6 +416,11 @@ def format_report(rep: dict, *, with_merge_plan: bool = False, notes: dict[str, 
 
     lines.append(f"unsourced AI notes (no source/sources/source_urls): {rep['counts']['unsourced']}")
     lines.extend(f"  {p}" for p in rep["unsourced"])
+
+    lines.append(f"stale or conflicting facts: {rep['counts']['stale_facts']}")
+    for f in rep["stale_facts"]:
+        mark = f"  [{f['confidence']}]" if f["confidence"] else ""
+        lines.append(f"  {f['subject']}{mark} — {f['detail']}")
 
     lines.append(f"stale quarantine (> {STALE_DAYS} days, never referenced): {rep['counts']['stale_quarantine']}")
     lines.extend(f"  {p['path']}  ({p['age_days']} days)" for p in rep["stale_quarantine"])

@@ -1,5 +1,6 @@
 """Small operator commands: ``uv run python -m hq.cli <command>``.
 
+    health   one score for whether the machine is working, and the trend
     models   list what the gateway serves and check models.yaml against it
     ask      run one agent once from the terminal (no Telegram, no board)
 
@@ -190,6 +191,99 @@ async def cmd_vault_health(flags: list[str]) -> int:
         await db.close_pool()
 
 
+async def cmd_health() -> int:
+    """One score for whether the machine is working, and the trend since last run.
+
+    Seven commands already report pieces of this, and none of them answered
+    "is Mission HQ healthy". A 74% run-success rate stayed invisible for a week
+    because nothing added the pieces up. Every input here is already recorded
+    and no model is called, so this is free to run as often as you like.
+    """
+    import json
+    import subprocess
+    from datetime import UTC, datetime
+
+    from hq import db, vault_health
+    from hq.config import BACKEND_DIR, REPO_DIR
+
+    await db.open_pool()
+    try:
+
+        def grade(value: float, clean: float, warn: float, poor: float) -> int:
+            """10 / 7 / 4 / 0 for a metric where higher is better."""
+            for threshold, score in ((clean, 10), (warn, 7), (poor, 4)):
+                if value >= threshold:
+                    return score
+            return 0
+
+        def passes(cmd: list[str], cwd) -> bool:
+            try:
+                done = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=240, check=False)
+                return done.returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                return False
+
+        rows: list[tuple[str, float, int, str]] = []
+
+        runs = await db.fetch(
+            "SELECT count(*) FILTER (WHERE outcome = 'done') AS done, count(*) AS total"
+            " FROM hq.runs WHERE started_at > now() - interval '7 days'"
+            # A run the owner stopped on purpose is not a failed run.
+            "   AND coalesce(outcome, '') <> 'cancelled'"
+        )
+        done, total = runs[0]["done"] or 0, runs[0]["total"] or 0
+        pct = (done / total * 100) if total else 100.0
+        rows.append(("runs (7d)", 0.30, grade(pct, 95, 85, 75), f"{done}/{total} done = {pct:.0f}%"))
+
+        rep = await vault_health.report()
+        found = sum(int(v) for k, v in rep["counts"].items() if k != "memory_blocks_over_80pct")
+        rows.append(("vault", 0.25, grade(-found, -5, -20, -50), f"{found} finding(s)"))
+
+        blocked = await db.fetch(
+            "SELECT count(*) AS n FROM hq.tasks WHERE status IN ('blocked', 'needs_approval')"
+        )
+        waiting = blocked[0]["n"]
+        rows.append(("waiting on you", 0.15, grade(-waiting, 0, -3, -8), f"{waiting} task(s) stuck"))
+
+        rows.append(("types", 0.10, 10 if passes(["npx", "tsc", "--noEmit"], REPO_DIR / "frontend") else 0, "tsc"))
+        rows.append(("lint", 0.10, 10 if passes([".venv/bin/ruff", "check", "src/hq/"], BACKEND_DIR) else 0, "ruff"))
+
+        drift = await db.fetch(
+            "SELECT count(*) AS n FROM hq.runs WHERE outcome = 'no_artifact'"
+            " AND started_at > now() - interval '7 days'"
+        )
+        rows.append(("artifacts", 0.10, 10 if drift[0]["n"] == 0 else 4,
+                     f"{drift[0]['n']} run(s) claimed done with nothing written"))
+
+        composite = sum(weight * score for _, weight, score, _ in rows)
+
+        prev = await db.fetch("SELECT value FROM hq.control WHERE key = 'health_last'")
+        trend = ""
+        if prev:
+            before = float(json.loads(prev[0]["value"])["score"])
+            delta = composite - before
+            way = "up" if delta > 0.05 else ("down" if delta < -0.05 else "level")
+            trend = f"  ({way} from {before:.1f})"
+
+        print(f"\nMission HQ health: {composite:.1f}/10{trend}\n")
+        for label, weight, score, detail in rows:
+            bar = "#" * score + "." * (10 - score)
+            print(f"  {label:<15} {bar}  {score:>2}/10  {int(weight * 100):>2}%   {detail}")
+        weakest = min(rows, key=lambda r: r[2])
+        if weakest[2] < 10:
+            print(f"\n  weakest: {weakest[0]} — {weakest[3]}")
+        print()
+
+        await db.execute(
+            "INSERT INTO hq.control (key, value) VALUES ('health_last', %s::jsonb)"
+            " ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            (json.dumps({"score": round(composite, 2), "at": datetime.now(UTC).isoformat()}),),
+        )
+        return 0 if composite >= 7 else 1
+    finally:
+        await db.close_pool()
+
+
 def main() -> None:
     args = sys.argv[1:]
     if not args or args[0] in {"-h", "--help"}:
@@ -197,6 +291,8 @@ def main() -> None:
         raise SystemExit(0)
     if args[0] == "reindex":
         raise SystemExit(asyncio.run(cmd_reindex()))
+    if args[0] == "health":
+        raise SystemExit(asyncio.run(cmd_health()))
     if args[0] == "board-check":
         raise SystemExit(asyncio.run(cmd_board_check()))
     if args[0] == "prompt-check" and len(args) == 2:

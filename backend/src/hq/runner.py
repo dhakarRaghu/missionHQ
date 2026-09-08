@@ -94,10 +94,22 @@ Decide:
 - request_satisfied: the original request is fully done or answered. Also true
   when the agent stopped for a valid reason: it needs information only the
   owner can give, or the request is impossible and the agent explains why.
-  False when the answer only promises future work or restates the plan.
+
+  Also true when the agent handed the work to another agent and the tool calls
+  show it: a create_subtask call this round, or a check of a task it already
+  handed over that is still running. Mission HQ delivers that result to the
+  owner by itself when it lands, so the handover IS the completed answer for
+  this agent. Judge whether the handover was made and the brief was clear, not
+  whether the delegated work has finished. The owner asked for a coordinator
+  that delegates, so delegating is the job being done correctly.
+
+  False when the answer only promises future work with no tool call behind it,
+  or restates the plan, or says it will do something itself later.
 - progress_being_made: this round added real, new progress toward the request.
 - looping: the agent repeats the same tool calls or the same answer without
-  new information.
+  new information. Checking the status of a delegated task once is not
+  looping; checking it repeatedly in the same run, with nothing new each time,
+  is.
 - reason: one plain sentence.
 - next_instruction: when not satisfied, one concrete next step for the agent,
   written as an instruction to it. Empty string when satisfied.

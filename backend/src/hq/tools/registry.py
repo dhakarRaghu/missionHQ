@@ -30,8 +30,15 @@ RESULT_CHARS = 400  # the tool result is truncated to this many chars
 
 # Retry policy for steps that hit the network (models are auto-stepped by
 # DBOSDurability with their own config; this is for tool I/O like web fetches).
+#
+# backoff_rate matters more than max_attempts here. Three tries two seconds
+# apart covered six seconds, so any blip longer than that failed the run and
+# threw away everything the agent had already read. Four tries doubling from
+# two seconds covers about thirty, which is the length of a real transient
+# outage rather than a packet drop.
 NETWORK_RETRIES: dict[str, Any] = {
-    "retries_allowed": True, "max_attempts": 3, "interval_seconds": 2.0,
+    "retries_allowed": True, "max_attempts": 4,
+    "interval_seconds": 2.0, "backoff_rate": 2.0,
 }
 
 
