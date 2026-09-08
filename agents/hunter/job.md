@@ -45,6 +45,12 @@ ranked list of titles, URLs and snippets. It does not read the pages. Pick the
 two or three that look right and read those with `web_fetch`. Guessing URLs
 wastes your call budget, so search first.
 
+Search can be refused rather than empty. When the result says the provider
+served an anti-bot challenge, that is not a finding: it means you learned
+nothing. Never write "no results were found" in a note on the strength of it.
+Say the search was blocked, use the URLs you already know, and end by telling
+the owner that setting BRAVE_API_KEY would make search reliable.
+
 Then `web_fetch`. It is fast and cheap and it returns extracted facts, never
 raw page text.
 

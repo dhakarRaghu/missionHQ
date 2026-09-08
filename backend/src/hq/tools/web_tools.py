@@ -15,6 +15,7 @@ import ipaddress
 import logging
 import re
 import socket
+import time
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 import httpx
@@ -22,6 +23,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 
 from hq import llm
+from hq.config import settings
 from hq.obs import emit
 from hq.safety import ActionClass, Trust
 from hq.tools.registry import HQDeps, hq_tool
@@ -172,10 +174,18 @@ async def web_fetch(ctx: RunContext[HQDeps], url: str) -> dict:
 
 # --- search ------------------------------------------------------------------
 
-# DuckDuckGo's no-JavaScript endpoint. Chosen over a paid search API because it
-# needs no key and no quota, and over driving a browser because a browser is a
-# per-machine dependency that has already proved unreliable here.
+# Two providers. Brave is an documented search API with a key and a free
+# monthly quota, and it is the one to use. DuckDuckGo's no-JavaScript endpoint
+# needs no key, but it is a page meant for browsers, not an API: it answers
+# roughly two quick queries and then serves an anti-bot challenge ("Select all
+# squares containing a duck") with HTTP 202. That challenge is a clear "not
+# welcome", so this code detects it and reports it. It never tries to defeat
+# it, for the same reason browser_read refuses LinkedIn.
+_BRAVE_API = "https://api.search.brave.com/res/v1/web/search"
 _DDG_HTML = "https://html.duckduckgo.com/html/"
+_DDG_MIN_INTERVAL_S = 5.0
+_ddg_last_at = 0.0
+_ddg_lock = asyncio.Lock()
 _DDG_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
@@ -202,6 +212,72 @@ def _unwrap(href: str) -> str:
     return href
 
 
+async def _brave_search(query: str) -> list[dict] | str:
+    """Results from the Brave Search API, or a one-line reason it could not."""
+    key = settings().brave_api_key
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(
+            _BRAVE_API,
+            params={"q": query, "count": MAX_RESULTS},
+            headers={"Accept": "application/json", "X-Subscription-Token": key},
+        )
+    if resp.status_code == 429:
+        return "the search quota is used up for now; try again later"
+    if resp.status_code >= 400:
+        return f"search provider answered HTTP {resp.status_code}"
+    web = (resp.json().get("web") or {}).get("results") or []
+    return [
+        {
+            "title": _untag(r.get("title", ""))[:200],
+            "url": r.get("url", ""),
+            "snippet": _untag(r.get("description", ""))[:300],
+        }
+        for r in web
+        if r.get("url")
+    ]
+
+
+async def _ddg_search(query: str) -> list[dict] | str:
+    """Results scraped from DuckDuckGo's no-JavaScript page, or a reason.
+
+    Paced, because the endpoint challenges quick repeat callers. A challenge is
+    reported as itself and never as "no results": an agent told there are no
+    results will write that down as a finding, which would be false.
+    """
+    global _ddg_last_at
+    async with _ddg_lock:
+        gap = _DDG_MIN_INTERVAL_S - (time.monotonic() - _ddg_last_at)
+        if gap > 0:
+            await asyncio.sleep(gap)
+        _ddg_last_at = time.monotonic()
+
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        resp = await client.get(
+            _DDG_HTML, params={"q": query}, headers={"User-Agent": _DDG_UA}
+        )
+    # 202 plus this wording is the anti-bot challenge. raise_for_status would
+    # let it through, and the parse below would find nothing and look like an
+    # honest empty result.
+    if resp.status_code == 202 or "confirm this search was made by a human" in resp.text:
+        return (
+            "the search provider served an anti-bot challenge, so this search "
+            "returned nothing. This is not an empty result: do not record it as "
+            "one. Wait and try once more, or ask the owner to set BRAVE_API_KEY."
+        )
+    if resp.status_code >= 400:
+        return f"search provider answered HTTP {resp.status_code}"
+
+    snippets = _SNIPPET_RE.findall(resp.text)
+    out: list[dict] = []
+    for index, (href, title_html) in enumerate(_RESULT_RE.findall(resp.text)):
+        out.append({
+            "title": _untag(title_html)[:200],
+            "url": _unwrap(href),
+            "snippet": _untag(snippets[index])[:300] if index < len(snippets) else "",
+        })
+    return out
+
+
 @hq_tool(action=ActionClass.READ, trust=Trust.WEB, network=True)
 async def web_search(ctx: RunContext[HQDeps], query: str) -> dict:
     """Search the web and return a ranked list of results: title, url, snippet.
@@ -215,46 +291,38 @@ async def web_search(ctx: RunContext[HQDeps], query: str) -> dict:
     if not query:
         return {"query": query, "provenance": "web", "error": "query must not be empty"}
 
+    provider = "brave" if settings().brave_api_key else "duckduckgo"
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            resp = await client.get(
-                _DDG_HTML, params={"q": query}, headers={"User-Agent": _DDG_UA}
-            )
-        resp.raise_for_status()
+        found = await (_brave_search(query) if provider == "brave" else _ddg_search(query))
     except httpx.HTTPError as exc:
-        # An error result, not a raise: the agent should try another wording or
-        # another source rather than have its whole run fail here.
+        # An error result, not a raise: the agent should try other words or a
+        # known URL rather than have its whole run fail here.
         return {
-            "query": query, "provenance": "web",
+            "query": query, "provenance": "web", "provider": provider,
             "error": f"search failed ({type(exc).__name__}); try different words or a known URL",
         }
 
-    snippets = _SNIPPET_RE.findall(resp.text)
-    results: list[dict] = []
-    for index, (href, title_html) in enumerate(_RESULT_RE.findall(resp.text)):
-        url = _unwrap(href)
-        host = (urlparse(url).hostname or "").lower()
-        if not host or host in BLOCKED_HOSTS:
-            continue
-        results.append({
-            "title": _untag(title_html)[:200],
-            "url": url,
-            "snippet": _untag(snippets[index])[:300] if index < len(snippets) else "",
-        })
-        if len(results) >= MAX_RESULTS:
-            break
+    if isinstance(found, str):  # the provider explained why it could not answer
+        return {"query": query, "provenance": "web", "provider": provider, "error": found}
+
+    results = [
+        r for r in found
+        if (urlparse(r["url"]).hostname or "").lower() not in BLOCKED_HOSTS
+        and urlparse(r["url"]).hostname
+    ][:MAX_RESULTS]
 
     try:
         await emit(
             "web_search", run_id=ctx.deps.run_id, task_id=ctx.deps.task_id,
-            agent=ctx.deps.agent, payload={"query": query[:200], "results": len(results)},
+            agent=ctx.deps.agent,
+            payload={"query": query[:200], "results": len(results), "provider": provider},
         )
     except Exception as emit_exc:  # noqa: BLE001 — evidence only; never fail the tool
         log.warning("web_search emit failed: %s", emit_exc)
 
     if not results:
         return {
-            "query": query, "provenance": "web",
-            "error": "no results; try different words",
+            "query": query, "provenance": "web", "provider": provider,
+            "error": "no results for those words; try different ones",
         }
-    return {"query": query, "provenance": "web", "results": results}
+    return {"query": query, "provenance": "web", "provider": provider, "results": results}

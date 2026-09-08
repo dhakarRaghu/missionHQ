@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     # nothing in this system can do that at all.
     runtime_approval_hours: float = 12.0
 
+    # Brave Search API key. When set, web_search uses Brave, which is a
+    # documented API with a free monthly quota. When empty it falls back to
+    # scraping DuckDuckGo's no-JavaScript page, which answers about two quick
+    # queries and then serves an anti-bot challenge, so searching is unreliable
+    # until this is set. Get one at https://brave.com/search/api/.
+    brave_api_key: str = ""
+
     # Days a finished task stays on the board before the maintenance tick sets
     # it to `archived`. Nothing is deleted; archived tasks are simply left out
     # of the default list. 0 switches archiving off.
