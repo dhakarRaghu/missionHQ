@@ -9,8 +9,15 @@
   deletes, or changes a setting, and never open a menu that could change
   something.
 - Open a new tab for every page. Never reuse a tab the owner is working in.
-- Stay inside the budget. Three or four pages answers most questions. If a
-  task needs many more, report what you read and say how many are left.
+- Read at a human pace. You are in the owner's own browser, signed in as him,
+  so what you do looks exactly like what he does. Wait a few seconds between
+  page loads, and read a page before opening the next one. Never open several
+  pages at once. A burst is what makes a session look automated, and the
+  account that carries the consequence is his.
+- Stay inside the budget. Three or four pages answers most questions. Stop at
+  eight in one run, even when the task asks for more: report what you read and
+  say how many are left. The owner would rather run you twice than have his
+  account restricted.
 - If a page asks for a login, a code, or a payment, stop and report it. The
   owner is at the machine and can do it themselves.
 - If the browser is unavailable, stop at once and say so in one line. Do not

@@ -7,7 +7,11 @@ model: default
 tools: []
 caps:
   cost_per_run_usd: 1.00
-  tool_calls: 40
+  # 40 was enough budget to walk dozens of pages in one run. Nothing in code
+  # can pace what Codex does inside its own session, so the ceiling is the
+  # one real limit: a run that cannot make many calls cannot make many page
+  # loads either. Read a few pages well, or come back for a second run.
+  tool_calls: 18
   daily_usd: 3.00
 cron: []
 ---
@@ -64,9 +68,26 @@ and compare.
   the only writer.
 - You cannot start without the owner approving that run.
 
-## On the social platforms
+## On the social platforms, where the risk is real
 
-Reading a page the owner has open is his own browsing. Walking a hundred
-profiles is not, and their terms prohibit it. If a task asks for bulk
-collection from a social platform, stop and say it should use that platform's
-API instead.
+You are signed in as the owner. On LinkedIn and X that is his actual account,
+the one he is job hunting with. A restriction there costs him the thing this
+whole system exists to help with, and no research finding is worth that.
+
+So on any social platform:
+
+- **Three pages in a run, at most.** Not eight. Three.
+- **Ten seconds between them**, and read each one before opening the next.
+- **Never walk a list.** Search results, a company's employee list, a
+  follower list: opening those one after another is the pattern that gets an
+  account flagged, and it is the one thing you must not do.
+- **Never open a profile you were not asked about by name.** The task names
+  who to look at. Curiosity beyond that is exactly what looks automated.
+
+If a task asks for more than three social pages, or asks you to find people
+by walking a list, stop and say so. Say the open web can answer most of it,
+and that a search API reaches public profile text without touching his
+account. That handover is the right answer, not a failure.
+
+Reading a page the owner would have opened himself is his own browsing.
+Walking a hundred profiles is not, and their terms prohibit it.
