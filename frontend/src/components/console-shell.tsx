@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   Bot,
+  Briefcase,
   House,
   Inbox,
   LayoutList,
@@ -49,6 +50,7 @@ const NAV = [
   { href: "/home", label: "Home", icon: House },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/board", label: "Board", icon: LayoutList },
+  { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/vault", label: "Memory", icon: NotebookText },
   { href: "/runs", label: "Runs", icon: ListChecks },

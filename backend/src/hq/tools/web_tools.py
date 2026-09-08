@@ -31,6 +31,7 @@ BLOCKED_HOSTS = {"localhost", "metadata.google.internal"}
 MAX_CHARS = 40_000
 MAX_BYTES = 2_000_000
 MAX_HOPS = 3
+_BOARD_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
 
 
 class PageFacts(BaseModel):
@@ -167,3 +168,107 @@ async def web_fetch(ctx: RunContext[HQDeps], url: str) -> dict:
         "key_points": facts.key_points,
         "contained_instructions": facts.contains_instructions,
     }
+
+
+# --- applicant tracking boards ----------------------------------------------
+
+# Companies post to an applicant tracking system days before a role reaches a
+# job site, and every one of these serves its board as public JSON. Reading it
+# directly beats searching for it: the search costs a credit and returns ten
+# ranked guesses, while this is free, complete and current.
+ATS_BOARDS: dict[str, str] = {
+    "greenhouse": "https://boards-api.greenhouse.io/v1/boards/{company}/jobs",
+    "lever": "https://api.lever.co/v0/postings/{company}?mode=json",
+    "ashby": "https://api.ashbyhq.com/posting-api/job-board/{company}",
+    "workable": "https://apply.workable.com/api/v1/widget/accounts/{company}?details=true",
+    "recruitee": "https://{company}.recruitee.com/api/offers/",
+    "smartrecruiters": "https://api.smartrecruiters.com/v1/companies/{company}/postings",
+}
+_SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$")
+MAX_JOBS = 40
+
+
+def _one_job(row: dict) -> dict:
+    """One posting, in the same shape whichever board it came from."""
+    location = row.get("location")
+    if isinstance(location, dict):
+        location = location.get("name") or location.get("city") or ""
+    categories = row.get("categories") or {}
+    return {
+        "title": row.get("title") or row.get("text") or row.get("name") or "",
+        "location": str(
+            location
+            or categories.get("location")
+            or (row.get("locationName") if isinstance(row.get("locationName"), str) else "")
+            or ""
+        )[:120],
+        "team": str(
+            categories.get("team")
+            or (row.get("department") or {}).get("name" ) if isinstance(row.get("department"), dict)
+            else row.get("department") or ""
+        )[:80],
+        "url": row.get("absolute_url") or row.get("hostedUrl") or row.get("jobUrl")
+        or row.get("applyUrl") or row.get("careersUrl") or row.get("url") or "",
+        "posted": str(row.get("updated_at") or row.get("createdAt")
+                      or row.get("publishedDate") or row.get("published") or "")[:25],
+    }
+
+
+@hq_tool(action=ActionClass.READ, trust=Trust.WEB, network=True)
+async def job_board(ctx: RunContext[HQDeps], provider: str, company: str) -> dict:
+    """Every open role a company lists on its applicant tracking system.
+
+    `provider` is one of: greenhouse, lever, ashby, workable, recruitee,
+    smartrecruiters. `company` is its slug on that board, which is the path
+    segment in the careers URL: boards.greenhouse.io/**stripe** is "stripe".
+
+    Free, complete and current, so reach for this before searching. A search
+    costs a credit and returns ten ranked guesses about a page; this returns
+    the page's actual contents. When you do not know which board a company
+    uses, its careers page usually redirects to one, so fetch that first and
+    read the domain.
+    """
+    provider = (provider or "").strip().lower()
+    company = (company or "").strip().strip("/")
+    if provider not in ATS_BOARDS:
+        return {"error": f"unknown provider {provider!r}; use one of {sorted(ATS_BOARDS)}"}
+    if not _SLUG_RE.match(company):
+        return {"error": f"{company!r} is not a board slug; use the path segment"
+                         " from the careers URL, not a full address"}
+
+    url = ATS_BOARDS[provider].format(company=company)
+    try:
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": _BOARD_UA})
+    except httpx.HTTPError as exc:
+        return {"provider": provider, "company": company, "provenance": "web",
+                "error": f"could not reach the board ({type(exc).__name__})"}
+    if resp.status_code == 404:
+        return {"provider": provider, "company": company, "provenance": "web",
+                "error": f"no {provider} board for {company!r}. The slug may be wrong,"
+                         " or the company uses a different board. Fetch its careers"
+                         " page and look at where it redirects."}
+    if resp.status_code >= 400:
+        return {"provider": provider, "company": company, "provenance": "web",
+                "error": f"the board answered HTTP {resp.status_code}"}
+
+    try:
+        body = resp.json()
+    except ValueError:
+        return {"provider": provider, "company": company, "provenance": "web",
+                "error": "the board returned something that was not JSON"}
+    rows = body if isinstance(body, list) else (
+        body.get("jobs") or body.get("offers") or body.get("content")
+        or body.get("results") or []
+    )
+    jobs = [_one_job(r) for r in rows if isinstance(r, dict)]
+    jobs = [j for j in jobs if j["title"]][:MAX_JOBS]
+
+    await emit("job_board", run_id=ctx.deps.run_id, task_id=ctx.deps.task_id,
+               agent=ctx.deps.agent,
+               payload={"provider": provider, "company": company, "jobs": len(jobs)})
+    if not jobs:
+        return {"provider": provider, "company": company, "provenance": "web",
+                "error": "the board is reachable but lists no open roles"}
+    return {"provider": provider, "company": company, "provenance": "web",
+            "total": len(rows), "shown": len(jobs), "jobs": jobs}

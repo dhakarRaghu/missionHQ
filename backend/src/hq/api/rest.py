@@ -118,6 +118,65 @@ async def list_task_events(task_id: str) -> list[dict]:
         " WHERE task_id = %s ORDER BY seq", (task_id,))
 
 
+JOB_SELECT = (
+    "SELECT id::text, company, role, url, source, location, remote_policy,"
+    " experience_band, compensation, stack, fit_score, fit_bucket, status,"
+    " why_fit, next_step, notes, referral, seen_count, first_seen, last_seen"
+    " FROM hq.jobs"
+)
+
+
+@router.get("/jobs", operation_id="listJobs")
+async def list_jobs(status: str | None = None, limit: int = 200) -> list[dict]:
+    """The job ledger. Everything hunter verified, strongest fit first."""
+    if status:
+        return await db.fetch(
+            f"{JOB_SELECT} WHERE status = %s ORDER BY fit_score DESC, last_seen DESC"
+            " LIMIT %s", (status, limit))
+    return await db.fetch(
+        f"{JOB_SELECT} ORDER BY fit_score DESC, last_seen DESC LIMIT %s", (limit,))
+
+
+class JobPatch(BaseModel):
+    """What the owner may change from the dashboard. Everything else is
+    hunter's finding and stays as recorded."""
+
+    status: str | None = None
+    next_step: str | None = None
+    notes: str | None = None
+    referral: str | None = None
+
+
+JOB_STATUSES = ("seen", "shortlisted", "applied", "interviewing", "offer",
+                "rejected", "closed")
+
+
+@router.patch("/jobs/{job_id}", operation_id="updateJob")
+async def update_job(job_id: str, body: JobPatch) -> dict:
+    """Move a role along the pipeline, or add a note to it."""
+    sets, params = [], []
+    if body.status is not None:
+        if body.status not in JOB_STATUSES:
+            raise HTTPException(400, f"status must be one of {list(JOB_STATUSES)}")
+        sets.append("status = %s")
+        params.append(body.status)
+    for field in ("next_step", "notes", "referral"):
+        value = getattr(body, field)
+        if value is not None:
+            sets.append(f"{field} = %s")
+            params.append(value[:2000])
+    if not sets:
+        raise HTTPException(400, "nothing to update")
+    sets.append("updated_at = now()")
+    params.append(job_id)
+    rows = await db.fetch(
+        f"UPDATE hq.jobs SET {', '.join(sets)} WHERE id = %s RETURNING id::text", tuple(params))
+    if not rows:
+        raise HTTPException(404, "no such job")
+    await engagement.record_owner_action("web", "update_job")
+    return {"ok": True}
+
+
 @router.get("/runs", operation_id="listRuns")
 async def list_runs(limit: int = 50) -> list[dict]:
     return await db.fetch(

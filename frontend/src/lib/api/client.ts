@@ -4,6 +4,7 @@ import type {
   AgentInfo,
   ChatMessage,
   ChatTask,
+  Job,
   ChatTicket,
   ChatSession,
   Costs,
@@ -104,6 +105,7 @@ export const qk = {
   runs: (limit?: number) => ["runs", limit ?? 50] as const,
   runDetail: (id: string) => ["run-detail", id] as const,
   tickets: (status: string) => ["tickets", status] as const,
+  jobs: (status?: string) => ["jobs", status ?? "all"] as const,
   agents: ["agents"] as const,
   /** Prefixed by qk.agents so an agents invalidation refreshes it too. */
   agentDrafts: ["agents", "drafts"] as const,
@@ -153,6 +155,20 @@ export const api = {
   /** `status` may list several states: "approved,denied". */
   tickets: (status = "pending", limit?: number) =>
     request<Ticket[]>(`/tickets${query({ status, limit })}`),
+  jobs: (status?: string) => request<Job[]>(`/jobs${query({ status })}`),
+  updateJob: (
+    id: string,
+    patch: {
+      status?: string;
+      next_step?: string;
+      notes?: string;
+      referral?: string;
+    },
+  ) =>
+    request<{ ok: boolean }>(`/jobs/${seg(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
   cancelTask: (id: string) =>
     request<{ cancelled: boolean; reason?: string }>(
       `/tasks/${seg(id)}/cancel`,

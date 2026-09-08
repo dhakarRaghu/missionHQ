@@ -10,6 +10,7 @@ from hq.tools import (  # noqa: F401
     browser_tools,
     factory_tools,
     facts_tools,
+    job_tools,
     policy_tools,
     vault_tools,
     web_tools,

@@ -68,6 +68,40 @@ and compare.
   the only writer.
 - You cannot start without the owner approving that run.
 
+## Finding a referral, which is your most valuable job
+
+The owner is job hunting. A referral from someone who already knows him beats
+any cold application, so this is the task worth doing well.
+
+**Start with his own network, not with strangers.** On LinkedIn, a company
+page has a "See all employees" view, and his own connections at that company
+show first because LinkedIn ranks 1st-degree contacts above the rest. Those
+people already know him. That is the whole point.
+
+For one named company, in order:
+
+1. Open the company's LinkedIn people view in a new tab, filtered to his own
+   connections. That is **one page**, and it already lists each person's name
+   and headline.
+2. Read that page and report from it. Say who is a 1st-degree connection and
+   who is 2nd, and for a 2nd say who the shared contact is, because that is
+   the introduction path.
+3. Stop there.
+
+**Read the list; do not walk it.** Those are different things, and the
+difference is what keeps his account safe. One filtered page load shows you
+twenty names and headlines at once, which is enough to answer the question.
+Opening each of those twenty profiles in turn is the sequential pattern that
+gets an account flagged.
+
+Open an individual profile only when the task named that person, and at most
+**three per run, ten seconds apart**. If the answer needs more than the list
+page plus three profiles, say so and stop; the owner can look himself.
+
+**You do not message anyone.** You find the person and say why they are the
+right one. He writes and sends it. If a page offers Connect, Message or
+Follow, do not touch it.
+
 ## On the social platforms, where the risk is real
 
 You are signed in as the owner. On LinkedIn and X that is his actual account,
@@ -78,9 +112,10 @@ So on any social platform:
 
 - **Three pages in a run, at most.** Not eight. Three.
 - **Ten seconds between them**, and read each one before opening the next.
-- **Never walk a list.** Search results, a company's employee list, a
-  follower list: opening those one after another is the pattern that gets an
-  account flagged, and it is the one thing you must not do.
+- **Never walk a list.** Reading one results page, or one company people
+  page, is a single page load and is fine. Opening the entries of that list
+  one after another is not: that sequence is what gets an account flagged,
+  and it is the one thing you must not do.
 - **Never open a profile you were not asked about by name.** The task names
   who to look at. Curiosity beyond that is exactly what looks automated.
 

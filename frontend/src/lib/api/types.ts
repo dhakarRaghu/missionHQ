@@ -296,3 +296,40 @@ export interface ChatTask {
   status: TaskStatus;
   updated_at: string;
 }
+
+/** One role in the job ledger. Hunter records it; the owner moves it along. */
+export const JOB_STATUSES = [
+  "seen",
+  "shortlisted",
+  "applied",
+  "interviewing",
+  "offer",
+  "rejected",
+  "closed",
+] as const;
+
+export type JobStatus = (typeof JOB_STATUSES)[number];
+
+export interface Job {
+  id: string;
+  company: string;
+  role: string;
+  url: string;
+  source: string;
+  location: string;
+  remote_policy: string;
+  experience_band: string;
+  compensation: string;
+  stack: string;
+  /** 0-10 from hunter's rubric; why_fit is the sentence justifying it. */
+  fit_score: number;
+  fit_bucket: "strong" | "decent" | "stretch";
+  status: JobStatus;
+  why_fit: string;
+  next_step: string;
+  notes: string;
+  referral: string;
+  seen_count: number;
+  first_seen: string;
+  last_seen: string;
+}

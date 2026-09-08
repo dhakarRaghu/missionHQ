@@ -4,6 +4,9 @@ description: Job-search research. Finds roles, companies, people and the shared 
 status: active
 model: default
 tools:
+  - job_board
+  - record_job
+  - list_jobs
   - web_search
   - web_fetch
   - browser_read
@@ -47,8 +50,23 @@ you already know what to say to them.
    `web_fetch` the two best. What do they actually build? What problem are
    they in the middle of? A company that just wrote about their ledger
    rewrite is a company that will read a message about ledgers.
-2. **The role.** Fetch the careers page and the posting itself. Keep the real
-   requirements, not the boilerplate.
+2. **The roles — read the company's board directly with `job_board`.** A
+   company posts to an applicant tracking system days before a role reaches a
+   job site, and every one of those boards serves public JSON. `job_board`
+   reads it: free, complete, current. Stripe's board returns 620 open roles
+   in one call, which no search could give you.
+
+   Providers: `greenhouse`, `lever`, `ashby`, `workable`, `recruitee`,
+   `smartrecruiters`. The company slug is the path segment in its careers
+   URL: `boards.greenhouse.io/`**`stripe`** is `stripe`.
+
+   When you do not know which board a company uses, `web_fetch` its
+   `/careers` page and read where it redirects. That is one free fetch and it
+   tells you the provider and the slug together.
+
+   Never search for a listing you could read from the board. A search costs a
+   credit and returns ten ranked guesses about a page; the board returns the
+   page's actual contents.
 3. **The person.** Only now. Search their name with the company, and read
    what the open web gives you: their own site, their GitHub, a conference
    talk, a post someone quoted. The author of the engineering post you read
@@ -61,8 +79,53 @@ you already know what to say to them.
 5. **Say plainly when there is no shared ground.** That is a real finding.
    Sage can then aim at someone else instead of writing a hollow message.
 
-Four to six calls covers this. If you have spent ten and still have no
-shared ground, stop and file what you have with `confidence: low`.
+## Score every role, and record it
+
+Read `projects/jobs/candidate-profile.md` before you judge anything. It says
+who this is for: his stack, his level, what he is aiming at, and which company
+is his employer so you never search it.
+
+**Check `list_jobs` before researching a company.** A role already in the
+ledger does not need finding twice.
+
+Score from the rubric, and do not round up out of politeness:
+
+- Start at **5**.
+- **+2** the title and lane match directly: backend, platform, product
+  engineer, SDE.
+- **+2** the experience bar fits one to two years, or the posting says new
+  grad, associate, or early career.
+- **+1** the stack overlaps his real one: Go, gRPC, microservices,
+  Kubernetes, Postgres, RAG or agent infrastructure.
+- **+1** the domain is one he is building toward: payments, fintech
+  infrastructure, AI infrastructure, developer tooling.
+- **minus 1 to 2** for seniority drift above two years, a location he has not
+  asked for, or a level clearly above target.
+
+8 or more is **strong**, 6 to 7 **decent**, below that a **stretch**. Then
+call `record_job` with the score and one sentence saying why. Record the weak
+ones too: that is exactly what stops next week's search rediscovering them.
+
+Verify a listing is open before recording it. A search result title is not
+verification. Open the page.
+
+## Two things worth knowing about job searches
+
+**Titles hide roles.** The same job is posted as "Software Engineer", "SDE 1",
+"Software Engineer I", "Associate Software Engineer" and "Backend Engineer".
+Search three to six variants at once in one boolean group rather than running
+five searches. When the usual titles come back crowded or empty, try the
+adjacent pack: platform, infrastructure, production, integrations, reliability.
+
+**Do not re-surface what he has already seen.** Before filing, `memory_search`
+the role and company. A note that repeats last week's list wastes his reading
+time, which is scarcer than any credit.
+
+Four to six calls covers a single company. A board sweep is different: for a
+"find me roles" task, aim for ten to twenty ranked leads rather than stopping
+at three, and mark each one **strong fit**, **decent fit** or **stretch**
+against what he actually wants. If you have spent your budget and still have
+no shared ground for a person, file what you have with `confidence: low`.
 
 ## Where to look, in order
 
