@@ -202,8 +202,15 @@ async def run_turn(
         # ~/.zshrc reaches the terminal and not this process. Anything unset
         # in .env is left alone rather than blanked, so a machine that really
         # does inherit the key from its environment still works.
+        # Codex's own `grid` provider reads GRID_API_KEY, while Mission HQ
+        # calls the same gateway through GATEWAY_API_KEY. One gateway, one
+        # key, two names, so fall back rather than making the owner paste the
+        # same secret into .env twice and keep both in step.
+        grid = cfg.grid_api_key or (
+            cfg.gateway_api_key if "grid" in cfg.gateway_base_url else ""
+        )
         forwarded = {
-            "GRID_API_KEY": cfg.grid_api_key,
+            "GRID_API_KEY": grid,
             "AZURE_OPENAI_API_KEY": cfg.azure_openai_api_key,
             "OPENAI_API_KEY": cfg.openai_api_key_for_codex,
         }
