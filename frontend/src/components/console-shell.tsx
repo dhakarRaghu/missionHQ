@@ -34,7 +34,11 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useSseStatus } from "@/hooks/use-hq-events";
 import { useHasToken } from "@/components/features/auth/use-has-token";
 import { api, qk } from "@/lib/api/client";
@@ -60,7 +64,9 @@ function isActive(pathname: string, href: string) {
 
 /** Label of the section the user is in. Drives the header title. */
 function currentLabel(pathname: string): string {
-  return NAV.find((item) => isActive(pathname, item.href))?.label ?? "Mission HQ";
+  return (
+    NAV.find((item) => isActive(pathname, item.href))?.label ?? "Mission HQ"
+  );
 }
 
 /**
@@ -308,10 +314,14 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
             fillsHeight ? "overflow-hidden" : "overflow-y-auto",
           )}
         >
+          {/* A full-height view scrolls inside its own panes, so generous page
+              padding only shrinks the pane. On a 13-inch screen the header bar,
+              this padding and the old page title together cost about an eighth
+              of the usable height, which is why chat felt cramped. */}
           <div
             className={cn(
-              "mx-auto flex w-full max-w-7xl min-w-0 flex-col p-5 lg:p-7",
-              fillsHeight ? "h-full" : "min-h-full",
+              "mx-auto flex w-full max-w-7xl min-w-0 flex-col",
+              fillsHeight ? "h-full p-3 lg:p-4" : "min-h-full p-5 lg:p-7",
             )}
           >
             {children}

@@ -1,16 +1,11 @@
 import { Suspense } from "react";
 
 import { VaultView } from "@/components/features/vault/vault-view";
-import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function VaultPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <PageHeader
-        title="Memory"
-        description="What your agents have learned and remember between runs. You can edit any of it; every write is one git commit, and search covers words and meaning."
-      />
       {/* useSearchParams (the ?path= deep link) needs a Suspense boundary. */}
       <Suspense
         fallback={

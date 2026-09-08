@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { AgentEditor } from "@/components/features/agents/agent-editor/agent-editor";
-import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 
 export default function AgentConfigPage() {
@@ -20,10 +19,6 @@ export default function AgentConfigPage() {
           Back to {name}
         </Link>
       </Button>
-      <PageHeader
-        title={`Configure ${name}`}
-        description="Edit agents/<name>/job.md and policy.md. A saved job.md loads after a restart; policy.md applies on the next run."
-      />
       <AgentEditor name={name} />
     </>
   );
