@@ -65,6 +65,10 @@ class ModelEntry:
     input_per_mtok: float
     output_per_mtok: float
     settings: dict | None = None  # optional per-model request settings from models.yaml
+    # Other entry names to try, in order, when this one answers with a
+    # ModelAPIError (a timeout, a connection drop, a gateway 5xx). One flaky
+    # gateway model must not be able to stop the whole system.
+    fallback: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,6 +116,7 @@ class ModelRegistry:
                 input_per_mtok=float(cfg["input_per_mtok"]),
                 output_per_mtok=float(cfg["output_per_mtok"]),
                 settings=cfg.get("settings"),
+                fallback=tuple(cfg.get("fallback", ())),
             )
             for name, cfg in raw["models"].items()
         }
@@ -211,6 +216,29 @@ class ModelRegistry:
         return int(cap_usd / price * 1_000_000)
 
     def _build(self, entry: ModelEntry) -> Model:
+        """The entry's model, wrapped in its fallback chain when it declares one."""
+        primary = self._build_one(entry)
+        if not entry.fallback:
+            return primary
+        from pydantic_ai.models.fallback import FallbackModel
+
+        spares: list[Model] = []
+        for name in entry.fallback:
+            if name == entry.name or name not in self.entries:
+                log.warning("model %r: bad fallback %r, skipping", entry.name, name)
+                continue
+            try:
+                # _build_one, not _build: a fallback never carries its own
+                # chain, so a cycle in models.yaml cannot recurse.
+                spares.append(self._build_one(self.entries[name]))
+            except Exception as exc:  # noqa: BLE001 — a missing spare is not fatal
+                log.warning("model %r: fallback %r unavailable: %s", entry.name, name, exc)
+        if not spares:
+            return primary
+        log.info("model %r falls back to %s", entry.name, list(entry.fallback))
+        return FallbackModel(primary, *spares)
+
+    def _build_one(self, entry: ModelEntry) -> Model:
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openai import OpenAIProvider
 

@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     # nothing in this system can do that at all.
     runtime_approval_hours: float = 12.0
 
+    # Days a finished task stays on the board before the maintenance tick sets
+    # it to `archived`. Nothing is deleted; archived tasks are simply left out
+    # of the default list. 0 switches archiving off.
+    board_archive_days: int = 14
+
     # --- headed browser (browser_read) --------------------------------------
     # Off by default: it opens a real window, so it must be a deliberate choice.
     browser_enabled: bool = False

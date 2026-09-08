@@ -39,8 +39,11 @@ async def list_tasks(status: str | None = None, limit: int = 100) -> list[dict]:
         return await db.fetch(
             f"{TASK_SELECT} WHERE t.status = %s ORDER BY t.updated_at DESC LIMIT %s",
             (status, limit))
+    # Archived tasks are left out unless asked for by name: they are finished
+    # work the owner has stopped looking at, and the board is for what is live.
     return await db.fetch(
-        f"{TASK_SELECT} ORDER BY t.updated_at DESC LIMIT %s", (limit,))
+        f"{TASK_SELECT} WHERE t.status <> 'archived' ORDER BY t.updated_at DESC LIMIT %s",
+        (limit,))
 
 
 class CreateTaskBody(BaseModel):

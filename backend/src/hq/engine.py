@@ -482,6 +482,7 @@ async def _watchdog_tick(scheduled: datetime, context: Any) -> None:
     await _catch_up_missed(scheduled)
     await _deadman_check(scheduled)
     await _cap_overrunning_tasks()
+    await _archive_old_tasks()
 
     # dead-man ping (external check catches a dead process; this proves liveness)
     url = settings().healthchecks_ping_url
@@ -501,6 +502,31 @@ async def _watchdog_tick(scheduled: datetime, context: Any) -> None:
         wf_id = await runner.expire_ticket_step(row["id"], "watchdog")
         if wf_id:
             await DBOS.send_async(wf_id, f"{row['id']}:expired", topic=runner.APPROVAL_TOPIC)
+
+
+async def _archive_old_tasks() -> None:
+    """Retire finished tasks the owner has stopped looking at.
+
+    The board keeps every task forever, so the Done column grows without
+    limit and the columns that need attention get harder to find. A task that
+    finished more than ``board_archive_days`` ago is set to ``archived``,
+    which the task list leaves out. Nothing is deleted: the row, its runs and
+    its events all stay, and asking for status=archived still returns it.
+    """
+    days = settings().board_archive_days
+    if days <= 0:  # 0 switches archiving off
+        return
+    rows = await db.fetch(
+        "UPDATE hq.tasks SET status = 'archived', updated_at = now()"
+        " WHERE status IN ('done', 'failed')"
+        "   AND updated_at < now() - make_interval(days => %s)"
+        " RETURNING id::text",
+        (days,),
+    )
+    if rows:
+        # An event, not a log line: engine records what it did where the
+        # activity feed can show it.
+        await obs.emit("board.archived", payload={"count": len(rows), "older_than_days": days})
 
 
 async def _cap_overrunning_tasks() -> None:

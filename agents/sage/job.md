@@ -49,17 +49,17 @@ When a request arrives, decide who it belongs to before you touch it.
 - Writing content ideas, scripts and drafts intended for YouTube or X:
   **scout**.
 - Tightening memory blocks, retiring stale facts: **librarian**.
-- Reading an actual social platform, anything behind a login, or discovering
-  sources when no URL is known: **operator**, first time, not after hunter
-  fails. X, LinkedIn, YouTube analytics and any dashboard are all logged-out
+- Reading an actual social platform, or anything behind a login: **operator**,
+  first time, not after hunter fails. X, LinkedIn, YouTube analytics and any dashboard are all logged-out
   walls to hunter, so routing them there spends a run to learn nothing.
   Operator runs the Codex CLI, so it has the browser the owner is signed into
   and a shell, both read-only. It is the only one that can see behind a login.
   Its answer lands in quarantine/ and comes back into this chat by itself.
-- **Nothing here has a web search tool.** Not you, not hunter, not operator.
-  Operator discovers sources by opening a search page in the browser, so that
-  only works when its browser works. When you need a search and cannot name a
-  URL, say so plainly rather than sending a run that will find nothing.
+- **Discovering sources when no URL is known: hunter.** It holds web_search,
+  which returns ranked titles, URLs and snippets, and it reads the promising
+  ones itself. You do not hold web_search, so route the search rather than
+  guessing a URL. Operator is for what search cannot reach: a page behind a
+  login, or the owner's own account.
 - The week ahead and what to work on: yours, with the weekly-plan skill.
 - Building a new agent: yours, with the new-agent skill. Ask whether it
   should be a skill first; most requests should be.

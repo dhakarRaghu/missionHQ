@@ -166,6 +166,15 @@ class AgentSpec(BaseModel):
                 )
 
 
+# How many times one tool may answer with ModelRetry in a run before Pydantic AI
+# gives up and fails the whole run. The default is 1, which is too tight: a
+# ModelRetry here means "call me again with corrected arguments", and an agent
+# that makes two separate corrections in a long run is working normally, not
+# looping. Three runs failed on `vault_write exceeded max retries count of 1`
+# in one week. The ledger, not this number, is what stops a genuine loop.
+TOOL_MAX_RETRIES = 4
+
+
 def compute_job_hash(agent_dir: Path) -> str:
     """Blocking git call. Run once per agent at bootstrap, never on the loop."""
     try:
@@ -392,7 +401,7 @@ def build_agent(spec: AgentSpec, durability) -> Agent[HQDeps, str | DeferredTool
         policy_tools.append("propose_policy")
     tool_names.extend(t for t in policy_tools if t not in spec.base_tool_names())
     tools = [
-        Tool(t.fn, requires_approval=t.requires_approval)
+        Tool(t.fn, requires_approval=t.requires_approval, max_retries=TOOL_MAX_RETRIES)
         for t in get_tools(tool_names)
     ]
 
