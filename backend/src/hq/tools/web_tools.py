@@ -295,12 +295,25 @@ def _one_job(row: dict, provider: str = "", company: str = "") -> dict:
     }
 
 
-def _filter_jobs(jobs: list[dict], query: str, location: str) -> list[dict]:
-    """Filter the complete board before applying the response-size limit."""
+def _filter_jobs(
+    jobs: list[dict], query: str, location: str, exclude: str = ""
+) -> list[dict]:
+    """Filter the complete board before applying the response-size limit.
+
+    `exclude` matches the TITLE only, never the description. A backend role at
+    a bank will mention compliance in its description and should still be
+    found; a role titled "Corporate Risk and Compliance" should not. Matching
+    the description would drop the first and keep neither.
+    """
     terms = [term.strip().casefold() for term in query.split("|") if term.strip()]
     places = [term.strip().casefold() for term in location.split("|") if term.strip()]
+    banned = [term.strip().casefold() for term in exclude.split("|") if term.strip()]
     out = []
     for job in jobs:
+        if banned:
+            title = str(job.get("title", "")).casefold()
+            if any(term in title for term in banned):
+                continue
         haystack = " ".join(
             str(job.get(k, "")) for k in ("title", "team", "description")
         ).casefold()
@@ -320,6 +333,7 @@ async def job_board(
     company: str,
     query: str = "",
     location: str = "",
+    exclude: str = "",
     limit: int = MAX_JOBS,
     offset: int = 0,
 ) -> dict:
@@ -337,8 +351,10 @@ async def job_board(
 
     On a large board, pass pipe-separated alternatives in `query`, for example
     `software engineer|backend engineer|forward deployed|AI engineer`. Pass
-    pipe-separated cities or countries in `location`. Filtering happens before
-    pagination. `limit` is capped at 100 and `offset` reads the next page.
+    pipe-separated cities or countries in `location`. Pass titles to drop in
+    `exclude`, which matches the title only, so a backend role whose
+    description mentions compliance survives while one titled "Risk and
+    Compliance" does not. Filtering happens before pagination. `limit` is capped at 100 and `offset` reads the next page.
     """
     provider = (provider or "").strip().lower()
     company = (company or "").strip().strip("/")
@@ -402,7 +418,7 @@ async def job_board(
     )
     jobs = [_one_job(r, provider, company) for r in rows if isinstance(r, dict)]
     jobs = [j for j in jobs if j["title"]]
-    jobs = _filter_jobs(jobs, query, location)
+    jobs = _filter_jobs(jobs, query, location, exclude)
     matched = len(jobs)
     safe_limit = max(1, min(int(limit), MAX_JOB_RESULTS))
     safe_offset = max(0, int(offset))
@@ -432,3 +448,110 @@ async def job_board(
         "shown": len(jobs),
         "jobs": jobs,
     }
+
+
+# --- company discovery -------------------------------------------------------
+
+YC_API = "https://api.ycombinator.com/v0.1/companies"
+HN_API = "https://hn.algolia.com/api/v1/search"
+MAX_COMPANIES = 25
+
+
+async def _resolve_board(client: httpx.AsyncClient, name: str) -> dict:
+    """The ATS board a company posts on, found by trying its likely slug.
+
+    Most companies use their own name: boards.greenhouse.io/postman,
+    jobs.lever.co/cred. Trying that costs one HEAD-ish GET per provider and
+    saves the alternative, which is guessing a slug in a prompt and getting a
+    404 that looks like "this company is not hiring".
+    """
+    slug = re.sub(r"[^a-z0-9]", "", name.lower())
+    if not slug:
+        return {}
+    for provider, template in ATS_BOARDS.items():
+        if provider in ("workable", "recruitee", "smartrecruiters"):
+            continue  # these need an account id that is rarely the plain name
+        try:
+            resp = await client.get(
+                template.format(company=slug), headers={"User-Agent": _BOARD_UA}, timeout=10
+            )
+            if resp.status_code != 200:
+                continue
+            body = resp.json()
+            rows = body.get("jobs") if isinstance(body, dict) else body
+            if rows:
+                return {"provider": provider, "slug": slug, "open_roles": len(rows)}
+        except (httpx.HTTPError, ValueError):
+            continue
+    return {}
+
+
+@hq_tool(action=ActionClass.READ, trust=Trust.WEB, network=True)
+async def discover_companies(
+    ctx: RunContext[HQDeps],
+    region: str = "India",
+    industry: str = "",
+    batch: str = "",
+    resolve_boards: bool = True,
+) -> dict:
+    """Find companies worth looking at, from Y Combinator's public directory.
+
+    Free, no key, and current: this is the live directory rather than a list
+    someone wrote down once. `region` is a place like "India"; `industry` is
+    a YC industry like "Fintech" or "B2B"; `batch` narrows to one YC batch
+    such as "W25" for the newest companies.
+
+    With `resolve_boards` on, each company is also checked against the
+    applicant tracking boards, so you get the provider and slug to pass to
+    `job_board` rather than guessing one. A company with no board found is
+    still returned, with no board field: it may hire through its own site.
+
+    Use this before a sweep to decide WHERE to look. Everything it returns is
+    public directory data, not a recommendation.
+    """
+    params: dict[str, str] = {}
+    if region.strip():
+        params["regions"] = region.strip()
+    if industry.strip():
+        params["industry"] = industry.strip()
+    if batch.strip():
+        params["batch"] = batch.strip()
+
+    try:
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+            resp = await client.get(YC_API, params=params, headers={"User-Agent": _BOARD_UA})
+            if resp.status_code >= 400:
+                return {"provenance": "web",
+                        "error": f"the YC directory answered HTTP {resp.status_code}"}
+            rows = (resp.json() or {}).get("companies") or []
+            out: list[dict] = []
+            for row in rows[:MAX_COMPANIES]:
+                company = {
+                    "name": str(row.get("name", ""))[:80],
+                    "what": str(row.get("oneLiner") or "")[:160],
+                    "location": ", ".join(row.get("locations") or [])[:80],
+                    "team_size": row.get("teamSize"),
+                    "industries": (row.get("industries") or [])[:4],
+                    "batch": row.get("batch", ""),
+                }
+                if company["name"]:
+                    out.append(company)
+            if resolve_boards and out:
+                found = await asyncio.gather(
+                    *[_resolve_board(client, c["name"]) for c in out]
+                )
+                for company, board in zip(out, found, strict=True):
+                    if board:
+                        company["board"] = board
+    except httpx.HTTPError as exc:
+        return {"provenance": "web",
+                "error": f"could not reach the YC directory ({type(exc).__name__})"}
+
+    await emit("discover_companies", run_id=ctx.deps.run_id, task_id=ctx.deps.task_id,
+               agent=ctx.deps.agent,
+               payload={"region": region, "industry": industry, "found": len(out)})
+    if not out:
+        return {"provenance": "web", "error": "no companies matched; try a wider region"}
+    with_board = sum(1 for c in out if c.get("board"))
+    return {"provenance": "web", "region": region, "industry": industry,
+            "found": len(out), "with_board": with_board, "companies": out}

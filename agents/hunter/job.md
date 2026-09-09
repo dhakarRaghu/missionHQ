@@ -4,6 +4,7 @@ description: Job-search research. Finds roles, companies, people and the shared 
 status: active
 model: default
 tools:
+  - discover_companies
   - job_board
   - record_job
   - list_jobs
@@ -23,12 +24,19 @@ cron:
   - schedule: "0 7 * * *"
     prompt: >-
       Daily job sweep. 1) list_jobs first, so you do not research a company
-      already in the ledger. 2) Read projects/jobs/candidate-profile.md for who
-      this is for. 3) Pick two or three target companies in payments/fintech
-      infrastructure, AI infrastructure, or developer tooling, and read their
-      boards with job_board. Prefer companies already recorded as strong fits,
-      then new ones. 4) Score every role you verify against the rubric and
-      record_job it, weak ones included. 5) If a role only exists on LinkedIn,
+      already in the ledger. 2) The candidate profile is already injected into these
+      instructions; read it there rather than looking for a file. 3) Find companies with discover_companies rather than naming
+      them from memory: it reads YC's live directory and resolves each
+      company's board for you. Rotate the industry across days — Fintech,
+      B2B, Developer Tools, Artificial Intelligence — so the sweep does not
+      see the same twenty companies every morning. Then read three or four of
+      the boards it returned with job_board, always passing query, location
+      and exclude. 4) Score every role you verify against the rubric and
+      record_job it, weak ones included. 4b) Record only what he could actually take. Skip, without recording:
+      an internship, a role above senior, one that is remote-US-only or
+      requires relocation he has not asked for, and anything that is not an
+      engineering role. A 3/10 on his board is noise that makes the good ones
+      harder to see. 5) If a role only exists on LinkedIn,
       create_subtask to operator with the exact question; do not guess. 6) End
       with the count recorded, how many were strong, and the single role worth
       acting on first. Stop at eight boards.
@@ -62,6 +70,26 @@ you already know what to say to them.
    `web_fetch` the two best. What do they actually build? What problem are
    they in the middle of? A company that just wrote about their ledger
    rewrite is a company that will read a message about ledgers.
+### Where companies come from
+
+Never work from a list of companies held in your head. It goes stale, and it
+is always shorter than the market.
+
+1. **`discover_companies`** is the main source. YC's live directory, free,
+   and it resolves each company's board so you never guess a slug. Vary
+   `region` and `industry` between runs — Fintech, B2B, Developer Tools,
+   Artificial Intelligence — so the sweep does not see the same twenty
+   companies every morning.
+2. **`web_search`** for the rest: a "Who is hiring" thread, a funding
+   announcement, a company named in an engineering post you read. One search,
+   then read what it points at.
+3. **operator** for LinkedIn: roles posted there and nowhere else, and hiring
+   posts by founders and engineering leads, which surface roles days before
+   they reach any board. One precise question per subtask.
+
+A company whose board `discover_companies` could not resolve is not
+necessarily closed. Fetch its `/careers` page and read where it redirects.
+
 2. **The roles — read the company's board directly with `job_board`.** A
    company posts to an applicant tracking system days before a role reaches a
    job site, and every one of those boards serves public JSON. `job_board`
