@@ -16,13 +16,17 @@ models:
     model: kimi-latest    # 256k context
     input_per_mtok: 0.60
     output_per_mtok: 2.50
-    # kimi-latest is a reasoning model. At default effort it can spend 8k+
-    # hidden reasoning tokens on a 4k prompt and stall for minutes; "low"
-    # answers in tens of seconds with the same quality for our tasks.
+    # kimi-latest is a reasoning model. "low" answered in tens of seconds and
+    # was the default while cost was the constraint. On 2026-09-10 the owner
+    # said the constraint is value, not money: "use the model with high or
+    # extra high efforts ... i want value don't care about the money for now".
+    # High effort spends thousands of hidden reasoning tokens per call, so the
+    # per-call timeout goes up with it, and max_tokens rises so a long note or
+    # a big tool argument is not cut off mid-sentence.
     settings:
-      reasoning_effort: low
-      max_tokens: 4000
-      timeout_s: 90
+      reasoning_effort: high
+      max_tokens: 16000
+      timeout_s: 300
     # When the gateway answers kimi with a timeout or a connection error,
     # try these instead rather than failing the run. Ten of twenty-three run
     # failures in the week to 2026-09-08 were exactly that, and every role
@@ -38,8 +42,8 @@ models:
     input_per_mtok: 3.00
     output_per_mtok: 15.00
     settings:
-      max_tokens: 4000
-      timeout_s: 90
+      max_tokens: 16000
+      timeout_s: 300
 
   glm:
     provider: gateway
@@ -47,8 +51,8 @@ models:
     input_per_mtok: 0.60
     output_per_mtok: 2.20
     settings:
-      max_tokens: 4000
-      timeout_s: 90
+      max_tokens: 16000
+      timeout_s: 300
 
 # Roles are what agents declare. All three point at one model for now; split
 # them (deep -> a stronger model, cheap -> a faster one) by editing these three

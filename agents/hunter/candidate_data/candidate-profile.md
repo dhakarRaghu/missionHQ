@@ -1,6 +1,6 @@
 # Candidate profile
 
-Updated: 2026-09-09
+Updated: 2026-09-10
 
 Source: owner-provided resume at `candidate_data/raghvendra_resume.pdf`, plus
 the owner's stated target roles. Use this file for job discovery and fit
@@ -22,7 +22,9 @@ Prioritize entry-level and level-one roles in these three lanes:
 Treat equivalent titles as relevant when the work and seniority match. Prefer
 0-2 years of required experience. A role asking for 2-3 years may be a stretch;
 roles clearly requiring senior, staff, lead, principal, manager, or founding
-engineer scope are not targets.
+engineer scope are not targets. **A floor of three years or more is out**, and
+`record_job` files such a role as closed by itself — see "Confirmed
+preferences" below.
 
 ## Current position and employer exclusion
 
@@ -103,12 +105,26 @@ Negative signals:
   little software engineering.
 - Roles at the current employer, Juspay.
 
+## Confirmed preferences
+
+Stated by the owner on 2026-09-09. These are hard rules, and the scoring
+rubric in job.md applies them:
+
+- **Seniority ceiling: under three years.** He is not eligible for roles whose
+  experience floor is 3+ years, most of all at large companies, where the bar
+  is a recruiter screen. Enforced in `record_job`.
+- **Compensation target: 25 LPA or better.** Not a hard gate — most postings
+  publish no number — but it steers the score: +1 at or above, -2 for a
+  stated package clearly below. Always fill `compensation`; estimate with the
+  basis when the posting is silent.
+- **Work mode: hybrid, on-site and remote are all acceptable.** Never reject
+  or mark down a role for its mode. Geography still matters: Bengaluru,
+  elsewhere in India, or remote he can take from India. Remote-US-only is out.
+
 ## Preferences still unknown
 
 Do not invent or use these as hard filters until the owner confirms them:
 
-- Remote, hybrid, and on-site preference.
 - Willingness to relocate beyond Bengaluru.
-- Compensation target.
 - Work authorization and visa-sponsorship requirements outside India.
 - Preferred company size or industry exclusions.

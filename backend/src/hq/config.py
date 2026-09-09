@@ -13,9 +13,10 @@ REPO_DIR = BACKEND_DIR.parent
 
 
 class Caps(BaseModel):
-    cost_per_run_usd: float = 0.50
-    tool_calls: int = 40
-    daily_usd: float = 2.00
+    # Defaults tripled 2026-09-10; every job.md sets its own explicitly anyway.
+    cost_per_run_usd: float = 1.50
+    tool_calls: int = 80
+    daily_usd: float = 6.00
 
 
 class Settings(BaseSettings):
@@ -34,7 +35,10 @@ class Settings(BaseSettings):
     # and never reaches prompts, tool args, results, or the vault.  # comma-separated owner/repo list, e.g. "me/app,me/site"
 
     cron_tz: str = "Asia/Kolkata"
-    daily_spend_cap_usd: float = 5.00
+    # 5.00 while cost was the constraint; tripled 2026-09-10 when the owner said
+    # value is ("don't care about the money for now"). The per-agent caps in
+    # each job.md went up by the same factor.
+    daily_spend_cap_usd: float = 15.00
     notifications_per_day: int = 5
     api_bearer_token: str = ""
     # Tailscale Serve identity that may skip the bearer token. Empty = never.

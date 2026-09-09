@@ -41,8 +41,11 @@ from hq.job_pipeline import (
 )
 from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, scan
 
-TASK_TIMEOUT_S = 20 * 60   # a cron/board run may not exceed 20 minutes
-CHAT_TIMEOUT_S = 6 * 60    # a chat turn may not exceed 6 minutes (approval waits excluded: they block in recv)
+# Doubled 2026-09-10 alongside high reasoning effort and tripled call caps: a
+# run that thinks harder and calls more tools needs the wall clock to match, or
+# the cap becomes the new failure mode. _cap_overrunning_tasks keys off this.
+TASK_TIMEOUT_S = 40 * 60   # a cron/board run may not exceed 40 minutes
+CHAT_TIMEOUT_S = 12 * 60   # a chat turn may not exceed 12 minutes (approval waits excluded: they block in recv)
 
 # The two system schedules that are not "every minute". Each is named in TWO
 # places — the cron entry in _register_cron and the catch-up window in
@@ -53,7 +56,8 @@ CHAT_TIMEOUT_S = 6 * 60    # a chat turn may not exceed 6 minutes (approval wait
 # The digest lands half an hour before sage's daily note, because it is the
 # outlet for what the notification cap held back and the note then summarises
 # the day that includes it. The whole nightly chain is:
-#   21:00 hunter -> 21:30 scout -> 22:00 digest -> 22:30 sage note
+#   21:00 hunter -> 21:15 sage discovery -> 21:30 scout -> 22:00 digest
+#   -> 22:30 sage note
 #   -> 23:30 librarian -> 03:00 reindex
 # Change an agent's cron in its job.md and these two may need to move with it.
 DIGEST_HOUR, DIGEST_MINUTE = 22, 0
@@ -195,10 +199,17 @@ def bootstrap_pre_launch() -> None:
         models=llm.registry().all_instances(),
         # pydantic-ai's StepConfig type has not yet caught up with DBOS's
         # supported timeout_seconds option. DBOS.step accepts it at runtime.
+        # 2026-09-10: the gateway key allows FIVE parallel requests, and every
+        # model in the fallback chain shares that key. A 429 here is not a
+        # flaky model, it is a full slot table, and the right response is to
+        # wait for a slot — not to try two more models on the same key within
+        # two seconds, which is what happened: kimi, sonnet and glm all 429'd
+        # inside one attempt and the run died in under five seconds. Four
+        # attempts from five seconds, doubling, waits up to ~75s for a slot.
         model_step_config=cast(StepConfig, {
-            "retries_allowed": True, "max_attempts": 2,
-            "interval_seconds": 2.0, "backoff_rate": 2.0,
-            "timeout_seconds": 300.0,
+            "retries_allowed": True, "max_attempts": 4,
+            "interval_seconds": 5.0, "backoff_rate": 2.0,
+            "timeout_seconds": 600.0,  # one model request at high effort; was 300
         }),
     )
     for name, spec in scan().items():
@@ -208,10 +219,15 @@ def bootstrap_pre_launch() -> None:
 
 async def bootstrap_post_launch() -> None:
     """Queues + schedules. Both need a launched executor."""
-    # tasks=2 so one run waiting on approval cannot block every other task;
-    # vault writes stay serialized by memory._write_lock.
-    _queues["tasks"] = await DBOS.register_queue_async("tasks", worker_concurrency=2)
-    _queues["chat"] = await DBOS.register_queue_async("chat", worker_concurrency=2)
+    # One task worker, not two, since 2026-09-10. The gateway key permits five
+    # parallel requests in total, shared with Codex and the chat queue, and a
+    # single agent run holds one slot itself plus a ledger or guard call beside
+    # it. Two task workers and one chat turn already filled the table and the
+    # overflow died as 429s. The nightly chain is spread across 2.5 hours and a
+    # task may run 40 minutes, so serial is not a bottleneck; a run waiting on
+    # approval blocks in recv without holding a model slot.
+    _queues["tasks"] = await DBOS.register_queue_async("tasks", worker_concurrency=1)
+    _queues["chat"] = await DBOS.register_queue_async("chat", worker_concurrency=1)
     await DBOS.apply_schedules_async(_schedules)
     wanted = {s["schedule_name"] for s in _schedules}
     for sched in await DBOS.list_schedules_async(schedule_name_prefix="cron_"):

@@ -49,7 +49,8 @@ APPROVAL_TOPIC = "approval"
 APPROVAL_TIMEOUT_S = 86400  # 24h total; after that the run is blocked
 APPROVAL_POLL_S = 60        # one recv round; the ticket table is re-read each round
 MAX_RESUME_ROUNDS = 5       # hard stop against approval/answer loops
-REQUEST_LIMIT = 30          # model requests per run
+REQUEST_LIMIT = 90          # model requests per run (x3 with the caps, 2026-09-10 —
+                            # at 30 it became the ceiling before tool_calls did)
 
 LEDGER_MODEL = "cheap"          # registry role for the ledger judge
 LEDGER_MIN_COST_USD = 0.01      # runs cheaper than this are not the failure mode
@@ -57,6 +58,14 @@ LEDGER_MAX_CONTINUATIONS = 3    # ledger-driven "keep going" re-runs per execute
 STALL_LIMIT = 2                 # stalled verdicts before the run blocks itself
 LEDGER_OUTPUT_CHARS = 2000
 LEDGER_ARGS_CHARS = 80
+
+# A round whose tool calls include one of these has handed the work to another
+# agent, and that IS the completed answer for this run: Mission HQ delivers the
+# result to the owner by itself when it lands. Decided in code rather than left
+# to the ledger judge, which was told the same thing in prose and still ruled
+# "only promises future results" on a sage run, then blocked it as stalled two
+# polls later — over a task that could not start until sage's own turn ended.
+HANDOVER_TOOLS = frozenset({"create_subtask", "start_job_search"})
 
 GUARD_MODEL = "cheap"           # registry role for the guardrail judge
 GUARD_POLICY_CHARS = 6000       # policy.md text handed to the guard
@@ -707,7 +716,17 @@ async def execute(
         if (usage.tool_calls or 0) == 0 or agent_cost < LEDGER_MIN_COST_USD:
             return await finish(output, "done", messages_json=messages_json)
 
-        check = await _ledger_check_step(prompt, output, _tool_call_lines(result.new_messages()))
+        tool_lines = _tool_call_lines(result.new_messages())
+        if any(line.split("(", 1)[0] in HANDOVER_TOOLS for line in tool_lines):
+            await emit_step("ledger", run_id=deps.run_id, task_id=deps.task_id,
+                            agent=spec.name, payload={
+                                "satisfied": True, "progress": True, "looping": False,
+                                "reason": "handed over to another agent this round",
+                                "next_instruction": "", "stall": stall, "via": "handover",
+                            })
+            return await finish(output, "done", messages_json=messages_json)
+
+        check = await _ledger_check_step(prompt, output, tool_lines)
         ledger_in += int(check["input_tokens"])
         ledger_out += int(check["output_tokens"])
         ledger_cost += llm.registry().cost_usd(

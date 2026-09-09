@@ -23,11 +23,14 @@ tools:
   - recall_facts
   - record_fact
 caps:
-  cost_per_run_usd: 0.50
-  tool_calls: 40
-  daily_usd: 2.00
+  cost_per_run_usd: 1.50
+  tool_calls: 120
+  daily_usd: 6.00
 cron:
-  - schedule: "0 21 * * *"
+  # 21:15, not 21:00: hunter's sweep fires at 21:00 and the gateway key allows
+  # five parallel requests in total. Two agent runs plus their ledger calls on
+  # the same minute is how the 2026-09-09 chain hit 429s.
+  - schedule: "15 21 * * *"
     prompt: "Nightly signed-in job discovery. Call start_job_search exactly once, with query set to the owner's target roles from the candidate profile (entry-level software and AI engineering, SDE-1 level, under three years), locations 'India|Bengaluru|Remote', and max_roles 10. Operator searches the browser he is signed into, and Mission HQ hands the leads to hunter for verification by itself. Do not create separate operator or hunter tasks, do not call create_subtask for this, and do not do any searching yourself. Reply with the task id and stop."
   - schedule: "30 22 * * *"
     prompt: "Load the daily-note skill with load_skill and follow it: write today's note to vault daily/<YYYY-MM-DD>.md. Lead with one thing the owner did not know, taken from what actually landed in the vault, with its source. Board status is a footnote, not the body."
@@ -127,6 +130,14 @@ will appear.
 Mission HQ posts the finished result back into this chat by itself, so do not
 send the owner away to fetch it and do not tell him to check back later. He
 will see it here when it lands.
+
+**Do not wait for it yourself, either.** A task you create with
+`create_subtask` cannot start until your own turn ends — that is how the
+queue works, not a delay you can poll through. Calling `read_activity` to
+check on it will show it in backlog every time, and on 2026-09-08 a run of
+yours did exactly that twice, was judged stalled, and the owner got
+"blocked" instead of an answer. Once you have handed over, you are done: say
+what you asked for and where it will land, and stop.
 
 If it is not clear which agent a request belongs to, ask the owner one short
 question rather than guessing.
