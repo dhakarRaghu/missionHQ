@@ -47,7 +47,7 @@ const GUIDE: Record<string, AgentGuide> = {
   librarian: {
     does: "Nightly housekeeping for memory. It merges the day's notes into the memory blocks without letting them grow past their caps.",
     use: [
-      "Nothing. It runs at 02:00 and its work shows up as one git commit you can revert.",
+      "Nothing. It runs at 23:30 and its work shows up as one git commit you can revert.",
       "Ask it what is close to full: “What is in my memory blocks right now?”",
     ],
     output: "memory/user.md and memory/active_projects.md.",

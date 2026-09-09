@@ -17,14 +17,17 @@ what keeps it safe, and how to set it up from an empty machine.
 You talk to one agent, **sage**. It answers what it can and hands the rest to
 whoever owns that work. You never need to know which agent to ask.
 
-A normal day looks like this, with nothing from you:
+A normal day looks like this, with nothing from you. It all runs in the
+evening, after your own day is done, so the work is waiting when you wake up:
 
 | Time | What happens |
 |---|---|
-| 02:00 | The librarian folds yesterday's notes into your long-term memory, without letting it grow past its size cap |
-| 08:00 | Scout reads the newest research and adds ranked content ideas |
-| 09:00 Mondays | Planner reads the board and your last seven daily notes and writes one page on the week ahead |
-| 21:00 | Sage writes the day's note: what the agents did, anything you filed, one suggestion, and one question for you |
+| 21:00 | Hunter sweeps for new roles, verifies them, and scores them into the job ledger |
+| 21:30 | Scout reads the newest research and adds ranked content ideas |
+| 22:00 | The digest goes out: everything the notification cap held back during the day |
+| 22:30 | Sage writes the day's note: what the agents did, anything you filed, one suggestion, and one question for you |
+| 23:30 | The librarian folds the day's notes into your long-term memory, without letting it grow past its size cap |
+| 03:00 | The vault search index is rebuilt, so notes you edited by hand in Obsidian become searchable |
 | Sunday 20:00 | Sage writes the weekly review |
 
 And when you do want something:
@@ -50,10 +53,10 @@ Four run in-process. One more runs outside it, through an agent CLI.
 
 | Agent | What it is for | Runs |
 |---|---|---|
-| **sage** | Your second brain and the one you talk to. Daily notes, weekly reviews, answers from the vault, and handing work to the others | 21:00 daily, Sunday 20:00, and whenever you chat |
-| **librarian** | Keeps memory small and current. Merges the day's notes into the shared memory blocks and retires what is no longer true | 02:00 daily |
-| **hunter** | Reads the web and writes what it found. The only agent with web access, and it can write nowhere but `quarantine/` | On request |
-| **scout** | Content for YouTube and X. Turns hunter's research into ideas and drafts. Never posts without your approval | 08:00 daily |
+| **sage** | Your second brain and the one you talk to. Daily notes, weekly reviews, answers from the vault, and handing work to the others | 22:30 daily, Sunday 20:00, and whenever you chat |
+| **librarian** | Keeps memory small and current. Merges the day's notes into the shared memory blocks and retires what is no longer true | 23:30 daily |
+| **hunter** | Reads the web and writes what it found. The only agent with web access, and it can write nowhere but `quarantine/` | 21:00 daily, and on request |
+| **scout** | Content for YouTube and X. Turns hunter's research into ideas and drafts. Never posts without your approval | 21:30 daily |
 | **operator** | Everything the Codex CLI can reach: the browser *you are signed into*, web search, the shell, files. Reads only, and needs your approval | On request |
 
 ### Agent or skill?

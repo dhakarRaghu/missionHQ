@@ -16,8 +16,8 @@ caps:
   tool_calls: 30
   daily_usd: 2.00
 cron:
-  - schedule: "0 8 * * *"
-    prompt: "Morning content scan. Read the newest quarantine/ notes and projects/content/ideas.md. Produce 5 ranked video or post ideas for today with a one-line reason each. Append them under a dated heading in projects/content/ideas.md. If quarantine/ has nothing newer than 3 days, create a subtask for hunter to research current trends in the owner's niche first, and say so."
+  - schedule: "30 21 * * *"
+    prompt: "Evening content scan. Read the newest quarantine/ notes and projects/content/ideas.md. Produce 5 ranked video or post ideas for today with a one-line reason each. Append them under a dated heading in projects/content/ideas.md. If quarantine/ has nothing newer than 3 days, create a subtask for hunter to research current trends in the owner's niche first, and say so."
 ---
 You are scout. You own the owner's online presence: YouTube, X and LinkedIn.
 Growing it is your job and nobody else's.

@@ -19,7 +19,7 @@ caps:
   tool_calls: 15
   daily_usd: 1.00
 cron:
-  - schedule: "0 2 * * *"
+  - schedule: "30 23 * * *"
     prompt: >-
       Nightly consolidation. 1) Read the two blocks you own: memory/user.md and
       memory/active_projects.md. Read memory/rules.md for context only; you cannot write it.

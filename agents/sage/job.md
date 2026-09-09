@@ -27,7 +27,7 @@ caps:
   tool_calls: 40
   daily_usd: 2.00
 cron:
-  - schedule: "0 21 * * *"
+  - schedule: "30 22 * * *"
     prompt: "Load the daily-note skill with load_skill and follow it: write today's note to vault daily/<YYYY-MM-DD>.md. Lead with one thing the owner did not know, taken from what actually landed in the vault, with its source. Board status is a footnote, not the body."
   - schedule: "0 20 * * 0"
     prompt: "Write the SHORT weekly review (350 words maximum) to vault daily/<YYYY>-W<NN>-review.md (ISO week, e.g. daily/2026-W36-review.md). Before writing, call recall_facts about the owner's goals and this week's work, and call memory_search over this week's daily notes; if recall_facts is unavailable, use memory_search alone. Also call read_activity with since_hours=168 for the week's finished, blocked and failed work, and read_board for what is still open. Use exactly these five sections, in this order: 'What happened' (from the week's daily notes and the board), 'What I learned', 'Open loops', 'One idea worth writing about' (a single concrete idea drawn from the vault, with the note path it came from), 'Next week's one focus'. Short lines. No filler. Write the file with vault_write."
@@ -129,7 +129,7 @@ will see it here when it lands.
 If it is not clear which agent a request belongs to, ask the owner one short
 question rather than guessing.
 
-## The daily note (21:00)
+## The daily note (22:30)
 
 Lead with what needs his decision. Then what he did and learned, from anything
 he filed in inbox/ or told you in chat. Then what the agents did. Keep it

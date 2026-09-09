@@ -42,6 +42,21 @@ from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, scan
 TASK_TIMEOUT_S = 20 * 60   # a cron/board run may not exceed 20 minutes
 CHAT_TIMEOUT_S = 6 * 60    # a chat turn may not exceed 6 minutes (approval waits excluded: they block in recv)
 
+# The two system schedules that are not "every minute". Each is named in TWO
+# places — the cron entry in _register_cron and the catch-up window in
+# _catch_up_missed — and a literal in one that did not match the literal in the
+# other would make the catch-up either fire early every tick or never fire at
+# all. They are constants so the two cannot drift.
+#
+# The digest lands half an hour before sage's daily note, because it is the
+# outlet for what the notification cap held back and the note then summarises
+# the day that includes it. The whole nightly chain is:
+#   21:00 hunter -> 21:30 scout -> 22:00 digest -> 22:30 sage note
+#   -> 23:30 librarian -> 03:00 reindex
+# Change an agent's cron in its job.md and these two may need to move with it.
+DIGEST_HOUR, DIGEST_MINUTE = 22, 0
+REINDEX_HOUR = 3
+
 AGENTS: dict[str, tuple[AgentSpec, Agent[runner.HQDeps, str | DeferredToolRequests]]] = {}
 _queues: dict[str, Queue] = {}
 _schedules: list[ScheduleInput] = []  # built pre-launch, applied post-launch
@@ -493,11 +508,11 @@ def _register_cron() -> None:
     # Evening digest: the outlet for everything the notification cap held back.
     # It is not a budgeted 'notify' itself.
     _schedules.append({"schedule_name": "daily_digest", "workflow_fn": daily_digest,
-                       "schedule": "30 20 * * *", "cron_timezone": tz})
+                       "schedule": f"{DIGEST_MINUTE} {DIGEST_HOUR} * * *", "cron_timezone": tz})
     # Nightly full reindex: index-on-write covers agent writes; this catches
     # notes the owner edits by hand (Obsidian) that the app never sees.
     _schedules.append({"schedule_name": "reindex_vault", "workflow_fn": reindex_vault,
-                       "schedule": "0 3 * * *", "cron_timezone": tz})
+                       "schedule": f"0 {REINDEX_HOUR} * * *", "cron_timezone": tz})
     for sched in _schedules:
         get_dbos_func_name(sched["workflow_fn"])  # raises unless registered as a workflow
 
@@ -915,15 +930,16 @@ async def _catch_up_missed(now_utc: datetime) -> None:
                            brief=entry.prompt, source="cron", dedup_key=key)
             await runner.emit_step("cron.caught_up", agent=agent_name, payload={"slot": key})
 
-    # digest: 20:30 local, at most once per date (send_digest dedups by date)
-    if now.hour * 60 + now.minute >= 20 * 60 + 30:
+    # digest: DIGEST_HOUR:DIGEST_MINUTE local, at most once per date
+    # (send_digest dedups by date)
+    if now.hour * 60 + now.minute >= DIGEST_HOUR * 60 + DIGEST_MINUTE:
         row = await db.fetchone(
             "SELECT 1 FROM hq.outbox WHERE idempotency_key = %s", (f"digest:{now:%Y-%m-%d}",))
         if row is None:
             await digest.send_digest(now=now_utc)
 
-    # reindex: 03:00 local, once per date
-    if now.hour >= 3:
+    # reindex: REINDEX_HOUR:00 local, once per date
+    if now.hour >= REINDEX_HOUR:
         row = await db.fetchone("SELECT value FROM hq.control WHERE key = 'reindex:last_date'")
         if not row or row["value"] != f"{now:%Y-%m-%d}":
             n = await memory.reindex_all()

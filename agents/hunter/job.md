@@ -22,7 +22,7 @@ caps:
   tool_calls: 60
   daily_usd: 2.00
 cron:
-  - schedule: "0 7 * * *"
+  - schedule: "0 21 * * *"
     prompt: >-
       Daily job sweep. 1) list_jobs first, so you do not research a company
       already in the ledger. 2) The candidate profile is already injected into these
@@ -30,7 +30,7 @@ cron:
       them from memory: it reads YC's live directory and resolves each
       company's board for you. Rotate the industry across days — Fintech,
       B2B, Developer Tools, Artificial Intelligence — so the sweep does not
-      see the same twenty companies every morning. Then read three or four of
+      see the same twenty companies every night. Then read three or four of
       the boards it returned with job_board, always passing query, location
       and exclude. 4) Score and record every verified role in an acceptable
       lane and location, including weak fits so it is not rediscovered. Skip,
@@ -80,7 +80,7 @@ is always shorter than the market.
    and it resolves each company's board so you never guess a slug. Vary
    `region` and `industry` between runs — Fintech, B2B, Developer Tools,
    Artificial Intelligence — so the sweep does not see the same twenty
-   companies every morning.
+   companies every night.
 2. **`web_search`** for the rest: a "Who is hiring" thread, a funding
    announcement, a company named in an engineering post you read. One search,
    then read what it points at.

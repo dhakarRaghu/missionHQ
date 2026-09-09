@@ -1,6 +1,6 @@
 # Daily note
 
-Use at 21:00, or when the owner asks what happened today. Write to
+Use at 22:30, or when the owner asks what happened today. Write to
 `daily/<YYYY-MM-DD>.md`. Under 300 words.
 
 ## What this note is for, and what it was doing wrong
