@@ -41,7 +41,14 @@ case "${1:-status}" in
   install)
     need_build
     mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/data/logs"
-    cp "$SRC" "$DST"
+    # The plist is a template: it must not name a user, because this repo is
+    # cloned onto other machines. Fill it in for this one at install time.
+    NPM="$(command -v npm || true)"
+    if [ -z "$NPM" ]; then
+      echo "npm is not on PATH. Install Node 20+ first." >&2
+      exit 1
+    fi
+    sed -e "s|__REPO__|$ROOT|g" -e "s|__NODE_BIN__|$(dirname "$NPM")|g" "$SRC" > "$DST"
     launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
     launchctl bootstrap "$DOMAIN" "$DST"
     echo "installed and started $LABEL"

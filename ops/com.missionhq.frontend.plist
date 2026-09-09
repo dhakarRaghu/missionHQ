@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template. `ops/frontend.sh install` substitutes __REPO__ and __NODE_BIN__ for
+  this machine and writes the result to ~/Library/LaunchAgents.
+  Nothing here may name a user: the repo is cloned onto other machines. This
+  file once carried one machine's absolute paths, and every other machine got
+  `last exit code = 78: EX_CONFIG` from a WorkingDirectory that did not exist.
+-->
 <plist version="1.0">
 <dict>
   <key>Label</key>
@@ -22,13 +29,15 @@
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/frontend</string>
+  <string>__REPO__/frontend</string>
 
   <key>EnvironmentVariables</key>
   <dict>
-    <!-- npm/node come from Homebrew or nvm; both are on this PATH. -->
+    <!-- launchd starts with almost no PATH, and node comes from Homebrew on
+         one machine and nvm on another. __NODE_BIN__ is wherever `npm`
+         actually resolved at install time, so both work without editing. -->
     <key>PATH</key>
-    <string>/Users/raghvendra.dhakar/.nvm/versions/node/v20.19.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>__NODE_BIN__:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>NODE_ENV</key>
     <string>production</string>
     <!-- Server-only. next.config.ts rewrites /api/* here. Caddy also routes
@@ -48,8 +57,8 @@
   <integer>15</integer>
 
   <key>StandardOutPath</key>
-  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/frontend.log</string>
+  <string>__REPO__/data/logs/frontend.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/frontend.log</string>
+  <string>__REPO__/data/logs/frontend.log</string>
 </dict>
 </plist>
