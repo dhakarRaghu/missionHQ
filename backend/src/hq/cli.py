@@ -242,8 +242,9 @@ async def cmd_health() -> int:
         runs = await db.fetch(
             "SELECT count(*) FILTER (WHERE outcome = 'done') AS done, count(*) AS total"
             " FROM hq.runs WHERE started_at > now() - interval '7 days'"
-            # A run the owner stopped on purpose is not a failed run.
-            "   AND coalesce(outcome, '') <> 'cancelled'"
+            # Neither a run the owner stopped on purpose, nor one closed by
+            # the watchdog because its process went away, is a failed run.
+            "   AND coalesce(outcome, '') NOT IN ('cancelled', 'abandoned')"
         )
         done, total = runs[0]["done"] or 0, runs[0]["total"] or 0
         pct = (done / total * 100) if total else 100.0

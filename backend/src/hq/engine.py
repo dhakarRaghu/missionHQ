@@ -151,11 +151,23 @@ def bootstrap_pre_launch() -> None:
     # after several attempts", where several meant two. Four attempts doubling
     # from two seconds covers about thirty. Past that, FallbackModel moves the
     # request to another model rather than retrying the same failing one.
+    #
+    # max_attempts is 2, not 4, because FallbackModel already tries three
+    # models inside one attempt. Four attempts meant twelve model calls before
+    # giving up, and a scout run spent 2h45m doing exactly that: three fast
+    # tool calls, then two and three quarter hours of silence, then "exceeded
+    # its maximum of 4 retries". Retrying was not the missing piece; retrying
+    # too patiently was the failure.
+    #
+    # timeout_seconds is the hard stop the per-request timeout could not give.
+    # httpx resets its read timeout on every byte, so a gateway that trickles
+    # output never trips it. This one is wall-clock and cannot be reset.
     durability = DBOSDurability(
         models=llm.registry().all_instances(),
         model_step_config={
-            "retries_allowed": True, "max_attempts": 4,
+            "retries_allowed": True, "max_attempts": 2,
             "interval_seconds": 2.0, "backoff_rate": 2.0,
+            "timeout_seconds": 300.0,
         },
     )
     for name, spec in scan().items():
@@ -553,6 +565,20 @@ async def _cap_overrunning_tasks() -> None:
         " AND updated_at < now() - make_interval(secs => %s)",
         (TASK_TIMEOUT_S * 2,),
     )
+    # A run row whose workflow died without closing it stays open for ever, so
+    # the Runs page shows work that stopped hours ago and `hq.cli health`
+    # counts it against the success rate. Two were open here: one from a
+    # cancelled workflow that could not run its own bookkeeping, one from a
+    # process that went away. Close them on the same tick that closes tasks.
+    orphans = await db.fetch(
+        "UPDATE hq.runs SET outcome = 'abandoned', ended_at = now()"
+        " WHERE ended_at IS NULL AND started_at < now() - make_interval(secs => %s)"
+        " RETURNING id::text",
+        (TASK_TIMEOUT_S * 2,),
+    )
+    if orphans:
+        await obs.emit("runs.abandoned", payload={"count": len(orphans)})
+
     for row in stale:
         await board.apply(
             row["id"],

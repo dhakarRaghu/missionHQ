@@ -22,7 +22,7 @@ models:
     settings:
       reasoning_effort: low
       max_tokens: 4000
-      timeout_s: 180
+      timeout_s: 90
     # When the gateway answers kimi with a timeout or a connection error,
     # try these instead rather than failing the run. Ten of twenty-three run
     # failures in the week to 2026-09-08 were exactly that, and every role
@@ -39,7 +39,7 @@ models:
     output_per_mtok: 15.00
     settings:
       max_tokens: 4000
-      timeout_s: 180
+      timeout_s: 90
 
   glm:
     provider: gateway
@@ -48,7 +48,7 @@ models:
     output_per_mtok: 2.20
     settings:
       max_tokens: 4000
-      timeout_s: 180
+      timeout_s: 90
 
 # Roles are what agents declare. All three point at one model for now; split
 # them (deep -> a stronger model, cheap -> a faster one) by editing these three
