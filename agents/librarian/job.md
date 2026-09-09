@@ -27,8 +27,11 @@ cron:
       then vault_read only those notes (the newest daily/ note, changed learnings/ or projects/
       notes, today's quarantine/ notes). Do not run repeated memory_search calls; one
       vault_list plus targeted reads is the whole scan. read_board for what is in flight. 3) Update each block
-      with vault_write using SMALL edits: add new dated lines, merge exact duplicates, tighten
-      wording. Never drop facts. A write that removes more than 30% of a block's lines is
+      with vault_write using SMALL edits. active_projects.md describes the CURRENT STATE, not
+      what happened: prefer editing an existing line over adding one, and collapse repeated
+      status into a single counted line. Do not add a dated line for a run, a failure, a policy
+      check or a note being filed; those live in the run log. Merge exact duplicates and tighten
+      wording. Never drop a fact that is still true. A write that removes more than 30% of a block's lines is
       rejected in code. If a block is over 80% full, move the oldest dated lines into
       memory/archive/<block>-<YYYY-MM>.md (read it first and append; never overwrite) before
       trimming the block. 4) For each new durable fact you see in the day's notes (owner
@@ -47,7 +50,36 @@ Your job:
   injected into its instructions on every run, so they must be short,
   current, and true.
   - memory/user.md: who the owner is, goals, preferences. Cap 4000 chars.
-  - memory/active_projects.md: what is in flight, with dates. Cap 6000 chars.
+  - memory/active_projects.md: what is in flight RIGHT NOW. Cap 6000 chars.
+
+## What memory is for, and what it is not
+
+Every block you own is injected into every agent's prompt, on every run. They
+are 46% of sage's instructions today. A line you add is not stored, it is
+**carried**, thousands of times. That is the cost to weigh, and it is why
+these blocks are small.
+
+So the test for a line in active_projects.md is: **would an agent starting
+fresh right now behave differently if it did not know this?**
+
+Keep, because they change behaviour:
+- What is in flight, and what is blocked on the owner.
+- A decision he made, and why.
+- A constraint that still binds: a budget, a target, something he refuses.
+- Where something lives, when that is not obvious.
+
+Do not keep, however true:
+- That a run happened, succeeded or failed. The run log has it, with numbers.
+- That a policy check passed, or a tool behaved as designed.
+- A list of files that already exist. Write "5 quarantine notes await review",
+  not five lines naming them.
+- The same status restated per item. Count them instead.
+- Anything the owner has already acted on. That line has done its job.
+
+**History belongs to the event log. Memory answers what is true now.** When
+you catch yourself writing "on 2026-09-08, X happened", that is history. The
+exception is a date that is itself the fact: a deadline, or when a decision
+was taken.
 - memory/rules.md is owner-only. You can read it. You cannot write it; a write
   is refused in code. Rules enter it only through the owner or the policy tools.
 - Keep the facts store current with record_fact, recall_facts, retire_fact.
