@@ -214,6 +214,7 @@ class JobPatch(BaseModel):
 JOB_STATUSES = (
     "seen",
     "shortlisted",
+    "referral",
     "applied",
     "interviewing",
     "offer",
@@ -249,7 +250,10 @@ async def update_job(job_id: str, body: JobPatch) -> dict:
     await engagement.record_owner_action("web", "update_job")
     await emit("job.updated", payload={"job_id": job_id, "fields": sets[:-1]})
     referral_task = None
-    if body.status == "shortlisted":
+    # Either move says the same thing: this one is worth a real approach, so go
+    # and find the person. Shortlisting is the usual route; dragging straight
+    # to Referral is the owner skipping a step, not asking for less.
+    if body.status in {"shortlisted", "referral"}:
         referral_task = await _hunt_referral(job_id)
     return {"ok": True, "referral_task_id": referral_task}
 

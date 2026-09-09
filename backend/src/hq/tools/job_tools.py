@@ -51,6 +51,7 @@ def min_years_required(experience_band: str) -> float | None:
 STATUSES = (
     "seen",
     "shortlisted",
+    "referral",
     "applied",
     "interviewing",
     "offer",

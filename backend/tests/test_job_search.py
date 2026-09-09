@@ -15,6 +15,7 @@ from hq.job_pipeline import (
     verification_payload,
 )
 from hq.loader import AgentSpec, instructions_for
+from hq.tools.job_tools import STATUSES as JOB_TOOL_STATUSES
 from hq.tools.job_tools import _dedupe_key, min_years_required
 from hq.tools.web_tools import _detect_ats_url, _filter_jobs, _find_ats_link, _one_job
 
@@ -389,11 +390,28 @@ def test_candidate_profile_is_injected_from_agent_folder(tmp_path) -> None:
     assert "SDE-1" in instructions
 
 
-def test_job_identity_migration_is_contiguous() -> None:
-    migrations = load_migrations()
+def test_migrations_are_contiguous() -> None:
+    # What actually matters is that the numbers run 1..N with no gap and no
+    # duplicate, since they are applied in order and recorded by number. The
+    # previous version of this asserted that 11 was the LAST migration, which
+    # is not contiguity: it just failed the next time anyone added one.
+    numbers = [n for n, _sql in load_migrations()]
 
-    assert migrations[-1][0] == 11
-    assert "jobs_dedupe_key_idx" in migrations[-1][1]
+    assert numbers == sorted(numbers)
+    assert numbers == list(range(1, len(numbers) + 1))
+
+
+def test_job_identity_migration_still_creates_the_dedupe_index() -> None:
+    by_number = dict(load_migrations())
+
+    assert "jobs_dedupe_key_idx" in by_number[11]
+
+
+def test_referral_stage_is_a_valid_job_status() -> None:
+    by_number = dict(load_migrations())
+
+    assert "'referral'" in by_number[12]
+    assert "referral" in JOB_TOOL_STATUSES
 
 
 # --- eligibility rules enforced in code, not in a prompt ---------------------

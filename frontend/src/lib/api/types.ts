@@ -303,6 +303,7 @@ export interface ChatTask {
 export const JOB_STATUSES = [
   "seen",
   "shortlisted",
+  "referral",
   "applied",
   "interviewing",
   "offer",

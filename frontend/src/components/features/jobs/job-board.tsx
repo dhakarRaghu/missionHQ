@@ -29,6 +29,11 @@ const ACTIVE_COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
     hint: "Verified and scored in the last two days. Strong fits stay; the rest close themselves.",
   },
   { key: "shortlisted", label: "Shortlisted", hint: "Worth applying to." },
+  {
+    key: "referral",
+    label: "Referral",
+    hint: "Waiting on a person. Operator looks one up when you shortlist.",
+  },
   { key: "applied", label: "Applied", hint: "Sent. Waiting." },
 ];
 
@@ -218,40 +223,57 @@ function JobCard({ job }: { job: Job }) {
         </span>
       </div>
 
+      {/* Every long field is clamped, with the full text on hover. A card is a
+          thing you scan a column of; one that runs to twenty lines because the
+          agent wrote a good paragraph pushes the next role off the screen, and
+          the column stops being scannable at all. */}
       {job.why_fit ? (
-        <p className="text-muted-foreground border-border border-l-2 pl-2 text-xs">
+        <p
+          className="text-muted-foreground border-border line-clamp-3 border-l-2 pl-2 text-xs"
+          title={job.why_fit}
+        >
           {job.why_fit}
         </p>
       ) : null}
 
       {job.referral ? (
-        <p className="text-xs">
+        <p className="line-clamp-2 text-xs" title={job.referral}>
           <span className="text-muted-foreground">Referral: </span>
           {job.referral}
         </p>
       ) : null}
 
       {job.next_step ? (
-        <p className="text-xs">
+        <p className="line-clamp-2 text-xs" title={job.next_step}>
           <span className="text-muted-foreground">Next: </span>
           {job.next_step}
         </p>
       ) : null}
 
       {job.stack ? (
-        <p className="text-muted-foreground line-clamp-2 text-xs" title={job.stack}>
+        <p className="text-muted-foreground truncate text-xs" title={job.stack}>
           {job.stack}
         </p>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1">
+        {/* max-w keeps a verbose band ("early career explicitly welcomed")
+            from taking a whole row to itself and pushing the rest to the next. */}
         {job.experience_band ? (
-          <Badge variant="secondary" className="text-xs">
+          <Badge
+            variant="secondary"
+            className="max-w-36 truncate text-xs"
+            title={job.experience_band}
+          >
             {job.experience_band}
           </Badge>
         ) : null}
         {job.remote_policy ? (
-          <Badge variant="secondary" className="text-xs">
+          <Badge
+            variant="secondary"
+            className="max-w-24 truncate text-xs"
+            title={job.remote_policy}
+          >
             {job.remote_policy}
           </Badge>
         ) : null}
@@ -259,22 +281,19 @@ function JobCard({ job }: { job: Job }) {
             unstated one has to be visible rather than simply absent. */}
         <Badge
           variant={job.compensation ? "secondary" : "outline"}
-          className={cn("text-xs", !job.compensation && "text-muted-foreground")}
+          className={cn(
+            "max-w-36 truncate text-xs",
+            !job.compensation && "text-muted-foreground",
+          )}
           title={job.compensation || "No package on the posting — check Levels/Glassdoor"}
         >
-          {job.compensation || "package not stated"}
+          {job.compensation || "no package"}
         </Badge>
         {job.seen_count > 1 ? (
           <span className="text-muted-foreground text-xs">
-            seen {job.seen_count}x
+            {job.seen_count}x
           </span>
         ) : null}
-        <span
-          className="text-muted-foreground ml-auto text-xs"
-          title={new Date(job.last_seen).toLocaleString()}
-        >
-          {timeAgo(job.last_seen)}
-        </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -288,6 +307,14 @@ function JobCard({ job }: { job: Job }) {
             Open <ExternalLink aria-hidden className="size-3" />
           </a>
         </Button>
+        {/* Moved down here off the badge row: with four columns the badges
+            wrap, and a timestamp pushed onto its own line read as a field. */}
+        <span
+          className="text-muted-foreground order-last ml-auto text-xs"
+          title={new Date(job.last_seen).toLocaleString()}
+        >
+          {timeAgo(job.last_seen)}
+        </span>
         <Select
           value={job.status}
           onValueChange={(value) => move.mutate(value as JobStatus)}
