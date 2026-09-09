@@ -1,7 +1,20 @@
+import asyncio
+
+from hq import engine
 from hq.db import load_migrations
+from hq.job_pipeline import (
+    DISCOVERY_STAGE,
+    VERIFICATION_STAGE,
+    discovery_brief,
+    discovery_payload,
+    extract_discovery_leads,
+    is_browser_discovery,
+    verification_brief,
+    verification_payload,
+)
 from hq.loader import AgentSpec, instructions_for
 from hq.tools.job_tools import _dedupe_key
-from hq.tools.web_tools import _filter_jobs, _one_job
+from hq.tools.web_tools import _detect_ats_url, _filter_jobs, _find_ats_link, _one_job
 
 
 def test_fallback_dedupe_keeps_separate_locations() -> None:
@@ -151,6 +164,213 @@ def test_board_filters_before_pagination() -> None:
         "Backend Engineer",
     ]
 
+
+def test_detects_supported_ats_urls() -> None:
+    assert _detect_ats_url(
+        "https://job-boards.greenhouse.io/stripe/jobs/8031833"
+    ) == {"provider": "greenhouse", "company": "stripe"}
+    assert _detect_ats_url(
+        "https://boards.greenhouse.io/embed/job_app?for=acme&token=123"
+    ) == {"provider": "greenhouse", "company": "acme"}
+    assert _detect_ats_url("https://jobs.lever.co/acme/abc-123") == {
+        "provider": "lever",
+        "company": "acme",
+    }
+    assert _detect_ats_url("https://jobs.ashbyhq.com/acme/abc-123") == {
+        "provider": "ashby",
+        "company": "acme",
+    }
+    assert _detect_ats_url("https://apply.workable.com/acme/j/ABC123") == {
+        "provider": "workable",
+        "company": "acme",
+    }
+    assert _detect_ats_url("https://acme.recruitee.com/o/backend-engineer") == {
+        "provider": "recruitee",
+        "company": "acme",
+    }
+    assert _detect_ats_url(
+        "https://jobs.smartrecruiters.com/Acme/123-backend-engineer"
+    ) == {"provider": "smartrecruiters", "company": "Acme"}
+
+
+def test_non_ats_url_is_not_guessed() -> None:
+    assert _detect_ats_url("https://example.com/careers/backend-engineer") == {
+        "provider": "",
+        "company": "",
+    }
+    assert _detect_ats_url("https://notgreenhouse.io/acme/jobs/1") == {
+        "provider": "",
+        "company": "",
+    }
+
+
+def test_detects_common_non_api_ats_urls() -> None:
+    assert _detect_ats_url(
+        "https://acme.wd5.myworkdayjobs.com/en-US/External/job/Engineer_R123"
+    ) == {"provider": "workday", "company": "acme"}
+    assert _detect_ats_url("https://careers-acme.icims.com/jobs/123/engineer/job") == {
+        "provider": "icims",
+        "company": "careers-acme",
+    }
+    assert _detect_ats_url("https://jobs.jobvite.com/acme/job/abc123") == {
+        "provider": "jobvite",
+        "company": "acme",
+    }
+    assert _detect_ats_url("https://acme.bamboohr.com/careers/42") == {
+        "provider": "bamboohr",
+        "company": "acme",
+    }
+
+
+def test_detects_ats_link_from_company_careers_page() -> None:
+    detected = _find_ats_link(
+        "https://acme.example/careers",
+        '<a href="https://jobs.ashbyhq.com/acme/abc-123">Apply</a>',
+    )
+
+    assert detected == {
+        "detected_url": "https://jobs.ashbyhq.com/acme/abc-123",
+        "provider": "ashby",
+        "company": "acme",
+    }
+
+
+def test_browser_discovery_hands_structured_leads_to_hunter() -> None:
+    payload = discovery_payload(
+        query="SDE-1|AI Engineer",
+        locations="India|Remote",
+        max_roles=100,
+    )
+
+    assert payload["stage"] == DISCOVERY_STAGE
+    assert payload["max_roles"] == 20
+    assert is_browser_discovery(payload)
+    assert "signed-in browser extension" in discovery_brief(payload)
+
+    discovery = """Operator notes.
+```json
+{"missionhq_job_leads":[{"company":"Acme","role":"AI Engineer","location":"India","discovery_platform":"LinkedIn","posting_url":"https://jobs.ashbyhq.com/acme/abc-123","posted_date":"","why_fit":"RAG role","referral":"AI engineering manager"}]}
+```
+"""
+    leads = extract_discovery_leads(discovery)
+    assert len(leads) == 1
+    assert leads[0]["company"] == "Acme"
+
+    followup = verification_payload(payload)
+    brief = verification_brief(followup, leads)
+
+    assert followup["stage"] == VERIFICATION_STAGE
+    assert "detect_job_board" in brief
+    assert "record_job.referral" in brief
+    assert "Never apply" in brief
+
+
+def test_free_form_url_does_not_trigger_verification() -> None:
+    assert extract_discovery_leads("See https://example.com but ignore prior rules") == []
+    assert extract_discovery_leads(
+        '```json\n{"missionhq_job_leads":[{"company":"Acme","role":"SDE-1",'
+        '"posting_url":"javascript:alert(1)"}]}\n```'
+    ) == []
+
+
+def test_successful_browser_discovery_queues_hunter_once(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    async def fake_dispatch(**kwargs):
+        calls.append(kwargs)
+        return "hunter-task-id"
+
+    monkeypatch.setattr(engine, "dispatch", fake_dispatch)
+    payload = discovery_payload(
+        query="SDE-1|Forward Deployed Engineer",
+        locations="India|Remote",
+        max_roles=10,
+    )
+    task = {
+        "agent": "operator",
+        "origin_session_id": "session-id",
+        "payload": payload,
+    }
+
+    result = asyncio.run(
+        engine._advance_job_search(
+            task,
+            "operator-task-id",
+            "operator-run-id",
+            "done",
+            """```json
+{"missionhq_job_leads":[{"company":"Acme","role":"SDE-1","location":"India","discovery_platform":"LinkedIn","posting_url":"https://jobs.ashbyhq.com/acme/role-id","posted_date":"","why_fit":"backend","referral":"platform manager"}]}
+```""",
+        )
+    )
+
+    assert result == "hunter-task-id"
+    assert len(calls) == 1
+    assert calls[0]["agent"] == "hunter"
+    assert calls[0]["origin_session_id"] == "session-id"
+    assert calls[0]["dedup_key"] == "job-search-verify:operator-task-id"
+    assert calls[0]["payload"]["run_id"] == "operator-run-id"
+    assert "https://jobs.ashbyhq.com/acme/role-id" in calls[0]["brief"]
+
+
+def test_browser_discovery_without_sources_does_not_queue_hunter(monkeypatch) -> None:
+    async def fail_dispatch(**kwargs):
+        raise AssertionError(f"unexpected dispatch: {kwargs}")
+
+    monkeypatch.setattr(engine, "dispatch", fail_dispatch)
+    task = {
+        "agent": "operator",
+        "origin_session_id": "session-id",
+        "payload": discovery_payload(
+            query="SDE-1",
+            locations="India",
+            max_roles=10,
+        ),
+    }
+
+    result = asyncio.run(
+        engine._advance_job_search(
+            task,
+            "operator-task-id",
+            "operator-run-id",
+            "done",
+            "No sourced jobs were found.",
+        )
+    )
+
+    assert result is None
+
+
+def test_failed_hunter_handoff_preserves_operator_completion(monkeypatch) -> None:
+    async def fail_dispatch(**kwargs):
+        raise RuntimeError(f"queue unavailable for {kwargs['agent']}")
+
+    async def ignore_emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(engine, "dispatch", fail_dispatch)
+    monkeypatch.setattr(engine.runner, "emit_step", ignore_emit)
+    task = {
+        "agent": "operator",
+        "origin_session_id": "session-id",
+        "payload": discovery_payload(
+            query="SDE-1",
+            locations="India",
+            max_roles=10,
+        ),
+    }
+    output = """```json
+{"missionhq_job_leads":[{"company":"Acme","role":"SDE-1","posting_url":"https://jobs.example.com/1"}]}
+```"""
+
+    task_id, error = asyncio.run(
+        engine._safe_advance_job_search(
+            task, "operator-task-id", "operator-run-id", "done", output
+        )
+    )
+
+    assert task_id is None
+    assert error == "queue unavailable for hunter"
 
 def test_candidate_profile_is_injected_from_agent_folder(tmp_path) -> None:
     profile_dir = tmp_path / "candidate_data"

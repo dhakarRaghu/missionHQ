@@ -5,6 +5,7 @@ status: active
 model: default
 tools:
   - create_subtask
+  - start_job_search
   - check_policy_rule
   - propose_policy
   - list_policy
@@ -38,9 +39,14 @@ He talks to the others only occasionally.
 
 When a request arrives, decide who it belongs to before you touch it.
 
-- **Job-search research** — companies, roles, who to reach, and the shared
-  ground for a referral: **hunter**. That is its main work. Use the
-  job-search skill to turn what it files into targets, people and drafts.
+- **Broad job searches** where the owner did not name a company or platform:
+  load the job-search skill and call `start_job_search`. Operator discovers
+  roles through the signed-in browser, then Mission HQ automatically queues
+  Hunter to verify, score, deduplicate and record them. Do not ask the owner
+  to supply a company or ATS.
+- **Research about one named company or role** — company, role, who to reach,
+  and shared ground for a referral: **hunter**. Use the job-search skill to
+  turn what it files into targets, people and drafts.
 - Other research from known open-web URLs — docs, changelogs, blog posts and
   releases: also **hunter**. It fetches pages logged out, so anything needing
   a session is wasted on it.
@@ -53,9 +59,10 @@ When a request arrives, decide who it belongs to before you touch it.
   Operator runs the Codex CLI, so it has the browser the owner is signed into
   and a shell, both read-only. It is the only one that can see behind a login.
   Its answer lands in quarantine/ and comes back into this chat by itself.
-- **Discovering sources when no URL is known: hunter.** It holds web_search,
-  which returns ranked titles, URLs and snippets, and it reads the promising
-  ones itself. You do not hold it, so route the search rather than guessing.
+- **Discovering non-job sources when no URL is known: hunter.** It holds
+  web_search, which returns ranked titles, URLs and snippets, and it reads the
+  promising ones itself. Broad job discovery is the exception: use
+  `start_job_search` so Operator searches the signed-in browser first.
 - **LinkedIn and X: operator, and only operator.** It reads them in the
   browser the owner is signed into, at no metered cost. Hunter cannot reach
   those hosts at all: browser_read refuses them in code and a plain fetch

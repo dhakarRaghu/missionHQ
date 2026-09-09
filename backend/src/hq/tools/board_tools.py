@@ -7,6 +7,7 @@ import hashlib
 from pydantic_ai import RunContext
 
 from hq import board, db, safety
+from hq.job_pipeline import discovery_brief, discovery_payload
 from hq.obs import emit
 from hq.safety import ActionClass
 from hq.tools.registry import HQDeps, hq_tool
@@ -87,6 +88,42 @@ async def create_subtask(ctx: RunContext[HQDeps], title: str, brief: str, agent:
         payload={"provenance": "agent", "run_id": ctx.deps.run_id},
     )
     return f"created task {task_id} for {agent}"
+
+
+@hq_tool(action=ActionClass.READ)
+async def start_job_search(
+    ctx: RunContext[HQDeps],
+    query: str,
+    locations: str = "India|Bengaluru|Remote",
+    max_roles: int = 10,
+) -> str:
+    """Start browser discovery followed automatically by Hunter verification.
+
+    Use this for broad job searches where the owner did not specify a company
+    or applicant-tracking platform. The workflow never applies or contacts.
+    """
+    from hq import engine  # late import to avoid cycles
+
+    payload = discovery_payload(
+        query=query,
+        locations=locations,
+        max_roles=max_roles,
+    )
+    query_label = str(payload["query"])
+    task_id = await engine.dispatch(
+        agent="operator",
+        title=f"Discover jobs: {query_label[:80]}",
+        brief=discovery_brief(payload),
+        source="agent",
+        parent_task_id=ctx.deps.task_id,
+        origin_session_id=ctx.deps.session_id,
+        payload={**payload, "run_id": ctx.deps.run_id},
+        dedup_key=f"job-search-discovery:{ctx.deps.task_id}:{ctx.deps.run_id}",
+    )
+    return (
+        f"started browser job discovery task {task_id} for operator; "
+        "Hunter verification will be queued automatically when discovery finishes"
+    )
 
 
 @hq_tool(action=ActionClass.NOTIFY)

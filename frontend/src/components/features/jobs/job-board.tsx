@@ -83,10 +83,9 @@ export function JobBoard() {
   if (!(jobs.data ?? []).length) {
     return (
       <EmptyState title="No roles yet">
-        Ask sage to run a job search. Hunter reads company job boards directly,
-        scores each role against your profile, and every verified role lands
-        here — including the weak ones, so it never researches the same company
-        twice.
+        Ask Sage to find roles matching your profile—no company or platform is
+        required. Operator discovers them in your signed-in browser, then
+        Hunter verifies, scores and deduplicates each original posting here.
       </EmptyState>
     );
   }

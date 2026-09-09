@@ -11,7 +11,7 @@ import json
 import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -25,12 +25,18 @@ from dbos import (
 from dbos._croniter import croniter  # type: ignore[attr-defined]
 from dbos._registrations import get_dbos_func_name
 from pydantic_ai import Agent, DeferredToolRequests
-from pydantic_ai.durable_exec.dbos import DBOSDurability
+from pydantic_ai.durable_exec.dbos import DBOSDurability, StepConfig
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from hq import board, db, digest, llm, memory, obs, runner, safety
 from hq.config import settings
 from hq.dbos_app import DBOS
+from hq.job_pipeline import (
+    extract_discovery_leads,
+    is_browser_discovery,
+    verification_brief,
+    verification_payload,
+)
 from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, scan
 
 TASK_TIMEOUT_S = 20 * 60   # a cron/board run may not exceed 20 minutes
@@ -44,7 +50,13 @@ _schedules: list[ScheduleInput] = []  # built pre-launch, applied post-launch
 # An LLM judge cannot reliably tell a real success from a claimed one, so a run
 # that was asked to write something must leave a side effect on record: one
 # ``tool.called`` event with ok=true for one of these tools.
-ARTIFACT_TOOLS = ("vault_write", "record_fact", "create_subtask", "announce")
+ARTIFACT_TOOLS = (
+    "vault_write",
+    "record_fact",
+    "create_subtask",
+    "start_job_search",
+    "announce",
+)
 ARTIFACT_SOURCES = {"cron", "web", "agent"}
 NO_ARTIFACT_REASON = "run reported success but produced no artifact"
 # A folder reference such as ``daily/`` or ``projects/content/``. The lookbehind
@@ -164,11 +176,13 @@ def bootstrap_pre_launch() -> None:
     # output never trips it. This one is wall-clock and cannot be reset.
     durability = DBOSDurability(
         models=llm.registry().all_instances(),
-        model_step_config={
+        # pydantic-ai's StepConfig type has not yet caught up with DBOS's
+        # supported timeout_seconds option. DBOS.step accepts it at runtime.
+        model_step_config=cast(StepConfig, {
             "retries_allowed": True, "max_attempts": 2,
             "interval_seconds": 2.0, "backoff_rate": 2.0,
             "timeout_seconds": 300.0,
-        },
+        }),
     )
     for name, spec in scan().items():
         AGENTS[name] = (spec, build_agent(spec, durability))
@@ -350,8 +364,22 @@ async def run_task(task_id: str) -> str:
     await runner.emit_step("run.finished", run_id=run_id, task_id=task_id, agent=agent_name,
                            payload={"outcome": result, "exit_status": exit_status(result, error),
                                     "cost_usd": outcome.cost_usd})
+    followup_task_id, followup_error = await _safe_advance_job_search(
+        task, task_id, run_id, result, outcome.output
+    )
+    delivered_output = outcome.output[:TASK_OUTPUT_CHARS]
+    if followup_task_id is not None:
+        delivered_output += (
+            "\n\nHunter verification was queued automatically as task "
+            f"{followup_task_id}."
+        )
+    elif followup_error is not None:
+        delivered_output += (
+            "\n\nHunter verification could not be queued automatically. "
+            f"The discovery result was preserved; retry is safe. ({followup_error})"
+        )
     await _deliver_task_result_step(
-        task_id, run_id, agent_name, result, outcome.output[:TASK_OUTPUT_CHARS]
+        task_id, run_id, agent_name, result, delivered_output
     )
     await enqueue_agent_tasks(run_id)
     if task["source"] == "cron" and await safety.notification_budget_left():
@@ -696,11 +724,63 @@ async def _preflight(agent_name: str, spec: AgentSpec) -> str | None:
 async def _load_task(task_id: str) -> dict:
     row = await db.fetchone(
         "SELECT id::text, title, brief, agent, status, source,"
-        " origin_session_id::text FROM hq.tasks WHERE id = %s",
+        " parent_id::text, origin_session_id::text, payload"
+        " FROM hq.tasks WHERE id = %s",
         (task_id,),
     )
     assert row is not None, f"task {task_id} missing"
     return row
+
+
+async def _advance_job_search(
+    task: dict, task_id: str, run_id: str, result: str, output: str
+) -> str | None:
+    """Queue Hunter exactly once after successful browser discovery."""
+    payload = task.get("payload") or {}
+    if task.get("agent") != "operator" or not is_browser_discovery(payload):
+        return None
+    if result != "done":
+        return None
+    leads = extract_discovery_leads(output)
+    if not leads:
+        return None
+
+    hunter_payload = verification_payload(payload)
+    hunter_payload["run_id"] = run_id
+    hunter_payload["discovery_task_id"] = task_id
+    query = str(payload.get("query") or "matching roles")
+    return await dispatch(
+        agent="hunter",
+        title=f"Verify discovered jobs: {query[:72]}",
+        brief=verification_brief(payload, leads),
+        source="agent",
+        parent_task_id=task_id,
+        origin_session_id=task.get("origin_session_id"),
+        payload=hunter_payload,
+        dedup_key=f"job-search-verify:{task_id}",
+    )
+
+
+async def _safe_advance_job_search(
+    task: dict, task_id: str, run_id: str, result: str, output: str
+) -> tuple[str | None, str | None]:
+    """Keep a completed discovery deliverable even when handoff fails.
+
+    The verification payload carries the Operator run id, so a task created
+    just before an enqueue failure is picked up by enqueue_agent_tasks below.
+    """
+    try:
+        return await _advance_job_search(task, task_id, run_id, result, output), None
+    except Exception as exc:  # noqa: BLE001 — handoff must not orphan source output
+        error = friendly_error(exc)
+        await runner.emit_step(
+            "job_search.handoff_failed",
+            run_id=run_id,
+            task_id=task_id,
+            agent=str(task.get("agent") or "operator"),
+            payload={"error": error, "raw_error": str(exc)[:500]},
+        )
+        return None, error
 
 
 @DBOS.step()

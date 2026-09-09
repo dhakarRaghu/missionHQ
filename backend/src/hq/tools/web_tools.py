@@ -10,12 +10,13 @@ learns that they existed.
 from __future__ import annotations
 
 import asyncio
+import html
 import ipaddress
 import logging
 import re
 import socket
 from datetime import UTC, datetime
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import httpx
 from pydantic import BaseModel, Field
@@ -201,9 +202,125 @@ ATS_BOARDS: dict[str, str] = {
     "recruitee": "https://{company}.recruitee.com/api/offers/",
     "smartrecruiters": "https://api.smartrecruiters.com/v1/companies/{company}/postings",
 }
+ATS_HOSTS: tuple[tuple[str, str], ...] = (
+    ("greenhouse.io", "greenhouse"),
+    ("lever.co", "lever"),
+    ("ashbyhq.com", "ashby"),
+    ("workable.com", "workable"),
+    ("recruitee.com", "recruitee"),
+    ("smartrecruiters.com", "smartrecruiters"),
+    ("myworkdayjobs.com", "workday"),
+    ("myworkdaysite.com", "workday"),
+    ("icims.com", "icims"),
+    ("jobvite.com", "jobvite"),
+    ("bamboohr.com", "bamboohr"),
+)
 _SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$")
 MAX_JOBS = 40
 MAX_JOB_RESULTS = 100
+
+
+def _detect_ats_url(url: str) -> dict[str, str]:
+    """Return the provider and company slug encoded in a supported ATS URL."""
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return {"provider": "", "company": ""}
+    host = (parsed.hostname or "").casefold()
+    parts = [part for part in parsed.path.split("/") if part]
+    provider = next(
+        (
+            provider
+            for suffix, provider in ATS_HOSTS
+            if host == suffix or host.endswith(f".{suffix}")
+        ),
+        "",
+    )
+    company = ""
+
+    if provider == "greenhouse":
+        if (
+            host.startswith("boards-api.")
+            and len(parts) >= 3
+            and parts[:2] == ["v1", "boards"]
+        ):
+            company = parts[2]
+        elif parts[:2] == ["embed", "job_app"]:
+            company = (parse_qs(parsed.query).get("for") or [""])[0]
+        elif parts:
+            company = parts[0]
+    elif provider in {"lever", "ashby", "workable", "smartrecruiters"} and parts:
+        company = parts[0]
+    elif provider == "recruitee" and host.endswith(".recruitee.com"):
+        company = host.removesuffix(".recruitee.com").split(".")[-1]
+    elif provider == "workday" and host.endswith(
+        (".myworkdayjobs.com", ".myworkdaysite.com")
+    ):
+        company = host.split(".")[0]
+    elif provider == "icims" and host.endswith(".icims.com"):
+        company = host.removesuffix(".icims.com").split(".")[-1]
+    elif provider == "jobvite" and host == "jobs.jobvite.com" and parts:
+        company = parts[0]
+    elif provider == "bamboohr" and host.endswith(".bamboohr.com"):
+        company = host.removesuffix(".bamboohr.com").split(".")[-1]
+
+    if not provider or not company or not _SLUG_RE.match(company):
+        return {"provider": "", "company": ""}
+    return {"provider": provider, "company": company}
+
+
+def _find_ats_link(page_url: str, raw_html: str) -> dict[str, str]:
+    """Find the first supported ATS URL linked or embedded in a careers page."""
+    candidates = [page_url]
+    candidates.extend(
+        urljoin(page_url, html.unescape(match))
+        for match in re.findall(r"(?i)href=[\"']([^\"']+)", raw_html)
+    )
+    candidates.extend(
+        html.unescape(match.replace("\\/", "/"))
+        for match in re.findall(r"https?:\\?/\\?/[^\s\"'<>]+", raw_html)
+    )
+    for candidate in candidates[:500]:
+        candidate = candidate.rstrip("\\\"',);")
+        detected = _detect_ats_url(candidate)
+        if detected["provider"]:
+            return {"detected_url": candidate, **detected}
+    return {"detected_url": "", "provider": "", "company": ""}
+
+
+@hq_tool(action=ActionClass.READ, trust=Trust.WEB, network=True)
+async def detect_job_board(ctx: RunContext[HQDeps], url: str) -> dict[str, str]:
+    """Detect an ATS and company slug from a job or careers URL.
+
+    Detects Greenhouse, Lever, Ashby, Workable, Recruitee, SmartRecruiters,
+    Workday, iCIMS, Jobvite and BambooHR. The first six can then be read with
+    job_board. For a company-owned careers page, follows redirects and inspects
+    its links, so the owner never has to supply a provider or slug.
+    """
+    requested_url = url.strip()
+    detected = _detect_ats_url(requested_url)
+    if detected["provider"]:
+        return {"url": requested_url, "detected_url": requested_url, **detected}
+
+    try:
+        raw_html, resolved_url = await _fetch_text(requested_url)
+    except (httpx.HTTPError, ValueError, PermissionError) as exc:
+        return {
+            "url": requested_url,
+            "provider": "",
+            "company": "",
+            "error": f"could not inspect careers page ({type(exc).__name__})",
+        }
+
+    detected = _find_ats_link(resolved_url, raw_html)
+    if detected["provider"]:
+        return {"url": requested_url, "resolved_url": resolved_url, **detected}
+    return {
+        "url": requested_url,
+        "resolved_url": resolved_url,
+        "provider": "",
+        "company": "",
+        "error": "no supported ATS link was found on the careers page",
+    }
 
 
 def _job_date(value: object) -> str:

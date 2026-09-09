@@ -70,6 +70,7 @@ async def record_job(
     provider: str = "",
     external_id: str = "",
     next_step: str = "",
+    referral: str = "",
 ) -> str:
     """Record one verified role in the job ledger, or update it if already known.
 
@@ -102,8 +103,8 @@ async def record_job(
         INSERT INTO hq.jobs (company, role, url, source, provider, external_id,
                              dedupe_key, location, remote_policy, experience_band,
                              compensation, stack, fit_score, fit_bucket, why_fit,
-                             next_step)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             next_step, referral)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (dedupe_key) DO UPDATE SET
             -- A rediscovery refreshes facts but never overwrites a status the
             -- owner moved along.
@@ -121,7 +122,8 @@ async def record_job(
             fit_score = EXCLUDED.fit_score,
             fit_bucket = EXCLUDED.fit_bucket,
             why_fit = EXCLUDED.why_fit,
-            next_step = COALESCE(NULLIF(EXCLUDED.next_step, ''), hq.jobs.next_step)
+            next_step = COALESCE(NULLIF(EXCLUDED.next_step, ''), hq.jobs.next_step),
+            referral = COALESCE(NULLIF(EXCLUDED.referral, ''), hq.jobs.referral)
         RETURNING id::text, seen_count, status
         """,
         (
@@ -141,6 +143,7 @@ async def record_job(
             bucket,
             why_fit.strip()[:500],
             next_step.strip()[:300],
+            referral.strip()[:500],
         ),
     )
     row = rows[0]

@@ -13,7 +13,21 @@ agents that read the web may only write to `quarantine/`.
 
 ## How to gather
 
-You cannot read the web. Ask, with `create_subtask`:
+For a broad request such as "find SDE-1 jobs", call `start_job_search` once.
+The owner does not need to name a company or platform. It creates this durable
+pipeline:
+
+1. Operator uses the signed-in browser to discover current roles across
+   LinkedIn, Google Jobs, Wellfound, YC Work at a Startup and company sites.
+2. Mission HQ automatically passes those leads to Hunter.
+3. Hunter verifies original postings, detects the ATS, scores against the
+   injected candidate profile, deduplicates, records the role, and adds a
+   referral person or target persona.
+
+Never create separate Operator and Hunter tasks for the same broad search;
+that loses the ordering between discovery and verification.
+
+For a narrow follow-up about a known company, ask with `create_subtask`:
 
 - **hunter** first, for the open web, which is most of it: a company's
   engineering blog, a public careers page, the job posting, a funding

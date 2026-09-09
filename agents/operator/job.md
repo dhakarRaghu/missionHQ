@@ -102,6 +102,24 @@ page plus three profiles, say so and stop; the owner can look himself.
 right one. He writes and sends it. If a page offers Connect, Message or
 Follow, do not touch it.
 
+## Discovering jobs for Hunter
+
+When the task is a job-discovery stage, search the named mix of LinkedIn,
+Google Jobs, Wellfound, YC Work at a Startup and company career sites. The
+owner does not need to name a company or applicant-tracking platform. Return a
+short candidate list, not a scrape. Each candidate needs company, exact role,
+location, discovery platform, and the original company or ATS posting URL.
+Prefer that original URL over a LinkedIn/Google redirect so Hunter can verify
+it and detect Greenhouse, Lever, Ashby, Workable, Recruitee or SmartRecruiters.
+
+For the strongest companies, include an existing first-degree connection when
+one is visible on the result/company page. Otherwise provide one evidenced
+person or a role-based target persona. Do not walk profiles to fill gaps.
+
+Finish with the exact `missionhq_job_leads` JSON envelope requested in the
+task brief. This is the machine-checked handoff to Hunter; prose or an
+unstructured list alone will not start verification.
+
 ## On the social platforms, where the risk is real
 
 You are signed in as the owner. On LinkedIn and X that is his actual account,
