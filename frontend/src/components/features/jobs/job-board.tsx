@@ -26,12 +26,19 @@ const ACTIVE_COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
   {
     key: "seen",
     label: "Found",
-    hint: "Verified and scored. Not acted on yet.",
+    hint: "Verified and scored in the last two days. Strong fits stay; the rest close themselves.",
   },
   { key: "shortlisted", label: "Shortlisted", hint: "Worth applying to." },
   { key: "applied", label: "Applied", hint: "Sent. Waiting." },
-  { key: "interviewing", label: "Interviewing", hint: "In process." },
 ];
+
+/**
+ * "interviewing" is deliberately absent. The owner tracks that himself, and a
+ * column that is always empty costs the three that are not a quarter of the
+ * width each. The status still exists in the API and in the ledger, so a row
+ * already in it is not orphaned — it simply is not a stage of this board.
+ */
+const HIDDEN_STATUSES: ReadonlySet<string> = new Set(["interviewing"]);
 
 const OUTCOME_COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
   { key: "offer", label: "Offers", hint: "Offers will appear here." },
@@ -172,9 +179,15 @@ function JobCard({ job }: { job: Job }) {
   const queryClient = useQueryClient();
   const move = useMutation({
     mutationFn: (status: JobStatus) => api.updateJob(job.id, { status }),
-    onSuccess: (_result, status) => {
-      toast(`${job.company} moved to ${status}`);
+    onSuccess: (result, status) => {
+      toast(
+        `${job.company} moved to ${status}`,
+        result.referral_task_id
+          ? { description: "Operator is looking for a referral path in your signed-in browser." }
+          : undefined,
+      );
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -242,11 +255,15 @@ function JobCard({ job }: { job: Job }) {
             {job.remote_policy}
           </Badge>
         ) : null}
-        {job.compensation ? (
-          <Badge variant="secondary" className="text-xs">
-            {job.compensation}
-          </Badge>
-        ) : null}
+        {/* Always rendered. A blank package is the thing worth chasing, so an
+            unstated one has to be visible rather than simply absent. */}
+        <Badge
+          variant={job.compensation ? "secondary" : "outline"}
+          className={cn("text-xs", !job.compensation && "text-muted-foreground")}
+          title={job.compensation || "No package on the posting — check Levels/Glassdoor"}
+        >
+          {job.compensation || "package not stated"}
+        </Badge>
         {job.seen_count > 1 ? (
           <span className="text-muted-foreground text-xs">
             seen {job.seen_count}x
@@ -284,7 +301,7 @@ function JobCard({ job }: { job: Job }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {JOB_STATUSES.map((status) => (
+            {JOB_STATUSES.filter((s) => !HIDDEN_STATUSES.has(s)).map((status) => (
               <SelectItem key={status} value={status}>
                 {status}
               </SelectItem>

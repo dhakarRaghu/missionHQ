@@ -165,10 +165,12 @@ export const api = {
       referral?: string;
     },
   ) =>
-    request<{ ok: boolean }>(`/jobs/${seg(id)}`, {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    }),
+    // referral_task_id is set only when the patch shortlisted the role and the
+    // referral hunt was queued; null when operator is not loaded or it failed.
+    request<{ ok: boolean; referral_task_id: string | null }>(
+      `/jobs/${seg(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    ),
   cancelTask: (id: string) =>
     request<{ cancelled: boolean; reason?: string }>(
       `/tasks/${seg(id)}/cancel`,

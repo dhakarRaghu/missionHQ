@@ -16,10 +16,12 @@ page.
 from __future__ import annotations
 
 import logging
+import re
 
 from pydantic_ai import ModelRetry, RunContext
 
 from hq import db
+from hq.config import settings
 from hq.obs import emit
 from hq.safety import ActionClass, Trust
 from hq.tools.registry import HQDeps, hq_tool
@@ -27,6 +29,25 @@ from hq.tools.registry import HQDeps, hq_tool
 log = logging.getLogger(__name__)
 
 BUCKETS = ("strong", "decent", "stretch")
+
+# The lower bound of every "N years" figure in a free-text experience band.
+# Group 1 is the floor: "0-3 years" -> 0, "3+ years" -> 3, "~4 yrs" -> 4.
+# Only digits actually attached to a year word count, so "SDE2+ / ~4 yrs"
+# reads as 4 and not as 2.
+_YEAR_SPAN_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(?:(?:\+|-|–|—|to)\s*(?:\d+(?:\.\d+)?)?)?\s*\+?\s*"
+    r"(?:yrs?\.?|years?)\b",
+    re.IGNORECASE,
+)
+
+
+def min_years_required(experience_band: str) -> float | None:
+    """The floor of the experience a posting asks for, or None when it names no
+    number. The floor, not the ceiling: "2-4 years" is open to a candidate with
+    two, so what matters is the smallest figure the posting will accept."""
+    floors = [float(m.group(1)) for m in _YEAR_SPAN_RE.finditer(experience_band)]
+    return min(floors) if floors else None
+
 STATUSES = (
     "seen",
     "shortlisted",
@@ -82,6 +103,12 @@ async def record_job(
     the one sentence justifying it. A score without a reason is not useful to
     anyone reading the board later.
 
+    Always fill `experience_band` with what the posting actually asks for, and
+    `compensation` with the package when the posting or a salary page names
+    one. A role whose floor is at or above the owner's seniority ceiling is
+    still recorded, so it is never researched twice, but it is filed closed
+    rather than put in front of him.
+
     Verify the listing is real and open before recording it. A search result
     title is not verification.
     """
@@ -98,13 +125,29 @@ async def record_job(
     score = int(fit_score)
     bucket = "strong" if score >= 8 else ("decent" if score >= 6 else "stretch")
     key = _dedupe_key(company, role, location, provider, external_id)
+
+    # Seniority is a hard fact about the owner, not a preference to weigh, so
+    # it is applied here rather than trusted to the prompt. The row is still
+    # written: skipping it entirely would only mean rediscovering the same
+    # posting next week and spending another run rejecting it.
+    bar = settings().job_max_min_years
+    floor = min_years_required(experience_band)
+    over_bar = floor is not None and floor >= bar
+    status = "closed" if over_bar else "seen"
+    note = (
+        f"Closed on record: the posting asks for {floor:g}+ years and the owner"
+        f" is early-career (bar is {bar:g})."
+        if over_bar
+        else ""
+    )
     rows = await db.fetch(
         """
         INSERT INTO hq.jobs (company, role, url, source, provider, external_id,
                              dedupe_key, location, remote_policy, experience_band,
                              compensation, stack, fit_score, fit_bucket, why_fit,
-                             next_step, referral)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             next_step, referral, status, notes)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s)
         ON CONFLICT (dedupe_key) DO UPDATE SET
             -- A rediscovery refreshes facts but never overwrites a status the
             -- owner moved along.
@@ -144,6 +187,8 @@ async def record_job(
             why_fit.strip()[:500],
             next_step.strip()[:300],
             referral.strip()[:500],
+            status,
+            note,
         ),
     )
     row = rows[0]
@@ -160,6 +205,13 @@ async def record_job(
         },
     )
     again = f" (seen {row['seen_count']} times)" if row["seen_count"] > 1 else ""
+    if over_bar and row["status"] == "closed":
+        return (
+            f"recorded {company} — {role} as CLOSED{again}: the posting asks for"
+            f" {floor:g}+ years, over the owner's {bar:g}-year ceiling. It is in"
+            " the ledger so it is not researched again. Do not look for a"
+            " referral and do not report it as a candidate role."
+        )
     return (
         f"recorded {company} — {role}: {fit_score}/10 {bucket}{again},"
         f" status {row['status']}"

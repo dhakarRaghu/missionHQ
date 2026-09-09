@@ -1,6 +1,7 @@
 import asyncio
 
 from hq import engine
+from hq.config import settings
 from hq.db import load_migrations
 from hq.job_pipeline import (
     DISCOVERY_STAGE,
@@ -13,7 +14,7 @@ from hq.job_pipeline import (
     verification_payload,
 )
 from hq.loader import AgentSpec, instructions_for
-from hq.tools.job_tools import _dedupe_key
+from hq.tools.job_tools import _dedupe_key, min_years_required
 from hq.tools.web_tools import _detect_ats_url, _filter_jobs, _find_ats_link, _one_job
 
 
@@ -392,3 +393,34 @@ def test_job_identity_migration_is_contiguous() -> None:
 
     assert migrations[-1][0] == 11
     assert "jobs_dedupe_key_idx" in migrations[-1][1]
+
+
+# --- eligibility rules enforced in code, not in a prompt ---------------------
+
+def test_min_years_reads_the_floor_not_a_level_number() -> None:
+    # "SDE2" must not be read as two years; only digits attached to a year word count.
+    assert min_years_required("SDE2+ / ~4 yrs") == 4.0
+
+
+def test_min_years_takes_the_bottom_of_a_range() -> None:
+    assert min_years_required("0-3 years") == 0.0
+    assert min_years_required("2 to 4 years") == 2.0
+
+
+def test_min_years_reads_an_open_ended_floor() -> None:
+    assert min_years_required("3+ years") == 3.0
+    assert min_years_required("5+ yrs experience") == 5.0
+
+
+def test_min_years_is_none_when_no_number_is_named() -> None:
+    assert min_years_required("new grad / early career") is None
+    assert min_years_required("") is None
+
+
+def test_seniority_ceiling_matches_the_configured_bar() -> None:
+    bar = settings().job_max_min_years
+
+    # The screenshot case: a 4-year posting recorded as a candidate role.
+    assert min_years_required("SDE2+ / ~4 yrs") >= bar
+    # A range open to a one-year candidate stays eligible.
+    assert min_years_required("1-3 years") < bar

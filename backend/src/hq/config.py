@@ -131,6 +131,24 @@ class Settings(BaseSettings):
     # of the default list. 0 switches archiving off.
     board_archive_days: int = 14
 
+    # --- job search -----------------------------------------------------------
+    # Days a merely-decent find stays in the Found column. The owner reads that
+    # column to decide what to act on today, so a role he has walked past for
+    # two days is noise. The maintenance tick sets those to `closed`; nothing is
+    # deleted, because the row is also the discovery memory that stops the same
+    # role being researched again next week. A strong fit never ages out.
+    job_found_days: int = 2
+    # Minimum years of experience at which a posting stops being one the owner
+    # can take. He is early-career, so a role whose floor is this high is a
+    # waste of a run whatever else it offers. Enforced in record_job, not asked
+    # for in a prompt, because "don't record senior roles" is exactly the kind
+    # of instruction a model drops on a long run.
+    job_max_min_years: float = 3.0
+    # Target total compensation in lakhs per annum. Not a hard gate: most
+    # postings publish no number at all, so refusing those would empty the
+    # board. It steers the score and is shown on the card.
+    job_target_ctc_lakh: float = 25.0
+
     # --- headed browser (browser_read) --------------------------------------
     # Off by default: it opens a real window, so it must be a deliberate choice.
     browser_enabled: bool = False

@@ -27,6 +27,8 @@ caps:
   tool_calls: 40
   daily_usd: 2.00
 cron:
+  - schedule: "0 21 * * *"
+    prompt: "Nightly signed-in job discovery. Call start_job_search exactly once, with query set to the owner's target roles from the candidate profile (entry-level software and AI engineering, SDE-1 level, under three years), locations 'India|Bengaluru|Remote', and max_roles 10. Operator searches the browser he is signed into, and Mission HQ hands the leads to hunter for verification by itself. Do not create separate operator or hunter tasks, do not call create_subtask for this, and do not do any searching yourself. Reply with the task id and stop."
   - schedule: "30 22 * * *"
     prompt: "Load the daily-note skill with load_skill and follow it: write today's note to vault daily/<YYYY-MM-DD>.md. Lead with one thing the owner did not know, taken from what actually landed in the vault, with its source. Board status is a footnote, not the body."
   - schedule: "0 20 * * 0"

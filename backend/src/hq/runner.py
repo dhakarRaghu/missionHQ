@@ -96,8 +96,8 @@ Decide:
   owner can give, or the request is impossible and the agent explains why.
 
   Also true when the agent handed the work to another agent and the tool calls
-  show it: a create_subtask call this round, or a check of a task it already
-  handed over that is still running. Mission HQ delivers that result to the
+  show it: a create_subtask or start_job_search call this round, or a check of
+  a task it already handed over that is still running. Mission HQ delivers that result to the
   owner by itself when it lands, so the handover IS the completed answer for
   this agent. Judge whether the handover was made and the brief was clear, not
   whether the delegated work has finished. The owner asked for a coordinator

@@ -202,7 +202,64 @@ async def update_job(job_id: str, body: JobPatch) -> dict:
         raise HTTPException(404, "no such job")
     await engagement.record_owner_action("web", "update_job")
     await emit("job.updated", payload={"job_id": job_id, "fields": sets[:-1]})
-    return {"ok": True}
+    referral_task = None
+    if body.status == "shortlisted":
+        referral_task = await _hunt_referral(job_id)
+    return {"ok": True, "referral_task_id": referral_task}
+
+
+async def _hunt_referral(job_id: str) -> str | None:
+    """Shortlisting is the owner saying this one is worth a real approach, so
+    that is the moment to go and find the person to ask.
+
+    Operator does it, not hunter: the people are on LinkedIn, which
+    ``browser_read`` refuses in code, and only the signed-in browser can see a
+    first-degree connection. The brief names one company and one role, which is
+    what keeps the browse guard's "bounded" test satisfiable — an open-ended
+    walk of a company's employees is exactly what it is there to refuse.
+
+    Best effort. A dispatch that fails must not fail the owner's status change,
+    which has already been committed.
+    """
+    from hq import engine
+
+    job = await db.fetchone(
+        "SELECT company, role, url, referral FROM hq.jobs WHERE id = %s", (job_id,)
+    )
+    if job is None or "operator" not in engine.registered_agents():
+        return None
+    known = (job["referral"] or "").strip()
+    brief = (
+        f"Find the one person to ask for a referral into {job['company']} for"
+        f" their {job['role']} role ({job['url']}).\n\n"
+        "In the signed-in browser, in this order:\n"
+        "1. An existing first-degree connection at the company. If there is"
+        " one, that is the answer; say how the owner knows them.\n"
+        "2. Otherwise the named engineering leader or recruiter who visibly"
+        " owns this role or its team.\n"
+        "3. If neither is verifiable, give the target persona and the exact"
+        " page to check by hand. Never invent a person or a relationship.\n\n"
+        "Also report the shared ground the owner could open with: a post, a"
+        " repo, a talk, a shared school or employer. A referral ask with no"
+        " shared ground is a cold ask with extra steps.\n\n"
+        "Read only. Do not connect, follow, message, or apply. One company,"
+        " a handful of pages; do not walk the employee list."
+    )
+    if known:
+        brief += f"\n\nWhat hunter already recorded, to confirm or correct:\n{known}"
+    try:
+        return await engine.dispatch(
+            agent="operator",
+            title=f"Referral path: {job['company']} — {job['role']}"[:120],
+            brief=brief,
+            source="web",
+            dedup_key=f"referral:{job_id}",
+        )
+    except Exception as exc:  # noqa: BLE001 — the status change already stands
+        log.warning("could not queue referral hunt for job %s: %s", job_id, exc)
+        await emit("job.referral_hunt_failed",
+                   payload={"job_id": job_id, "error": str(exc)[:200]})
+        return None
 
 
 @router.get("/runs", operation_id="listRuns")

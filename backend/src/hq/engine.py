@@ -547,6 +547,7 @@ async def _watchdog_tick(scheduled: datetime, context: Any) -> None:
     await _deadman_check(scheduled)
     await _cap_overrunning_tasks()
     await _archive_old_tasks()
+    await _close_stale_finds()
 
     # dead-man ping (external check catches a dead process; this proves liveness)
     url = settings().healthchecks_ping_url
@@ -591,6 +592,35 @@ async def _archive_old_tasks() -> None:
         # An event, not a log line: engine records what it did where the
         # activity feed can show it.
         await obs.emit("board.archived", payload={"count": len(rows), "older_than_days": days})
+
+
+async def _close_stale_finds() -> None:
+    """Retire a merely-decent find the owner has walked past for a few days.
+
+    The Found column answers one question — what is worth acting on today —
+    and it stops answering it once a role he has already declined twice is
+    still sitting in it. Anything still ``seen`` and not a strong fit after
+    ``job_found_days`` is set to ``closed``.
+
+    Closed, not deleted. The row is also the discovery memory: hunter checks
+    the ledger before researching a company, so deleting it would only mean
+    rediscovering the same posting next week and paying for another run to
+    reject it again. A strong fit is never aged out — that is the whole
+    category the owner asked to keep.
+    """
+    days = settings().job_found_days
+    if days <= 0:  # 0 switches the retention off
+        return
+    rows = await db.fetch(
+        "UPDATE hq.jobs SET status = 'closed', updated_at = now()"
+        " WHERE status = 'seen' AND fit_bucket <> 'strong'"
+        "   AND first_seen < now() - make_interval(days => %s)"
+        " RETURNING id::text",
+        (days,),
+    )
+    if rows:
+        await obs.emit("jobs.aged_out",
+                       payload={"count": len(rows), "older_than_days": days})
 
 
 async def _cap_overrunning_tasks() -> None:

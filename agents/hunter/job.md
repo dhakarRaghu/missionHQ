@@ -33,10 +33,14 @@ cron:
       see the same twenty companies every night. Then read three or four of
       the boards it returned with job_board, always passing query, location
       and exclude. 4) Score and record every verified role in an acceptable
-      lane and location, including weak fits so it is not rediscovered. Skip,
-      without recording: an internship, a role above senior, one that is
-      remote-US-only or requires relocation he has not asked for, and anything
-      that is not an engineering role. 5) If a fact is visible only on
+      lane and location, including weak fits so it is not rediscovered. Always
+      fill experience_band with the years the posting actually asks for, and
+      compensation with the package or your best estimate and its basis; the
+      target is 25 LPA or better. Do not chase a role whose floor is three
+      years or more — he cannot take it. Hybrid, onsite and remote are all
+      fine. Skip, without recording: an internship, one that is remote-US-only
+      or requires relocation he has not asked for, and anything that is not an
+      engineering role. 5) If a fact is visible only on
       LinkedIn, note the exact Operator follow-up needed; you cannot delegate
       from a web-reading run. 6) End
       with the count recorded, how many were strong, and the single role worth
@@ -156,15 +160,43 @@ Score from the rubric, and do not round up out of politeness:
   Kubernetes, Postgres, RAG or agent infrastructure.
 - **+1** the domain is one he is building toward: payments, fintech
   infrastructure, AI infrastructure, developer tooling.
+- **+1** the package is at or above 25 LPA, or the level and company make that
+  the going rate.
 - **minus 1 to 2** for seniority drift above two years, a location he has not
   asked for, or a level clearly above target.
+- **minus 2** the package is stated and clearly below 25 LPA. A role he would
+  take a pay cut for is not a strong fit however well it reads.
 
 Cap the final score at 10. 8 or more is **strong**, 6 to 7 **decent**, below
 that a **stretch**. Then call `record_job` with the score and one sentence
 saying why. Record weak but eligible roles too: that is exactly what stops
 next week's search rediscovering them. Do not record roles rejected before
-scoring because their level, discipline or location is outside the candidate
+scoring because their discipline or location is outside the candidate
 profile; list those briefly as rejected leads in the quarantine summary.
+
+## The hard limits
+
+**Three years is the ceiling.** He has under two years, so a posting whose
+floor is three years or more is not one he can take — most of all at a large
+company, where the bar is enforced by a recruiter screen he never gets past.
+Do not spend a run on one. If you have already opened it, record it anyway
+with the true `experience_band`: `record_job` files anything at or above the
+ceiling as closed by itself, which keeps it out of his way and still stops it
+being rediscovered next week. Do not look for a referral for one, and do not
+report it as a candidate role.
+
+**The package is part of the finding.** Target is 25 LPA or better. Fill
+`compensation` from the posting, or from the company's own careers or salary
+page when it publishes one. When nothing states it, write your best estimate
+with the basis, like `est. 18-24 LPA (Levels.fyi, SDE-1 Bengaluru)`, rather
+than leaving it blank — a blank tells him nothing and he has to open the
+posting himself to find out.
+
+**Every work mode is fine.** Hybrid, onsite and remote are all acceptable, so
+never reject or mark down a role for its mode. Location is still a real
+filter: Bengaluru, elsewhere in India, or remote he can take from India. A
+remote role restricted to the US, or one that needs relocation he has not
+asked for, is still out.
 
 When `job_board` returns `external_id`, pass it and `provider` to `record_job`.
 Also preserve any known location, remote policy, experience band, compensation,
