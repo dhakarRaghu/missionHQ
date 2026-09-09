@@ -15,6 +15,7 @@ from hq import board, db, engagement, safety
 from hq.api.deps import require_auth
 from hq.config import settings
 from hq.dbos_app import DBOS
+from hq.job_pipeline import referral_brief, referral_payload
 from hq.obs import emit
 
 log = logging.getLogger(__name__)
@@ -167,6 +168,72 @@ async def dismiss_task(task_id: str) -> dict:
     return {"dismissed": True}
 
 
+REFERRAL_SELECT = (
+    "SELECT r.id::text, r.job_id::text, r.company, r.name, r.headline,"
+    " r.profile_url, r.degree, r.shared_ground, r.why_them, r.mutuals,"
+    " r.source, r.status, r.created_at, r.updated_at,"
+    " j.role AS job_role, j.url AS job_url, j.fit_score, j.status AS job_status"
+    " FROM hq.referrals r JOIN hq.jobs j ON j.id = r.job_id"
+)
+# A 1st-degree connection already knows him and is worth every other lead put
+# together, so the list is ordered by how usable the person is, not by when
+# they were found. 'persona' is not a person at all and sorts last.
+_DEGREE_RANK = (
+    "CASE r.degree WHEN '1st' THEN 0 WHEN '2nd' THEN 1 WHEN '3rd' THEN 2"
+    " WHEN 'none' THEN 3 WHEN 'unknown' THEN 4 ELSE 5 END"
+)
+
+
+@router.get("/referrals", operation_id="listReferrals")
+async def list_referrals(job_id: str | None = None, limit: int = 200) -> list[dict]:
+    """People the owner could ask for a referral, best-connected first."""
+    where = "WHERE r.job_id = %s" if job_id else ""
+    params: tuple[Any, ...] = (job_id, limit) if job_id else (limit,)
+    return await db.fetch(
+        f"{REFERRAL_SELECT} {where} ORDER BY {_DEGREE_RANK}, j.fit_score DESC,"
+        " r.created_at DESC LIMIT %s",
+        params,
+    )
+
+
+class ReferralPatch(BaseModel):
+    """What the owner may change. The person's details are what operator read
+    off the page and stay as recorded."""
+
+    status: str | None = None
+    shared_ground: str | None = None
+
+
+REFERRAL_STATUSES = ("found", "asked", "replied", "dismissed")
+
+
+@router.patch("/referrals/{referral_id}", operation_id="updateReferral")
+async def update_referral(referral_id: str, body: ReferralPatch) -> dict:
+    """Mark a person asked, replied, or not worth it."""
+    sets, params = [], []
+    if body.status is not None:
+        if body.status not in REFERRAL_STATUSES:
+            raise HTTPException(400, f"status must be one of {list(REFERRAL_STATUSES)}")
+        sets.append("status = %s")
+        params.append(body.status)
+    if body.shared_ground is not None:
+        sets.append("shared_ground = %s")
+        params.append(body.shared_ground[:2000])
+    if not sets:
+        raise HTTPException(400, "nothing to update")
+    sets.append("updated_at = now()")
+    params.append(referral_id)
+    rows = await db.fetch(
+        f"UPDATE hq.referrals SET {', '.join(sets)} WHERE id = %s RETURNING id::text",
+        tuple(params),
+    )
+    if not rows:
+        raise HTTPException(404, "no such referral")
+    await emit("referral.updated",
+               payload={"referral_id": referral_id, "fields": sets[:-1]})
+    return {"ok": True}
+
+
 @router.get("/tasks/{task_id}/events", operation_id="listTaskEvents")
 async def list_task_events(task_id: str) -> list[dict]:
     return await db.fetch(
@@ -279,37 +346,18 @@ async def _hunt_referral(job_id: str) -> str | None:
     if job is None or "operator" not in engine.registered_agents():
         return None
     known = (job["referral"] or "").strip()
-    brief = (
-        f"Find the one person to ask for a referral into {job['company']} for"
-        f" their {job['role']} role ({job['url']}).\n\n"
-        "Start on the company's LinkedIn people page, in ONE tab:\n"
-        "  https://www.linkedin.com/company/<slug>/people/?facetNetwork=F\n"
-        "Try the obvious slug first. That page lists his own connections at"
-        " the company with their headlines, which is usually the entire"
-        " answer. Do not search Google for this, and do not open individual"
-        " profiles — the headline is enough to name the right person, and"
-        " walking profiles is what gets an account restricted.\n\n"
-        "Report, in this order of preference:\n"
-        "1. An existing first-degree connection at the company. If there is"
-        " one, that is the answer; say how the owner knows them.\n"
-        "2. Otherwise the named engineering leader or recruiter who visibly"
-        " owns this role or its team, from the same page.\n"
-        "3. If neither is verifiable, give the target persona and the exact"
-        " page to check by hand. Never invent a person or a relationship.\n\n"
-        "Also report the shared ground the owner could open with: a post, a"
-        " repo, a talk, a shared school or employer. A referral ask with no"
-        " shared ground is a cold ask with extra steps.\n\n"
-        "Read only. Do not connect, follow, message, or apply. One tab, and"
-        " close it when you are done."
+    payload = referral_payload(
+        job_id=job_id, company=job["company"], role=job["role"]
     )
-    if known:
-        brief += f"\n\nWhat hunter already recorded, to confirm or correct:\n{known}"
     try:
         return await engine.dispatch(
             agent="operator",
             title=f"Referral path: {job['company']} — {job['role']}"[:120],
-            brief=brief,
+            brief=referral_brief(payload, known),
             source="web",
+            payload=payload,
+            # Per job, not per press: shortlisting a role twice must not queue
+            # two identical browser runs against the same company page.
             dedup_key=f"referral:{job_id}",
         )
     except Exception as exc:  # noqa: BLE001 — the status change already stands

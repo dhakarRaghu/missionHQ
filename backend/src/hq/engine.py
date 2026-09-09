@@ -33,7 +33,9 @@ from hq.config import settings
 from hq.dbos_app import DBOS
 from hq.job_pipeline import (
     extract_discovery_leads,
+    extract_referral_people,
     is_browser_discovery,
+    is_referral_hunt,
     verification_brief,
     verification_payload,
 )
@@ -403,6 +405,7 @@ async def run_task(task_id: str) -> str:
     followup_task_id, followup_error = await _safe_advance_job_search(
         task, task_id, run_id, result, outcome.output
     )
+    recorded_people = await _safe_record_referrals(task, run_id, result, outcome.output)
     delivered_output = outcome.output[:TASK_OUTPUT_CHARS]
     if followup_task_id is not None:
         delivered_output += (
@@ -413,6 +416,11 @@ async def run_task(task_id: str) -> str:
         delivered_output += (
             "\n\nHunter verification could not be queued automatically. "
             f"The discovery result was preserved; retry is safe. ({followup_error})"
+        )
+    if recorded_people:
+        delivered_output += (
+            f"\n\n{recorded_people} referral"
+            f"{'' if recorded_people == 1 else 's'} recorded on the Jobs board."
         )
     await _deliver_task_result_step(
         task_id, run_id, agent_name, result, delivered_output
@@ -847,6 +855,93 @@ async def _safe_advance_job_search(
             payload={"error": error, "raw_error": str(exc)[:500]},
         )
         return None, error
+
+
+@DBOS.step()
+async def _record_referral_people_step(
+    job_id: str, company: str, people: list[dict[str, str]], source: str
+) -> int:
+    """Write the people from one referral run into hq.referrals.
+
+    Re-running the hunt for a role refreshes each person rather than stacking
+    duplicates, and never clears a field the new run happened not to see: a
+    second look that only got the headline must not wipe the shared ground the
+    first one found. ``status`` is untouched on conflict, because it is the
+    owner's — he is the one who marks a person asked.
+    """
+    written = 0
+    for person in people:
+        await db.execute(
+            """
+            INSERT INTO hq.referrals (job_id, company, name, headline, profile_url,
+                                      degree, shared_ground, why_them, mutuals, source)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (job_id, lower(name)) DO UPDATE SET
+                headline = COALESCE(NULLIF(EXCLUDED.headline, ''), hq.referrals.headline),
+                profile_url = COALESCE(NULLIF(EXCLUDED.profile_url, ''), hq.referrals.profile_url),
+                degree = CASE WHEN EXCLUDED.degree = 'unknown'
+                              THEN hq.referrals.degree ELSE EXCLUDED.degree END,
+                shared_ground = COALESCE(NULLIF(EXCLUDED.shared_ground, ''),
+                                         hq.referrals.shared_ground),
+                why_them = COALESCE(NULLIF(EXCLUDED.why_them, ''), hq.referrals.why_them),
+                mutuals = COALESCE(NULLIF(EXCLUDED.mutuals, ''), hq.referrals.mutuals),
+                updated_at = now()
+            """,
+            (job_id, company, person["name"], person["headline"],
+             person["profile_url"], person["degree"], person["shared_ground"],
+             person["why_them"], person["mutuals"], source),
+        )
+        written += 1
+    # Finding the people IS the role reaching the referral stage, so move it
+    # there — unless the owner has already pushed it further, which is his call
+    # and not something a background run may undo.
+    if written:
+        await db.execute(
+            "UPDATE hq.jobs SET status = 'referral', updated_at = now()"
+            " WHERE id = %s AND status IN ('seen', 'shortlisted')",
+            (job_id,),
+        )
+    return written
+
+
+async def _safe_record_referrals(
+    task: dict, run_id: str, result: str, output: str
+) -> int:
+    """Turn a finished referral run into people rows. Never fails the run.
+
+    The names are the whole point of the run, so a parse or write failure is
+    reported as its own event and the prose answer still reaches the owner in
+    quarantine — he can read it there and the row is recoverable by retrying.
+    """
+    payload = task.get("payload") or {}
+    if result != "done" or not is_referral_hunt(payload):
+        return 0
+    try:
+        people = extract_referral_people(output)
+        if not people:
+            await runner.emit_step(
+                "referral.none_found", run_id=run_id, task_id=task.get("id"),
+                agent=str(task.get("agent") or "operator"),
+                payload={"job_id": payload.get("job_id")},
+            )
+            return 0
+        written = await _record_referral_people_step(
+            str(payload["job_id"]), str(payload.get("company") or ""), people,
+            f"operator:{run_id}",
+        )
+        await runner.emit_step(
+            "referral.recorded", run_id=run_id, task_id=task.get("id"),
+            agent=str(task.get("agent") or "operator"),
+            payload={"job_id": payload.get("job_id"), "count": written},
+        )
+        return written
+    except Exception as exc:  # noqa: BLE001 — the reading still happened
+        await runner.emit_step(
+            "referral.record_failed", run_id=run_id, task_id=task.get("id"),
+            agent=str(task.get("agent") or "operator"),
+            payload={"job_id": payload.get("job_id"), "error": str(exc)[:300]},
+        )
+        return 0
 
 
 @DBOS.step()

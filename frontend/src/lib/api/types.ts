@@ -300,6 +300,35 @@ export interface ChatTask {
 }
 
 /** One role in the job ledger. Hunter records it; the owner moves it along. */
+/** One person the owner could ask for a referral, found by operator on the
+ * company's own people page. Ranked by degree: a 1st-degree connection
+ * already knows him and is worth every other lead put together. */
+export const REFERRAL_STATUSES = ["found", "asked", "replied", "dismissed"] as const;
+
+export type ReferralStatus = (typeof REFERRAL_STATUSES)[number];
+
+export interface Referral {
+  id: string;
+  job_id: string;
+  company: string;
+  name: string;
+  headline: string;
+  profile_url: string;
+  degree: "1st" | "2nd" | "3rd" | "none" | "persona" | "unknown";
+  shared_ground: string;
+  why_them: string;
+  mutuals: string;
+  source: string;
+  status: ReferralStatus;
+  created_at: string;
+  updated_at: string;
+  /** Joined from the role this person is for. */
+  job_role: string;
+  job_url: string;
+  fit_score: number;
+  job_status: JobStatus;
+}
+
 export const JOB_STATUSES = [
   "seen",
   "shortlisted",

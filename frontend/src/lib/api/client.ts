@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ChatTask,
   Job,
+  Referral,
   ChatTicket,
   ChatSession,
   Costs,
@@ -106,6 +107,8 @@ export const qk = {
   runDetail: (id: string) => ["run-detail", id] as const,
   tickets: (status: string) => ["tickets", status] as const,
   jobs: (status?: string) => ["jobs", status ?? "all"] as const,
+  /** Prefixed by "jobs" so a jobs invalidation refreshes the people too. */
+  referrals: (jobId?: string) => ["jobs", "referrals", jobId ?? "all"] as const,
   agents: ["agents"] as const,
   /** Prefixed by qk.agents so an agents invalidation refreshes it too. */
   agentDrafts: ["agents", "drafts"] as const,
@@ -156,6 +159,13 @@ export const api = {
   tickets: (status = "pending", limit?: number) =>
     request<Ticket[]>(`/tickets${query({ status, limit })}`),
   jobs: (status?: string) => request<Job[]>(`/jobs${query({ status })}`),
+  referrals: (jobId?: string) =>
+    request<Referral[]>(`/referrals${query({ job_id: jobId })}`),
+  updateReferral: (id: string, patch: { status?: string; shared_ground?: string }) =>
+    request<{ ok: boolean }>(`/referrals/${seg(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
   updateJob: (
     id: string,
     patch: {
