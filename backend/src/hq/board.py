@@ -13,18 +13,27 @@ from hq.obs import emit
 
 log = logging.getLogger(__name__)
 
-VALID_STATUSES = {"backlog", "running", "blocked", "needs_approval", "done", "failed"}
+VALID_STATUSES = {"backlog", "running", "blocked", "needs_approval", "done",
+                  "failed", "archived"}
 
 # Legal status transitions. A same-status "transition" is always accepted as a
 # no-op so a replayed workflow step can re-apply what it already applied.
 ALLOWED: dict[str, set[str]] = {
-    "backlog": {"running", "blocked", "failed"},
+    "backlog": {"running", "blocked", "failed", "archived"},
     "running": {"needs_approval", "blocked", "done", "failed"},
     "needs_approval": {"running", "blocked", "failed"},
-    "blocked": {"backlog", "running", "failed"},
-    "done": set(),
-    "failed": {"backlog"},
+    "blocked": {"backlog", "running", "failed", "archived"},
+    "done": {"archived"},
+    "failed": {"backlog", "archived"},
+    # Terminal. It also has to be a key at all: ``apply`` looks up
+    # ``ALLOWED[current]``, so an absent entry is a KeyError on any event
+    # appended to a task the maintenance tick had already archived.
+    "archived": set(),
 }
+# ``running`` and ``needs_approval`` deliberately have no route to archived.
+# Hiding a card whose run is still going would hide something still spending
+# money, so the owner cancels it first. The dismiss endpoint refuses the same
+# two states, and the two rules must stay in step.
 
 # Events written before ``apply`` started recording ``data.status``. Used only
 # by the projection rebuild so old logs still replay to a status.

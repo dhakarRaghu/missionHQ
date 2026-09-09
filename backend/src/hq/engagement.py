@@ -46,6 +46,8 @@ Action = Literal[
     "chat",
     "vault_edit",
     "cancel_task",
+    "retry_task",
+    "dismiss_task",
     "update_job",
 ]
 

@@ -176,6 +176,15 @@ export const api = {
       `/tasks/${seg(id)}/cancel`,
       { method: "POST" },
     ),
+  retryTask: (id: string) =>
+    request<{ retried: boolean; reason?: string }>(`/tasks/${seg(id)}/retry`, {
+      method: "POST",
+    }),
+  dismissTask: (id: string) =>
+    request<{ dismissed: boolean; reason?: string }>(
+      `/tasks/${seg(id)}/dismiss`,
+      { method: "POST" },
+    ),
   resolveTicket: (id: string, verdict: Verdict) =>
     request<{ resolved: boolean; reason?: string }>(
       `/tickets/${seg(id)}/resolve`,

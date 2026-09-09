@@ -251,43 +251,171 @@ const SOURCE_LABEL: Record<string, string> = {
 function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
   const running = task.status === "running";
   return (
-    <button
-      type="button"
-      onClick={onOpen}
+    // An article, not a button. The card carries its own actions now, and a
+    // button inside a button is invalid: the browser drops the inner one and
+    // the click lands on the card instead of on Approve.
+    <article
       className={cn(
-        "bg-card flex w-full flex-col gap-2 rounded-xl border px-3.5 py-3 text-left transition-shadow hover:shadow-sm",
+        "bg-card flex w-full flex-col rounded-xl border transition-shadow hover:shadow-sm",
         // A queued task has not been picked up yet, so its card is drawn as an
         // outline. One waiting on the owner is the only card with a heavy edge.
         task.status === "backlog" && "border-dashed",
         task.status === "needs_approval" && "border-foreground/60 border-2",
       )}
     >
-      <span className="flex items-center justify-between gap-2">
-        <span className="bg-muted text-muted-foreground rounded-md px-1.5 py-0.5 text-xs">
-          {SOURCE_LABEL[task.source] ?? task.source}
-        </span>
-        {running ? (
-          <span className="text-status-success flex items-center gap-1 text-xs">
-            <span
-              aria-hidden
-              className="bg-status-success size-1.5 rounded-full motion-safe:animate-pulse"
-            />
-            live
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex w-full flex-col gap-2 px-3.5 py-3 text-left"
+      >
+        <span className="flex items-center justify-between gap-2">
+          <span className="bg-muted text-muted-foreground rounded-md px-1.5 py-0.5 text-xs">
+            {SOURCE_LABEL[task.source] ?? task.source}
           </span>
-        ) : null}
-      </span>
-
-      <span className="line-clamp-3 text-sm leading-snug font-medium">
-        {task.title}
-      </span>
-
-      <span className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
-        <span className="truncate">{task.agent}</span>
-        <span className="whitespace-nowrap" title={exactTime(task.updated_at)}>
-          {timeAgo(task.updated_at)}
+          {running ? (
+            <span className="text-status-success flex items-center gap-1 text-xs">
+              <span
+                aria-hidden
+                className="bg-status-success size-1.5 rounded-full motion-safe:animate-pulse"
+              />
+              live
+            </span>
+          ) : null}
         </span>
-      </span>
-    </button>
+
+        <span className="line-clamp-3 text-sm leading-snug font-medium">
+          {task.title}
+        </span>
+
+        <span className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
+          <span className="truncate">{task.agent}</span>
+          <span className="whitespace-nowrap" title={exactTime(task.updated_at)}>
+            {timeAgo(task.updated_at)}
+          </span>
+        </span>
+      </button>
+
+      <TaskCardActions task={task} />
+    </article>
+  );
+}
+
+/**
+ * The actions a card can take without being opened.
+ *
+ * An approval used to mean: notice the card, open it, read it, answer. Three
+ * of those steps are the same every time, so Approve and Reject are on the
+ * card itself. It is the same ticket the Inbox and Telegram answer, and a
+ * second answer anywhere is a visible no-op, so nothing is lost by having a
+ * fourth place to say yes.
+ *
+ * Only the actions that apply to this task's state are rendered — a card with
+ * nothing to offer draws no footer at all.
+ */
+function TaskCardActions({ task }: { task: Task }) {
+  const queryClient = useQueryClient();
+  // Same query key as the Inbox, so react-query fetches the pending list once
+  // for the whole board however many cards ask for it.
+  const tickets = useQuery({
+    queryKey: qk.tickets("pending"),
+    queryFn: () => api.tickets("pending"),
+    enabled: task.status === "needs_approval",
+  });
+  const ticket = (tickets.data ?? []).find((row) => row.task_id === task.id);
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    queryClient.invalidateQueries({ queryKey: ["tickets"] });
+  };
+
+  const resolve = useMutation({
+    mutationFn: (verdict: Verdict) => api.resolveTicket(ticket!.id, verdict),
+    onSuccess: (result, verdict) => {
+      toast(
+        result.resolved
+          ? `Ticket ${verdict}`
+          : (result.reason ?? "Already resolved elsewhere"),
+      );
+      refresh();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const retry = useMutation({
+    mutationFn: () => api.retryTask(task.id),
+    onSuccess: (result) => {
+      toast(result.retried ? "Queued again" : (result.reason ?? "Not retried"));
+      refresh();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const dismiss = useMutation({
+    mutationFn: () => api.dismissTask(task.id),
+    onSuccess: (result) => {
+      toast(
+        result.dismissed
+          ? "Dismissed — still on the Runs page"
+          : (result.reason ?? "Not dismissed"),
+      );
+      refresh();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const canRetry = task.status === "blocked" || task.status === "failed";
+  // Running and needs_approval are excluded: hiding a card whose run is still
+  // going would hide something still spending money.
+  const canDismiss = !["running", "needs_approval"].includes(task.status);
+  const busy = resolve.isPending || retry.isPending || dismiss.isPending;
+  if (!ticket && !canRetry && !canDismiss) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-t px-3.5 py-2">
+      {ticket ? (
+        <>
+          <Button
+            size="sm"
+            className="h-7 px-2 text-xs"
+            disabled={busy}
+            onClick={() => resolve.mutate("approved")}
+          >
+            Approve
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            disabled={busy}
+            onClick={() => resolve.mutate("denied")}
+          >
+            Reject
+          </Button>
+        </>
+      ) : null}
+      {canRetry ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          disabled={busy}
+          onClick={() => retry.mutate()}
+        >
+          Retry
+        </Button>
+      ) : null}
+      {canDismiss ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-muted-foreground ml-auto h-7 px-2 text-xs"
+          disabled={busy}
+          onClick={() => dismiss.mutate()}
+        >
+          Dismiss
+        </Button>
+      ) : null}
+    </div>
   );
 }
 

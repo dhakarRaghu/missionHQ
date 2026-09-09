@@ -1,6 +1,7 @@
 import asyncio
 
 from hq import engine
+from hq.board import ALLOWED, VALID_STATUSES
 from hq.config import settings
 from hq.db import load_migrations
 from hq.job_pipeline import (
@@ -424,3 +425,28 @@ def test_seniority_ceiling_matches_the_configured_bar() -> None:
     assert min_years_required("SDE2+ / ~4 yrs") >= bar
     # A range open to a one-year candidate stays eligible.
     assert min_years_required("1-3 years") < bar
+
+
+# --- board transitions the owner's card buttons depend on --------------------
+
+def test_every_status_is_a_key_in_the_transition_table() -> None:
+    # apply() looks up ALLOWED[current]; a status that is valid but absent here
+    # is a KeyError on the next event appended to such a task.
+    assert set(ALLOWED) == VALID_STATUSES
+
+
+def test_dismiss_is_allowed_from_every_state_the_endpoint_offers_it() -> None:
+    for state in ("backlog", "blocked", "done", "failed"):
+        assert "archived" in ALLOWED[state], state
+
+
+def test_a_live_run_cannot_be_archived() -> None:
+    # Dismissing one would hide a run that is still spending money, so the
+    # owner has to cancel first. The endpoint refuses these two as well.
+    for state in ("running", "needs_approval"):
+        assert "archived" not in ALLOWED[state], state
+
+
+def test_retry_puts_a_stopped_task_back_in_the_queue() -> None:
+    assert "backlog" in ALLOWED["blocked"]
+    assert "backlog" in ALLOWED["failed"]

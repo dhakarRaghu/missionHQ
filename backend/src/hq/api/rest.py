@@ -121,6 +121,52 @@ async def cancel_task(task_id: str) -> dict:
     return {"cancelled": True}
 
 
+@router.post("/tasks/{task_id}/retry", operation_id="retryTask")
+async def retry_task(task_id: str) -> dict:
+    """Run a stopped task again, from the board.
+
+    Blocked and failed are where tasks go to be forgotten: a transient gateway
+    failure or an approval that timed out leaves work the owner still wants,
+    and until now the only way back was to retype it as a new task, which lost
+    the brief and the history. This re-runs the same row, so its event log
+    keeps every attempt in one place.
+    """
+    from hq import engine
+
+    row = await db.fetchone("SELECT status FROM hq.tasks WHERE id = %s", (task_id,))
+    if row is None:
+        raise HTTPException(404, "no such task")
+    if row["status"] not in {"blocked", "failed"}:
+        return {"retried": False, "reason": f"task is {row['status']}"}
+    await board.apply(task_id, "retried", actor="owner", status="backlog",
+                      data={"reason": "retried by the owner"})
+    await engine.requeue(task_id)
+    await engagement.record_owner_action("web", "retry_task")
+    return {"retried": True}
+
+
+@router.post("/tasks/{task_id}/dismiss", operation_id="dismissTask")
+async def dismiss_task(task_id: str) -> dict:
+    """Take a finished or stopped task off the board.
+
+    Archived, not deleted. The row, its runs and its events all stay, so the
+    Runs page and the health score still see what happened; the board simply
+    stops showing work the owner has finished with. A task still running has
+    to be cancelled first — dismissing one would hide a run that is still
+    spending money.
+    """
+    row = await db.fetchone("SELECT status FROM hq.tasks WHERE id = %s", (task_id,))
+    if row is None:
+        raise HTTPException(404, "no such task")
+    if row["status"] in {"running", "needs_approval"}:
+        return {"dismissed": False,
+                "reason": f"task is {row['status']}; cancel it first"}
+    await board.apply(task_id, "dismissed", actor="owner", status="archived",
+                      data={"reason": "dismissed by the owner"})
+    await engagement.record_owner_action("web", "dismiss_task")
+    return {"dismissed": True}
+
+
 @router.get("/tasks/{task_id}/events", operation_id="listTaskEvents")
 async def list_task_events(task_id: str) -> list[dict]:
     return await db.fetch(
@@ -232,18 +278,25 @@ async def _hunt_referral(job_id: str) -> str | None:
     brief = (
         f"Find the one person to ask for a referral into {job['company']} for"
         f" their {job['role']} role ({job['url']}).\n\n"
-        "In the signed-in browser, in this order:\n"
+        "Start on the company's LinkedIn people page, in ONE tab:\n"
+        "  https://www.linkedin.com/company/<slug>/people/?facetNetwork=F\n"
+        "Try the obvious slug first. That page lists his own connections at"
+        " the company with their headlines, which is usually the entire"
+        " answer. Do not search Google for this, and do not open individual"
+        " profiles — the headline is enough to name the right person, and"
+        " walking profiles is what gets an account restricted.\n\n"
+        "Report, in this order of preference:\n"
         "1. An existing first-degree connection at the company. If there is"
         " one, that is the answer; say how the owner knows them.\n"
         "2. Otherwise the named engineering leader or recruiter who visibly"
-        " owns this role or its team.\n"
+        " owns this role or its team, from the same page.\n"
         "3. If neither is verifiable, give the target persona and the exact"
         " page to check by hand. Never invent a person or a relationship.\n\n"
         "Also report the shared ground the owner could open with: a post, a"
         " repo, a talk, a shared school or employer. A referral ask with no"
         " shared ground is a cold ask with extra steps.\n\n"
-        "Read only. Do not connect, follow, message, or apply. One company,"
-        " a handful of pages; do not walk the employee list."
+        "Read only. Do not connect, follow, message, or apply. One tab, and"
+        " close it when you are done."
     )
     if known:
         brief += f"\n\nWhat hunter already recorded, to confirm or correct:\n{known}"

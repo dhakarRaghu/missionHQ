@@ -236,17 +236,38 @@ async def dispatch(
     return task_id
 
 
-async def _enqueue(task_id: str) -> None:
-    """Deterministic workflow id, so a replayed dispatch cannot start a second run."""
+async def _enqueue(task_id: str, *, attempt: int = 0) -> None:
+    """Deterministic workflow id, so a replayed dispatch cannot start a second run.
+
+    ``attempt`` exists for the owner's Retry. The id is derived from the task,
+    which is what makes a replay idempotent — and also what makes a second run
+    of the same task impossible, because DBOS hands back the finished
+    workflow's handle instead of starting anything. A retry is a deliberately
+    different attempt, so it gets a different id.
+    """
     if DBOS.step_id is not None:
         # DBOS forbids starting workflows from inside a step (e.g. the
         # create_subtask tool). The task stays in backlog and the owning
         # workflow picks it up via enqueue_agent_tasks() after its run.
         return
+    wf_id = f"task-{task_id}" if attempt == 0 else f"task-{task_id}-retry-{attempt}"
     # Durable wall-clock cap enforced by DBOS, outside the agent: a stalled or
     # hung run is cancelled instead of sitting in "running" all night.
-    with SetWorkflowID(f"task-{task_id}"), SetWorkflowTimeout(TASK_TIMEOUT_S):
+    with SetWorkflowID(wf_id), SetWorkflowTimeout(TASK_TIMEOUT_S):
         await _queues["tasks"].enqueue_async(run_task, task_id)
+
+
+async def requeue(task_id: str) -> None:
+    """Run a stopped task again, as a fresh attempt.
+
+    The attempt number is the count of runs already on record, so the workflow
+    id is new every time and still deterministic: pressing Retry twice on the
+    same task state cannot start two runs.
+    """
+    row = await db.fetchone(
+        "SELECT count(*) AS n FROM hq.runs WHERE task_id = %s", (task_id,)
+    )
+    await _enqueue(task_id, attempt=int(row["n"]) if row else 1)
 
 
 async def enqueue_chat(session_id: str, text: str, client_id: str) -> WorkflowHandleAsync[str]:
