@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, qk } from "@/lib/api/client";
 import type { Ticket, Verdict } from "@/lib/api/types";
+import { ticketDetails, ticketHeadline } from "@/lib/tickets";
 import { exactTime, timeAgo } from "@/lib/time";
 
 /** Backend filter for the "Recently resolved" section (comma list). */
@@ -141,9 +142,11 @@ function TicketCard({
         ) : null}
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <pre className="bg-muted max-h-48 overflow-auto rounded-md p-3 text-xs">
-          {JSON.stringify(ticket.tool_args, null, 2)}
-        </pre>
+        {/* The same reading the chat thread and the board card give this
+            ticket: the one value the decision turns on, then the rest as
+            key: value lines. Raw JSON stays one click away for the case the
+            headline misses. Three surfaces, one rendering. */}
+        <TicketArgs args={ticket.tool_args} />
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
@@ -176,6 +179,39 @@ function TicketCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function TicketArgs({ args }: { args: Record<string, unknown> | null | undefined }) {
+  const headline = ticketHeadline(args);
+  const details = ticketDetails(args);
+  if (!headline && !details.length) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      {headline ? (
+        <p className="border-border max-h-40 overflow-auto border-l-2 pl-3 text-sm break-words whitespace-pre-wrap">
+          {headline}
+        </p>
+      ) : null}
+      {details.length ? (
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+          {details.map((row) => (
+            <Fragment key={row.key}>
+              <dt className="text-muted-foreground font-mono">{row.key}</dt>
+              <dd className="truncate" title={row.value}>
+                {row.value}
+              </dd>
+            </Fragment>
+          ))}
+        </dl>
+      ) : null}
+      <details className="text-xs">
+        <summary className="text-muted-foreground cursor-pointer">raw arguments</summary>
+        <pre className="bg-muted mt-2 max-h-48 overflow-auto rounded-md p-3">
+          {JSON.stringify(args, null, 2)}
+        </pre>
+      </details>
+    </div>
   );
 }
 

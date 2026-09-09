@@ -1,9 +1,6 @@
-import { LiveFeed } from "@/components/features/feed/live-feed";
+import { redirect } from "next/navigation";
 
 export default function FeedPage() {
-  return (
-    <>
-      <LiveFeed />
-    </>
-  );
+  // The live feed is a tab on Runs now; same reason as /inbox -> /home.
+  redirect("/runs?tab=feed");
 }

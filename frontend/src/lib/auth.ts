@@ -13,7 +13,7 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
 
 const STORAGE_KEY = "hq.token";
 const LOGIN_PATH = "/login";
-const DEFAULT_NEXT = "/inbox";
+const DEFAULT_NEXT = "/home";
 
 /** True when the browser talks to a different origin (Vercel mode). */
 export function hasRemoteApi(): boolean {

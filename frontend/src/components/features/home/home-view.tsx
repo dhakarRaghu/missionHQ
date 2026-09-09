@@ -5,14 +5,14 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
 
-import { EmptyState } from "@/components/empty-state";
-import { ErrorState } from "@/components/error-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useFeed } from "@/hooks/use-hq-events";
 import { feedHref, feedLabel } from "@/components/features/feed/live-feed";
+import { TicketList } from "@/components/features/inbox/ticket-list";
+import { ValueWeekCard } from "@/components/features/inbox/value-week-card";
 import { api, qk } from "@/lib/api/client";
 import type { Task } from "@/lib/api/types";
 import { describeCron } from "@/lib/cron";
@@ -43,6 +43,12 @@ function isToday(iso: string): boolean {
  * The one screen that answers "what is my system doing" without reading four
  * other views: what needs a decision, what the numbers are today, what is
  * scheduled, and what just happened.
+ *
+ * The Inbox used to be a separate view. It was one card here ("3 decisions
+ * are waiting — Open Inbox") pointing at a page whose whole content was the
+ * same three tickets. The owner asked for the two to be one page: the
+ * tickets themselves sit where the count was, so a decision is one click
+ * from the moment he sees it, not two.
  */
 export function HomeView() {
   const hydrated = useSyncExternalStore(
@@ -50,15 +56,10 @@ export function HomeView() {
     () => true,
     () => false,
   );
-  const tickets = useQuery({
-    queryKey: qk.tickets("pending"),
-    queryFn: () => api.tickets("pending"),
-  });
   const tasks = useQuery({ queryKey: qk.tasks(), queryFn: () => api.tasks() });
   const costs = useQuery({ queryKey: qk.costs, queryFn: api.costs });
   const agents = useQuery({ queryKey: qk.agents, queryFn: api.agents });
 
-  const pending = tickets.data ?? [];
   const all: Task[] = tasks.data ?? [];
 
   const localDate = hydrated
@@ -78,12 +79,7 @@ export function HomeView() {
         </p>
       </div>
 
-      <DecisionsCard
-        count={pending.length}
-        loading={tickets.isLoading}
-        error={tickets.isError ? tickets.error.message : null}
-        onRetry={() => tickets.refetch()}
-      />
+      <TicketList />
 
       <section aria-label="Today at a glance">
         <h2 className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
@@ -129,6 +125,10 @@ export function HomeView() {
         />
         <ActivityCard />
       </div>
+
+      {/* The kill metric lives with the decisions it measures. Last, because
+          it is read weekly and the tickets above are read now. */}
+      <ValueWeekCard />
     </div>
   );
 }
@@ -162,53 +162,6 @@ function Stat({
     </Link>
   ) : (
     body
-  );
-}
-
-/** The one thing on this page that can be blocking real work. */
-function DecisionsCard({
-  count,
-  loading,
-  error,
-  onRetry,
-}: {
-  count: number;
-  loading: boolean;
-  error: string | null;
-  onRetry: () => void;
-}) {
-  if (loading) return <Skeleton className="h-24 w-full" />;
-  if (error) return <ErrorState message={error} onRetry={onRetry} />;
-
-  if (!count) {
-    return (
-      <EmptyState title="You are all caught up">
-        Nothing needs your decision. When an agent is about to do something
-        outward, it stops and waits for you here.
-      </EmptyState>
-    );
-  }
-
-  return (
-    <Card className="border-status-approval/50">
-      <CardContent className="flex flex-wrap items-center gap-4 pt-6">
-        <p className="text-3xl font-semibold tabular-nums">{count}</p>
-        <div className="min-w-0 flex-1">
-          <p className="font-medium">
-            {count === 1 ? "decision is" : "decisions are"} waiting on you
-          </p>
-          <p className="text-muted-foreground text-sm">
-            Each one has an agent paused behind it. Answering unblocks the run.
-          </p>
-        </div>
-        <Button asChild>
-          <Link href="/inbox">
-            Open Inbox
-            <ArrowRight aria-hidden />
-          </Link>
-        </Button>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -340,7 +293,7 @@ function ActivityCard() {
           )}
         </div>
         <Button variant="ghost" size="sm" asChild className="mt-3 -ml-2">
-          <Link href="/feed">
+          <Link href="/runs?tab=feed">
             Live feed
             <ArrowRight aria-hidden />
           </Link>

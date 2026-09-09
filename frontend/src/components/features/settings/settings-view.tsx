@@ -94,7 +94,7 @@ export function SettingsView() {
     },
     {
       group: "connections",
-      href: "/feed",
+      href: "/runs?tab=feed",
       title: "Event stream",
       blurb:
         "The live connection this console uses. A drop means pages stop updating.",
@@ -114,7 +114,7 @@ export function SettingsView() {
     },
     {
       group: "workspace",
-      href: "/inbox",
+      href: "/home",
       title: "Value week",
       blurb:
         "Whether you act on at least half of what the system sends you over seven days.",

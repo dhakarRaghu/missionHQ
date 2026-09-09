@@ -1,13 +1,14 @@
 import { Suspense } from "react";
 
-import { CostSummary, RunsTable } from "@/components/features/runs/runs-table";
+import { RunsTabs } from "@/components/features/runs/runs-tabs";
+import { CostSummary } from "@/components/features/runs/runs-table";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function RunsPage() {
   return (
     <>
       <CostSummary />
-      {/* useSearchParams (the ?run= panel) needs a Suspense boundary. */}
+      {/* useSearchParams (the ?tab= and ?run= state) needs a Suspense boundary. */}
       <Suspense
         fallback={
           <div role="status" aria-busy="true" aria-label="Loading runs">
@@ -15,7 +16,7 @@ export default function RunsPage() {
           </div>
         }
       >
-        <RunsTable />
+        <RunsTabs />
       </Suspense>
     </>
   );

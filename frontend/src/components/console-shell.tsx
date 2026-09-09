@@ -4,11 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity,
   Bot,
   Briefcase,
   House,
-  Inbox,
   LayoutList,
   Lightbulb,
   ListChecks,
@@ -49,14 +47,12 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/home", label: "Home", icon: House },
-  { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/board", label: "Board", icon: LayoutList },
   { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/ideas", label: "Ideas", icon: Lightbulb },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/vault", label: "Memory", icon: NotebookText },
   { href: "/runs", label: "Runs", icon: ListChecks },
-  { href: "/feed", label: "Live feed", icon: Activity },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/tools", label: "Tools", icon: Wrench },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -270,7 +266,7 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
                             <span>{label}</span>
                           </Link>
                         </SidebarMenuButton>
-                        {href === "/inbox" && pending > 0 ? (
+                        {href === "/home" && pending > 0 ? (
                           <SidebarMenuBadge className="text-status-approval">
                             {pending}
                           </SidebarMenuBadge>
