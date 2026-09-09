@@ -206,11 +206,19 @@ class ModelRegistry:
             input_tokens * e.input_per_mtok + output_tokens * e.output_per_mtok
         ) / 1_000_000
 
+    # Agent runs are almost all input: the instructions and the growing message
+    # history are re-sent every round, and the model answers in a few hundred
+    # tokens. Measured on a real scout run, 209,592 tokens were input by a wide
+    # margin. Pricing every one of them at the output rate was 4x too harsh —
+    # that run had spent about $0.13 of a $0.50 cap when it was killed for
+    # "exceeding" it. A 90/10 blend is close to what runs actually cost.
+    INPUT_SHARE = 0.9
+
     def token_budget(self, name_or_role: str, cap_usd: float) -> int | None:
         """Total tokens a run may spend before ``cap_usd`` is exceeded, priced at
-        the dearer of input/output. None when the model is unpriced (0)."""
+        a 90% input / 10% output blend. None when the model is unpriced (0)."""
         e = self.entries[self.canonical(name_or_role)]
-        price = max(e.input_per_mtok, e.output_per_mtok)
+        price = self.INPUT_SHARE * e.input_per_mtok + (1 - self.INPUT_SHARE) * e.output_per_mtok
         if price <= 0:
             return None
         return int(cap_usd / price * 1_000_000)

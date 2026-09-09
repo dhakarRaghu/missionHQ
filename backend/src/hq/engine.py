@@ -226,8 +226,13 @@ async def dispatch(
     payload: dict | None = None,
 ) -> str:
     """Create (or find, on dedup_key) a task and make sure it is enqueued."""
-    if agent not in AGENTS:
-        raise KeyError(f"unknown agent {agent!r}; loaded: {sorted(AGENTS)}")
+    # AGENTS is filled by bootstrap_pre_launch, which only the API process
+    # runs. From `hq.cli ask` it is empty, so a tool that dispatches —
+    # start_job_search — failed with "unknown agent 'operator'; loaded: []"
+    # and the pipeline could not be exercised from the terminal at all. The
+    # manifests on disk are the authority either way.
+    if agent not in AGENTS and agent not in scan():
+        raise KeyError(f"unknown agent {agent!r}; known: {sorted(scan())}")
     task_id, status, inserted = await board.create_task(
         title=title, brief=brief, agent=agent, source=source,
         parent_id=parent_task_id, origin_session_id=origin_session_id,
@@ -251,6 +256,13 @@ async def _enqueue(task_id: str, *, attempt: int = 0) -> None:
         # DBOS forbids starting workflows from inside a step (e.g. the
         # create_subtask tool). The task stays in backlog and the owning
         # workflow picks it up via enqueue_agent_tasks() after its run.
+        return
+    if "tasks" not in _queues:
+        # Only the API process registers queues. From `hq.cli ask`, a tool
+        # that dispatches (start_job_search) gets this far and then died on
+        # KeyError: 'tasks'. The board row is the durable part; the boot
+        # sweep below re-enqueues every backlog task, so leaving it there is
+        # the same outcome the step_id branch already relies on.
         return
     wf_id = f"task-{task_id}" if attempt == 0 else f"task-{task_id}-retry-{attempt}"
     # Durable wall-clock cap enforced by DBOS, outside the agent: a stalled or
@@ -813,8 +825,34 @@ async def _advance_job_search(
     payload = task.get("payload") or {}
     if task.get("agent") != "operator" or not is_browser_discovery(payload):
         return None
+    query = str(payload.get("query") or "matching roles")
     if result != "done":
-        return None
+        # Operator never reached a browser — blocked or failed, not "looked
+        # and found nothing". On the machine this runs on today that is every
+        # time, and returning None here meant the nightly job discovery
+        # produced nothing at all. Hunter can answer the same question from
+        # the boards' own APIs without a browser, so ask it to. Weaker — no
+        # LinkedIn — but a search, and the brief says which it was so the
+        # note does not claim more than it read. A run that did reach a
+        # browser and found nothing stays a real "nothing", below.
+        return await dispatch(
+            agent="hunter",
+            title=f"Board sweep (browser unavailable): {query[:60]}",
+            brief=(
+                f"Operator could not discover roles in the browser this run"
+                f" (outcome: {result}). Do the same search from the boards"
+                f" instead: discover_companies for the owner's target"
+                f" industries, then job_board with query, location and"
+                f" exclude, for '{query}' in"
+                f" {payload.get('locations') or 'India|Bengaluru|Remote'}."
+                f" Score and record every verified role. Say in the note"
+                f" that this sweep read boards only, not LinkedIn."
+            ),
+            source="agent",
+            parent_task_id=task_id,
+            origin_session_id=task.get("origin_session_id"),
+            dedup_key=f"job-search-fallback:{task_id}",
+        )
     leads = extract_discovery_leads(output)
     if not leads:
         return None
@@ -822,7 +860,6 @@ async def _advance_job_search(
     hunter_payload = verification_payload(payload)
     hunter_payload["run_id"] = run_id
     hunter_payload["discovery_task_id"] = task_id
-    query = str(payload.get("query") or "matching roles")
     return await dispatch(
         agent="hunter",
         title=f"Verify discovered jobs: {query[:72]}",
