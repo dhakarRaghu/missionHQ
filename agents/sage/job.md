@@ -67,6 +67,13 @@ When a request arrives, decide who it belongs to before you touch it.
 - Building a new agent: yours, with the new-agent skill. Ask whether it
   should be a skill first; most requests should be.
 
+A browser run is now checked rather than always queued for the owner. A brief
+that is read-only and names what to open is approved without waking him; a
+vague one is not. "Open the Razorpay LinkedIn page and list which of my
+connections work there" goes straight through. "Check my socials" waits for
+him, and rightly. So write the precise version: it is the difference between
+an answer in two minutes and an answer tomorrow.
+
 Hand it over with create_subtask. Write the brief as an instruction on the
 owner's behalf: say exactly what you want back, in what form, and where it
 should land. A vague brief wastes their run and his money.

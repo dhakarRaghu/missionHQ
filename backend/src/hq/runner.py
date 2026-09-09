@@ -347,6 +347,72 @@ async def recent_runtime_approval_step(agent: str, hours: float) -> bool:
     return row is not None
 
 
+class BrowseVerdict(BaseModel):
+    """Whether the coordinator may approve one browser run on its own."""
+
+    read_only: bool
+    bounded: bool
+    allow: bool
+    reason: str
+
+
+BROWSE_GUARD_INSTRUCTIONS = """\
+You decide whether a coordinator may approve one browser run without waking
+the owner. The browser is the owner's own, signed into his real accounts, so
+the risk is not that the agent writes something. It cannot: the sandbox is
+read-only and no agent in this system holds a tool that acts on the world.
+The risk is his account being restricted for behaving like a bot, and his
+private pages being read for no good reason.
+
+You receive the task the agent was given.
+
+read_only: the task only looks and reports. False if it asks to click,
+submit, send, connect, follow, apply, message, buy, or change a setting, or
+if it is vague enough that the agent might.
+
+bounded: the task names what to open. A company, a person, his own profile,
+a handful of pages. False for anything open-ended: walking a list of
+employees, followers, search results, or "check my socials" with no target.
+
+allow: true only when read_only AND bounded are both true. When unsure, false.
+The owner is then asked, which costs him ten seconds; a wrong yes costs him
+the account he is job hunting with.
+
+reason: one plain sentence, addressed to the owner, saying what the run will
+read and why it is safe or is not.
+"""
+
+_browse_guard: Agent[None, BrowseVerdict] | None = None
+
+
+def _browse_guard_agent() -> Agent[None, BrowseVerdict]:
+    global _browse_guard
+    if _browse_guard is None:
+        _browse_guard = Agent[None, BrowseVerdict](
+            llm.registry().resolve(GUARD_MODEL),
+            name="hq-browse-guard",
+            model_settings=llm.registry().model_settings_for(GUARD_MODEL),
+            output_type=BrowseVerdict,
+            instructions=BROWSE_GUARD_INSTRUCTIONS,
+        )
+    return _browse_guard
+
+
+@DBOS.step(name="guard.browse")
+async def _browse_guard_step(agent: str, policy: str, summary: str) -> dict[str, Any]:
+    """Judge one browser run. Never raises; an unavailable judge asks the owner."""
+    try:
+        res = await _browse_guard_agent().run(
+            f"Agent: {agent}\n\nStanding policies:\n{policy}\n\nTask:\n{summary[:1200]}"
+        )
+        v = res.output
+        return {"allow": bool(v.allow and v.read_only and v.bounded),
+                "reason": v.reason[:300]}
+    except Exception as exc:  # noqa: BLE001 — the guard must never fail a run
+        log.warning("browse guard failed, deferring to the owner: %s", exc)
+        return {"allow": False, "reason": f"the safety check could not run ({type(exc).__name__})"}
+
+
 async def await_runtime_approval(spec: AgentSpec, deps: HQDeps, summary: str) -> bool:
     """Open one ticket for a whole claude-runtime run and block until answered.
 
@@ -367,10 +433,26 @@ async def await_runtime_approval(spec: AgentSpec, deps: HQDeps, summary: str) ->
                      "tool": f"runtime:{spec.runtime}"},
         )
         return True
+    # The owner asked that the coordinator be able to say yes to reading his
+    # own accounts, so a research run does not wait on him. It is delegated
+    # judgement, not a weaker rule: a run only skips him when the check finds
+    # it both read-only and bounded to named pages. Anything open-ended, and
+    # anything the judge is unsure about, still goes to him. The check runs on
+    # the cheap model and its verdict is recorded either way.
+    verdict = await _browse_guard_step(spec.name, _current_policy(spec), summary)
+    if verdict["allow"]:
+        await emit_step(
+            "approval_resolved", run_id=deps.run_id, task_id=deps.task_id,
+            payload={"status": "approved", "via": "sage-guard",
+                     "tool": f"runtime:{spec.runtime}", "reason": verdict["reason"]},
+        )
+        return True
+
     ticket_id = await _open_ticket_step(
         task_id=deps.task_id, run_id=deps.run_id, wf_id=wf_id,
         tool_name=f"runtime:{spec.name}",
-        tool_args={"agent": spec.name, "task": summary[:600]},
+        tool_args={"agent": spec.name, "task": summary[:600],
+                   "why_you": verdict["reason"]},
         tool_call_id=f"runtime-{deps.run_id or wf_id}",
     )
     if deps.task_id:
