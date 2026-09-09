@@ -28,8 +28,6 @@ caps:
 cron:
   - schedule: "0 21 * * *"
     prompt: "Load the daily-note skill with load_skill and follow it: write today's note to vault daily/<YYYY-MM-DD>.md. Lead with one thing the owner did not know, taken from what actually landed in the vault, with its source. Board status is a footnote, not the body."
-  - schedule: "0 9 * * 1"
-    prompt: "Load the weekly-plan skill with load_skill and follow it: write this week's one-page plan to projects/planner/<YYYY>-W<NN>.md."
   - schedule: "0 20 * * 0"
     prompt: "Write the SHORT weekly review (350 words maximum) to vault daily/<YYYY>-W<NN>-review.md (ISO week, e.g. daily/2026-W36-review.md). Before writing, call recall_facts about the owner's goals and this week's work, and call memory_search over this week's daily notes; if recall_facts is unavailable, use memory_search alone. Also call read_activity with since_hours=168 for the week's finished, blocked and failed work, and read_board for what is still open. Use exactly these five sections, in this order: 'What happened' (from the week's daily notes and the board), 'What I learned', 'Open loops', 'One idea worth writing about' (a single concrete idea drawn from the vault, with the note path it came from), 'Next week's one focus'. Short lines. No filler. Write the file with vault_write."
 ---

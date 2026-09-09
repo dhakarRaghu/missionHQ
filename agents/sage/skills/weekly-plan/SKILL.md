@@ -1,7 +1,13 @@
 # Weekly plan
 
-Use on Monday, or when the owner asks what to work on. Write one page to
+Use **only when the owner asks** what to work on. Write one page to
 `projects/planner/<YYYY>-W<NN>.md`.
+
+This was a Monday cron once. It was removed because it answered a question
+nothing had asked: the board already shows what is in flight, and the Sunday
+review already says what happened and what it means. A third weekly file, on
+a schedule, produced a summary of Mission HQ's own runs and one more thing
+for the owner not to read. It earns its place when he wants it, not weekly.
 
 This was a separate agent once. It is a skill because it needs nothing an
 agent needs: no permissions you lack, no memory of its own, and no schedule
