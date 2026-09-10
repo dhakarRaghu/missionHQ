@@ -12,6 +12,7 @@ from hq.tools import (  # noqa: F401
     facts_tools,
     job_tools,
     policy_tools,
+    request_tools,
     vault_tools,
     web_tools,
 )
