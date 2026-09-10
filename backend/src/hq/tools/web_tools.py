@@ -163,6 +163,36 @@ async def web_fetch(ctx: RunContext[HQDeps], url: str) -> dict:
         except Exception as emit_exc:  # noqa: BLE001 — evidence only; never fail the tool
             log.warning("web_fetch.client_error emit failed: %s", emit_exc)
         return {"url": url, "provenance": "web", "error": f"HTTP {status} for {url}"}
+    except httpx.HTTPError as exc:
+        # Everything else that stopped the fetch reaching a page: a hostname
+        # that does not resolve, a refused connection, a timeout. Same reason
+        # as the 4xx branch above, learned the same way — on 2026-09-10 a
+        # verification run found five LinkedIn leads, resolved four of the
+        # companies to their own careers pages, and died because the fifth
+        # (careers.exlservice.com) does not exist. DBOS retried that one dead
+        # hostname four times and the raise took the whole run with it,
+        # discarding the four that had worked.
+        #
+        # A 5xx still raises, from the branch above: server trouble is
+        # genuinely transient and the step retries are the right response. A
+        # host that is not there will not be there on the fourth try.
+        reason = f"{type(exc).__name__}: {exc}"[:200]
+        try:
+            await emit(
+                "web_fetch.unreachable",
+                run_id=ctx.deps.run_id,
+                task_id=ctx.deps.task_id,
+                agent=ctx.deps.agent,
+                payload={"url": url, "reason": reason},
+            )
+        except Exception as emit_exc:  # noqa: BLE001 — evidence only; never fail the tool
+            log.warning("web_fetch.unreachable emit failed: %s", emit_exc)
+        return {
+            "url": url,
+            "provenance": "web",
+            "error": f"could not reach {url} ({reason}). Try another source"
+            " rather than this URL again.",
+        }
     body = _strip_html(text)
 
     result = await reader_agent().run(
