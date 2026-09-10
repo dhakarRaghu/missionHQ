@@ -247,7 +247,8 @@ JOB_SELECT = (
     "SELECT id::text, company, role, url, source, provider, external_id,"
     " location, remote_policy,"
     " experience_band, compensation, stack, fit_score, fit_bucket, status,"
-    " why_fit, next_step, notes, referral, seen_count, first_seen, last_seen"
+    " why_fit, next_step, notes, referral, seen_count, first_seen, last_seen,"
+    " company_brief, pay_signal, role_brief, researched_at"
     " FROM hq.jobs"
 )
 

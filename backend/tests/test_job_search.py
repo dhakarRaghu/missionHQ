@@ -1,6 +1,8 @@
 import asyncio
 import json
 
+import pytest
+
 from hq import engine
 from hq.board import ALLOWED, VALID_STATUSES
 from hq.config import settings
@@ -20,9 +22,10 @@ from hq.job_pipeline import (
     verification_brief,
     verification_payload,
 )
-from hq.loader import AgentSpec, instructions_for
+from hq.loader import AgentSpec, instructions_for, scan
 from hq.tools.job_tools import STATUSES as JOB_TOOL_STATUSES
 from hq.tools.job_tools import _dedupe_key, min_years_required, senior_title
+from hq.tools.registry import OUTBOUND_ACTIONS, TOOL_REGISTRY, WEB_FORBIDDEN_TOOLS
 from hq.tools.web_tools import _detect_ats_url, _filter_jobs, _find_ats_link, _one_job
 
 
@@ -612,3 +615,91 @@ def test_a_role_tripping_both_gates_reports_the_recorded_reason() -> None:
     role, band = "Lead AI Engineer", "6+ years (stated)"
     assert senior_title(role) is not None
     assert min_years_required(band) == 6.0
+
+
+# --- asking for a browser look without being able to start one --------------
+
+def test_hunter_can_request_but_still_cannot_dispatch() -> None:
+    # The whole point of request_operator: hunter gets a way to ask, and the
+    # rule that stopped it dispatching is untouched. If someone later
+    # "simplifies" this by granting create_subtask, this fails.
+    hunter = scan()["hunter"]
+    held = hunter.base_tool_names()
+
+    assert "request_operator" in held
+    assert not held & WEB_FORBIDDEN_TOOLS
+
+
+def test_granting_hunter_create_subtask_is_refused_at_load() -> None:
+    spec = scan()["hunter"].model_copy(deep=True)
+    spec.tools = [*spec.tools, "create_subtask"]
+
+    with pytest.raises(ValueError, match="cannot combine"):
+        spec.validate_trifecta()
+
+
+def test_request_tools_are_not_outbound() -> None:
+    # request_operator writes a row and starts nothing, so it must not be an
+    # outbound action — an outbound tool on a web-reading agent is refused at
+    # load, and would take request_operator down with it.
+    for name in ("request_operator", "list_operator_requests",
+                 "resolve_operator_request"):
+        tool = TOOL_REGISTRY[name]
+        assert tool.action not in OUTBOUND_ACTIONS, name
+        assert not tool.world_facing, name
+
+
+def test_sage_can_review_and_close_requests() -> None:
+    held = scan()["sage"].base_tool_names()
+
+    assert {"list_operator_requests", "resolve_operator_request"} <= held
+    assert "create_subtask" in held  # it is the one that actually dispatches
+
+
+def test_request_queue_dedupes_only_pending_rows() -> None:
+    # A wall hit again next week should be fileable again once the first
+    # request has been decided, so the unique index is partial on pending.
+    sql = dict(load_migrations())[14]
+
+    assert "operator_requests_pending_idx" in sql
+    assert "WHERE status = 'pending'" in sql
+
+
+def test_web_fetch_degrades_rather_than_killing_a_run() -> None:
+    # A dead hostname must return an error the agent can route around. It used
+    # to raise, DBOS retried it four times, and the raise took the whole
+    # verification run with it — discarding four companies that had worked.
+    import inspect
+
+    from hq.tools import web_tools
+
+    src = inspect.getsource(web_tools.web_fetch)
+    assert "except httpx.HTTPError" in src
+    assert "could not reach" in src
+    # ...but a 5xx must still raise, because that retry is worth having.
+    assert "raise  # server trouble" in src
+
+
+def test_telegram_render_never_cuts_inside_a_tag() -> None:
+    # Rendering then slicing leaves an unclosed <b> or a half-written href,
+    # and Telegram rejects malformed HTML rather than dropping the tag — the
+    # whole send fails. Clip the source, render after.
+    from hq.channels import cards
+
+    long_md = ("**bold heading here** and [a link](https://example.com/page) "
+               "with `code` too.\n\n") * 200
+    out = cards.render_for_telegram(long_md, limit=4000)
+
+    assert len(out) <= 4000
+    assert out.count("<b>") == out.count("</b>")
+    assert out.count("<a ") == out.count("</a>")
+    assert not out.rstrip().endswith("<")
+
+
+def test_telegram_render_survives_hostile_text() -> None:
+    from hq.channels import cards
+
+    out = cards.render_for_telegram("5 < 10 & rising <script>alert(1)</script>")
+
+    assert "<script>" not in out
+    assert "&lt;script&gt;" in out

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import UTC, datetime
 
 from pydantic_ai import ModelRetry, RunContext
 
@@ -120,6 +121,9 @@ async def record_job(
     external_id: str = "",
     next_step: str = "",
     referral: str = "",
+    company_brief: str = "",
+    pay_signal: str = "",
+    role_brief: str = "",
 ) -> str:
     """Record one verified role in the job ledger, or update it if already known.
 
@@ -143,6 +147,21 @@ async def record_job(
 
     Verify the listing is real and open before recording it. A search result
     title is not verification.
+
+    For a role that clears the gates and scores 6 or better, do the company
+    dig BEFORE recording and fill these three:
+
+    - `company_brief`: what they actually build, how big, what stage. One or
+      two sentences from their own site or a funding announcement.
+    - `pay_signal`: what the evidence says about money — a stated range, a
+      Levels.fyi or Glassdoor band for that level and city, or the honest
+      "no public signal". The owner is employed; a move has to pay.
+    - `role_brief`: what the job is really day to day, past the title, from
+      the posting's own responsibilities.
+
+    Leave them empty for a weak fit rather than guessing. `researched_at` is
+    stamped when any of the three is present, so the board can tell an
+    unresearched role from a researched one with nothing to report.
     """
     company, role, url = company.strip(), role.strip(), url.strip()
     if not company or not role:
@@ -179,14 +198,22 @@ async def record_job(
         )
     else:
         note = ""
+    # Stamped only when the dig actually produced something, so the board can
+    # tell "not researched yet" from "researched, nothing to report".
+    researched = (
+        datetime.now(UTC)
+        if any(v.strip() for v in (company_brief, pay_signal, role_brief))
+        else None
+    )
     rows = await db.fetch(
         """
         INSERT INTO hq.jobs (company, role, url, source, provider, external_id,
                              dedupe_key, location, remote_policy, experience_band,
                              compensation, stack, fit_score, fit_bucket, why_fit,
-                             next_step, referral, status, notes)
+                             next_step, referral, status, notes,
+                             company_brief, pay_signal, role_brief, researched_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s)
+                %s, %s, %s, %s, %s, %s)
         ON CONFLICT (dedupe_key) DO UPDATE SET
             -- A rediscovery refreshes facts but never overwrites a status the
             -- owner moved along.
@@ -205,7 +232,11 @@ async def record_job(
             fit_bucket = EXCLUDED.fit_bucket,
             why_fit = EXCLUDED.why_fit,
             next_step = COALESCE(NULLIF(EXCLUDED.next_step, ''), hq.jobs.next_step),
-            referral = COALESCE(NULLIF(EXCLUDED.referral, ''), hq.jobs.referral)
+            referral = COALESCE(NULLIF(EXCLUDED.referral, ''), hq.jobs.referral),
+            company_brief = COALESCE(NULLIF(EXCLUDED.company_brief, ''), hq.jobs.company_brief),
+            pay_signal = COALESCE(NULLIF(EXCLUDED.pay_signal, ''), hq.jobs.pay_signal),
+            role_brief = COALESCE(NULLIF(EXCLUDED.role_brief, ''), hq.jobs.role_brief),
+            researched_at = COALESCE(EXCLUDED.researched_at, hq.jobs.researched_at)
         RETURNING id::text, seen_count, status
         """,
         (
@@ -228,6 +259,10 @@ async def record_job(
             referral.strip()[:500],
             status,
             note,
+            company_brief.strip()[:600],
+            pay_signal.strip()[:300],
+            role_brief.strip()[:600],
+            researched,
         ),
     )
     row = rows[0]

@@ -363,6 +363,13 @@ export interface Job {
   next_step: string;
   notes: string;
   referral: string;
+  /** Hunter's company dig, done only for roles scoring 6+. `researched_at` is
+   * null when the dig has not happened, which is different from a dig that
+   * found nothing to say. */
+  company_brief: string;
+  pay_signal: string;
+  role_brief: string;
+  researched_at: string | null;
   seen_count: number;
   first_seen: string;
   last_seen: string;

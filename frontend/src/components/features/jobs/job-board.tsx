@@ -437,6 +437,29 @@ function JobCard({ job }: { job: Job }) {
         </p>
       ) : null}
 
+      {/* The company dig. He is employed, so "is this worth leaving for" is
+          the real question and a title cannot answer it. Absent on a weak fit
+          by design — hunter only digs at 6+. */}
+      {job.company_brief ? (
+        <p
+          className="text-muted-foreground line-clamp-2 text-xs"
+          title={job.company_brief}
+        >
+          <span className="text-foreground font-medium">Company: </span>
+          {job.company_brief}
+        </p>
+      ) : null}
+
+      {job.role_brief ? (
+        <p
+          className="text-muted-foreground line-clamp-2 text-xs"
+          title={job.role_brief}
+        >
+          <span className="text-foreground font-medium">Day to day: </span>
+          {job.role_brief}
+        </p>
+      ) : null}
+
       {job.stack ? (
         <p className="text-muted-foreground truncate text-xs" title={job.stack}>
           {job.stack}
@@ -467,14 +490,20 @@ function JobCard({ job }: { job: Job }) {
         {/* Always rendered. A blank package is the thing worth chasing, so an
             unstated one has to be visible rather than simply absent. */}
         <Badge
-          variant={job.compensation ? "secondary" : "outline"}
+          variant={job.compensation || job.pay_signal ? "secondary" : "outline"}
           className={cn(
-            "max-w-36 truncate text-xs",
-            !job.compensation && "text-muted-foreground",
+            "max-w-44 truncate text-xs",
+            !(job.compensation || job.pay_signal) && "text-muted-foreground",
           )}
-          title={job.compensation || "No package on the posting — check Levels/Glassdoor"}
+          title={
+            job.compensation ||
+            job.pay_signal ||
+            (job.researched_at
+              ? "Hunter looked and found no public pay signal"
+              : "Not researched yet — hunter digs at a 6+ fit")
+          }
         >
-          {job.compensation || "no package"}
+          {job.compensation || job.pay_signal || "no package"}
         </Badge>
         {job.seen_count > 1 ? (
           <span className="text-muted-foreground text-xs">

@@ -74,7 +74,15 @@ class Settings(BaseSettings):
     codex_cli_path: str = "codex"
     # Codex has no budget flag and no tool allowlist, so the timeout is the
     # only ceiling on one run and --sandbox read-only is the boundary.
-    codex_timeout_s: float = 600.0
+    #
+    # 900, not 600, since 2026-09-10: the broad discovery run was killed at
+    # 600s and returned nothing, because a killed CLI has no partial result.
+    # The brief now tells operator to finish inside ten minutes and report
+    # what it has; this sits above that so the instruction, not the killer,
+    # is what ends a healthy run. Raising it further would only let a browser
+    # session grind on LinkedIn for half an hour, which is the pattern that
+    # gets the owner's account restricted.
+    codex_timeout_s: float = 900.0
     # Optional. Codex reads ~/.codex/config.toml, and a machine whose default
     # provider only works inside the ChatGPT app cannot run it headlessly.
     # These override the model and any config key, e.g.
