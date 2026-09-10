@@ -22,7 +22,7 @@ from hq.job_pipeline import (
 )
 from hq.loader import AgentSpec, instructions_for
 from hq.tools.job_tools import STATUSES as JOB_TOOL_STATUSES
-from hq.tools.job_tools import _dedupe_key, min_years_required
+from hq.tools.job_tools import _dedupe_key, min_years_required, senior_title
 from hq.tools.web_tools import _detect_ats_url, _filter_jobs, _find_ats_link, _one_job
 
 
@@ -570,3 +570,45 @@ def test_blocked_browser_discovery_falls_back_to_hunter_board_sweep(monkeypatch)
     assert calls[0]["parent_task_id"] == "operator-task-id"
     assert "boards only, not LinkedIn" in calls[0]["brief"]
     assert "SDE-1" in calls[0]["brief"]
+
+
+# --- seniority by title, which the years ceiling cannot see -----------------
+
+def test_manager_and_lead_titles_are_too_senior() -> None:
+    # The four roles the 2026-09-10 sweep actually recorded; three were noise.
+    assert senior_title("Engineering Manager – AI Engineering") == "manager"
+    assert senior_title("Lead AI Engineer") == "lead"
+    assert senior_title("Lead, Engineer") == "lead"
+    assert senior_title("AI Engineer") is None
+
+
+def test_level_one_titles_stay_eligible() -> None:
+    for role in ("Software Engineer I", "SDE-1", "Product Engineer I",
+                 "Forward Deployed Engineer", "Applied AI Engineer",
+                 "Backend Engineer (Leadership track)"):
+        assert senior_title(role) is None, role
+
+
+def test_every_scope_word_in_the_profile_is_caught() -> None:
+    for role, word in (("Senior Software Engineer", "senior"),
+                       ("Staff Backend Engineer", "staff"),
+                       ("Principal Engineer", "principal"),
+                       ("Founding Engineer", "founding"),
+                       ("Head of Platform", "head")):
+        assert senior_title(role) == word, role
+
+
+def test_a_lead_title_needs_no_years_bar_to_be_caught() -> None:
+    # This is the whole point: "Lead AI Engineer" states no years, so the
+    # years ceiling returns None and only the title gate stops it.
+    assert min_years_required("") is None
+    assert senior_title("Lead AI Engineer") is not None
+
+
+def test_a_role_tripping_both_gates_reports_the_recorded_reason() -> None:
+    # "Lead AI Engineer" with "6+ years" trips the years bar AND the title
+    # gate. The note written to the row picks years first; the message handed
+    # back to hunter must say the same thing, not the other one.
+    role, band = "Lead AI Engineer", "6+ years (stated)"
+    assert senior_title(role) is not None
+    assert min_years_required(band) == 6.0

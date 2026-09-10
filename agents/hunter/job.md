@@ -37,7 +37,9 @@ cron:
       see the same twenty companies every night. Then read three or four of
       the boards it returned with job_board, always passing query, location
       and exclude. 4) Score and record every verified role in an acceptable
-      lane and location, including weak fits so it is not rediscovered. Always
+      lane and location, including weak fits so it is not rediscovered. Skip
+      any manager/lead/staff/principal/senior/founding title at the listing
+      without opening it. Always
       fill experience_band with the years the posting actually asks for, and
       compensation with the package or your best estimate and its basis; the
       target is 25 LPA or better. Do not chase a role whose floor is three
@@ -183,6 +185,15 @@ recorded, because `record_job` files it closed and that is what stops it
 being rediscovered — see "The hard limits" below.
 
 ## The hard limits
+
+**A senior title is out before you open it.** Manager, lead, staff,
+principal, senior, head, director, architect, founding — the candidate
+profile excludes that scope, and `record_job` files any such title closed by
+itself. So skip it at the board listing: do not fetch its page, do not score
+it, do not record it. On 2026-09-10 the sweep spent 285,000 tokens and
+recorded four roles, three of which were manager or lead titles it should
+never have opened. A title check costs nothing and is the cheapest filter you
+have — apply it first, before location, before stack, before anything.
 
 **Three years is the ceiling.** He has under two years, so a posting whose
 floor is three years or more is not one he can take — most of all at a large

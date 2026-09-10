@@ -41,6 +41,33 @@ _YEAR_SPAN_RE = re.compile(
 )
 
 
+# Scope words that put a role above what the owner can take, whatever the
+# posting says about years. The years ceiling cannot catch these: "Lead AI
+# Engineer" and "Engineering Manager" often name no years bar at all, so
+# min_years_required returns None and the role sails through. Three of the
+# four roles the 2026-09-10 sweep recorded were exactly this shape.
+#
+# Word-bounded so "Leadership" and "Headcount" in a title do not match, and
+# deliberately not including "senior" alone in a compound like "Senior-friendly
+# team" — the title field is short and this is the whole of it.
+_SENIOR_TITLE_RE = re.compile(
+    r"\b(?:senior|sr\.?|staff|principal|lead|leads|manager|head|director"
+    r"|architect|vp|chief|founding|distinguished)\b",
+    re.IGNORECASE,
+)
+
+
+def senior_title(role: str) -> str | None:
+    """The scope word that makes a title too senior, or None.
+
+    The candidate profile is explicit: "roles clearly requiring senior, staff,
+    lead, principal, manager, or founding engineer scope are not targets".
+    Enforced here rather than in a prompt, for the same reason as the years
+    ceiling — it is a fact about the owner, not a judgement call."""
+    match = _SENIOR_TITLE_RE.search(role)
+    return match.group(0).lower() if match else None
+
+
 def min_years_required(experience_band: str) -> float | None:
     """The floor of the experience a posting asks for, or None when it names no
     number. The floor, not the ceiling: "2-4 years" is open to a candidate with
@@ -104,6 +131,10 @@ async def record_job(
     the one sentence justifying it. A score without a reason is not useful to
     anyone reading the board later.
 
+    A role whose TITLE is senior/staff/lead/principal/manager/founding scope is
+    filed closed automatically, whatever its stated years. Do not spend run
+    budget on one: skip it at the board listing rather than opening its page.
+
     Always fill `experience_band` with what the posting actually asks for, and
     `compensation` with the package when the posting or a salary page names
     one. A role whose floor is at or above the owner's seniority ceiling is
@@ -134,13 +165,20 @@ async def record_job(
     bar = settings().job_max_min_years
     floor = min_years_required(experience_band)
     over_bar = floor is not None and floor >= bar
-    status = "closed" if over_bar else "seen"
-    note = (
-        f"Closed on record: the posting asks for {floor:g}+ years and the owner"
-        f" is early-career (bar is {bar:g})."
-        if over_bar
-        else ""
-    )
+    too_senior = senior_title(role)
+    status = "closed" if (over_bar or too_senior) else "seen"
+    if over_bar:
+        note = (
+            f"Closed on record: the posting asks for {floor:g}+ years and the"
+            f" owner is early-career (bar is {bar:g})."
+        )
+    elif too_senior:
+        note = (
+            f"Closed on record: the title is {too_senior!r} scope, which the"
+            " candidate profile excludes."
+        )
+    else:
+        note = ""
     rows = await db.fetch(
         """
         INSERT INTO hq.jobs (company, role, url, source, provider, external_id,
@@ -206,12 +244,20 @@ async def record_job(
         },
     )
     again = f" (seen {row['seen_count']} times)" if row["seen_count"] > 1 else ""
-    if over_bar and row["status"] == "closed":
+    # Same order as the note above, so the reason hunter is told matches the
+    # reason written on the row. A role can trip both gates.
+    if (over_bar or too_senior) and row["status"] == "closed":
+        why = (
+            f"the posting asks for {floor:g}+ years, over the owner's"
+            f" {bar:g}-year ceiling"
+            if over_bar
+            else f"{too_senior!r} scope is above what the owner can take"
+        )
         return (
-            f"recorded {company} — {role} as CLOSED{again}: the posting asks for"
-            f" {floor:g}+ years, over the owner's {bar:g}-year ceiling. It is in"
-            " the ledger so it is not researched again. Do not look for a"
-            " referral and do not report it as a candidate role."
+            f"recorded {company} — {role} as CLOSED{again}: {why}. It is in the"
+            " ledger so it is not researched again. Do not look for a referral,"
+            " do not report it as a candidate role, and do not spend more of"
+            " this run on it."
         )
     return (
         f"recorded {company} — {role}: {fit_score}/10 {bucket}{again},"
