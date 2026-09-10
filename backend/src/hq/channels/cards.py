@@ -17,6 +17,7 @@ Two rules the rest of the module depends on:
 
 from __future__ import annotations
 
+import re
 from html import escape
 
 BAR_WIDTH = 10
@@ -99,6 +100,125 @@ def ago(seconds: float) -> str:
     if seconds < 86400:
         return f"{int(seconds // 3600)} h"
     return f"{int(seconds // 86400)} d"
+
+
+# --- markdown -> Telegram HTML ------------------------------------------------
+# Agent answers are markdown. Telegram renders a small HTML subset and nothing
+# else, so a reply sent as-is arrives as literal ``**`` and ``##`` around the
+# words that were meant to stand out — a wall of punctuation on a phone. Worse,
+# one ``<`` in an agent's text makes Telegram reject the entire send.
+#
+# So: escape first, then translate the handful of markdown forms Telegram can
+# actually express. Anything it cannot (tables, nesting, images) degrades to
+# plain text rather than breaking the message.
+
+_FENCE_RE = re.compile(r"```[a-zA-Z0-9]*\n(.*?)```", re.DOTALL)
+_HEADING_RE = re.compile(r"(?m)^\s{0,3}#{1,6}\s+(.+?)\s*#*$")
+_BULLET_RE = re.compile(r"(?m)^(\s*)[-*+]\s+")
+_QUOTE_RE = re.compile(r"(?m)^\s{0,3}&gt;\s?(.*)$")
+_RULE_RE = re.compile(r"(?m)^\s*(?:[-*_]\s*){3,}$")
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+# Single-asterisk italics only. Underscores are left alone on purpose: agent
+# text is full of snake_case tool and column names, and _job_board_ is a name,
+# not emphasis.
+_ITALIC_RE = re.compile(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])")
+_CODE_RE = re.compile(r"`([^`\n]+?)`")
+_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)")
+_BLANKS_RE = re.compile(r"\n{3,}")
+
+
+def md_to_html(text: str) -> str:
+    """One agent answer, as something readable on a phone.
+
+    Escapes everything first, so no agent text can inject a tag or break the
+    send, then renders the forms Telegram supports: fenced code, headings as
+    bold, bullets as dots, quotes, bold, italic, inline code and links.
+    """
+    out = escape(str(text or ""), quote=False)
+
+    # Fenced code first: its contents must not be touched by the inline rules.
+    blocks: list[str] = []
+
+    def _stash(match: re.Match[str]) -> str:
+        blocks.append(match.group(1).rstrip())
+        return f"\x00{len(blocks) - 1}\x00"
+
+    out = _FENCE_RE.sub(_stash, out)
+
+    out = _RULE_RE.sub("", out)
+    out = _HEADING_RE.sub(r"<b>\1</b>", out)
+    out = _QUOTE_RE.sub(r"<blockquote>\1</blockquote>", out)
+    out = _BULLET_RE.sub(r"\1• ", out)
+    out = _LINK_RE.sub(r'<a href="\2">\1</a>', out)
+    out = _BOLD_RE.sub(r"<b>\1</b>", out)
+    out = _ITALIC_RE.sub(r"<i>\1</i>", out)
+    out = _CODE_RE.sub(r"<code>\1</code>", out)
+
+    for i, block in enumerate(blocks):
+        out = out.replace(f"\x00{i}\x00", f"<pre>{block}</pre>")
+
+    return _BLANKS_RE.sub("\n\n", out).strip()
+
+
+def clip(text: str, limit: int) -> str:
+    """Shorten a multi-line body while KEEPING its line structure.
+
+    ``truncate`` is for a label: it collapses newlines, which is right for one
+    line and wrong for a message. Collapsing a whole answer put every line on
+    one line, and the heading rule then wrapped the entire body in bold.
+    """
+    clean = str(text or "").strip()
+    if len(clean) <= limit:
+        return clean
+    cut = clean[:limit]
+    # Prefer a paragraph break, then a line break, then a word.
+    for sep in ("\n\n", "\n", " "):
+        idx = cut.rfind(sep)
+        if idx > limit * 0.5:
+            return cut[:idx].rstrip() + "\n…"
+    return cut.rstrip() + "…"
+
+
+TELEGRAM_LIMIT = 4096
+
+
+def render_for_telegram(text: str, limit: int = 4000) -> str:
+    """Markdown to HTML, guaranteed to fit and never cut inside a tag.
+
+    Rendering first and slicing after is the obvious version and it is wrong:
+    a cut lands inside ``<b>`` or a half-written href, and Telegram rejects
+    malformed HTML outright rather than dropping the tag — the whole message
+    fails to send. So the SOURCE is clipped first and rendered after, and if
+    the tags push it over anyway, clip harder and render again.
+    """
+    budget = limit
+    for _ in range(4):
+        rendered = md_to_html(clip(text, budget))
+        if len(rendered) <= limit:
+            return rendered
+        # Tag overhead is roughly proportional; back off and retry rather than
+        # guessing a ratio.
+        budget = int(budget * 0.7)
+    # Last resort: plain escaped text, which has no tags to break.
+    return esc(clip(text, limit - 16))
+
+
+def answer_card(
+    *, agent: str, title_text: str, body: str, icon: str = "",
+    footer: str = "", body_limit: int = 1200,
+) -> str:
+    """An agent's finished answer as a card: who, what, the answer, the trail.
+
+    The body is the agent's own markdown, rendered. Truncation happens BEFORE
+    rendering, so a cut can never land inside a tag and leave it open.
+    """
+    head = f"{icon} <b>{esc(title_text)}</b>".strip()
+    who = f"<i>{esc(agent)}</i>" if agent else ""
+    return card(
+        lines(head, who),
+        render_for_telegram(body, body_limit),
+        f"<i>{esc(footer)}</i>" if footer else "",
+    )
 
 
 def readable_args(tool: str, args: dict) -> str:

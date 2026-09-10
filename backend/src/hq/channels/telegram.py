@@ -339,11 +339,22 @@ async def _send_intent(intent: dict, bot: Bot) -> None:
             parse_mode=ParseMode.HTML,
         )
     else:
-        await bot.send_message(
-            owner,
-            cards.esc(intent.get("text", ""))[:4000],
-            parse_mode=ParseMode.HTML,
-        )
+        # One choke point for every plain message: the digest, notify_owner,
+        # a missed-cron warning, an announce. Their text is markdown written
+        # by an agent, and escaping alone left the ``**`` and ``##`` in place
+        # — a wall of punctuation to read on a phone. Rendering here means a
+        # new sender is readable without remembering to format it.
+        #
+        # ``html`` marks text a caller already rendered (the cron result card
+        # builds its own layout). Rendering that twice would escape its tags
+        # into visible angle brackets.
+        text = str(intent.get("text", ""))
+        # render_for_telegram clips the SOURCE and renders after, so a cut can
+        # never land inside a tag. Slicing rendered HTML instead would leave
+        # an unclosed <b> or a half-written href, and Telegram rejects
+        # malformed HTML rather than dropping the tag: the send fails whole.
+        body = text[:4000] if intent.get("html") else cards.render_for_telegram(text)
+        await bot.send_message(owner, body, parse_mode=ParseMode.HTML)
 
 
 # --- lifecycle ---------------------------------------------------------------
