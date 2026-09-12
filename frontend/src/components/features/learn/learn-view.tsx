@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, FileText, Maximize2, PanelsTopLeft, Plus, X } from "lucide-react";
+import { Check, ChevronDown, FileText, Maximize2, PanelsTopLeft, Plus, X } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
@@ -31,15 +31,28 @@ import { cn } from "@/lib/utils";
  * live site appears inside the console.
  */
 export function LearnView() {
-  const lessons = useQuery({
-    queryKey: learningKeys.lessons,
-    queryFn: () => learningApi.lessons(),
+  const queryClient = useQueryClient();
+  const markRead = useMutation({
+    mutationFn: (l: { lesson_date: string; kind: string }) =>
+      learningApi.markRead(l.lesson_date, l.kind),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: learningKeys.lessons }),
   });
+  // Topic lessons only. A course phase's article lives on the Courses page,
+  // next to the phase it teaches — two different things that happened to
+  // share a page because they were both "today's lesson".
+  const lessons = useQuery({
+    queryKey: [...learningKeys.lessons, "topic"],
+    queryFn: () => learningApi.lessons(30, "topic"),
+  });
+  // Selection is by id, not by date. Two lessons a day now — the topic one
+  // and a course phase — so the date stopped being unique and every click on
+  // the second row silently resolved back to the first.
   const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<"page" | "text">("page");
 
   const list = lessons.data ?? [];
-  const current = list.find((l) => l.lesson_date === selected) ?? list[0];
+  const current = list.find((l) => l.id === selected) ?? list[0];
 
   if (lessons.isPending) {
     return (
@@ -77,6 +90,11 @@ export function LearnView() {
           <h2 className="text-base font-semibold leading-tight">
             {current.title}
           </h2>
+          {current.kind === "course" ? (
+            <Badge variant="secondary" className="shrink-0">
+              course
+            </Badge>
+          ) : null}
           {current.score ? (
             <Badge variant="outline" className="shrink-0">
               {current.score}/60
@@ -106,6 +124,30 @@ export function LearnView() {
               <FileText aria-hidden className="size-3.5" />
               Text
             </Button>
+            {current.read_at ? (
+              <span className="flex items-center gap-1 self-center text-xs text-muted-foreground">
+                <Check aria-hidden className="size-3.5" />
+                read
+              </span>
+            ) : (
+              // The gate he asked for: the evening run will not start the next
+              // phase of a course until the last one is marked read, so
+              // lessons cannot pile up unread.
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={markRead.isPending}
+                onClick={() =>
+                  markRead.mutate({
+                    lesson_date: current.lesson_date,
+                    kind: current.kind,
+                  })
+                }
+              >
+                <Check aria-hidden className="size-3.5" />
+                Mark as read
+              </Button>
+            )}
             {current.html_path ? (
               // A new tab, not a lightbox: the lesson keeps its own sandboxed
               // frame there, so the diagrams get the whole screen without the
@@ -140,24 +182,35 @@ export function LearnView() {
       )}
 
       <footer className="shrink-0">
-        <Drawer label={`Earlier lessons (${list.length})`}>
+        <Drawer label={`Earlier topic lessons (${list.length})`}>
           <ul className="space-y-0.5 pt-1">
             {list.map((lesson) => (
               <li key={lesson.id}>
                 <button
                   type="button"
-                  onClick={() => setSelected(lesson.lesson_date)}
+                  onClick={() => setSelected(lesson.id)}
                   className={cn(
-                    "w-full rounded px-2 py-1 text-left text-xs transition-colors",
-                    lesson.lesson_date === current.lesson_date
+                    "flex w-full cursor-pointer items-baseline gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors",
+                    lesson.id === current.id
                       ? "bg-accent text-accent-foreground"
                       : "hover:bg-muted",
                   )}
                 >
-                  <span className="text-muted-foreground">
+                  <span className="shrink-0 text-muted-foreground">
                     {lesson.lesson_date}
-                  </span>{" "}
-                  {lesson.title}
+                  </span>
+                  {lesson.kind === "course" ? (
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 px-1 py-0 text-[10px]"
+                    >
+                      course
+                    </Badge>
+                  ) : null}
+                  <span className="truncate">{lesson.title}</span>
+                  {lesson.read_at ? (
+                    <Check aria-label="read" className="ml-auto size-3 shrink-0" />
+                  ) : null}
                 </button>
               </li>
             ))}

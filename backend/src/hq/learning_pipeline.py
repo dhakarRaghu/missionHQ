@@ -563,6 +563,12 @@ order:
    lot. He is not reading for a language: a point that only holds in Python is
    worth less than the same point about the system.
 
+Rank what you find the way the `deep-research` skill ranks it: source code at
+a tag and versioned docs settle defaults, the original paper settles mechanism,
+a vendor post counts only when it states its conditions, and a secondary blog
+summarising someone else's work counts for nothing — put forward the thing the
+summary was written about instead.
+
 Skip: listicles, "top 10 tools", vendor launch posts that are only marketing,
 anything paywalled you cannot read, and anything already in the ledger.
 
@@ -622,6 +628,13 @@ def study_brief(payload: Mapping[str, Any], picks: Sequence[Mapping[str, Any]]) 
 reading the owner would do himself if he had the hour.
 
 {lines}
+
+**Load the `deep-research` skill first and work to it.** It is the standard
+for anything he builds from: open every URL you cite, rank the source, carry
+the conditions with every number, name the scorer, report absences, and finish
+with the mandatory "Things I could NOT verify" section. Use `fetch_source`
+rather than `web_fetch` whenever exact words matter — a default value, a
+method section, whether a keyword appears at all.
 
 For each article:
 
@@ -890,6 +903,12 @@ Phase: **{payload.get("title")}**
 Slug: `{payload.get("slug")}`  ·  Course: {payload.get("course")}
 {payload.get("summary")}
 
+**Load the `deep-research` skill first and work to it.** This becomes a
+lesson he studies from and runs code from, so every number needs its baseline
+and conditions, every default needs the version and the file you read it in,
+and anything you could not confirm goes in the mandatory "Things I could NOT
+verify" section rather than being quietly stated.
+
 First call `sync_courses` — he adds phases to that platform, and the
 catalogue here should be current before you read. Then call
 `read_course_phase` with that slug. You get the whole module — mental
@@ -902,11 +921,13 @@ Then do the work the module does not:
 1. **Read every section properly** and note, for each, what it asserts and
    what it leaves unexplained. A phase says "cold start" and moves on; your
    job is to know what actually happens in those milliseconds.
-2. **Go deeper on each mechanism.** For the two or three concepts that carry
-   the phase, find the primary source — the vendor's engineering post, the
-   paper, the source code, the RFC — and read it. `web_search` and
-   `web_fetch` are yours; spend up to six searches here, this is the point of
-   the run.
+2. **Go deeper on each mechanism, by source rank.** For the two or three
+   concepts that carry the phase, go to rank 1 or 2: the source file at a
+   release tag, docs pinned to a version, the original paper's method section.
+   Read them with `fetch_source` so you see the real text. Search for the
+   artifact ("Raft extended paper section 5.4"), not the topic, and search for
+   the rebuttal on purpose. Up to eight searches — this is the point of the
+   run.
 3. **Find where it breaks in production.** An incident, a postmortem, a
    "we learned this the hard way" writeup on the same mechanism. That is the
    part his module cannot have, because it was written from documentation.
@@ -942,9 +963,18 @@ version he should read *instead* — same ground, better taught, and extended
 where the module stops.
 
 - **Keep its shape.** His modules run: mental model, then numbered
-  subsections, then hands-on labs, then where it shows up in real production
-  code, then a checkpoint, then a one-page cheatsheet. Follow that shape —
-  it is the format he built for himself and reads fastest.
+  subsections, then hands-on labs, then a real-world anchor, then a
+  checkpoint, then a one-page cheatsheet. Follow that shape — it is the format
+  he built for himself and reads fastest.
+- **Drop the employer sections. Do not carry them across.** His modules anchor
+  to code at a company he no longer works at, with sections like "the
+  Mindtickle mapping". He said it plainly: he cannot use that work, and he
+  cannot show anyone what they do. So replace that section with a **public**
+  anchor on the same mechanism — an engineering post, an incident writeup, an
+  open-source implementation anyone can read — and never name his current or
+  former employer anywhere in the lesson. If the phase's only concrete example
+  was internal, say that the original anchored internally and give the public
+  equivalent instead.
 - **Go deeper than the module on the mechanism.** Where it says what happens,
   say why, with the numbers hunter found.
 - **Add the failure.** Every phase should carry at least one real incident or

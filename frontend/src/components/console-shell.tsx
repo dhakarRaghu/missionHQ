@@ -9,6 +9,7 @@ import {
   GraduationCap,
   House,
   LayoutList,
+  Library,
   Lightbulb,
   ListChecks,
   LogOut,
@@ -52,6 +53,7 @@ const NAV = [
   { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/ideas", label: "Ideas", icon: Lightbulb },
   { href: "/learn", label: "Learn", icon: GraduationCap },
+  { href: "/courses", label: "Courses", icon: Library },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/vault", label: "Memory", icon: NotebookText },
   { href: "/runs", label: "Runs", icon: ListChecks },
@@ -225,7 +227,7 @@ function HaltedBanner() {
  * height (chat, vault) use `flex-1 min-h-0` and scroll their own panes.
  */
 /** Views that fill the viewport and scroll their own panes. */
-const FULL_HEIGHT = ["/chat", "/vault", "/learn"];
+const FULL_HEIGHT = ["/chat", "/vault", "/learn", "/courses"];
 
 export function ConsoleShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

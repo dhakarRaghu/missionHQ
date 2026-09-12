@@ -26,7 +26,7 @@ from hq.learning_pipeline import LESSON_DIR
 
 router = APIRouter(prefix="/learning", dependencies=[Depends(require_auth)])
 
-PAGE_MAX_CHARS = 400_000
+PAGE_MAX_CHARS = 2_000_000
 # Inline style and script only: the page's diagram needs both, and nothing
 # else is allowed to load at all — no CDN, no font, no tracking pixel, no
 # fetch back to the API. `data:` images let a lesson embed a small asset.
@@ -85,12 +85,27 @@ def _lesson_file(path: str, suffix: str) -> Path:
 
 
 @router.get("/lessons", operation_id="listLessons")
-async def list_lessons(limit: int = 30) -> list[dict[str, Any]]:
-    """Lessons, newest first: what he was taught and what it was built from."""
+async def list_lessons(limit: int = 30, kind: str = "") -> list[dict[str, Any]]:
+    """Lessons, newest first: what he was taught and what it was built from.
+
+    `kind` filters: "topic" for the daily open-web lesson, "course" for a
+    phase of his own material. The Learn page asks for topic lessons only —
+    course articles belong on the Courses page, beside the phase they teach.
+    """
     limit = max(1, min(int(limit), 120))
+    if kind.strip():
+        return await db.fetch(
+            "SELECT id::text, to_char(lesson_date, 'YYYY-MM-DD') AS lesson_date,"
+            " title, one_liner, topic, md_path, html_path, score, sources, created_at,"
+            " kind, course_slug, read_at"
+            " FROM hq.lessons WHERE kind = %s ORDER BY lesson_date DESC, created_at DESC"
+            " LIMIT %s",
+            (kind.strip(), limit),
+        )
     return await db.fetch(
         "SELECT id::text, to_char(lesson_date, 'YYYY-MM-DD') AS lesson_date,"
-        " title, one_liner, topic, md_path, html_path, score, sources, created_at"
+        " title, one_liner, topic, md_path, html_path, score, sources, created_at,"
+        " kind, course_slug, read_at"
         " FROM hq.lessons ORDER BY lesson_date DESC LIMIT %s",
         (limit,),
     )
@@ -183,3 +198,129 @@ async def drop_learning_request(request_id: str) -> dict:
         (request_id,),
     )
     return {"ok": True}
+
+
+@router.post("/lessons/{lesson_date}/read", operation_id="markLessonRead")
+async def mark_lesson_read(lesson_date: str, kind: str = "course") -> dict:
+    """Mark a lesson read, which unlocks the next course phase.
+
+    His rule: "if I have read that last article then generate the next,
+    otherwise articles will pile up". The evening course run refuses to start
+    a new phase while the previous course lesson is unread, so this button is
+    the thing that advances the course.
+    """
+    row = await db.fetchone(
+        "UPDATE hq.lessons SET read_at = now()"
+        " WHERE lesson_date = %s::date AND kind = %s AND read_at IS NULL"
+        " RETURNING title",
+        (lesson_date, kind),
+    )
+    return {"ok": row is not None, "title": (row or {}).get("title", "")}
+
+
+ACTIVE_COURSE_KEY = "learning:active_course"
+
+
+async def _active_course() -> str:
+    row = await db.fetchone(
+        "SELECT value FROM hq.control WHERE key = %s", (ACTIVE_COURSE_KEY,)
+    )
+    return str((row or {}).get("value") or "").strip('"')
+
+
+@router.get("/courses", operation_id="listCourses")
+async def list_courses() -> list[dict[str, Any]]:
+    """His own courses and how far through each one he is.
+
+    One is active at a time. He was explicit: "we will be learning all topic
+    one by one, not all in one" — so the evening run works the active course
+    and leaves the rest alone.
+    """
+    active = await _active_course()
+    rows = await db.fetch(
+        "SELECT course, count(*) AS phases,"
+        " count(*) FILTER (WHERE status = 'taught') AS taught,"
+        " coalesce(sum(minutes), 0) AS minutes,"
+        " min(title) FILTER (WHERE status = 'pending') AS next_title"
+        " FROM hq.course_phases GROUP BY course ORDER BY course",
+        (),
+    )
+    return [{**r, "active": r["course"] == active} for r in rows]
+
+
+@router.get("/courses/{course}", operation_id="getCoursePhases")
+async def get_course_phases(course: str) -> list[dict[str, Any]]:
+    """Every phase of one course, in order, with the article written for it.
+
+    The row carries the generated lesson's paths, not just a link back to his
+    own platform. The whole point of course mode is that he reads the version
+    written here — deeper, corrected, with the production failure attached —
+    rather than going back to the source module.
+    """
+    return await db.fetch(
+        "SELECT p.slug, p.phase_order, p.title, p.summary, p.difficulty,"
+        " p.minutes, p.status, p.url, p.lesson_id::text,"
+        " l.html_path AS lesson_html_path, l.md_path AS lesson_md_path,"
+        " l.title AS lesson_title, l.one_liner AS lesson_one_liner,"
+        " to_char(l.lesson_date, 'YYYY-MM-DD') AS lesson_date,"
+        " l.score AS lesson_score, l.read_at AS lesson_read_at"
+        " FROM hq.course_phases p"
+        " LEFT JOIN hq.lessons l ON l.id = p.lesson_id"
+        " WHERE p.course = %s ORDER BY p.phase_order",
+        (course,),
+    )
+
+
+@router.post("/courses/{course}/phases/{slug}/teach", operation_id="teachPhase")
+async def teach_phase(course: str, slug: str) -> dict:
+    """Study one named phase now, instead of waiting for tonight's run.
+
+    Still gated: it will not start while a course lesson sits unread, because
+    that is the rule that stops articles piling up.
+    """
+    from hq import engine
+    from hq.learning_pipeline import course_payload, course_study_brief
+
+    unread = await db.fetchone(
+        "SELECT title FROM hq.lessons WHERE kind = 'course' AND read_at IS NULL"
+        " ORDER BY lesson_date DESC LIMIT 1",
+        (),
+    )
+    if unread:
+        return {"started": False,
+                "reason": f"{unread['title']} is still unread — mark it read first"}
+
+    phase = await db.fetchone(
+        "SELECT slug, course, title, summary, url FROM hq.course_phases"
+        " WHERE slug = %s AND course = %s AND status = 'pending'",
+        (slug, course),
+    )
+    if not phase:
+        raise HTTPException(404, f"no pending phase {slug!r} in {course!r}")
+
+    payload = course_payload(dict(phase))
+    task_id = await engine.dispatch(
+        agent="hunter",
+        title=f"Study: {str(phase['title'])[:64]}",
+        brief=course_study_brief(payload),
+        source="web",
+        payload=payload,
+        dedup_key=f"course-phase:{slug}",
+    )
+    return {"started": True, "task_id": task_id, "title": phase["title"]}
+
+
+@router.post("/courses/{course}/activate", operation_id="activateCourse")
+async def activate_course(course: str) -> dict:
+    """Work this course next, and only this one."""
+    row = await db.fetchone(
+        "SELECT count(*) AS n FROM hq.course_phases WHERE course = %s", (course,)
+    )
+    if not row or not row["n"]:
+        raise HTTPException(404, f"no course {course!r}")
+    await db.execute(
+        "INSERT INTO hq.control (key, value) VALUES (%s, to_jsonb(%s::text))"
+        " ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        (ACTIVE_COURSE_KEY, course),
+    )
+    return {"active": course}

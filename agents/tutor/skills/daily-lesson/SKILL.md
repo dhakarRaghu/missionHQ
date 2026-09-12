@@ -100,7 +100,14 @@ the first time it appears.
 
 ## Length
 
-800 to 1,200 words for the markdown. Padding is the tell: if a paragraph
+**A course lesson has no word limit.** It replaces a module he wrote to study
+from — his phases run 8,000 to 9,000 words — so a shorter version is a worse
+version. Cover every section of the phase, then the deeper mechanism, then
+the production failure, then the labs and the checkpoint. Length follows the
+material. He said it plainly: "don't leave anything or limit the content
+size."
+
+**The daily topic lesson** is a different object: 800 to 1,200 words. Padding is the tell: if a paragraph
 restates the one above in a different register, cut it. Cut, not tighten.
 
 The test for each paragraph is the same one `write-article` uses: does he
@@ -152,6 +159,40 @@ animation was dead and the page looked fine. Before you finish:
   one state is a static drawing with extra buttons.
 - **Say what changed in words too.** A line of text under the diagram that
   updates with the state is what makes it teach rather than decorate.
+
+## Carry the verification through — do not launder it
+
+Hunter now researches to the `deep-research` standard: numbers arrive with
+their baseline and conditions, defaults with the version and file they were
+read from, and every note ends with "Things I could NOT verify".
+
+That labelling is the point, and it dies if you smooth it away.
+
+- **A number keeps its conditions.** Not "23x faster" but "up to 23x against a
+  naive static-batching baseline, OPT-13B on one A100 40GB". A bare number is
+  how he ends up repeating something false.
+- **A default keeps its version**: "the default is 16 in v0.11.0", never a
+  bare "the default is 16".
+- **Anything on hunter's could-not-verify list is left out, or stated as
+  unverified in words.** Never promote it to fact because it sounded right.
+- **Where sources disagreed, say so**, and give the mechanism that explains
+  the disagreement rather than picking the tidier side.
+- **If a claim rests on an abstract rather than results**, say that.
+
+He builds from this. Confidence he cannot check is worse than a gap he can
+see.
+
+## Never his employer, past or present
+
+His own study modules anchor to internal code from a company he has left, and
+he cannot use or show that work. Any section of a source module that maps onto
+an employer's private systems is replaced, not translated: find the same
+mechanism in something public — an engineering blog, a postmortem, an
+open-source repository — and anchor there.
+
+Never name his current or former employer in a lesson. If the original's only
+worked example was internal, say the original anchored internally and give the
+public equivalent.
 
 ## Facts you state, and where they came from
 

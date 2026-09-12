@@ -16,7 +16,6 @@ import { exactTime, timeAgo } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 const IDEAS_PATH = "projects/content/ideas.md";
-const READING_PATH = "projects/content/reading.md";
 const DRAFTS_DIR = "projects/content/drafts";
 
 /** One dated batch: the text under a `## <heading>` in ideas.md. */
@@ -363,12 +362,12 @@ function BatchSection({
 /**
  * What scout came up with, without opening the vault tree.
  *
- * Two deliverables, in the owner's own words: "find the best read for me"
- * and "help me get content creation idea". The reading list sits on top
- * because it is the shorter one and the one he acts on first — open two
- * links, then decide whether to write. Both were always in the vault; four
- * clicks into Memory, at the bottom of files that grow every night. Work he
- * has to go looking for is work he stops reading.
+ * Posts only. Scout's evening reading list used to sit on top of this page,
+ * and on 2026-09-13 he said plainly that he does not want it here: "I don't
+ * want to know reading content ... just give me Posts to publish." Reading is
+ * what Learn and Courses are for, and a list he scrolls past every day to
+ * reach the thing he came for is a list that makes him stop opening the page.
+ * Scout still writes the file; nothing on this page reads it.
  */
 export function IdeasView() {
   const tree = useQuery({ queryKey: vaultKeys.tree, queryFn: vaultApi.tree });
@@ -376,14 +375,6 @@ export function IdeasView() {
 
   return (
     <div className="flex min-h-full flex-col gap-8 pb-8">
-      <BatchSection
-        path={READING_PATH}
-        label="Worth reading today"
-        itemNoun="read"
-        defaultOpen={1}
-        emptyHint="Scout picks the three to five posts from your feeds most worth your time each evening, with one line on why each matters to you. Nothing yet."
-      />
-
       {drafts.length ? (
         <section className="flex flex-col gap-2">
           <h2 className="text-sm font-medium">Drafts ready to read</h2>

@@ -21,6 +21,13 @@ export interface Lesson {
   /** The article urls the lesson was built from. */
   sources: string[];
   created_at: string;
+  /** "topic" is the daily open-web lesson; "course" is a phase of his own
+   * study material. Two a day, so the date alone no longer identifies one. */
+  kind: "topic" | "course";
+  /** The phase slug, when this is a course lesson. */
+  course_slug: string;
+  /** Until this is set, the evening run will not start the next phase. */
+  read_at: string | null;
 }
 
 /** One lesson page as markup, with a Content-Security-Policy already injected
@@ -65,22 +72,79 @@ export interface LearningRequest {
   served_at: string | null;
 }
 
+/** One of his own courses on the study platform, and how far tutor has got
+ * through it. Phases are taught one a day, gated on the last being read. */
+export interface Course {
+  course: string;
+  phases: number;
+  taught: number;
+  minutes: number;
+  next_title: string | null;
+  /** Exactly one course is active; the evening run only touches that one. */
+  active: boolean;
+}
+
+/** One phase of a course, as it appears on his study platform. */
+export interface CoursePhase {
+  slug: string;
+  phase_order: number;
+  title: string;
+  summary: string;
+  difficulty: string;
+  minutes: number;
+  status: "pending" | "taught" | "skipped";
+  /** The original module on his own study platform. */
+  url: string;
+  lesson_id: string | null;
+  /** The article written for this phase — deeper than the original, with the
+   * corrections and the production failure. This is the one to read. */
+  lesson_html_path: string | null;
+  lesson_md_path: string | null;
+  /** The article's own title and takeaway, which are not the module's. */
+  lesson_title: string | null;
+  lesson_one_liner: string | null;
+  lesson_date: string | null;
+  lesson_score: number | null;
+  lesson_read_at: string | null;
+}
+
 export const learningKeys = {
   all: ["learning"] as const,
   lessons: ["learning", "lessons"] as const,
   page: (path: string) => ["learning", "page", path] as const,
   note: (path: string) => ["learning", "note", path] as const,
   requests: ["learning", "requests"] as const,
+  courses: ["learning", "courses"] as const,
+  coursePhases: (course: string) =>
+    ["learning", "courses", course] as const,
   readings: (status: string) => ["learning", "readings", status] as const,
 };
 
 export const learningApi = {
-  lessons: (limit = 30) =>
-    getJson<Lesson[]>(`/learning/lessons${queryString({ limit })}`),
+  lessons: (limit = 30, kind = "") =>
+    getJson<Lesson[]>(`/learning/lessons${queryString({ limit, kind })}`),
   page: (path: string) =>
     getJson<LessonPage>(`/learning/page${queryString({ path })}`),
   note: (path: string) =>
     getJson<LessonNote>(`/learning/note${queryString({ path })}`),
+  markRead: (lessonDate: string, kind: string) =>
+    sendJson<{ ok: boolean; title: string }>(
+      "POST",
+      `/learning/lessons/${lessonDate}/read${queryString({ kind })}`,
+    ),
+  courses: () => getJson<Course[]>("/learning/courses"),
+  coursePhases: (course: string) =>
+    getJson<CoursePhase[]>(`/learning/courses/${encodeURIComponent(course)}`),
+  teachPhase: (course: string, slug: string) =>
+    sendJson<{ started: boolean; reason?: string; title?: string }>(
+      "POST",
+      `/learning/courses/${encodeURIComponent(course)}/phases/${encodeURIComponent(slug)}/teach`,
+    ),
+  activateCourse: (course: string) =>
+    sendJson<{ active: string }>(
+      "POST",
+      `/learning/courses/${encodeURIComponent(course)}/activate`,
+    ),
   requests: () => getJson<LearningRequest[]>("/learning/requests"),
   addRequest: (text: string) =>
     sendJson<{ id: string }>("POST", "/learning/requests", { text }),

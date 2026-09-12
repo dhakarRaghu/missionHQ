@@ -11,7 +11,11 @@ These numbers come from his own last 10 posts, read off his profile on
 
 | | His actual practice |
 |---|---|
-| Median sentence | **8 words**. Half his sentences are under 8. |
+| Median sentence | **8 words**. Half his sentences are shorter than that. |
+| Whole post | **87 words** median. Short sentences, not a short post. |
+| Contractions | **3.1 per post.** "I don't", "it's", "that's", "you're", "should've". |
+| Uncontracted ("it is", "cannot", "do not") | **0.2 per post.** He almost never writes them out. |
+| "I think" / "I don't think" / "I'd rather" | **0.9 per post.** This is his voice, not a hedge. |
 | Em-dashes (—) | **Zero.** In 10 posts. Use a full stop. |
 | Emoji, hashtags, bullets, numbered lists | **Zero.** |
 | "not just X but Y", "serves as" | **Zero.** He does not write like this. |
@@ -35,10 +39,17 @@ recognise as his own.
    "I broke production", "I've seen", "I don't think", "I have a theory".
    This turns an abstract idea into something owned and lived. A post with no
    "I" in it is a lecture, and he does not write lectures.
-2. **State the claim flat.** No "maybe", "in my opinion", "it could be
-   argued", "arguably", "I would say". He picks a side: "Progress only
-   happens when someone refuses to converge." Put it early or use it as the
-   punchline. A hedge is the single fastest way to sound generated.
+2. **State the claim flat — but "I think" is not a hedge, it is him.**
+   Cut "maybe", "arguably", "it could be argued", "it is worth noting",
+   "in my opinion". Those soften the claim. Keep "I think", "I don't think",
+   "I genuinely think", "I suspect", "I'd rather", "I keep coming back to" —
+   he opens with them **roughly once a post**, and they make the claim *his*
+   rather than a stated fact about the world. "I don't think most support
+   teams have a support problem" is a harder claim than "Support teams do not
+   have a support problem", because he is standing behind it.
+
+   This rule used to read "no hedging" with no exception, and it deleted his
+   most recognisable move from every draft.
 3. **Trigger, then reflection, then insight.** Start from a real thing that
    happened: a meme, an incident, a number, something he saw. Move to the
    pattern he noticed. End on the implication. Let it run like spoken
@@ -52,18 +63,74 @@ recognise as his own.
    average" sits next to a sharp read on where this is going. What he is
    learning now, tied to what it means next.
 
+## Write it spoken, not written
+
+On 2026-09-13 he read a batch back and said it still was not his language.
+Length was not the problem. Counted the same way across his ten real posts
+and that batch of five, the shape already matched and the register did not:
+
+| | him | the batch |
+|---|---|---|
+| Words per post | 87 | 84 |
+| Median sentence | 8 words | 7 |
+| Contractions | **3.1 per post** | **0.4** |
+| "it is", "cannot", "do not", "I am" written out | **0.2 per post** | **1.0** |
+| "I think" family | **0.9 per post** | **0.0** |
+
+He talks. The drafts wrote.
+
+**Contract everything he would contract.** "I'm spinning up two containers
+tonight", not "I am spinning up". "It can't tell you which", not "The number
+cannot tell you which". "That's how most teams iterate on their AI agents
+right now and it's insane" is his actual sentence, from the pinned post. Full
+forms are for emphasis — one per post at most, where the weight belongs.
+
+Before you hand a draft over, count the apostrophes. Under two in a post of
+his length, and you have written an essay in his name.
+
+## Say it the way he would say it out loud
+
+He asked for simpler language twice. Simpler does not mean shallower — it
+means the reader gets the mechanism without having read the article first.
+
+Three things that broke it in the last batch:
+
+- **"It measures how far behind the applying thread is."** He would say "how
+  far behind the replica is at *running* the changes". Name the moving part
+  in words a reader can picture, then use the real name once if it matters.
+- **"The number everyone dashboards."** A noun used as a verb to sound sharp.
+  He writes "the number everyone puts on a dashboard".
+- **"A fast thing feeds a slow thing."** So abstract it could mean anything.
+  He grounds first: "MySQL pulls changes faster than it can run them."
+
+The test: **could someone who has not read the source article follow this
+post?** If following it needs the article, the post is a summary with his name
+on it. Spend one plain sentence setting up the thing, then make the turn.
+
+And do not end every post on an aphorism. Five posts closing on five polished
+final lines is a template showing through. He ends on a question ("What's one
+support tool you'd happily delete tomorrow?"), on a preference ("I'd rather
+build a support system that understands where the conversation came from"),
+or he just stops.
+
 ## Score it. Then fix the worst line and score again.
 
 Score the draft out of 60, six dimensions, ten each. Be harsh: you are
 scoring your own work and a generous score costs him a bad post.
 
 1. **I-anchor** — does it open or pivot on his real, specific experience?
-2. **The claim** — one clear position, stated without a hedge?
+2. **The claim** — one clear position, and is it *his*? "I think X" and
+   "I don't think X" score full marks; "maybe", "arguably", "it could be
+   argued", "it is worth noting" do not. Do not mark a post down for "I
+   think": that is the rule this scoring line used to break.
 3. **Flow** — trigger to reflection to insight, or a template wearing a
    disguise?
-4. **Shape** — short lines, median sentence near 8 words, no bullets, no
-   emoji, no em-dash?
-5. **Specifics** — at least one detail only he could know. A number, a date,
+4. **Shape** — median sentence near 8 words, whole post near 87, at least
+   three contractions, no bullets, no emoji, no em-dash? Score 5 or below if
+   the post writes out "it is", "cannot" or "do not" where he would have
+   contracted.
+5. **Specifics** — at least one detail only he could know, and no term a
+   reader needs the source article to parse. A number, a date,
    a name, a thing that broke on a Tuesday. This is the one pass a tool
    cannot fake, and it is what makes the writing his.
 6. **Slop-free** — none of the tells below?
@@ -150,15 +217,19 @@ name on it. Cut it.
 He said the drafts still read AI-generated. The tells, in order of how often
 they show up in these batches:
 
+- **Written-English register.** Full forms where he would contract, and no
+  "I think" anywhere. Measured, this is the loudest tell in the batches he has
+  rejected — louder than sentence length, which already matches him.
 - **Even, essay-length sentences.** His median is 8 words. Half his sentences
-  are shorter than that. A paragraph of 20-word sentences is the loudest tell.
+  are shorter than that. A paragraph of 20-word sentences is a loud tell.
 - **The tricolon.** Three parallel clauses in a row is a model's favourite
   rhythm and almost nobody's speech.
 - **Summary closers.** "The lesson is...", "And that is why...". He stops when
   the thought stops.
 - **Abstraction where a detail belongs.** "Production incidents are common"
   instead of "I broke production three times last month".
-- **Hedging into authority.** "It is worth noting that" — he just says it.
+- **Hedging into authority.** "It is worth noting that", "one could argue"
+  — he just says it. Not "I think", which is him saying it.
 - **Perfect parallel structure** across bullet points. Real notes are ragged.
 
 Read it aloud once. If it sounds like a conference talk rather than something

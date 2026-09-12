@@ -872,3 +872,44 @@ def test_his_files_are_not_silently_truncated() -> None:
     assert roster.strip().splitlines()[-1] in brief
     assert path.strip().splitlines()[-1] in brief
     assert interests.strip().splitlines()[-1] in brief
+
+
+def test_study_runs_work_to_the_research_standard() -> None:
+    # Normal research finds sources that agree. This method tries to break the
+    # claim first and reports what survived — every number with its baseline,
+    # every default with its version, and a mandatory list of what could not
+    # be verified.
+    import pathlib
+
+    from hq.learning_pipeline import (
+        course_payload,
+        course_study_brief,
+        scan_payload,
+        study_brief,
+        study_payload,
+    )
+
+    skill = (pathlib.Path(__file__).resolve().parents[2] / "agents" / "hunter"
+             / "skills" / "deep-research" / "SKILL.md").read_text()
+    flat = " ".join(skill.split())
+    # The principles, not the sentences: this is our method now, written in our
+    # own terms and against our own tools, not a transplanted document.
+    assert "leads, not sources" in flat          # a search result is not a source
+    assert "Things I could NOT verify" in flat   # the mandatory gap list
+    assert "raw.githubusercontent.com" in flat and "never `main`" in flat
+    assert "Abstracts state conclusions" in flat  # the crux is in the method
+    assert "fetch_source" in flat                 # our tool, not a generic one
+    assert "rubyhack.ai" in flat                  # our own failure, as the reason
+
+    picks = [{"title": "A", "url": "https://e.com/a", "why": "because"}]
+    topic = study_brief(study_payload(scan_payload(), picks), picks)
+    course = course_study_brief(course_payload({"slug": "k-phase-00", "title": "T"}))
+    for brief in (topic, course):
+        assert "deep-research" in brief
+        assert "could NOT verify" in brief or "could not confirm" in brief
+
+    # fetch_source exists, because none of the above is possible through a
+    # summariser: you cannot read a config file or prove an absence in one.
+    from hq.tools import web_tools
+
+    assert "text" in web_tools.fetch_source.__doc__.lower()

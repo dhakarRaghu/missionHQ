@@ -48,8 +48,9 @@ STATUSES = ("found", "queued", "digested", "taught", "skipped")
 # depend on them; three days is enough to catch what a feed is arguing about
 # without making the habit hostage to a browser extension.
 FEED_WEEKDAYS = (0, 2, 4)
-# One phase of his own material runs to ~49k characters. Read it whole.
-PHASE_MAX_CHARS = 80_000
+# One phase of his own material runs to ~49k characters. Read it whole — he
+# was explicit: "don't leave anything or limit the content size".
+PHASE_MAX_CHARS = 400_000
 
 
 def _today() -> datetime:
@@ -390,7 +391,7 @@ async def read_lesson(ctx: RunContext[HQDeps], path: str) -> dict[str, Any]:
     if not full.is_file() or root not in full.parents:
         raise ModelRetry(f"no such lesson: {clean}")
     text = await asyncio.to_thread(full.read_text)
-    return {"path": clean, "content": text[:20000]}
+    return {"path": clean, "content": text}
 
 
 @hq_tool(action=ActionClass.READ, trust=Trust.WEB, network=True)
@@ -512,8 +513,22 @@ async def start_course_study(ctx: RunContext[HQDeps], course: str = "") -> str:
             " still unread. Mark it read on the Learn page and the next one runs."
         )
 
-    where = "WHERE status = 'pending'" + (" AND course = %s" if course.strip() else "")
-    params: tuple[Any, ...] = (course.strip(),) if course.strip() else ()
+    # One course at a time. His words: "we will be learning all topic one by
+    # one, not all in one." Whichever course he marked active on the Courses
+    # page is the only one this touches, unless he names another here.
+    chosen = course.strip()
+    if not chosen:
+        row = await db.fetchone(
+            "SELECT value FROM hq.control WHERE key = 'learning:active_course'", ()
+        )
+        chosen = str((row or {}).get("value") or "").strip('"')
+    if not chosen:
+        return (
+            "no active course. Pick one on the Courses page — it works one"
+            " course at a time rather than spreading across all of them."
+        )
+    where = "WHERE status = 'pending' AND course = %s"
+    params: tuple[Any, ...] = (chosen,)
     nxt = await db.fetchone(
         f"SELECT slug, course, title, summary, url, minutes, difficulty"
         f" FROM hq.course_phases {where}"
@@ -523,7 +538,8 @@ async def start_course_study(ctx: RunContext[HQDeps], course: str = "") -> str:
         params,
     )
     if not nxt:
-        return "no pending phases; every course is taught or none are synced yet"
+        return (f"no pending phases left in {chosen!r}; pick the next course on"
+                " the Courses page")
 
     payload = course_payload(dict(nxt))
     task_id = await engine.dispatch(

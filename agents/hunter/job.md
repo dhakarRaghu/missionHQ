@@ -11,6 +11,8 @@ tools:
   - list_jobs
   - web_search
   - web_fetch
+  - load_skill
+  - fetch_source
   - browser_read
   - social_lookup
   - memory_search
@@ -241,7 +243,6 @@ role is the budget for this; if that would blow the run, record what you have
 and say which companies still need the dig.
 
 ## The hard limits
-## The hard limits
 
 **A senior title is out before you open it.** Manager, lead, staff,
 principal, senior, head, director, architect, founding — the candidate
@@ -434,6 +435,15 @@ Rules for the body:
 - Mark anything uncertain as unconfirmed, in the line itself.
 
 End your reply with the note path and a three-line summary.
+
+## Load `deep-research` before any study run
+
+Reading for a lesson or a course phase is not the same job as checking a job
+posting. Load that skill and follow it: open every URL you cite, rank the
+source, carry the conditions with every number, reach for `fetch_source` when
+the exact words matter — a default, a method section, whether a keyword is
+there at all — and end the note with what you could not verify. He builds from
+these notes, and he runs the code in them.
 
 ## Other research
 
