@@ -703,3 +703,88 @@ def test_telegram_render_survives_hostile_text() -> None:
 
     assert "<script>" not in out
     assert "&lt;script&gt;" in out
+
+
+# --- the LinkedIn post is the link, and operator's answers close the loop ----
+
+def test_ledger_has_a_linkedin_link_and_requests_can_be_answered() -> None:
+    sql = dict(load_migrations())[16]
+
+    assert "linkedin_url" in sql
+    assert "'answered'" in sql
+
+
+def test_record_job_takes_a_linkedin_url() -> None:
+    import inspect
+
+    from hq.tools import job_tools
+
+    assert 'linkedin_url: str = ""' in inspect.getsource(job_tools)
+
+
+def test_verification_records_a_linkedin_lead_without_the_portal() -> None:
+    payload = discovery_payload(query="SDE-1", locations="India", max_roles=5)
+    brief = verification_brief(verification_payload(payload), [])
+
+    assert "is\n   verified" in brief or "is verified" in brief
+    assert "linkedin_url" in brief
+    assert "Do not go looking for\n   that portal" in brief or "Do not go looking for that portal" in brief
+
+
+def test_discovery_uses_the_linkedin_post_as_the_link() -> None:
+    brief = discovery_brief(discovery_payload(query="SDE-1", locations="India", max_roles=5))
+
+    assert "Use the LinkedIn job URL" in brief
+    assert "Prefer the original application URL" not in brief
+
+
+def test_operator_answers_are_handed_back_to_hunter() -> None:
+    # The loop used to stop at 'dispatched': operator answered into quarantine
+    # and nothing recorded the role. This pins that run_task now routes the
+    # answer back.
+    import inspect
+
+    src = inspect.getsource(engine)
+    assert "async def _safe_record_operator_answers" in src
+    assert "await _safe_record_operator_answers(task, run_id, result, outcome.output)" in src
+    assert "Do not file request_operator on this run" in src
+
+
+def test_member_of_technical_staff_is_an_entry_title() -> None:
+    # Adobe's MTS 1 is a new-graduate role; the gate closed it at 9/10.
+    assert senior_title("Member of Technical Staff 1") is None
+    assert senior_title("Member of Technical Staff") is None
+    assert senior_title("Staff Software Engineer") == "staff"
+    assert senior_title("Senior Member of Technical Staff") == "senior"
+    assert senior_title("Principal Member of Technical Staff") == "principal"
+
+
+def test_discovery_runs_four_searches_for_twenty_roles() -> None:
+    # This brief and these defaults were silently reverted to HEAD on
+    # 2026-09-12 and nothing noticed: the restart loaded the old one-search
+    # brief. Pinned so a revert fails the gate instead.
+    import inspect
+    import pathlib
+
+    from hq.tools import board_tools
+
+    # A payload without max_roles is what falls back to the brief's own default.
+    payload = discovery_payload(query="SDE-1", locations="India", max_roles=5)
+    payload.pop("max_roles")
+    brief = discovery_brief(payload)
+    assert "Run FOUR short LinkedIn searches" in brief
+    assert "Go straight to one LinkedIn jobs search" not in brief
+    assert "Maximum candidates: 20" in brief
+    assert "max_roles: int = 20" in inspect.getsource(board_tools)
+    sage = pathlib.Path(__file__).resolve().parents[2] / "agents" / "sage" / "job.md"
+    assert "and max_roles 20." in sage.read_text()
+
+
+def test_a_level_two_title_is_the_wrong_rung() -> None:
+    # Flipkart "SDE II, 2.5 years" slipped under the years ceiling and stayed open.
+    for role in ("SDE II", "SDE-2", "SDE2", "Software Engineer II", "Software Engineer III",
+                 "Software Engineer (SDE II per LinkedIn)", "Member of Technical Staff 2"):
+        assert senior_title(role) is not None, role
+    for role in ("SDE 1", "SDE-I", "Software Engineer I", "Software Engineer", "Member of Technical Staff 1",
+                 "Engineer, 3D Graphics", "AI Engineer"):
+        assert senior_title(role) is None, role

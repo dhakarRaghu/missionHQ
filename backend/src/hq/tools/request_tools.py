@@ -131,8 +131,8 @@ async def list_operator_requests(
     Route the good ones with create_subtask to operator, then close them with
     resolve_operator_request so the same wall is not queued again tomorrow.
     """
-    if status not in {"pending", "dispatched", "declined", "expired"}:
-        raise ModelRetry("status must be pending, dispatched, declined or expired")
+    if status not in {"pending", "dispatched", "answered", "declined", "expired"}:
+        raise ModelRetry("status must be pending, dispatched, answered, declined or expired")
     return await db.fetch(
         "SELECT id::text, requested_by, company, role, question, url_hint, why,"
         " status, created_at FROM hq.operator_requests"

@@ -376,8 +376,14 @@ What makes a request worth filing:
   needs no follow-up; it is already out.
 
 File one request per wall, never the same one twice in a run. Do not wait for
-an answer: your run ends first, and the answer arrives in a later brief. Do
-not claim to call `create_subtask`; you do not have it.
+an answer: your run ends first. When operator answers, Mission HQ hands the
+answer back to you as its own task, to record the role — so a request is no
+longer a dead end. Do not claim to call `create_subtask`; you do not have it.
+
+**The LinkedIn post is the link.** When a role came from LinkedIn, pass its job
+URL to `record_job` as `linkedin_url`, and as `url` too when you have no better
+one. The owner applies from LinkedIn and does not need the company's own
+portal, so never chase a portal just to put a company URL on the card.
 
 Ask operator only for **job facts**: a posting that exists only on LinkedIn,
 the real title and level on a company's LinkedIn job page, whether a role is

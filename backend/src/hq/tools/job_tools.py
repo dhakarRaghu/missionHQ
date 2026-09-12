@@ -51,9 +51,23 @@ _YEAR_SPAN_RE = re.compile(
 # Word-bounded so "Leadership" and "Headcount" in a title do not match, and
 # deliberately not including "senior" alone in a compound like "Senior-friendly
 # team" — the title field is short and this is the whole of it.
+#
+# "Staff" but not "Member of Technical Staff": MTS is the ENTRY title at Adobe,
+# Salesforce, Nutanix and others (MTS 1 is a new graduate), and on 2026-09-12
+# this gate closed Adobe's "Member of Technical Staff 1" at 9/10. A senior MTS
+# still closes on its other word — "Senior", "Principal", "Lead".
 _SENIOR_TITLE_RE = re.compile(
-    r"\b(?:senior|sr\.?|staff|principal|lead|leads|manager|head|director"
+    r"\b(?:senior|sr\.?|(?<!technical )staff|principal|lead|leads|manager|head|director"
     r"|architect|vp|chief|founding|distinguished)\b",
+    re.IGNORECASE,
+)
+
+# A level number on an engineering title: "SDE II", "SDE-2", "Software
+# Engineer III", "MTS 2". He is making a level-one switch, so level two is the
+# wrong rung even when its stated years slip under the ceiling — Flipkart's
+# "SDE II, 2.5 years" passed the years gate on 2026-09-12 and stayed open.
+_LEVEL_TITLE_RE = re.compile(
+    r"\b(?:sde|swe|engineer|developer|mts|staff)[\s-]*(?:ii|iii|iv|[2-9])\b",
     re.IGNORECASE,
 )
 
@@ -65,7 +79,7 @@ def senior_title(role: str) -> str | None:
     lead, principal, manager, or founding engineer scope are not targets".
     Enforced here rather than in a prompt, for the same reason as the years
     ceiling — it is a fact about the owner, not a judgement call."""
-    match = _SENIOR_TITLE_RE.search(role)
+    match = _SENIOR_TITLE_RE.search(role) or _LEVEL_TITLE_RE.search(role)
     return match.group(0).lower() if match else None
 
 
@@ -124,6 +138,7 @@ async def record_job(
     company_brief: str = "",
     pay_signal: str = "",
     role_brief: str = "",
+    linkedin_url: str = "",
 ) -> str:
     """Record one verified role in the job ledger, or update it if already known.
 
@@ -159,6 +174,10 @@ async def record_job(
     - `role_brief`: what the job is really day to day, past the title, from
       the posting's own responsibilities.
 
+    `linkedin_url` is the LinkedIn job post when the role came from LinkedIn.
+    It is the link on the owner's board — he applies from LinkedIn, not from
+    the company's own portal — so pass it whenever you have it.
+
     Leave them empty for a weak fit rather than guessing. `researched_at` is
     stamped when any of the three is present, so the board can tell an
     unresearched role from a researched one with nothing to report.
@@ -172,6 +191,8 @@ async def record_job(
         raise ModelRetry("fit_score must be between 0 and 10")
     if not why_fit.strip():
         raise ModelRetry("why_fit is required: one sentence saying why this score")
+    if linkedin_url.strip() and not linkedin_url.strip().startswith(("http://", "https://")):
+        raise ModelRetry("linkedin_url must be the full https:// job post address, or empty")
 
     score = int(fit_score)
     bucket = "strong" if score >= 8 else ("decent" if score >= 6 else "stretch")
@@ -211,9 +232,10 @@ async def record_job(
                              dedupe_key, location, remote_policy, experience_band,
                              compensation, stack, fit_score, fit_bucket, why_fit,
                              next_step, referral, status, notes,
-                             company_brief, pay_signal, role_brief, researched_at)
+                             company_brief, pay_signal, role_brief, researched_at,
+                             linkedin_url)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s)
+                %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (dedupe_key) DO UPDATE SET
             -- A rediscovery refreshes facts but never overwrites a status the
             -- owner moved along.
@@ -236,7 +258,8 @@ async def record_job(
             company_brief = COALESCE(NULLIF(EXCLUDED.company_brief, ''), hq.jobs.company_brief),
             pay_signal = COALESCE(NULLIF(EXCLUDED.pay_signal, ''), hq.jobs.pay_signal),
             role_brief = COALESCE(NULLIF(EXCLUDED.role_brief, ''), hq.jobs.role_brief),
-            researched_at = COALESCE(EXCLUDED.researched_at, hq.jobs.researched_at)
+            researched_at = COALESCE(EXCLUDED.researched_at, hq.jobs.researched_at),
+            linkedin_url = COALESCE(NULLIF(EXCLUDED.linkedin_url, ''), hq.jobs.linkedin_url)
         RETURNING id::text, seen_count, status
         """,
         (
@@ -263,6 +286,7 @@ async def record_job(
             pay_signal.strip()[:300],
             role_brief.strip()[:600],
             researched,
+            linkedin_url.strip()[:500],
         ),
     )
     row = rows[0]

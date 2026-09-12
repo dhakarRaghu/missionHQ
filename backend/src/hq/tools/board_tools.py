@@ -95,7 +95,7 @@ async def start_job_search(
     ctx: RunContext[HQDeps],
     query: str,
     locations: str = "India|Bengaluru|Remote",
-    max_roles: int = 10,
+    max_roles: int = 20,
 ) -> str:
     """Start browser discovery followed automatically by Hunter verification.
 

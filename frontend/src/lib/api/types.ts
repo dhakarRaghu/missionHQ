@@ -370,6 +370,10 @@ export interface Job {
   pay_signal: string;
   role_brief: string;
   researched_at: string | null;
+  /** The LinkedIn job post the owner applies from. When present it is the
+   * card's link; the company's own portal is not needed. Empty for a role
+   * hunter found on an ATS board rather than on LinkedIn. */
+  linkedin_url: string;
   seen_count: number;
   first_seen: string;
   last_seen: string;

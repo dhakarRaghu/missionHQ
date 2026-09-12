@@ -519,8 +519,17 @@ function JobCard({ job }: { job: Job }) {
           variant="outline"
           className="h-7 px-2 text-xs"
         >
-          <a href={job.url} target="_blank" rel="noopener noreferrer">
-            Open <ExternalLink aria-hidden className="size-3" />
+          {/* The LinkedIn post when there is one — the owner applies from
+              LinkedIn, and asked for that link rather than the company's
+              portal. A role hunter found straight on an ATS board has no
+              LinkedIn post, so it keeps its original link. */}
+          <a
+            href={job.linkedin_url || job.url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {job.linkedin_url ? "LinkedIn" : "Open"}
+            <ExternalLink aria-hidden className="size-3" />
           </a>
         </Button>
         {/* Moved down here off the badge row: with four columns the badges
