@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # 5.00 while cost was the constraint; tripled 2026-09-10 when the owner said
     # value is ("don't care about the money for now"). The per-agent caps in
     # each job.md went up by the same factor.
-    daily_spend_cap_usd: float = 15.00
+    daily_spend_cap_usd: float = 60.00
     notifications_per_day: int = 5
     api_bearer_token: str = ""
     # Tailscale Serve identity that may skip the bearer token. Empty = never.
@@ -135,8 +135,8 @@ class Settings(BaseSettings):
     brightdata_search_market: str = "en-IN"
 
     brightdata_scrapers_enabled: bool = False
-    brightdata_daily_calls: int = 40
-    brightdata_monthly_calls: int = 1200
+    brightdata_daily_calls: int = 150
+    brightdata_monthly_calls: int = 4000
 
     # Days a finished task stays on the board before the maintenance tick sets
     # it to `archived`. Nothing is deleted; archived tasks are simply left out
@@ -178,6 +178,13 @@ class Settings(BaseSettings):
     # Paths (relative to the repo root; overridable for tests)
     agents_dir: Path = REPO_DIR / "agents"
     vault_dir: Path = REPO_DIR / "vault"
+    # His own files for the learning journey — the roster and his interests.
+    # In the repo, not the vault: the vault has no remote and is the agents'
+    # memory layer, and these two are his to edit and worth git history.
+    learning_dir: Path = REPO_DIR / "learning"
+    # His own study platform. The catalogue at /api/study is public; the phase
+    # pages are readable by slug. Tutor works through them one phase a day.
+    study_api_base: str = "https://raghu-monitoring.vercel.app"
     halt_file: Path = REPO_DIR / "HALT"
     models_file: Path = BACKEND_DIR / "models.yaml"
 

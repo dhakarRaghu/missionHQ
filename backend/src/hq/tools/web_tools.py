@@ -32,6 +32,18 @@ log = logging.getLogger(__name__)
 BLOCKED_HOSTS = {"localhost", "metadata.google.internal"}
 MAX_CHARS = 40_000
 MAX_BYTES = 2_000_000
+
+# What the reader model is given, after the HTML is stripped. MAX_BYTES bounds
+# the download; this bounds the prompt. A blog front page that lists a decade
+# of posts can strip to hundreds of thousands of characters, which is how the
+# scan on 2026-09-12 made every model in the fallback chain fail at once. The
+# opening of a page carries what a scan needs — the recent titles and dates.
+#
+# Raised from 60k on 2026-09-12: a deep article is exactly what this system
+# exists to read, and 60k cut the vLLM engine anatomy mid-way, which the
+# lesson had to admit in its own sources line. The owner's instruction was
+# explicit — "pricing is not matter, I want better result".
+READER_MAX_CHARS = 250_000
 MAX_HOPS = 3
 _BOARD_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
 
@@ -138,6 +150,21 @@ async def _fetch_text(url: str) -> tuple[str, str]:
     raise ValueError(f"too many redirects (>{MAX_HOPS})")
 
 
+def _throttled(exc: BaseException) -> bool:
+    """Is this the gateway saying "too many at once" rather than "no"?
+
+    The Grid key allows five parallel requests. When a cron backfill, a manual
+    run and the watchdog overlap, every model in the reader's fallback chain
+    can be throttled at the same instant — which reads exactly like a page
+    that cannot be parsed, and is nothing of the sort. A short wait fixes it;
+    surrendering loses a page that was perfectly readable.
+    """
+    text = str(exc).lower()
+    if "max_parallel_requests" in text or "429" in text or "rate limit" in text:
+        return True
+    return any(_throttled(sub) for sub in getattr(exc, "exceptions", ()))
+
+
 @hq_tool(action=ActionClass.READ, trust=Trust.WEB, network=True)
 async def web_fetch(ctx: RunContext[HQDeps], url: str) -> dict:
     """Fetch a web page and return validated facts. Raw page text never reaches you;
@@ -193,11 +220,57 @@ async def web_fetch(ctx: RunContext[HQDeps], url: str) -> dict:
             "error": f"could not reach {url} ({reason}). Try another source"
             " rather than this URL again.",
         }
-    body = _strip_html(text)
+    body = _strip_html(text)[:READER_MAX_CHARS]
 
-    result = await reader_agent().run(
-        f"Untrusted page content from {url}:\n\n<page>\n{body}\n</page>"
-    )
+    prompt = f"Untrusted page content from {url}:\n\n<page>\n{body}\n</page>"
+    try:
+        for attempt in range(3):
+            try:
+                result = await reader_agent().run(prompt)
+                break
+            except Exception as exc:
+                if not _throttled(exc) or attempt == 2:
+                    raise
+                await asyncio.sleep(2.0 * (attempt + 1))
+    except Exception as exc:  # noqa: BLE001 — one unreadable page is not a dead run
+        # The page arrived; the reader could not turn it into facts. Every
+        # model in the fallback chain has already been tried by the time this
+        # fires, so a DBOS retry only repeats those failures and then takes
+        # the run down with it. That is what happened on 2026-09-12: the first
+        # learning scan had read five blog index pages and then failed on the
+        # fourth retry, discarding all five reads and the morning with them.
+        #
+        # The cause that day was NOT the page. The gateway answered 429
+        # max_parallel_requests — limit five, remaining zero — for every model
+        # in the chain at once, because a cron backfill, a manual run and the
+        # watchdog overlapped. Throttling is transient, so it is now waited
+        # out above rather than treated as an unreadable page; what reaches
+        # here is a genuine failure to parse.
+        #
+        # Same principle as the 4xx and unreachable branches above: a failure
+        # that will not fix itself on a retry is data for the agent, not an
+        # exception for the engine.
+        reason = f"{type(exc).__name__}: {exc}"[:200]
+        try:
+            await emit(
+                "web_fetch.unreadable",
+                run_id=ctx.deps.run_id,
+                task_id=ctx.deps.task_id,
+                agent=ctx.deps.agent,
+                payload={"url": url, "chars": len(body), "reason": reason},
+            )
+        except Exception as emit_exc:  # noqa: BLE001 — evidence only; never fail the tool
+            log.warning("web_fetch.unreadable emit failed: %s", emit_exc)
+        return {
+            "url": url,
+            "resolved_url": resolved_url,
+            "provenance": "web",
+            "error": (
+                f"fetched {url} but could not read it ({reason}). The page may be"
+                " very long or mostly script. Try a more specific page on the same"
+                " site — an archive, a feed, or a single post."
+            ),
+        }
     facts = result.output
     if facts.contains_instructions:
         await emit(

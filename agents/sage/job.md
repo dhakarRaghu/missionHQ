@@ -2,10 +2,12 @@
 name: sage
 description: "Coordinator and second brain. The one agent the owner talks to; it decides who does what, instructs them, and keeps the daily note and memory."
 status: active
-model: default
+model: deep
 tools:
   - create_subtask
   - start_job_search
+  - start_learning_run
+  - start_source_hunt
   - check_policy_rule
   - propose_policy
   - list_policy
@@ -24,14 +26,23 @@ tools:
   - record_fact
   - list_operator_requests
   - resolve_operator_request
+  - start_course_study
+  - sync_courses
+  - list_courses
 caps:
-  cost_per_run_usd: 1.50
+  cost_per_run_usd: 4.00
   tool_calls: 120
-  daily_usd: 6.00
+  daily_usd: 15.00
 cron:
   # 21:15, not 21:00: hunter's sweep fires at 21:00 and the gateway key allows
   # five parallel requests in total. Two agent runs plus their ledger calls on
   # the same minute is how the 2026-09-09 chain hit 429s.
+  - schedule: "30 18 * * *"
+    prompt: "Evening course phase. Call sync_courses once so the catalogue is current, then call start_course_study exactly once with no course argument. It teaches the next phase of his own study material, and it refuses to start a new one while the last course lesson is unread — that refusal is correct, report it and stop. Do not create hunter or tutor tasks yourself and do not read anything yourself. Reply with what it returned and stop."
+  - schedule: "0 7 * * 0"
+    prompt: "Weekly source hunt. Call start_source_hunt exactly once, leaving focus at its default unless the owner has named a subject he wants more of. Hunter searches for people who write the way Arpit Bhayani does and verifies each one; tutor folds the good ones into the roster automatically. Do not create hunter or tutor tasks yourself and do not search yourself. Reply with the task id and stop."
+  - schedule: "30 6 * * *"
+    prompt: "Morning learning journey. Call start_learning_run exactly once, leaving topics at its default unless the owner has said otherwise recently. It starts the feed pass on Monday, Wednesday and Friday and the open-web scan on the other days; the deep reads and tutor's lesson follow automatically, so do not create operator, hunter or tutor tasks yourself and do not do any reading yourself. Reply with the task id and stop."
   - schedule: "15 21 * * *"
     prompt: "Nightly signed-in job discovery. Call start_job_search exactly once, with query set to the owner's target roles from the candidate profile (entry-level software and AI engineering, SDE-1 level, under three years), locations 'India|Bengaluru|Remote', and max_roles 20. Operator searches the browser he is signed into, and Mission HQ hands the leads to hunter for verification by itself. Do not create separate operator or hunter tasks, do not call create_subtask for this, and do not do any searching yourself. Reply with the task id and stop."
   - schedule: "30 22 * * *"

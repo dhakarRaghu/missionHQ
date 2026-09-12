@@ -102,6 +102,7 @@ if _cors_origins:
 from hq.api.agents_admin import router as agents_admin_router
 from hq.api.chat import router as chat_router
 from hq.api.events import router as events_router
+from hq.api.learning import router as learning_router
 from hq.api.rest import router as rest_router
 from hq.api.vault import router as vault_router
 
@@ -109,4 +110,5 @@ app.include_router(rest_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(vault_router, prefix="/api")
+app.include_router(learning_router, prefix="/api")
 app.include_router(agents_admin_router, prefix="/api")

@@ -788,3 +788,40 @@ def test_a_level_two_title_is_the_wrong_rung() -> None:
     for role in ("SDE 1", "SDE-I", "Software Engineer I", "Software Engineer", "Member of Technical Staff 1",
                  "Engineer, 3D Graphics", "AI Engineer"):
         assert senior_title(role) is None, role
+
+
+def test_a_page_that_cannot_be_read_is_data_not_an_exception() -> None:
+    # The first learning scan on 2026-09-12 read five blog index pages, hit one
+    # very long front page, and died: the reader model's whole fallback chain
+    # failed, DBOS retried the step four times, and all five good reads went
+    # with it. A retry cannot fix a page that is too long, so it returns.
+    import inspect
+
+    from hq.tools import web_tools
+
+    src = inspect.getsource(web_tools.web_fetch)
+    assert "READER_MAX_CHARS" in src
+    assert "web_fetch.unreadable" in src
+    assert "could not read it" in src
+    # A bound must exist so one enormous page cannot blow the prompt, but it
+    # is generous now: 60k cut the vLLM article mid-way and the lesson had to
+    # admit the truncation. Deep articles are the point of this system.
+    assert 100_000 < web_tools.READER_MAX_CHARS <= 400_000
+
+
+def test_a_throttled_gateway_is_waited_out_not_called_unreadable() -> None:
+    # On 2026-09-12 the gateway answered 429 max_parallel_requests (limit 5,
+    # remaining 0) for every model in the reader's fallback chain at once,
+    # because a cron backfill, a manual run and the watchdog overlapped. That
+    # is transient, and it reads exactly like a page that cannot be parsed.
+    from hq.tools.web_tools import _throttled
+
+    class Boom(Exception):
+        pass
+
+    assert _throttled(Boom("status_code: 429, body: max_parallel_requests"))
+    assert _throttled(Boom("Rate limit exceeded for api_key"))
+    assert not _throttled(Boom("invalid json in model output"))
+    # A fallback chain raises a group; the reason is inside it.
+    group = ExceptionGroup("all models failed", [Boom("nope"), Boom("429 throttling_error")])
+    assert _throttled(group)

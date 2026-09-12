@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Throughput is queue design</title>
+<style>
+  body { background: #fbfaf7; color: #23211d; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.65; margin: 0; padding: 2rem 1rem 4rem; }
+  main { max-width: 44rem; margin: 0 auto; }
+  h1 { font-size: 1.7rem; line-height: 1.2; margin-bottom: .3rem; }
+  h2 { font-size: 1.2rem; margin-top: 2.4rem; }
+  p, li { font-size: 1.02rem; }
+  .lede { color: #5f5b52; font-size: .95rem; margin-top: 0; }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .85rem; }
+  pre { background: #f1eee7; border: 1px solid #dcd7ca; border-radius: 6px; padding: .8rem 1rem; overflow-x: auto; line-height: 1.5; }
+  code { background: #f1eee7; padding: .05rem .3rem; border-radius: 3px; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  th, td { border: 1px solid #dcd7ca; padding: .5rem .7rem; text-align: left; vertical-align: top; }
+  th { background: #f1eee7; font-weight: 600; }
+  figure { margin: 2rem 0; background: #fff; border: 1px solid #e3ded2; border-radius: 8px; padding: 1rem; }
+  svg { width: 100%; height: auto; display: block; }
+  figcaption { font-size: .87rem; color: #5f5b52; margin-top: .6rem; }
+  .controls { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin-top: .8rem; font-size: .9rem; }
+  .controls button { font: inherit; padding: .35rem 1rem; border: 1px solid #4a473f; background: #f1eee7; border-radius: 5px; cursor: pointer; }
+  .controls button:hover { background: #e5e0d3; }
+  .controls label { display: flex; align-items: center; gap: .35rem; }
+  .fix { background: #f4f7f1; border-left: 3px solid #4a7a3f; padding: .6rem .9rem; font-size: .92rem; color: #3c4a36; border-radius: 0 4px 4px 0; }
+  ul { padding-left: 1.15rem; }
+  li { margin: .35rem 0; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Throughput is queue design</h1>
+<p class="lede">AI systems — serving. Also feeds the phase 3 replica build. Sources: vLLM's engine anatomy, and MySQL replication internals.</p>
+
+<h2>The one idea</h2>
+
+<p>A fast thing feeds a slow thing. That join is a <strong>seam</strong>.</p>
+
+<p>In MySQL replication, the fast thing is the primary — thousands of row changes a second. The slow thing is the replica, which by default applies them one transaction at a time.</p>
+
+<p>In vLLM, the fast thing is <strong>prefill</strong>: the GPU reads a whole prompt in one pass. The slow thing is <strong>decode</strong>: one token per step, and every step reads the model's entire weights from memory.</p>
+
+<p>When work arrives faster than the slow side can take it, you have exactly two options:</p>
+
+<ul>
+  <li><strong>Buffer it.</strong> Accept the work, park it somewhere, fall behind.</li>
+  <li><strong>Refuse it.</strong> Don't accept it yet. Make the caller wait at the door.</li>
+</ul>
+
+<p>That's the whole lesson. Everything else is detail on those two options — and on one question: <strong>who pays?</strong></p>
+
+<figure>
+<svg viewBox="0 0 720 250" role="img" aria-label="A producer feeds a seam; at the seam the work is either buffered or refused, and each choice sends the cost to a different person">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#4a473f"/>
+    </marker>
+  </defs>
+
+  <rect x="14" y="96" width="108" height="52" rx="7" fill="#eceadf" stroke="#4a473f"/>
+  <text x="68" y="118" font-size="13" text-anchor="middle" fill="#23211d">fast side</text>
+  <text x="68" y="135" font-size="10" text-anchor="middle" fill="#5f5b52">produces</text>
+
+  <line x1="124" y1="122" x2="196" y2="122" stroke="#4a473f" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <rect x="200" y="86" width="96" height="72" rx="7" fill="#fff" stroke="#4a473f" stroke-dasharray="5 3"/>
+  <text x="248" y="112" font-size="13" text-anchor="middle" font-weight="bold" fill="#23211d">the seam</text>
+  <text x="248" y="130" font-size="10" text-anchor="middle" fill="#5f5b52">more arrives</text>
+  <text x="248" y="144" font-size="10" text-anchor="middle" fill="#5f5b52">than leaves</text>
+
+  <line x1="298" y1="104" x2="374" y2="62" stroke="#8a6d3b" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="298" y1="140" x2="374" y2="182" stroke="#3f6a8a" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <rect x="378" y="30" width="150" height="62" rx="7" fill="#f6efe2" stroke="#8a6d3b"/>
+  <text x="453" y="52" font-size="13" text-anchor="middle" font-weight="bold" fill="#6b5325">1. buffer it</text>
+  <text x="453" y="70" font-size="10.5" text-anchor="middle" fill="#6b5325">accept, store, fall behind</text>
+  <text x="453" y="84" font-size="10.5" text-anchor="middle" fill="#6b5325">MySQL: the relay log</text>
+
+  <rect x="378" y="152" width="150" height="62" rx="7" fill="#eef3f7" stroke="#3f6a8a"/>
+  <text x="453" y="174" font-size="13" text-anchor="middle" font-weight="bold" fill="#2f5570">2. refuse it</text>
+  <text x="453" y="192" font-size="10.5" text-anchor="middle" fill="#2f5570">hold at the door</text>
+  <text x="453" y="206" font-size="10.5" text-anchor="middle" fill="#2f5570">vLLM: the waiting queue</text>
+
+  <line x1="530" y1="61" x2="576" y2="61" stroke="#8a6d3b" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="530" y1="183" x2="576" y2="183" stroke="#3f6a8a" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <text x="582" y="50" font-size="11" font-weight="bold" fill="#6b5325">the reader pays</text>
+  <text x="582" y="66" font-size="10.5" fill="#6b5325">stale data,</text>
+  <text x="582" y="80" font-size="10.5" fill="#6b5325">silently</text>
+
+  <text x="582" y="172" font-size="11" font-weight="bold" fill="#2f5570">the caller pays</text>
+  <text x="582" y="188" font-size="10.5" fill="#2f5570">slower first</text>
+  <text x="582" y="202" font-size="10.5" fill="#2f5570">token, visibly</text>
+</svg>
+<figcaption>The choice is not whether to pay. It is who pays, and whether they can see it.</figcaption>
+</figure>
+
+<h2>MySQL buffers</h2>
+
+<p>Two threads run on the replica. The <strong>I/O thread</strong> pulls events from the primary and writes them, unchanged, into a local file — the <strong>relay log</strong>. That file is the buffer. The <strong>applier thread</strong> reads that file and actually executes the changes.</p>
+
+<p>When the primary runs hot, the I/O thread keeps up easily; it is only copying bytes. The applier falls behind. The unapplied part of the relay log grows. Nothing errors. Disk fills quietly.</p>
+
+<div class="fix">
+<strong>About <code>Seconds_Behind_Master</code>.</strong> People read it as "how big the backlog is". It isn't. It compares the timestamp of the event the applier is working on right now against the replica's clock — so it measures <em>applier</em> delay only. If the network dies and the I/O thread stops pulling, the applier finishes what it has and this reports <strong>0</strong>, while you are minutes behind. Zero means "healthy" or "receiving nothing", and you cannot tell which from that number alone. Always read <code>Replica_IO_Running</code> beside it.
+</div>
+
+<h2>vLLM refuses</h2>
+
+<p>vLLM keeps two queues: <strong>waiting</strong> and <strong>running</strong>.</p>
+
+<p>To generate tokens, the GPU must hold that request's attention keys and values — the <strong>KV cache</strong>. vLLM allocates it in fixed chunks of 16 tokens, called <strong>blocks</strong>.</p>
+
+<p>The rule: a request moves from waiting to running only if the cache manager can guarantee enough blocks for its next step. No blocks, no admission.</p>
+
+<p>Notice what that protects. A request already generating never stalls halfway for want of memory. The cost lands on the new request's <strong>time to first token</strong> instead.</p>
+
+<p>Refusing is cheap here because of the batch layout: all sequences are concatenated into one flat row of tokens with no padding, so a request can join or leave at any token boundary. That is what <em>continuous batching</em> means — the batch is re-formed every step, not held until its slowest member finishes.</p>
+
+<h2>Who pays</h2>
+
+<table>
+  <tr><th></th><th>MySQL's answer</th><th>vLLM's answer</th></tr>
+  <tr><td>Excess work waits…</td><td>in the relay log, on disk</td><td>in the waiting queue</td></tr>
+  <tr><td>Who feels it</td><td>whoever reads the replica — stale data</td><td>the new request — slower first token</td></tr>
+  <tr><td>What to watch</td><td>applier lag <em>and</em> "is the I/O thread alive?"</td><td>queue wait and time to first token</td></tr>
+</table>
+
+<p>Buffering hides the problem and costs freshness. Refusing shows it immediately and costs admission latency. A seam that appears to cost nothing is hiding the cost somewhere you are not measuring.</p>
+
+<figure>
+<svg viewBox="0 0 720 330" role="img" aria-label="Simulation: the same burst arriving at a buffering system and a refusing system">
+  <text x="8" y="18" font-size="13" font-weight="bold" fill="#23211d">The same burst, two answers</text>
+
+  <text x="8" y="46" font-size="11.5" font-weight="bold" fill="#6b5325">MySQL — buffers</text>
+  <rect x="8" y="56" width="92" height="42" rx="6" fill="#eceadf" stroke="#4a473f"/>
+  <text x="54" y="82" font-size="11" text-anchor="middle" fill="#23211d">primary</text>
+  <line x1="102" y1="77" x2="140" y2="77" stroke="#4a473f" stroke-width="1.4" marker-end="url(#ar)"/>
+  <g id="mcells"></g>
+  <text x="300" y="50" font-size="10" text-anchor="middle" fill="#5f5b52">relay log — work accepted but not yet applied</text>
+  <line x1="462" y1="77" x2="500" y2="77" stroke="#4a473f" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="481" y="70" font-size="9" text-anchor="middle" fill="#5f5b52">applier</text>
+  <rect x="504" y="56" width="92" height="42" rx="6" fill="#eceadf" stroke="#4a473f"/>
+  <text x="550" y="82" font-size="11" text-anchor="middle" fill="#23211d">applied</text>
+  <text id="mlag" x="604" y="72" font-size="11" fill="#6b5325">lag: 0s</text>
+  <text id="mnote" x="604" y="88" font-size="10" fill="#5f5b52">reader sees fresh data</text>
+
+  <text x="8" y="170" font-size="11.5" font-weight="bold" fill="#2f5570">vLLM — refuses</text>
+  <rect x="8" y="180" width="92" height="42" rx="6" fill="#eceadf" stroke="#4a473f"/>
+  <text x="54" y="206" font-size="11" text-anchor="middle" fill="#23211d">requests</text>
+  <line x1="102" y1="201" x2="140" y2="201" stroke="#4a473f" stroke-width="1.4" marker-end="url(#ar)"/>
+  <g id="vcells"></g>
+  <text x="300" y="174" font-size="10" text-anchor="middle" fill="#5f5b52">waiting queue — not admitted without KV blocks</text>
+  <line x1="462" y1="201" x2="500" y2="201" stroke="#4a473f" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="481" y="194" font-size="9" text-anchor="middle" fill="#5f5b52">running</text>
+  <rect x="504" y="180" width="92" height="42" rx="6" fill="#eceadf" stroke="#4a473f"/>
+  <text id="vrun" x="550" y="206" font-size="11" text-anchor="middle" fill="#23211d">4 streaming</text>
+  <text id="vlag" x="604" y="196" font-size="11" fill="#2f5570">wait: 0</text>
+  <text id="vnote" x="604" y="212" font-size="10" fill="#5f5b52">first token fast</text>
+
+  <rect x="8" y="262" width="12" height="12" rx="2" fill="#b08b4a" stroke="#8a6d3b"/>
+  <text x="26" y="272" font-size="10" fill="#5f5b52">work waiting</text>
+  <rect x="124" y="262" width="12" height="12" rx="2" fill="#c0392b" stroke="#8c2f22"/>
+  <text x="142" y="272" font-size="10" fill="#5f5b52">head-of-line blocked (one big job hogging the batch)</text>
+  <text id="story" x="8" y="300" font-size="11" fill="#23211d">Press play. Then press burst and watch where the pain lands.</text>
+</svg>
+<div class="controls">
+  <button id="play">play</button>
+  <button id="burst">burst: one huge job</button>
+  <label>drain speed <input id="rate" type="range" min="1" max="4" value="1"></label>
+  <label><input id="chunk" type="checkbox" checked> chop the big job (chunked prefill)</label>
+</div>
+<figcaption>Top: the relay log absorbs whatever the applier cannot keep up with, so lag grows and nothing complains. Bottom: the scheduler refuses admission, so the queue grows instead and the pain shows up as wait time. Untick "chop the big job" and burst again — the huge job takes the whole batch and everyone already streaming stalls. That is head-of-line blocking, and chunked prefill is the fix.</figcaption>
+</figure>
+
+<h2>The third move: chop the big job</h2>
+
+<p>Once you have buffer and refuse, one more lever appears: make the big item smaller.</p>
+
+<p>A 100,000-token prompt processed in one step holds the GPU for seconds, and every request already generating gets nothing. That is <strong>head-of-line blocking</strong>: one big job at the front stalls everyone behind it.</p>
+
+<p><strong>Chunked prefill</strong> caps how many prompt tokens are processed per step, spreading a long prompt over several steps, each one still carrying the ongoing decodes. The long request's first token arrives later; everyone else keeps a smooth stream. The knob is <code>--max-num-batched-tokens</code>: the per-step token budget shared between prefill chunks and decodes.</p>
+
+<p>Two more vLLM moves, same reasoning:</p>
+
+<ul>
+  <li><strong>Prefix caching.</strong> If two prompts share their first 16-token block, that block's KV is computed once and reused. The best way through a seam is not to send the work at all. Only <em>complete</em> blocks are cached, so a prompt ending mid-block recomputes its tail.</li>
+  <li><strong>Speculative decoding.</strong> Decode is limited by memory bandwidth, not arithmetic — the math units idle while weights are read. So a small cheap model guesses several tokens ahead and the big model verifies them in one pass. A rejection sampler keeps the output distribution identical to the big model's own.</li>
+</ul>
+
+<h2>One knob that lies</h2>
+
+<p><strong>Semi-synchronous replication</strong> makes the primary wait for at least one replica to confirm receipt before reporting commit. It sounds like durability. The default timeout is <strong>10 seconds</strong>, and on timeout the primary silently falls back to plain asynchronous replication and carries on.</p>
+
+<p>So the guarantee holds while the network is fast and disappears exactly when the network is slow — the only time you needed it. It does not warn you. If you need a real durability bound, that is consensus, not semi-sync.</p>
+
+<h2>Fifteen minutes today</h2>
+
+<p>Watch a buffer fill. Two containers, <code>mysql:8.4</code>.</p>
+
+<pre><code># docker-compose.yml
+services:
+  primary:
+    image: mysql:8.4
+    command: --server-id=1 --log-bin=binlog --gtid-mode=ON
+             --enforce-gtid-consistency=ON
+    environment: { MYSQL_ROOT_PASSWORD: root }
+    ports: ["3306:3306"]
+  replica:
+    image: mysql:8.4
+    command: --server-id=2 --read-only=ON
+    environment: { MYSQL_ROOT_PASSWORD: root }
+    ports: ["3307:3306"]</code></pre>
+
+<p>Row-based binlog is already the default in 8.0+, so you do not need to set it.</p>
+
+<pre><code>-- primary
+CREATE USER 'repl'@'%' IDENTIFIED BY 'repl';
+GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';
+CREATE DATABASE bench;
+CREATE TABLE bench.t (id BIGINT PRIMARY KEY AUTO_INCREMENT, v INT);
+
+-- replica
+CHANGE REPLICATION SOURCE TO
+  SOURCE_HOST='primary', SOURCE_PORT=3306,
+  SOURCE_USER='repl', SOURCE_PASSWORD='repl',
+  SOURCE_AUTO_POSITION=1;
+START REPLICA;</code></pre>
+
+<p>Now freeze the slow side while the fast side keeps going:</p>
+
+<pre><code>-- replica: stop applying, keep receiving
+STOP REPLICA SQL_THREAD;
+
+-- primary: insert in a loop for a minute
+-- replica: watch it climb
+SHOW REPLICA STATUS\G</code></pre>
+
+<p>Read three fields together, never one:</p>
+
+<ul>
+  <li><code>Replica_IO_Running</code> — still <code>Yes</code>? Then you are receiving.</li>
+  <li><code>Seconds_Behind_Master</code> — climbing. That is applier delay.</li>
+  <li><code>Relay_Log_Space</code> — growing. That is the buffer, in bytes.</li>
+</ul>
+
+<p>Then <code>START REPLICA;</code> and time the drain. Run it again with <code>SET GLOBAL replica_parallel_workers = 4;</code> and compare. (In 8.4, transactions already carry WRITESET dependency information by default, so non-conflicting ones apply in parallel. On 8.0 you set <code>binlog_transaction_dependency_tracking = WRITESET</code> yourself; that variable is deprecated now.)</p>
+
+<p>You have just built the observable half of your phase 3 replica build — a lag counter — before writing any Go. <strong>And the build itself?</strong> If the Bitcask-style store from phase 2 is not running yet, there is nothing for a replica to attach to. Reading has outrun building.</p>
+
+<h2>Where it breaks</h2>
+
+<ul>
+  <li><strong><code>Seconds_Behind_Master</code> = 0 can mean "disconnected".</strong> Always check <code>Replica_IO_Running</code> too.</li>
+  <li><strong>Statement-based replication diverges silently.</strong> <code>SYSDATE()</code>, <code>UUID()</code>, <code>RAND()</code>, <code>LIMIT</code> without <code>ORDER BY</code>, and user-defined functions give different answers on the replica. No error — wrong data, found weeks later. (<code>NOW()</code> is safe: the statement's timestamp is replicated with it. That is exactly why <code>SYSDATE()</code> is not — it reads the clock at execution.)</li>
+  <li><strong>Row-based apply needs primary keys.</strong> The applier finds each row by primary key. Without one, every UPDATE and DELETE is a full table scan on the replica, one event at a time.</li>
+  <li><strong>A weak replica cannot absorb, only fall behind.</strong> Less CPU or slower disk than the primary, and parallel workers will not save you: the drain rate sits structurally below the fill rate.</li>
+  <li><strong>Chunked prefill is not free.</strong> The long request's first token gets slower and prefill runs slightly less efficiently. Right trade with many concurrent users, wrong one when a single request owns the machine.</li>
+  <li><strong>Prefix caching only shares complete blocks.</strong> A prompt ending mid-block recomputes that tail every time.</li>
+</ul>
+
+<h2>Two posts you could write</h2>
+
+<ul>
+  <li><strong>"Seconds_Behind_Master lies to you twice."</strong> It measures applier delay, not backlog, and reads 0 when you are disconnected. Yours because you can demo both states with two containers.</li>
+  <li><strong>"A vLLM scheduler and a MySQL replica solve the same problem."</strong> At every seam you buffer or refuse, then choose who pays. Yours because you can put KV-block admission beside the relay log with real flags and real status fields.</li>
+</ul>
+
+<h2>Sources</h2>
+
+<ul>
+  <li><em>Inside vLLM: Anatomy of a High-Throughput LLM Inference System</em>, Aleksa Gordic — <a href="https://blog.vllm.ai/2025/09/05/anatomy-of-vllm.html">blog.vllm.ai</a>. The extraction was truncated inside distributed serving, so benchmarking is not covered here.</li>
+  <li><em>MySQL Replication Internals</em>, Arpit Bhayani — <a href="https://arpitbhayani.me/blogs/mysql-replication-internals/">arpitbhayani.me</a>.</li>
+</ul>
+
+<p class="lede">Corrections applied on review: <code>Seconds_Behind_Master</code> measures applier delay rather than relay-log size and reads 0 when disconnected; <code>NOW()</code> is safe under statement-based replication while <code>SYSDATE()</code> is not; WRITESET dependency tracking is the default in MySQL 8.4.</p>
+
+</main>
+<script>
+(function () {
+  var CELLS = 13, X0 = 144, W = 22, GAP = 2;
+  var svgns = "http://www.w3.org/2000/svg";
+
+  function lane(groupId, y, fill) {
+    var g = document.getElementById(groupId);
+    var cells = [];
+    for (var i = 0; i < CELLS; i++) {
+      var r = document.createElementNS(svgns, "rect");
+      r.setAttribute("x", X0 + i * (W + GAP));
+      r.setAttribute("y", y);
+      r.setAttribute("width", W);
+      r.setAttribute("height", 42);
+      r.setAttribute("rx", 2);
+      r.setAttribute("fill", "none");
+      r.setAttribute("stroke", "#c3bdae");
+      g.appendChild(r);
+      cells.push(r);
+    }
+    return { cells: cells, fill: fill };
+  }
+
+  var mysql = lane("mcells", 56, "#b08b4a");
+  var vllm = lane("vcells", 180, "#5b87ab");
+
+  var el = {
+    mlag: document.getElementById("mlag"), mnote: document.getElementById("mnote"),
+    vlag: document.getElementById("vlag"), vnote: document.getElementById("vnote"),
+    vrun: document.getElementById("vrun"), story: document.getElementById("story"),
+    rate: document.getElementById("rate"), chunk: document.getElementById("chunk")
+  };
+
+  var s = { buffered: 0, waiting: 0, blocked: 0, lagSeconds: 0 };
+  var timer = null;
+
+  function paint(lane, n, blocked) {
+    lane.cells.forEach(function (c, i) {
+      c.setAttribute("fill", i < n ? (blocked ? "#c0392b" : lane.fill) : "none");
+    });
+  }
+
+  function draw() {
+    paint(mysql, s.buffered, false);
+    paint(vllm, s.waiting, s.blocked > 0);
+
+    el.mlag.textContent = "lag: " + s.lagSeconds + "s";
+    el.mnote.textContent = s.lagSeconds > 0 ? "reader sees stale data" : "reader sees fresh data";
+
+    el.vlag.textContent = "wait: " + s.waiting;
+    el.vrun.textContent = s.blocked > 0 ? "stalled" : "4 streaming";
+    el.vnote.textContent = s.blocked > 0 ? "everyone stalled" :
+      (s.waiting > 0 ? "first token delayed" : "first token fast");
+
+    if (s.blocked > 0) {
+      el.story.textContent = "The huge job took the whole batch. Every request already streaming is stalled — head-of-line blocking.";
+    } else if (s.buffered >= CELLS) {
+      el.story.textContent = "The buffer is full and still nothing has errored. That silence is the danger: lag is now " + s.lagSeconds + "s.";
+    } else if (s.waiting > 0 || s.buffered > 0) {
+      el.story.textContent = "Same burst, two answers: MySQL is " + s.lagSeconds + "s behind, vLLM has " + s.waiting + " waiting at the door.";
+    } else {
+      el.story.textContent = "Both sides keeping up. Press burst to overload the seam.";
+    }
+  }
+
+  function tick() {
+    var drain = Number(el.rate.value);
+
+    // MySQL accepts everything and falls behind.
+    s.buffered = Math.min(CELLS, s.buffered + 2);
+    s.buffered = Math.max(0, s.buffered - drain);
+    s.lagSeconds = s.buffered;
+
+    // vLLM admits only what it can serve; the rest waits at the door.
+    if (s.blocked > 0) {
+      s.blocked -= 1;                       // the big job still owns the batch
+      s.waiting = Math.min(CELLS, s.waiting + 2);
+    } else {
+      s.waiting = Math.min(CELLS, s.waiting + 2);
+      s.waiting = Math.max(0, s.waiting - (drain + 1));
+    }
+    draw();
+  }
+
+  document.getElementById("play").onclick = function () {
+    if (timer) { clearInterval(timer); timer = null; this.textContent = "play"; }
+    else { timer = setInterval(tick, 500); this.textContent = "pause"; }
+  };
+
+  document.getElementById("burst").onclick = function () {
+    s.buffered = Math.min(CELLS, s.buffered + 7);
+    s.lagSeconds = s.buffered;
+    if (el.chunk.checked) {
+      s.waiting = Math.min(CELLS, s.waiting + 7);   // chopped: queue grows, stream survives
+    } else {
+      s.blocked = 6;                                 // unchopped: the batch is monopolised
+    }
+    draw();
+  };
+
+  draw();
+})();
+</script>
+</body>
+</html>

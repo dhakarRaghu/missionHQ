@@ -110,3 +110,56 @@ A draft worth keeping goes to
 If the brief has no owner-supplied detail — nothing he built, broke, noticed
 or believes — do not manufacture one. Write what you can, then ask him the
 one question that would unlock it, and stop.
+
+## When the idea came from something he read
+
+Most of these ideas start in an article, a paper or someone's post. That is
+fine — it is what reading is for. What is not fine is dressing a borrowed
+insight up as something he lived.
+
+**Say where it came from, in his own plain way.** Real openers he could use:
+
+> I was reading about how retrieval actually fails and it made me look at ours.
+> Someone wrote this week that agents fail before they even start. I think that is right.
+> Read a good breakdown of KV caching today. One line stuck.
+
+Then the post earns its keep by what HE adds: the thing he noticed in his own
+system, the place he disagrees, the number from his own runs. The article is
+the prompt, not the payload.
+
+**Never write "I built", "I shipped", "I debugged" for something he did not
+do.** On 2026-09-12 he read a batch of drafts back and said plainly: "this is
+not actually what I'm doing". A post that claims his hands were on something
+they were not is the fastest way to lose a reader who knows him — and he has
+to defend it in the replies.
+
+Three sourcing shapes that stay honest:
+
+1. **Read it, tried it.** "Read X. Tried it on my own system. Here is what
+   happened." Strongest, and only usable when he actually tried it.
+2. **Read it, thought about it.** "X argues Y. In my system that would mean Z."
+   The claim is his, the source is named, nothing is faked.
+3. **Read it, disagree.** "Everyone says X. Having watched my own runs, I do
+   not buy it." Best engagement, and only honest when he has the evidence.
+
+If a draft fits none of these, it is a summary of someone else's post with his
+name on it. Cut it.
+
+## Sounding like him rather than like a model
+
+He said the drafts still read AI-generated. The tells, in order of how often
+they show up in these batches:
+
+- **Even, essay-length sentences.** His median is 8 words. Half his sentences
+  are shorter than that. A paragraph of 20-word sentences is the loudest tell.
+- **The tricolon.** Three parallel clauses in a row is a model's favourite
+  rhythm and almost nobody's speech.
+- **Summary closers.** "The lesson is...", "And that is why...". He stops when
+  the thought stops.
+- **Abstraction where a detail belongs.** "Production incidents are common"
+  instead of "I broke production three times last month".
+- **Hedging into authority.** "It is worth noting that" — he just says it.
+- **Perfect parallel structure** across bullet points. Real notes are ragged.
+
+Read it aloud once. If it sounds like a conference talk rather than something
+he would type into his phone at 1am, rewrite it shorter and more specific.

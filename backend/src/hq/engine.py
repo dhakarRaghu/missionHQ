@@ -29,6 +29,7 @@ from pydantic_ai.durable_exec.dbos import DBOSDurability, StepConfig
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from hq import board, db, digest, llm, memory, obs, runner, safety
+from hq import learning_pipeline as learning
 from hq.config import settings
 from hq.dbos_app import DBOS
 from hq.job_pipeline import (
@@ -72,6 +73,12 @@ _schedules: list[ScheduleInput] = []  # built pre-launch, applied post-launch
 # that was asked to write something must leave a side effect on record: one
 # ``tool.called`` event with ok=true for one of these tools.
 ARTIFACT_TOOLS = (
+    # A lesson is an artifact. Lessons moved out of the vault on
+    # 2026-09-12, and this list still only knew about vault writes — so
+    # tutor wrote two files and a database row, was judged empty-handed,
+    # and its task showed as blocked on the board.
+    "write_lesson",
+    "record_lesson",
     "vault_write",
     "record_fact",
     "create_subtask",
@@ -436,6 +443,7 @@ async def run_task(task_id: str) -> str:
     recorded_people = await _safe_record_referrals(task, run_id, result, outcome.output)
     review_task_id = await _safe_route_operator_requests(task, run_id, result)
     answers_task_id = await _safe_record_operator_answers(task, run_id, result, outcome.output)
+    learning_task_id = await _safe_advance_learning(task, task_id, run_id, result, outcome.output)
     delivered_output = outcome.output[:TASK_OUTPUT_CHARS]
     if followup_task_id is not None:
         delivered_output += (
@@ -462,6 +470,8 @@ async def run_task(task_id: str) -> str:
             "\n\nThis answered hunter's requests. Hunter is recording the roles"
             f" as task {answers_task_id}."
         )
+    if learning_task_id is not None:
+        delivered_output += f"\n\nThe learning journey continues as task {learning_task_id}."
     await _deliver_task_result_step(
         task_id, run_id, agent_name, result, delivered_output
     )
@@ -1083,6 +1093,251 @@ async def _safe_route_operator_requests(
             "operator.request_routing_failed",
             run_id=run_id,
             task_id=task.get("id"),
+            agent=str(task.get("agent") or ""),
+            payload={"error": str(exc)[:300]},
+        )
+        return None
+
+
+# --- the daily learning journey ---------------------------------------------
+
+@DBOS.step()
+async def _record_reading_leads_step(leads: list[dict[str, Any]], default_source: str) -> int:
+    """Put every candidate in the ledger. A URL seen twice keeps its first row."""
+    for lead in leads:
+        await db.execute(
+            """
+            INSERT INTO hq.readings (url, title, author, source, topic,
+                                     posted_date, why, score)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (url) DO UPDATE SET
+                score = GREATEST(EXCLUDED.score, hq.readings.score),
+                why = COALESCE(NULLIF(EXCLUDED.why, ''), hq.readings.why),
+                last_seen = now()
+            """,
+            (lead.get("url", ""), str(lead.get("title", ""))[:300],
+             str(lead.get("author", ""))[:120],
+             str(lead.get("source") or default_source)[:40],
+             str(lead.get("topic", ""))[:120], str(lead.get("posted_date", ""))[:40],
+             str(lead.get("why", ""))[:600], int(lead.get("score") or 0)),
+        )
+    return len(leads)
+
+
+@DBOS.step()
+async def _learning_context_step() -> tuple[str, list[str], int, str, str, list[str]]:
+    """The roster, what was taught, the backlog, his interests, and the path."""
+    from hq.tools.learning_tools import scan_context
+
+    return await scan_context()
+
+
+@DBOS.step()
+async def _learning_requests_step() -> list[str]:
+    """What he asked to learn about, for the scan brief."""
+    from hq.tools.learning_tools import open_requests
+
+    return await open_requests()
+
+
+@DBOS.step()
+async def _pending_readings_step(limit: int) -> list[dict[str, Any]]:
+    """Unread candidates, best first.
+
+    A 'queued' row older than a day comes back: the study run that claimed it
+    never finished, and a candidate stranded in queued is one the ledger would
+    never offer again.
+    """
+    return await db.fetch(
+        "SELECT url, title, why, score, topic FROM hq.readings"
+        " WHERE status = 'found'"
+        "    OR (status = 'queued' AND last_seen < now() - interval '1 day')"
+        " ORDER BY score DESC, first_seen DESC LIMIT %s",
+        (limit,),
+    )
+
+
+@DBOS.step()
+async def _queue_readings_step(urls: list[str]) -> None:
+    await db.execute(
+        "UPDATE hq.readings SET status = 'queued', last_seen = now()"
+        " WHERE url = ANY(%s) AND status <> 'taught'",
+        (urls,),
+    )
+
+
+@DBOS.step()
+async def _digested_readings_step(urls: list[str]) -> list[dict[str, Any]]:
+    return await db.fetch(
+        "SELECT url, title, digest_path FROM hq.readings"
+        " WHERE url = ANY(%s) AND digest_path <> '' ORDER BY score DESC",
+        (urls,),
+    )
+
+
+async def _advance_learning(
+    task: dict, task_id: str, run_id: str, result: str, output: str
+) -> str | None:
+    """Move the morning on: feed -> scan -> study -> lesson.
+
+    Each stage hands the next a bounded envelope, never its own prose. The
+    feed stage is allowed to fail: operator needs a live browser and the
+    owner's session, and when it cannot get one the scan still runs. A
+    morning that teaches nothing because a browser extension was asleep is
+    exactly the fragility this pipeline exists to avoid.
+    """
+    payload = task.get("payload") or {}
+    topics = str(payload.get("topics") or learning.DEFAULT_TOPICS)
+
+    if learning.is_feed_pass(payload):
+        leads = learning.extract_reading_leads(output) if result == "done" else []
+        if leads:
+            await _record_reading_leads_step(leads, "x")
+        scan = learning.scan_payload(topics=topics)
+        roster, taught, pending_count, interests, path, covered = (
+            await _learning_context_step()
+        )
+        note = "" if result == "done" else (
+            f"\n\nOperator could not read the feeds this run (outcome: {result}),"
+            " so the open web is all there is today. Say so in your answer."
+        )
+        return await dispatch(
+            agent="hunter",
+            title="Scan for today's reading",
+            brief=learning.scan_brief(
+                scan, roster=roster, recent=taught, pending=pending_count,
+                interests=interests, requests=await _learning_requests_step(),
+                path=path, covered=covered,
+            )
+            + note,
+            source="agent",
+            parent_task_id=task_id,
+            origin_session_id=task.get("origin_session_id"),
+            payload={**scan, "run_id": run_id},
+            dedup_key=f"learning-scan:{task_id}",
+        )
+
+    if learning.is_reading_scan(payload):
+        if result != "done":
+            return None
+        leads = learning.extract_reading_leads(output)
+        if leads:
+            await _record_reading_leads_step(leads, "blog")
+        # Selection reads the ledger, not this run's envelope, so a find from
+        # Monday's feed and one from today's scan compete on equal terms.
+        pending = await _pending_readings_step(learning.MAX_STUDY * 3)
+        picks = learning.select_for_study(pending, set())
+        if picks:
+            await _queue_readings_step([str(p["url"]) for p in picks])
+        # What is left after today's picks. When the backlog runs this low the
+        # roster is the problem rather than the day, so the hunt runs itself
+        # instead of waiting for Sunday — the owner asked for daily, and daily
+        # only works if supply is replenished before it runs out.
+        #
+        # This check sits BEFORE the empty-handed return on purpose. It used to
+        # sit after it, which meant the one morning that most needed more
+        # sources — the scan found nothing, the backlog is empty — was the one
+        # morning that quietly did nothing at all.
+        _roster, _titles, pool, *_rest = await _learning_context_step()
+        hunt_task_id: str | None = None
+        if pool < learning.MIN_PENDING:
+            hunt_task_id = await dispatch(
+                agent="hunter",
+                title="Find more people worth reading (the backlog is thin)",
+                brief=learning.source_hunt_brief(
+                    learning.source_hunt_payload(focus=topics), roster=_roster
+                ),
+                source="agent",
+                parent_task_id=task_id,
+                origin_session_id=task.get("origin_session_id"),
+                payload={**learning.source_hunt_payload(focus=topics), "run_id": run_id},
+                dedup_key=f"learning-sources-auto:{run_id}",
+            )
+        if not picks:
+            # Nothing worth reading today. The hunt above, when it started, is
+            # the honest answer: no lesson, and the reason is a thin roster.
+            return hunt_task_id
+        study = learning.study_payload({"topics": topics}, picks)
+        return await dispatch(
+            agent="hunter",
+            title=f"Read {len(picks)} article{'' if len(picks) == 1 else 's'} in full",
+            brief=learning.study_brief(study, picks),
+            source="agent",
+            parent_task_id=task_id,
+            origin_session_id=task.get("origin_session_id"),
+            payload={**study, "run_id": run_id},
+            dedup_key=f"learning-study:{task_id}",
+        )
+
+    if learning.is_source_hunt(payload):
+        if result != "done":
+            return None
+        leads = learning.extract_source_leads(output)
+        if not leads:
+            return None
+        roster, _taught, _pending, *_rest = await _learning_context_step()
+        merge = learning.roster_merge_payload(payload, len(leads))
+        return await dispatch(
+            agent="tutor",
+            title=f"Add {len(leads)} name{'' if len(leads) == 1 else 's'} to the reading roster",
+            brief=learning.roster_merge_brief(merge, leads, roster),
+            source="agent",
+            parent_task_id=task_id,
+            origin_session_id=task.get("origin_session_id"),
+            payload={**merge, "run_id": run_id},
+            dedup_key=f"learning-roster:{task_id}",
+        )
+
+    if learning.is_course_study(payload):
+        if result != "done":
+            return None
+        digests = await _digested_readings_step([str(payload.get("url") or "")])
+        if not digests:
+            return None
+        return await dispatch(
+            agent="tutor",
+            title=f"Write up: {str(payload.get('title') or 'the phase')[:56]}",
+            brief=learning.course_lesson_brief(payload, digests),
+            source="agent",
+            parent_task_id=task_id,
+            origin_session_id=task.get("origin_session_id"),
+            payload={**payload, "run_id": run_id},
+            dedup_key=f"course-lesson:{payload.get('slug')}",
+        )
+
+    if learning.is_deep_study(payload):
+        urls = [str(u) for u in (payload.get("urls") or [])]
+        digests = await _digested_readings_step(urls)
+        if not digests:
+            return None
+        lesson = learning.lesson_payload({"topics": topics}, digests)
+        _r, _t, _p, _i, lesson_path, _c = await _learning_context_step()
+        return await dispatch(
+            agent="tutor",
+            title="Write today's lesson",
+            brief=learning.lesson_brief(lesson, digests, path=lesson_path),
+            source="agent",
+            parent_task_id=task_id,
+            origin_session_id=task.get("origin_session_id"),
+            payload={**lesson, "run_id": run_id},
+            dedup_key=f"learning-lesson:{task_id}",
+        )
+    return None
+
+
+async def _safe_advance_learning(
+    task: dict, task_id: str, run_id: str, result: str, output: str
+) -> str | None:
+    """A broken hand-off must not lose the reading that was already done."""
+    if "tutor" not in AGENTS and "hunter" not in AGENTS:
+        return None
+    try:
+        return await _advance_learning(task, task_id, run_id, result, output)
+    except Exception as exc:  # noqa: BLE001 — the digests still stand
+        await runner.emit_step(
+            "learning.advance_failed",
+            run_id=run_id,
+            task_id=task_id,
             agent=str(task.get("agent") or ""),
             payload={"error": str(exc)[:300]},
         )

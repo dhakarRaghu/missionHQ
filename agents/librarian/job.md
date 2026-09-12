@@ -15,9 +15,9 @@ tools:
   - recall_facts
   - retire_fact
 caps:
-  cost_per_run_usd: 1.20
-  tool_calls: 45
-  daily_usd: 3.00
+  cost_per_run_usd: 3.00
+  tool_calls: 90
+  daily_usd: 10.00
 cron:
   - schedule: "30 23 * * *"
     prompt: >-

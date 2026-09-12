@@ -11,6 +11,7 @@ from hq.tools import (  # noqa: F401
     factory_tools,
     facts_tools,
     job_tools,
+    learning_tools,
     policy_tools,
     request_tools,
     vault_tools,

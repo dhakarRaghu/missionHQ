@@ -2,7 +2,7 @@
 name: hunter
 description: Job-search research. Finds roles, companies, people and the shared ground for a referral, and writes findings to quarantine only.
 status: active
-model: default
+model: deep
 tools:
   - discover_companies
   - job_board
@@ -12,20 +12,26 @@ tools:
   - web_search
   - web_fetch
   - browser_read
+  - social_lookup
   - memory_search
   - vault_read
   - vault_write:quarantine/**
   - read_board
   - recall_facts
   - request_operator
+  - record_reading
+  - list_readings
+  - read_course_phase
+  - sync_courses
+  - list_courses
 caps:
   # 0.50 was 200k tokens on kimi, and the 2026-09-09 sweep died at 212k on
   # its final answer AFTER recording two roles and filing its note. The scope
   # fix below is what actually shrank the run. Then tripled on 2026-09-10 with
   # every other cap, when the owner said value matters more than cost.
-  cost_per_run_usd: 2.25
-  tool_calls: 180
-  daily_usd: 7.50
+  cost_per_run_usd: 6.00
+  tool_calls: 250
+  daily_usd: 25.00
 cron:
   - schedule: "0 21 * * *"
     prompt: >-

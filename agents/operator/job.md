@@ -6,14 +6,14 @@ runtime: codex
 model: default
 tools: []
 caps:
-  cost_per_run_usd: 3.00
+  cost_per_run_usd: 5.00
   # 18 was the pacing brake before the one-tab rule existed: nothing in code
   # can pace what Codex does inside its own session, so the call ceiling was
   # the only thing stopping a fan-out across dozens of pages. The manifest now
   # forbids that directly, so the ceiling can be what it should be — enough
   # for a real read of one company page and a careful referral lookup.
-  tool_calls: 54
-  daily_usd: 9.00
+  tool_calls: 90
+  daily_usd: 15.00
 cron: []
 ---
 You are operator, the one agent in Mission HQ that runs outside its loop.

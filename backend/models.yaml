@@ -57,8 +57,36 @@ models:
 # Roles are what agents declare. All three point at one model for now; split
 # them (deep -> a stronger model, cheap -> a faster one) by editing these three
 # lines, with no change to any agent or any code.
+  # More room to think, for the agents whose output he actually reads.
+  #
+  # Measured on 2026-09-12, one sample each on an identical queueing problem:
+  # effort "low" answered in 26.8s with 517 output tokens, "high" in 61.4s
+  # with 1458. So the parameter does something. "xhigh" took 199.5s and
+  # produced FEWER tokens (842), with a different input-token count — that
+  # request was served by a fallback model, not kimi. And the gateway accepts
+  # "ultra" and "extra_high" without complaint, so it validates nothing:
+  # acceptance is not evidence of effect.
+  #
+  # So depth comes from the levers that demonstrably work — the proven effort
+  # value, twice the token budget, and a timeout that lets a long answer
+  # finish — rather than from a magic string nobody honours.
+  kimi_deep:
+    provider: gateway
+    model: kimi-latest
+    input_per_mtok: 0.60
+    output_per_mtok: 2.50
+    settings:
+      reasoning_effort: high
+      # 64k output and fifteen minutes. Probed on 2026-09-12: the gateway
+      # accepted 32k, 64k and 128k. It also accepts nonsense reasoning-effort
+      # values, so acceptance proves little — 64k is chosen because it is far
+      # past any lesson or digest, not because 128k failed.
+      max_tokens: 64000
+      timeout_s: 900
+    fallback: [sonnet, glm]
+
 roles:
-  deep: kimi
+  deep: kimi_deep
   default: kimi
   cheap: kimi
 
