@@ -27,7 +27,6 @@ tools:
   - list_operator_requests
   - resolve_operator_request
   - start_course_study
-  - sync_courses
   - list_courses
 caps:
   cost_per_run_usd: 4.00
@@ -38,7 +37,7 @@ cron:
   # five parallel requests in total. Two agent runs plus their ledger calls on
   # the same minute is how the 2026-09-09 chain hit 429s.
   - schedule: "30 18 * * *"
-    prompt: "Evening course phase. Call sync_courses once so the catalogue is current, then call start_course_study exactly once with no course argument. It teaches the next phase of his own study material, and it refuses to start a new one while the last course lesson is unread — that refusal is correct, report it and stop. Do not create hunter or tutor tasks yourself and do not read anything yourself. Reply with what it returned and stop."
+    prompt: "Evening course phase. Call start_course_study exactly once with no course argument. It refreshes nothing itself — hunter syncs the catalogue as part of the study run. It teaches the next phase of his own study material, and it refuses to start a new one while the last course lesson is unread — that refusal is correct, report it and stop. Do not create hunter or tutor tasks yourself and do not read anything yourself. Reply with what it returned and stop."
   - schedule: "0 7 * * 0"
     prompt: "Weekly source hunt. Call start_source_hunt exactly once, leaving focus at its default unless the owner has named a subject he wants more of. Hunter searches for people who write the way Arpit Bhayani does and verifies each one; tutor folds the good ones into the roster automatically. Do not create hunter or tutor tasks yourself and do not search yourself. Reply with the task id and stop."
   - schedule: "30 6 * * *"
