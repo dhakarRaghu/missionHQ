@@ -118,6 +118,55 @@ support tool you'd happily delete tomorrow?"), on a preference ("I'd rather
 build a support system that understands where the conversation came from"),
 or he just stops.
 
+## Write plain English, not native-speaker English
+
+He said it directly on 2026-09-13: "make the language for the post more
+simple, my first language is not English." Then he pointed at the line that
+gave it away:
+
+> vLLM gets requests faster than **the GPU can chew through them**
+
+That is a native speaker's idiom. It is vivid and it is wrong for him, because
+he has to read it, defend it in the replies, and recognise it as something he
+would have typed. The plain version says the same thing: *"faster than the GPU
+can process them."* Nothing is lost.
+
+Every one of these was in a batch he rejected. The fix is on the right:
+
+| written | say instead |
+|---|---|
+| the GPU can chew through them | the GPU can process them |
+| I didn't see it until it bit me | I didn't see it until it broke something |
+| I'm spinning up two containers | I'm starting two containers |
+| to watch it lie to me myself | to see it happen myself |
+| hand them to an AI and pretend | let an AI review them and move on |
+| the biases that eat your week | the biases that waste your week |
+| the retry loop burns tokens | the retry loop costs tokens |
+| the eval lies gently | the eval is slightly optimistic |
+
+The rules behind that table:
+
+- **No idioms and no metaphors made of everyday verbs.** "chew through",
+  "eat", "burn", "bite", "spin up", "wrestle with", "under the hood", "boils
+  down to". If the verb is not doing its literal job, replace it with the one
+  that is.
+- **Prefer one plain verb to a phrasal verb.** "start", not "spin up".
+  "process", not "chew through". "find", not "dig into". Phrasal verbs are the
+  hardest part of English for a second-language reader and they carry no extra
+  meaning here.
+- **Keep the sentences short, which he already does.** Short sentences are not
+  the problem; the vocabulary inside them is.
+- **Technical words stay.** "idempotency", "replica", "KV cache", "reconcile"
+  are precise and he uses them daily. Simple does not mean vague — it means no
+  decoration. Cut the literary verb, keep the technical noun.
+- **The test:** would this sentence read the same to someone who learned
+  English in school in India and uses it for work every day? If a phrase only
+  lands for someone raised on English idiom, rewrite it.
+
+Read his own posts again for the register. "Fast confusion is still
+confusion." "Five disconnected tools do not become a system just because the
+team got used to them." Plain words, hard claims. That is the target.
+
 ## Score it. Then fix the worst line and score again.
 
 **Run the register gate first. It is pass/fail, not scored.** A draft that
@@ -137,7 +186,7 @@ Count three things on the draft, against the measured table at the top:
 The gate is cheap to run and it hard-blocks the exact failure you last sent
 back. If it fails, fix register before scoring anything else.
 
-Only then score out of 60, six dimensions, ten each. Be harsh: you are
+Only then score out of 70, seven dimensions, ten each. Be harsh: you are
 scoring your own work and a generous score costs him a bad post.
 
 1. **I-anchor** — does it open or pivot on his real, specific experience?
@@ -156,8 +205,11 @@ scoring your own work and a generous score costs him a bad post.
    a name, a thing that broke on a Tuesday. This is the one pass a tool
    cannot fake, and it is what makes the writing his.
 6. **Slop-free** — none of the tells below?
+7. **Plain English** — any idiom or figurative everyday verb ("chew through",
+   "bit me", "spin up", "burns")? Each one costs 3. Technical vocabulary is
+   not an idiom and never costs anything.
 
-**Pass: 50 or more, and no single dimension under 7.**
+**Pass: 57 of 70, and no single dimension under 7.**
 
 Below that, rewrite the lowest-scoring dimension specifically and score
 again. Up to three passes. If a pass does not raise the score, stop and say

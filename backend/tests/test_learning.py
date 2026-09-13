@@ -964,44 +964,44 @@ def test_page_must_carry_the_lesson() -> None:
     assert page_shortfall(markdown, "") == ""
 
 
-def test_todays_actual_sources_would_now_be_dropped() -> None:
-    """The two articles behind the 2026-09-13 lesson, replayed through the gate.
+def test_news_expires_and_knowledge_does_not() -> None:
+    """Age is not the test; shelf life is.
 
-    Both came from a source verified active — the 90-day roster rule asks
-    whether a blog is alive, never how old the post is. He read a lesson built
-    on articles 597 and 367 days old and said the system "just creates
-    anything".
+    An early version of this gate dropped everything over 120 days. He
+    corrected it on 2026-09-13: what he wants is "real problems in systems, AI
+    world knowledge, useful for me maybe in future or present". The two
+    articles behind that day's lesson were 597 and 367 days old and both teach
+    a durable method — they stay. A benchmark post from the same week does not.
     """
     from hq.learning_pipeline import select_for_study
 
     leads = [
         {"url": "https://jxnl.co/writing/2025/01/24/systematically-improving-rag/",
          "title": "Systematically improving RAG", "topic": "ai", "score": 9,
-         "age_days": 597},
+         "age_days": 597, "shelf_life": "durable"},
         {"url": "https://jxnl.co/writing/2025/09/11/why-grep-beat-embeddings/",
-         "title": "Why grep beat embeddings", "topic": "ai", "score": 9,
-         "age_days": 367},
-        {"url": "https://example.com/fresh", "title": "Something from this month",
-         "topic": "ai", "score": 5, "age_days": 12},
+         "title": "Why grep beat embeddings", "topic": "ai", "score": 8,
+         "age_days": 367, "shelf_life": "durable"},
+        {"url": "https://example.com/leaderboard", "title": "New benchmark numbers",
+         "topic": "ai", "score": 9, "age_days": 400, "shelf_life": "news"},
     ]
-    picks = select_for_study([dict(lead) for lead in leads], set(), limit=3)
+    urls = [p["url"] for p in select_for_study(leads, set(), limit=5)]
 
-    urls = [p["url"] for p in picks]
-    assert urls == ["https://example.com/fresh"], urls
+    assert "https://jxnl.co/writing/2025/01/24/systematically-improving-rag/" in urls
+    assert "https://example.com/leaderboard" not in urls
 
 
-def test_a_foundational_paper_may_still_be_read() -> None:
-    """Raft is not stale at ten years, but "evergreen" cannot become the norm."""
-    from hq.learning_pipeline import MAX_EVERGREEN, select_for_study
+def test_fresh_news_still_counts() -> None:
+    """Only STALE news is dropped. This week's release is exactly his point."""
+    from hq.learning_pipeline import select_for_study
 
-    leads = [
-        {"url": f"https://example.com/paper{i}", "title": f"Paper {i}",
-         "topic": "distsys", "score": 9, "age_days": 3000, "evergreen": "true"}
-        for i in range(MAX_EVERGREEN + 2)
-    ]
-    picks = select_for_study(leads, set(), limit=10)
+    picks = select_for_study(
+        [{"url": "https://example.com/release", "title": "Shipped this week",
+          "topic": "ai", "score": 9, "age_days": 3, "shelf_life": "news"}],
+        set(), limit=2,
+    )
 
-    assert len(picks) == MAX_EVERGREEN
+    assert [p["url"] for p in picks] == ["https://example.com/release"]
 
 
 def test_an_undated_lead_is_kept_but_flagged() -> None:

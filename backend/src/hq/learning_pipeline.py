@@ -117,10 +117,12 @@ _LEAD_FIELDS = (
     "source",
     "topic",
     "posted_date",
-    # Set when a lead is foundational rather than current — a paper, a spec, a
-    # canonical writeup. It is the only way past the age gate, and only a
-    # couple survive per batch.
-    "evergreen",
+    # "news" or "durable". News is anything whose value is that it just
+    # happened: a release, a benchmark, an announcement, a funding round.
+    # Durable is knowledge that will still be true and still be useful later —
+    # a mechanism, a production failure and what it taught, a method. Only
+    # news expires.
+    "shelf_life",
     # Why it is worth HIS morning, in one line, and a 0-10 score. The score is
     # what code sorts on, so it crosses the boundary as a field rather than as
     # a sentence to be re-read.
@@ -133,20 +135,19 @@ def _bounded_text(value: object, limit: int) -> str:
     return " ".join(str(value or "").split())[:limit]
 
 
-# How old an article may be and still be today's reading.
+# Age matters for news. It does not matter for knowledge.
 #
-# The roster's 90-day rule asks whether a BLOG is alive. It never asked how old
-# the POST is, and an active blog serves old posts happily: on 2026-09-13 the
-# lesson was built on two articles 597 and 367 days old, from a source that is
-# verified active. He has been explicit twice — "world is rapidly evolving, I
-# want things latest", and about a source whose newest post was a year back,
-# "don't add these as this blog is last on 2025". So the age of the article is
-# now a gate, not a preference.
-MAX_LEAD_AGE_DAYS = 120
-# Foundational work does not expire — the Raft paper is not stale at ten years.
-# A lead may declare itself evergreen and skip the gate, but only a few can, or
-# "evergreen" becomes the way every old post gets in.
-MAX_EVERGREEN = 2
+# The first version of this gate dropped everything over 120 days, which was a
+# misreading. He corrected it on 2026-09-13: "when I say old for topics — the
+# content I'm reading should be about real problems in systems, AI world
+# knowledge, useful for me maybe in future or present." A writeup of a
+# production failure is as useful two years on as the week it appeared; a
+# release note, a benchmark table or a funding story is not.
+#
+# So the lead declares its shelf life and only NEWS expires. What he actually
+# objected to earlier — "this blog is last on 2025", "world is rapidly
+# evolving" — was a dead SOURCE, which the roster's 90-day rule already covers.
+MAX_NEWS_AGE_DAYS = 120
 _DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%d %B %Y", "%B %d, %Y", "%d %b %Y", "%b %d, %Y")
 
 
@@ -311,34 +312,28 @@ def extract_reading_leads(output: str) -> list[dict[str, Any]]:
 
 
 def _only_current(leads: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop what is too old to be today's reading.
+    """Drop stale news. Keep knowledge, whatever its date.
 
-    Known-old goes. Undated stays, ranked below everything dated and carrying
-    `undated`, so the lesson has to say the publication date could not be
-    established rather than implying it is current. Dropping the undated
-    outright was tempting and wrong: it empties a morning whenever a scan
-    forgets the field, and an empty morning is not an improvement on a flagged
-    one. The brief asks for the date; this decides what to do when it is
-    missing.
+    Undated leads stay, ranked after everything dated and carrying `undated`,
+    so the lesson has to say it could not establish a date rather than implying
+    the piece is current. Dropping them outright empties a morning whenever a
+    scan forgets the field, and an empty morning is not an improvement on a
+    flagged one.
     """
-    current: list[dict[str, Any]] = []
+    keep: list[dict[str, Any]] = []
     undated: list[dict[str, Any]] = []
-    evergreen = 0
     for lead in leads:
         age = lead.get("age_days")
-        if isinstance(age, int):
-            if age <= MAX_LEAD_AGE_DAYS:
-                current.append(lead)
-            elif (str(lead.get("evergreen") or "").strip().lower()
-                  in ("true", "yes", "1") and evergreen < MAX_EVERGREEN):
-                evergreen += 1
-                current.append(lead)
-            else:
-                lead["dropped"] = f"{age} days old"
+        if not isinstance(age, int):
+            lead["undated"] = True
+            undated.append(lead)
             continue
-        lead["undated"] = True
-        undated.append(lead)
-    return current + undated
+        is_news = str(lead.get("shelf_life") or "").strip().lower() == "news"
+        if is_news and age > MAX_NEWS_AGE_DAYS:
+            lead["dropped"] = f"news, {age} days old"
+            continue
+        keep.append(lead)
+    return keep + undated
 
 
 
@@ -682,26 +677,33 @@ is learning how serving and replication work, with those as the examples.
 **Prefer what is current.** The field moves fast and he is reading to keep up,
 so a post from this week beats a better-written one from last year.
 
-**The age limit is enforced in code, not left to you.** A lead older than
-{MAX_LEAD_AGE_DAYS} days is dropped before anything reads it, and a lead with no
-readable `posted_date` is kept but marked `undated`, which forces the lesson
-to admit it could not establish when the piece was written. This gate exists
-because this brief already asked for nothing older than six months and the
-2026-09-13 lesson was still built on articles 597 and 367 days old, from a
-source that is verified active. The roster's 90-day rule asks whether a blog
-is alive; it never asked how old the post is.
+**What expires is news, not knowledge.** He was explicit about this: "the
+content I'm reading should be about real problems in systems, AI world
+knowledge, useful for me maybe in future or present." A writeup of a
+production failure is as useful two years on as the week it appeared. A
+release note, a benchmark table or an announcement is not.
 
-So: **always report `posted_date` from the page itself**, in `YYYY-MM-DD`. If
-the page shows no date, that is a reason to doubt the source, not to guess.
-For genuinely foundational work — a paper, a spec, a canonical writeup that
-does not go stale — set `"evergreen": true` and say in `why` what makes it
-foundational. At most {MAX_EVERGREEN} of those survive per batch, so spend them.
+So label every lead's `shelf_life`:
+
+- **`"durable"`** — a mechanism, a production failure and what it taught, a
+  method, a paper, a spec. Kept whatever its date. Prefer these.
+- **`"news"`** — its value is that it just happened. Dropped in code once it
+  is more than {MAX_NEWS_AGE_DAYS} days old, before anything reads it.
+
+**Always report `posted_date` from the page itself**, in `YYYY-MM-DD`. A lead
+with no readable date is kept but marked `undated`, which forces the lesson to
+admit the date could not be established — so find it. If the page shows no
+date at all, that is a reason to doubt the source, not to guess.
+
+The thing he objects to is a dead source, not an old post: a blog whose newest
+piece is a year back does not belong on the roster, and that is the roster's
+90-day rule, not this one.
 
 Return up to {payload.get("max_candidates")} candidates, ending your answer with this envelope and
 nothing after it:
 
 ```json
-{{"missionhq_reading_leads":[{{"title":"...","url":"https://...","author":"who wrote it","source":"blog|newsletter|paper|hn","topic":"which interest from his list it serves - REQUIRED, a lead without it is dropped","posted_date":"2026-09-11 - REQUIRED, from the page, YYYY-MM-DD","evergreen":false,"why":"one line: what he would learn","score":8}}]}}
+{{"missionhq_reading_leads":[{{"title":"...","url":"https://...","author":"who wrote it","source":"blog|newsletter|paper|hn","topic":"which interest from his list it serves - REQUIRED, a lead without it is dropped","posted_date":"2026-09-11 - REQUIRED, from the page, YYYY-MM-DD","shelf_life":"durable|news - REQUIRED","why":"one line: what he would learn and why it is still useful","score":8}}]}}
 ```
 
 `score` is 0-10 for how much it teaches him. Be honest with the low end: a 4

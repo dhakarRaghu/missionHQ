@@ -85,6 +85,16 @@ one incident of his own is often 600 to 1,200. If it is 400 words of real conten
 to hit a length is the single most detectable thing in AI writing, and the
 field guide lists content inflation as its own category for that reason.
 
+**Plain English, not native-speaker English.** English is his second
+language, and he said so on 2026-09-13 after reading "faster than the GPU can
+chew through them": "make the language more simple". Drop idioms and
+figurative everyday verbs — chew through, eat, burn, bite, spin up, under the
+hood, boils down to — and use the literal one: process, waste, cost, break,
+start. Prefer one plain verb to a phrasal verb. Technical vocabulary is not
+the problem and never gets simplified: "idempotency", "reconcile", "KV cache"
+stay. The test is whether a sentence reads the same to someone who learned
+English at school in India and uses it for work every day.
+
 ## Score it
 
 Same six dimensions as `write-post`, same threshold — 50 of 60, none under 7

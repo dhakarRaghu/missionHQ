@@ -146,6 +146,16 @@ sentences were.
   nothing.
 - Read it back once. If a sentence needs a second pass to parse, split it.
 
+**Plain English, not native-speaker English.** English is his second
+language, and he said so on 2026-09-13 after reading "faster than the GPU can
+chew through them": "make the language more simple". Drop idioms and
+figurative everyday verbs — chew through, eat, burn, bite, spin up, under the
+hood, boils down to — and use the literal one: process, waste, cost, break,
+start. Prefer one plain verb to a phrasal verb. Technical vocabulary is not
+the problem and never gets simplified: "idempotency", "reconcile", "KV cache"
+stay. The test is whether a sentence reads the same to someone who learned
+English at school in India and uses it for work every day.
+
 Jargon is fine — he wants the real words — as long as each one is unpacked
 the first time it appears.
 
