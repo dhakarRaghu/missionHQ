@@ -6,6 +6,11 @@ publishes his own work.
 
 ## His voice is measured, not guessed
 
+The canonical copy lives in `../voice.md` and is shared with `write-article`.
+This file keeps the same numbers inline so a post can be written from this
+page alone; if the two ever disagree, re-measure his real posts and update
+`voice.md`.
+
 These numbers come from his own last 10 posts, read off his profile on
 2026-09-10 (`quarantine/2026-09-10-operator-fc263764.md`). Match them.
 
@@ -115,7 +120,24 @@ or he just stops.
 
 ## Score it. Then fix the worst line and score again.
 
-Score the draft out of 60, six dimensions, ten each. Be harsh: you are
+**Run the register gate first. It is pass/fail, not scored.** A draft that
+fails the gate does not get a number; it gets rewritten, however good the
+prose is. This is the check the 2026-09-13 batch failed, and the 60-point
+score did not catch it because register was one bullet inside one dimension.
+
+Count three things on the draft, against the measured table at the top:
+
+1. **Apostrophes.** Under two in a post of his length, fail. He contracts;
+   the gate fails drafts that write out what he would shorten.
+2. **Written-out forms.** "it is", "cannot", "do not", "I am", "we are".
+   More than one, fail. He averages 0.2 a post.
+3. **The "I think" family.** "I think", "I don't think", "I'd rather",
+   "I suspect", "I keep coming back". Zero, fail. He averages 0.9 a post.
+
+The gate is cheap to run and it hard-blocks the exact failure you last sent
+back. If it fails, fix register before scoring anything else.
+
+Only then score out of 60, six dimensions, ten each. Be harsh: you are
 scoring your own work and a generous score costs him a bad post.
 
 1. **I-anchor** — does it open or pivot on his real, specific experience?

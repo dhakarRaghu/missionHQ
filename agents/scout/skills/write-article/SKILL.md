@@ -1,8 +1,12 @@
 # Write an article
 
-Use for long-form: a blog post, a technical write-up, an essay. Everything in
-the `write-post` skill about his voice and the AI tells applies here
-unchanged — load it first and keep it open. This skill covers only what is
+Use for long-form: a blog post, a technical write-up, an essay.
+
+Voice is shared, not copied. Read `../voice.md` first and keep it open — it
+holds his measured numbers, the six rules, the register gate, and the AI
+tells, and both skills read it from the same place, so an article is never
+written without them. The register gate there is pass/fail and runs before
+any scoring here, the same as for a post. This skill covers only what is
 different about length.
 
 ## Length changes the failure mode

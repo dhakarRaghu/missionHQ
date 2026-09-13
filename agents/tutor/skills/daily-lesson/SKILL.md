@@ -171,6 +171,15 @@ floor — covering the module's ground and stopping adds nothing over the
 module. What he ruled out is reading better while covering less: "I'm not
 saying to reduce anything."
 
+**A course lesson ends with a reference card.** The lesson teaches. The card
+is what he re-opens six months from now when he is building and has forgotten
+the details. One screen, at the end, before the sources: the commands and
+their flags, the defaults with their versions, the one diagram worth keeping
+as a still image, and the three lines he is most likely to get wrong. No
+prose. If he has to re-read the whole lesson to find one flag, the card
+failed. This is a course-lesson rule only — the daily topic lesson does not
+get one.
+
 This paragraph used to claim his phases run 8,000 to 9,000 words. They do
 not — the framing phases are a fraction of that — and tutor wrote to the
 number instead of to the module in front of it. **Do not put a figure back
@@ -378,6 +387,13 @@ Eight dimensions, 0-10 each:
    section answers, in plain words? A numbered label ("0.3 The architecture")
    scores 4 or below however good the prose under it. Words per section
    should sit near 110-210; over 250 on average, split — never cut.
+
+For a **course lesson** only, add a ninth check before scoring: a reference
+card is present, one screen, with the commands, the versioned defaults, the
+kept diagram and the three lines he will get wrong. A course lesson with no
+card, or a card padded with prose, is not finished — write it before scoring.
+This does not change the 60-of-80 pass mark; it is a completeness gate, not a
+dimension.
 
 Pass is 60 of 80, none under 6. Up to two revise passes, lowest dimension
 first. If a pass does not raise the score, stop and say what you would need —
