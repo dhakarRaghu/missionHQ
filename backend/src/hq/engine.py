@@ -1293,7 +1293,27 @@ async def _advance_learning(
             return None
         digests = await _digested_readings_step([str(payload.get("url") or "")])
         if not digests:
+            # Silence here is how a phase dies unnoticed: hunter finishes, the
+            # chain returns None, and the board shows a completed study with no
+            # lesson behind it. Say it out loud.
+            await board.apply(
+                task_id, "noted", status="blocked",
+                data={"reason": "study finished with no digest; no lesson can "
+                                f"be written for {payload.get('slug')}"},
+            )
             return None
+        # Key on the STUDY TASK, not the slug and not a counter.
+        #
+        # The bare slug was wrong: re-teaching a phase matched the previous
+        # lesson's completed task, dispatch handed that back, and hunter's work
+        # was dropped with nothing in the log. Counting prior attempts fixed
+        # that and broke something worse — the key changed on every call, so
+        # each durable-workflow resume dispatched ANOTHER tutor. One phase
+        # spawned five on 2026-09-13 and three of them wrote a lesson.
+        #
+        # A dedup key has to be stable for one piece of work and unique across
+        # deliberate re-runs. The study task id is exactly that: constant
+        # however often this step replays, and new for every re-teach.
         return await dispatch(
             agent="tutor",
             title=f"Write up: {str(payload.get('title') or 'the phase')[:56]}",
@@ -1301,8 +1321,11 @@ async def _advance_learning(
             source="agent",
             parent_task_id=task_id,
             origin_session_id=task.get("origin_session_id"),
-            payload={**payload, "run_id": run_id},
-            dedup_key=f"course-lesson:{payload.get('slug')}",
+            # Re-stage the payload: a lesson task must not look like a study
+            # task, or its own completion chains another lesson.
+            payload={**payload, "run_id": run_id,
+                     "stage": learning.COURSE_WRITTEN_STAGE},
+            dedup_key=f"course-lesson:{task_id}",
         )
 
     if learning.is_deep_study(payload):

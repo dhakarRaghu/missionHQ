@@ -913,3 +913,104 @@ def test_study_runs_work_to_the_research_standard() -> None:
     from hq.tools import web_tools
 
     assert "text" in web_tools.fetch_source.__doc__.lower()
+
+
+def test_lesson_task_is_not_itself_a_study() -> None:
+    """A written lesson must not look like a study, or the chain never ends.
+
+    The lesson task inherits the study payload. While it also inherited the
+    stage, finishing a lesson satisfied `is_course_study` and dispatched
+    another lesson from it. One phase produced five tutor tasks on 2026-09-13,
+    three of which wrote over each other's work.
+    """
+    from hq import learning_pipeline as learning
+
+    study = learning.course_payload(
+        {"slug": "kafka-phase-02-x", "course": "kafka", "title": "T",
+         "summary": "s", "url": "https://example.com/study/kafka-phase-02-x"},
+    )
+    assert learning.is_course_study(study)
+
+    written = {**study, "stage": learning.COURSE_WRITTEN_STAGE}
+    assert not learning.is_course_study(written)
+
+
+def test_page_must_carry_the_lesson() -> None:
+    """A page that drops most of the lesson is refused, with the names.
+
+    2026-09-13: a 1,449-word lesson shipped a 284-word page. Both files were
+    written, so nothing downstream noticed; he opened Learn and found a slider
+    and no prose.
+    """
+    from hq.tools.learning_tools import page_shortfall
+
+    markdown = (
+        "## Why you are here\n\n" + "word " * 400 +
+        "\n\n## How do you measure it?\n\n" + "word " * 400 +
+        "\n\n## Where this breaks\n\n" + "word " * 400
+    )
+    thin = "<h1>T</h1><p>" + "word " * 60 + "</p><svg></svg>"
+    problem = page_shortfall(markdown, thin)
+    assert "The page IS the lesson" in problem
+    assert "How do you measure it?" in problem
+
+    full = "".join(
+        f"<h2>{h}</h2><p>{'word ' * 400}</p>"
+        for h in ("Why you are here", "How do you measure it?", "Where this breaks")
+    )
+    assert page_shortfall(markdown, full) == ""
+
+    # No page at all is a legitimate choice on a day with nothing to draw.
+    assert page_shortfall(markdown, "") == ""
+
+
+def test_todays_actual_sources_would_now_be_dropped() -> None:
+    """The two articles behind the 2026-09-13 lesson, replayed through the gate.
+
+    Both came from a source verified active — the 90-day roster rule asks
+    whether a blog is alive, never how old the post is. He read a lesson built
+    on articles 597 and 367 days old and said the system "just creates
+    anything".
+    """
+    from hq.learning_pipeline import select_for_study
+
+    leads = [
+        {"url": "https://jxnl.co/writing/2025/01/24/systematically-improving-rag/",
+         "title": "Systematically improving RAG", "topic": "ai", "score": 9,
+         "age_days": 597},
+        {"url": "https://jxnl.co/writing/2025/09/11/why-grep-beat-embeddings/",
+         "title": "Why grep beat embeddings", "topic": "ai", "score": 9,
+         "age_days": 367},
+        {"url": "https://example.com/fresh", "title": "Something from this month",
+         "topic": "ai", "score": 5, "age_days": 12},
+    ]
+    picks = select_for_study([dict(lead) for lead in leads], set(), limit=3)
+
+    urls = [p["url"] for p in picks]
+    assert urls == ["https://example.com/fresh"], urls
+
+
+def test_a_foundational_paper_may_still_be_read() -> None:
+    """Raft is not stale at ten years, but "evergreen" cannot become the norm."""
+    from hq.learning_pipeline import MAX_EVERGREEN, select_for_study
+
+    leads = [
+        {"url": f"https://example.com/paper{i}", "title": f"Paper {i}",
+         "topic": "distsys", "score": 9, "age_days": 3000, "evergreen": "true"}
+        for i in range(MAX_EVERGREEN + 2)
+    ]
+    picks = select_for_study(leads, set(), limit=10)
+
+    assert len(picks) == MAX_EVERGREEN
+
+
+def test_an_undated_lead_is_kept_but_flagged() -> None:
+    """Dropping undated leads empties a morning; saying so does not."""
+    from hq.learning_pipeline import select_for_study
+
+    picks = select_for_study(
+        [{"url": "https://example.com/a", "title": "A", "topic": "ai", "score": 9}],
+        set(), limit=2,
+    )
+
+    assert picks and picks[0]["undated"] is True

@@ -322,6 +322,53 @@ async def list_lessons(ctx: RunContext[HQDeps], limit: int = 10) -> list[dict[st
     )
 
 
+# The page is what he opens. A lesson that is complete in markdown and a
+# quarter of that on the page is a lesson he cannot read, and the loss is
+# invisible from the agent's side because both files were written.
+PAGE_COVERAGE = 0.75
+
+
+def _visible_words(html: str) -> int:
+    body = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html,
+                  flags=re.DOTALL | re.IGNORECASE)
+    return len(re.sub(r"<[^>]+>", " ", body).split())
+
+
+def _md_headings(markdown: str) -> list[str]:
+    return [h.strip() for h in re.findall(r"^#{2,3} +(.+?)\s*$", markdown,
+                                          re.MULTILINE)]
+
+
+def page_shortfall(markdown: str, html: str) -> str:
+    """Why this page is not the lesson, or "" when it is.
+
+    On 2026-09-13 a lesson ran 1,449 words over fourteen sections and its page
+    carried 284 words and three headings. He read the page, found a slider and
+    almost no prose, and said: "there is no content to read, did you cut
+    things". The skill did say to write "the same lesson" as HTML, and then
+    spent thirty lines on the diagram, so the diagram is what got written.
+    Prose lost that argument twice, so the check lives here.
+    """
+    if not html.strip():
+        return ""
+    prose = re.sub(r"```.*?```", " ", markdown, flags=re.DOTALL)
+    md_words = len(prose.split())
+    if md_words < 200:
+        return ""
+    page_words = _visible_words(html)
+    if page_words >= md_words * PAGE_COVERAGE:
+        return ""
+    missing = [h for h in _md_headings(markdown) if h.lower() not in html.lower()]
+    detail = ("; sections missing from the page: " + ", ".join(missing[:8])) if missing else ""
+    return (
+        f"the page carries {page_words} visible words against {md_words} in the "
+        f"markdown ({page_words / md_words:.0%}). The page IS the lesson — it is "
+        f"what he opens — and the diagram is one part of it, not a replacement. "
+        f"Rewrite the HTML so every section of the markdown is on the page, then "
+        f"call write_lesson again{detail}"
+    )
+
+
 @hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
 async def write_lesson(
     ctx: RunContext[HQDeps], slug: str, markdown: str, html: str = ""
@@ -347,6 +394,10 @@ async def write_lesson(
     # in an HTML document a `---` block before <!DOCTYPE> renders as stray text.
     markdown = _FRONTMATTER_RE.sub("", markdown, count=1)
     html = _FRONTMATTER_RE.sub("", html, count=1)
+
+    shortfall = page_shortfall(markdown, html)
+    if shortfall:
+        raise ModelRetry(shortfall)
 
     name = f"{_today().date()}-{clean}"
     lessons = settings().learning_dir / "lessons"
@@ -443,6 +494,64 @@ async def sync_courses(ctx: RunContext[HQDeps]) -> str:
     return f"synced {seen} course phases from his study platform"
 
 
+def module_shape(body: str) -> dict[str, Any]:
+    """What this module actually is, measured from the module itself.
+
+    Prose could not hold this. The brief said "keep every bit of the ground
+    the module covers" and the 2026-09-13 lesson still came back teaching 2,400
+    words against the module's 3,112 — better written, and covering less, which
+    is the one trade he ruled out. A rule needs a number, and a number written
+    into a skill is stale the next time he edits a module. So it is counted
+    here, from the text in front of the agent.
+    """
+    headings = re.findall(r"^#{1,4} +(.+?)\s*$", body, re.MULTILINE)
+    prose = re.sub(r"```.*?```", " ", body, flags=re.DOTALL)
+    return {
+        "words": len(prose.split()),
+        "words_with_code": len(body.split()),
+        # "This phase has no lab and no Go code" — Kubernetes Phase 0. The
+        # brief once said to add a lab where a phase was thin on practice, and
+        # three invented labs followed.
+        "declares_no_lab": bool(
+            re.search(r"no lab\b|no hands-on|without a lab", body, re.IGNORECASE)
+        ),
+        "has_lab_section": any(re.search(r"\blabs?\b", h, re.IGNORECASE) for h in headings),
+        "sections": headings[:80],
+    }
+
+
+def _phase_order(slug: str) -> tuple[str, int]:
+    """The course and position a phase slug encodes, e.g. kafka-phase-03-x."""
+    course, _, tail = slug.partition("-phase-")
+    return course or slug, int(tail[:2]) if tail[:2].isdigit() else 0
+
+
+def course_sequence(catalogue: object, slug: str) -> dict[str, Any]:
+    """The phase before and after this one, in the same course.
+
+    A phase is not a standalone article; he studies the course in order. A
+    lesson written with no idea what the previous phase already taught either
+    re-teaches it or, worse, leans on something that does not arrive until two
+    phases later. Both read as badly written to someone working through the
+    course, which is how he reads them.
+    """
+    course, order = _phase_order(slug)
+    siblings: list[tuple[int, str, str]] = []
+    for item in catalogue if isinstance(catalogue, list) else []:
+        if not isinstance(item, dict):
+            continue
+        other = str(item.get("slug") or "")
+        other_course, other_order = _phase_order(other)
+        if other and other_course == course and other != slug:
+            siblings.append((other_order, other, str(item.get("title") or "")))
+    before = max((s for s in siblings if s[0] < order), default=None)
+    after = min((s for s in siblings if s[0] > order), default=None)
+    def shape(found: tuple[int, str, str] | None) -> dict[str, str] | None:
+        return None if found is None else {"slug": found[1], "title": found[2]}
+
+    return {"previous": shape(before), "next": shape(after)}
+
+
 @hq_tool(action=ActionClass.READ, trust=Trust.WEB, network=True)
 async def read_course_phase(ctx: RunContext[HQDeps], slug: str) -> dict[str, Any]:
     """The full text of one phase of his own course material.
@@ -473,6 +582,11 @@ async def read_course_phase(ctx: RunContext[HQDeps], slug: str) -> dict[str, Any
                 "sections": item.get("sections") or [],
                 "content": body[:PHASE_MAX_CHARS],
                 "truncated": len(body) > PHASE_MAX_CHARS,
+                # Where this sits in the course, so the lesson can be taught
+                # in order rather than as a standalone article.
+                "sequence": course_sequence(catalogue, slug),
+                # Measured, so no brief or skill has to carry a number.
+                "shape": module_shape(body),
             }
     raise ModelRetry(f"no phase with slug {slug!r}; call list_courses first")
 

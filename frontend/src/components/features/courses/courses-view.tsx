@@ -233,7 +233,7 @@ function PhaseRow({ phase, course }: { phase: CoursePhase; course: string }) {
         ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
           {taught && phase.lesson_score ? (
-            <span className="tabular-nums">{phase.lesson_score}/60</span>
+            <span className="tabular-nums">{phase.lesson_score}/80</span>
           ) : null}
           ~{phase.minutes}m
           {taught ? (

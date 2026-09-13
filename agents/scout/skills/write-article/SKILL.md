@@ -45,10 +45,39 @@ key takeaway is". Never a call to subscribe.
 Sub-headings are sentences, not labels. "The approval was never lost" beats
 "Root cause analysis".
 
+## Section it the way Arpit does
+
+He named the target on 2026-09-13: "check Arpit Bhayani's posts and articles
+and these videos, his writing style is simple, easier to understand — improve
+it according to that." Six of those essays were measured the same day, and
+the finding is structural, not verbal — his sentences are no shorter than
+ours.
+
+- **A heading every 110 to 210 words.** His essays carry 7 to 21 headings
+  across 1,500 to 2,600 words, counting every heading level. A section is one
+  idea; past roughly 250 words it is two wearing one heading.
+- **Name the section after the question it answers.** "What Happens to
+  Existing Data", "The Key Ordering Problem", "Why Increase Partitions".
+  Never clever, never a bare label like "Architecture".
+- **The first section is the motivation, named as such.** "Why Bloom Filters
+  Matter" comes before any mechanism.
+- **Open with one plain sentence saying what the thing is, then the question
+  the piece answers.** "A Bloom filter is a probabilistic data structure that
+  answers a very specific question — have I seen this thing before? — while
+  using almost no memory. There is a trade-off, though."
+- **Ask the reader a question about three times**, usually to open a section.
+
+`learning/sources.md` holds the measurements and the method; re-measure
+rather than trusting them. His blog is arpitbhayani.me/blogs and his video
+breakdowns, with notes and slides, are at arpitbhayani.me/videos.
+
+This is a shape rule, not a length rule. Splitting a section removes nothing.
+
 ## Length, honestly
 
-Write to the material, not to a target. Most of what he has to say is 600 to
-1,200 words. If it is 400 words of real content, publish 400 words. Padding
+Write to the material, not to a target. A technical piece built on a lesson
+usually lands where his do, between 1,500 and 2,600 words; a piece built on
+one incident of his own is often 600 to 1,200. If it is 400 words of real content, publish 400 words. Padding
 to hit a length is the single most detectable thing in AI writing, and the
 field guide lists content inflation as its own category for that reason.
 

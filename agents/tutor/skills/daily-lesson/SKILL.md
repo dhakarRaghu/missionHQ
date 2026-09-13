@@ -53,26 +53,75 @@ paid. Do not waste it by summarising the conclusion.
 
 No fixed template, but every lesson carries these, in roughly this order:
 
-1. **The claim.** Three or four lines. What is true, and why it is not
-   obvious. No preamble, no "in today's fast-moving world". Start where the
-   substance starts.
-2. **The mental model.** How to hold the idea. Plain words. One analogy at
+1. **Why you are here, as a story.** This comes FIRST, before the claim. He
+   asked for it on 2026-09-13: "the starting part is not giving any idea,
+   this should give me reasoning why we are learning this, story type".
+
+   Two short paragraphs. Put him in a concrete situation where not knowing
+   this costs something — a deploy he watches go sideways, a number he cannot
+   explain, a thing that works until it does not. Then the question that
+   situation leaves open. Only then the claim.
+
+   This is not throat-clearing. Throat-clearing is empty — "in today's
+   fast-moving world", "it is worth noting". A story lead is specific: a real
+   situation, named parts, a cost. **If your opening could sit on top of a
+   different lesson, it is throat-clearing.** Rewrite it.
+
+2. **The claim.** Three or four lines. What is true, and why it is not
+   obvious, now that he wants to know.
+3. **The mental model.** How to hold the idea. Plain words. One analogy at
    most, and only if it does real work.
-3. **The worked example.** Real code, config, or a traced request path — an
+4. **The worked example.** Real code, config, or a traced request path — an
    agent, a service, a data path. It must be something that would actually
    run. A worked example with a `# ...` where the hard part goes is worse
    than none, because the hard part is the lesson. Use the language the
    material is in; he is not reading for a language.
-4. **Where it breaks.** The failure mode, the cost, the number. What bites at
+5. **Where it breaks.** The failure mode, the cost, the number. What bites at
    ten times the volume. Most writing stops before this; it is the part he
    will still remember next month.
-5. **Fifteen minutes today.** One concrete thing he could try before work.
+6. **Fifteen minutes today.** One concrete thing he could try before work.
    Specific enough to start without deciding anything: a file to open, a
    query to run, a parameter to change.
-6. **Two things he could post.** One line each: the claim, and what makes it
+7. **Two things he could post.** One line each: the claim, and what makes it
    his rather than a rehash. Scout turns these into posts; you only supply
    the angle.
-7. **Sources.** Every url, with the digest path beside it.
+8. **Sources.** Every url, with the digest path beside it.
+
+## Break it into small sections, the way he reads
+
+He named the writer he wants these to read like: "check Arpit Bhayani's posts
+and articles and these videos, his writing style is simple, easier to
+understand — improve it according to that."
+
+Six of those essays were measured on 2026-09-13, and the finding is not what
+it sounds like. **His sentences are no shorter than ours.** His median is 14
+words; the Kubernetes lesson he found hard was 13. The readability is
+structural:
+
+- His first section is always the motivation, named as such — "Why Bloom
+  Filters Matter", "Why Increase Partitions".
+- His headings name the question the section answers, in plain words: "What
+  Happens to Existing Data", "The Key Ordering Problem". Never clever, never
+  a bare label like "Architecture", and never a bare number like "0.3 The
+  architecture".
+- He opens with one plain sentence saying what the thing is, then the
+  question the piece answers. "A Bloom filter is a probabilistic data
+  structure that answers a very specific question — have I seen this thing
+  before? — while using almost no memory. There is a trade-off, though."
+- He asks the reader a question about three times per piece, usually to open
+  a section.
+- He puts a heading every 110 to 210 words. **Our lessons already do** — the
+  one he found hard ran 141. A first pass at this claimed 325 by counting
+  only top-level headings in ours against every heading in his. Do not chase
+  this number; it is already met. It is here so nobody "fixes" it again.
+
+So the gap is naming, not density. **A section is one idea** — past roughly
+250 words it is two wearing one heading — but splitting is not the lever it
+looked like. The lever is that every heading should tell him what question
+the next 150 words answer.
+
+`learning/sources.md` carries the measurements and the method. Re-measure
+rather than trusting them; he keeps writing.
 
 ## Write it plainly
 
@@ -88,7 +137,9 @@ sentences were.
 - **Short sentences carry hard ideas.** Depth comes from the mechanism, never
   from the sentence length. A dense paragraph does not make the reader feel
   clever; it makes them reread.
-- **Say the thing, then explain it.** Claim first, mechanism after.
+- **Say the thing, then explain it.** Claim first, mechanism after — inside
+  a section. Across the lesson it runs the other way: the reason comes before
+  the first claim, or he has no reason to read the claim.
 - **Prefer the concrete noun.** "the relay log file" beats "the buffering
   layer".
 - **Cut the throat-clearing.** "It is worth noting that" and "in essence" add
@@ -100,12 +151,38 @@ the first time it appears.
 
 ## Length
 
-**A course lesson has no word limit.** It replaces a module he wrote to study
-from — his phases run 8,000 to 9,000 words — so a shorter version is a worse
-version. Cover every section of the phase, then the deeper mechanism, then
-the production failure, then the labs and the checkpoint. Length follows the
-material. He said it plainly: "don't leave anything or limit the content
+**A course lesson has no word limit, and no target belongs in this file.**
+It replaces a module he wrote to study from: cover everything the module
+covers, then the deeper mechanism, then the production failure. Nothing gets
+left out. He said it plainly: "don't leave anything or limit the content
 size."
+
+**Never teach less than the module does.** `read_course_phase` measures the
+module and hands hunter a `shape.words`; that is the floor, and it travels
+with the material instead of living here. Count your own teaching sections
+against it — apparatus on neither side — and if yours is smaller, go back and
+teach the parts you compressed.
+
+Two warnings, both learned the hard way on 2026-09-13. **Measure both sides
+the same way**, from the markdown with code fences stripped: an early
+comparison read the module off its rendered web page, counted code and page
+chrome, and reported it 50% larger than it is. And treat the floor as a
+floor — covering the module's ground and stopping adds nothing over the
+module. What he ruled out is reading better while covering less: "I'm not
+saying to reduce anything."
+
+This paragraph used to claim his phases run 8,000 to 9,000 words. They do
+not — the framing phases are a fraction of that — and tutor wrote to the
+number instead of to the module in front of it. **Do not put a figure back
+here.** A length written into a skill is wrong the next time he edits a
+module. `read_course_phase` hands you the module itself; that is the measure.
+
+And when a lesson reads as heavy, do not reach for the delete key. He was
+explicit on 2026-09-13: **"I'm not saying to reduce anything. I'm saying we
+improve the teaching ways, as I'm learning, so it generates the best readable
+content."** Weight is almost never word count. It is ideas arriving in the
+wrong order, or a term used before it was introduced. Fix the order, not the
+length — and see the course rules in the brief for how.
 
 **The daily topic lesson** is a different object: 800 to 1,200 words. Padding is the tell: if a paragraph
 restates the one above in a different register, cut it. Cut, not tighten.
@@ -114,6 +191,22 @@ The test for each paragraph is the same one `write-article` uses: does he
 know something after it that he did not know before it?
 
 ## The page, and the diagram
+
+**The page is the lesson. It is the file he opens.** Not a summary of the
+lesson, not a landing page for the diagram — every section that is in the
+markdown is on the page, in the same order, with the same words.
+
+On 2026-09-13 a lesson ran 1,449 words over fourteen sections and its page
+carried 284 words and three headings. He opened it, found a slider and almost
+no prose, and said: "there is no content to read, did you cut things." The
+markdown was complete. Everything below this line about the diagram is what
+got written instead of the lesson, because this section leads with the
+diagram and mentions the lesson once.
+
+`write_lesson` now refuses a page carrying materially less than the markdown
+and tells you which sections are missing. Do not treat that as a limit to
+squeeze past: a page that is 76% of the lesson is still a page missing a
+quarter of it.
 
 Write the same lesson as `<slug>.html`, self-contained:
 
@@ -214,21 +307,81 @@ Each came from writing fluently past the edge of what the digest supported.
 
 He will run this code. A wrong flag costs him an evening.
 
+## Plan the teaching before you write a word
+
+The lesson he rejected was written straight through: forty thousand tokens of
+prose with no plan behind it. It scored 53 of 60 on the rubric below and he
+still could not read it, because every defect he named — a mental model stated
+before he wanted it, a term used before it was introduced, sections three
+times longer than they should be — is a **planning** failure. None of them are
+visible sentence by sentence, and none of them can be fixed by writing more
+carefully. They have to be decided before the writing starts.
+
+So plan first, in your own working notes, and do not begin the prose until
+the plan survives the checks.
+
+**1. Write the one-sentence outcome.** What does he understand at the end
+that he did not at the start? If you cannot write it, you do not have a
+lesson yet — say so rather than writing around the gap.
+
+**2. List the sections, in order.** For each one, four things:
+
+```
+heading      — the question this section answers, in plain words
+one idea     — the single thing it teaches (if you write two, split it)
+assumes      — terms it relies on, each already introduced or known
+introduces   — the new term or idea it defines here for the first time
+```
+
+**3. Run the ledger.** Read your `assumes` column top to bottom against the
+`introduces` column above it, plus what the study note's Sequence block says
+earlier phases already taught. **Every assumed term must appear earlier, or
+be listed as already known.** A term that appears in neither is a forward
+reference, and forward references are the single commonest reason a lesson
+reads as too hard. Move the introduction earlier, or introduce it where it is
+first used. Do not leave it and hope.
+
+**4. Check the three shape rules against the plan**, not the prose:
+   - Is the first section the motivation, named as such?
+   - Is any section carrying more than one idea? Split it.
+   - Are there enough sections? A heading every 150 words or so — so a
+     4,000-word lesson wants roughly twenty, not thirteen.
+
+**5. Only then write**, section by section, against the plan.
+
+This costs a few hundred tokens against a lesson that runs tens of thousands,
+and no cap is anywhere near binding: the run he rejected cost $0.30 of an $8
+allowance and finished in half its time budget. There is no reason to skip
+it, and no credit for writing fast.
+
+Keep the plan. Report it with the lesson, so a bad lesson can be traced to
+the decision that caused it rather than re-read line by line.
+
 ## Score it, then fix the lowest
 
-Six dimensions, 0-10 each:
+Eight dimensions, 0-10 each:
 
 1. **One thread** — it is a lesson, not a digest of digests.
 2. **Not obvious** — it teaches something he could not have guessed.
 3. **Concrete** — real code, real numbers, real failure modes.
 4. **Usable today** — the fifteen-minute thing is genuinely fifteen minutes.
-5. **No padding** — every paragraph earns its place.
+5. **No padding** — every paragraph earns its place. Note what this is not:
+   a long lesson is not padded, and splitting a section adds none. Padding is
+   a paragraph restating the one above it.
 6. **The diagram teaches** — it shows mechanism, or it is honestly absent
    (score this 8 when you explain why there is none).
+7. **Taught in order** — score this by re-running the ledger against the
+   finished text. Zero forward references is 10. **Each term used before it
+   is introduced costs 3.** This is the dimension the rubric was missing: the
+   lesson he rejected would have passed every other one.
+8. **Sectioned to be read** — does every heading name the question its
+   section answers, in plain words? A numbered label ("0.3 The architecture")
+   scores 4 or below however good the prose under it. Words per section
+   should sit near 110-210; over 250 on average, split — never cut.
 
-Pass is 45 of 60, none under 6. Up to two revise passes, lowest dimension
+Pass is 60 of 80, none under 6. Up to two revise passes, lowest dimension
 first. If a pass does not raise the score, stop and say what you would need —
 usually a digest that failed to fetch, or a topic where the day's reading was
 thin.
 
-Report the score, the weakest dimension and both paths in your answer.
+Report the score, the weakest dimension, both paths, and the section plan in your answer.

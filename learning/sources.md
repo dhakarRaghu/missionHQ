@@ -42,8 +42,15 @@ last post was January 2025.
   and deterministic simulation testing, by the people who built it.
 - **Phil Eaton** — notes.eatonphil.com · 2026-09-06. Consensus, storage,
   data races, database internals.
-- **Arpit Bhayani** — arpitbhayani.me/blogs · 2026-07-05. Mechanisms from
-  first principles; the model for how a lesson should read.
+- **Arpit Bhayani** — arpitbhayani.me/blogs · verified 2026-09-13 (111
+  essays, newest Aug 2026). Mechanisms from first principles, and **the style
+  reference for every lesson written here** — see "How his writing reads",
+  below.
+- **Arpit Bhayani, video breakdowns** — arpitbhayani.me/videos · verified
+  2026-09-13 (186 videos, with slides and notes linked). Walkthroughs of
+  distributed systems, database internals and engineering architecture. Use
+  as a source index when a phase needs a worked walkthrough; the notes are
+  linked from each entry.
 - **antirez** — antirez.com · ~2026-07-29. Systems, from the Redis author.
 - **PlanetScale** — planetscale.com/blog · 2026-09-10. Sharding, MVCC,
   connection pools — the mechanism, not the SQL.
@@ -138,6 +145,47 @@ like Jepsen).
   fetcher. **Figma engineering** — JavaScript-rendered, no date visible.
 
 Operator can open these on a feed day and report the newest post date.
+
+## How his writing reads — the style target, measured
+
+He asked for lessons written the way Arpit writes: "his writing style is
+simple, easier to understand — improve it according to that." So it was
+measured rather than guessed. Six essays read on 2026-09-13 (bloom-filters,
+mysql-replication-internals, how-llm-inference-works,
+monolith-is-distributed-system, kafka-partitions, clock-sync-nightmare):
+
+| | his essays | our Kubernetes Phase 0 lesson |
+|---|---|---|
+| Article length | 1,464–2,626 words (median 2,388) | 4,218 |
+| Words between headings | 110–210 | 141 — already in range |
+| Headings per article | 7 to 21 | 13 |
+| First section | "Why Bloom Filters Matter", "Why Increase Partitions" | "The mental model" |
+| Median sentence | 14 words | 13 |
+| "you"/"your" per 1k words | 12 | 14 |
+| Questions asked of the reader | ~3 per article | 0 |
+
+**The gap is naming, not density.** Our sentences are as short as his and our
+sections are as small — the "325" in an earlier version of this table counted
+only top-level headings on our side and every heading on his. What differs is
+that his headings tell you what question the section answers, while ours were
+numbered labels. Four things to copy:
+
+1. **A heading every 150 words or so** — already true of our lessons; keep it
+   that way. A section is one idea, and past roughly 250 words it is two.
+2. **Name the section after the question it answers**, in plain words: "What
+   Happens to Existing Data", "The Key Ordering Problem", "Why Increase
+   Partitions". Never a clever title, never a bare label like "Architecture".
+3. **The first section is always "why this matters".** He puts the motivation
+   in a section of its own, at the top, before any mechanism.
+4. **Open with one plain sentence saying what the thing is, then the question
+   the piece answers.** Bloom filters: "A Bloom filter is a probabilistic data
+   structure that answers a very specific question — have I seen this thing
+   before? — while using almost no memory. There is a trade-off, though."
+   Kafka: "Partitions sit right in the middle of how Kafka works... But what
+   actually happens when you need more of them?"
+
+Re-measure rather than trusting this table: it was true of six essays on one
+day, and he keeps writing.
 
 ## How this file is maintained
 

@@ -97,7 +97,7 @@ export function LearnView() {
           ) : null}
           {current.score ? (
             <Badge variant="outline" className="shrink-0">
-              {current.score}/60
+              {current.score}/80
             </Badge>
           ) : null}
           <span

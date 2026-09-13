@@ -298,6 +298,25 @@ async def teach_phase(course: str, slug: str) -> dict:
     if not phase:
         raise HTTPException(404, f"no pending phase {slug!r} in {course!r}")
 
+    # Dedup against work that is still alive, never against work that
+    # finished. The key used to be the bare slug, so asking to teach a phase
+    # again — after resetting it to pending to regenerate the lesson —
+    # silently returned yesterday's completed task id and reported
+    # {"started": true}. Nothing ran, and the reply said it had.
+    live = await db.fetchone(
+        "SELECT id::text FROM hq.tasks WHERE dedup_key LIKE %s"
+        " AND status IN ('backlog', 'queued', 'running') LIMIT 1",
+        (f"course-phase:{slug}%",),
+    )
+    if live:
+        return {"started": False, "reason": "already studying this phase",
+                "task_id": live["id"]}
+    done = await db.fetchone(
+        "SELECT count(*) AS n FROM hq.tasks WHERE dedup_key LIKE %s",
+        (f"course-phase:{slug}%",),
+    )
+    attempt = int((done or {}).get("n") or 0)
+
     payload = course_payload(dict(phase))
     task_id = await engine.dispatch(
         agent="hunter",
@@ -305,7 +324,7 @@ async def teach_phase(course: str, slug: str) -> dict:
         brief=course_study_brief(payload),
         source="web",
         payload=payload,
-        dedup_key=f"course-phase:{slug}",
+        dedup_key=f"course-phase:{slug}" + (f":a{attempt}" if attempt else ""),
     )
     return {"started": True, "task_id": task_id, "title": phase["title"]}
 
