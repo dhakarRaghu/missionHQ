@@ -1363,6 +1363,7 @@ async def _advance_learning(
             pending, set(),
             phase_slug=str(payload.get("phase_slug") or ""),
             gaps=[str(g) for g in (payload.get("gaps") or [])],
+            only=str(payload.get("only") or ""),
         )
         if picks:
             await _queue_readings_step([str(p["url"]) for p in picks])

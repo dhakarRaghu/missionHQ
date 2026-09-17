@@ -14,7 +14,7 @@ import json
 import logging
 import re
 import shutil
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -27,19 +27,33 @@ from hq import courses as courses_spec
 from hq import db, lesson_kit
 from hq.config import settings
 from hq.learning_pipeline import (
+    ARTICLE_KINDS,
     COURSE_REVIEW_STAGE,
+    FRONTIER,
+    LAB_CARD,
     LESSON_DIR,
+    LESSON_KINDS,
     MAX_CANDIDATES,
+    PAPER,
     RELATIONSHIPS,
+    REVISION,
+    REVISION_AGE_DAYS,
+    SPINE_INCIDENT,
+    WEEK_REVIEW,
     course_payload,
     course_study_brief,
+    day_kind,
     evidence_gaps,
     feed_brief,
     feed_payload,
+    lab_card_brief,
+    lab_card_payload,
     scan_brief,
     scan_payload,
     source_hunt_brief,
     source_hunt_payload,
+    week_review_brief,
+    week_review_payload,
 )
 from hq.obs import emit
 from hq.safety import ActionClass, Trust
@@ -287,6 +301,20 @@ REVIEW_TASK_WRITES = (
 )
 
 
+# One row per unit of work: one article a day, one lesson and one lab card per
+# course phase, one review a week.
+_CONFLICTS = {
+    "course": "ON CONFLICT (course_slug) WHERE kind = 'course' AND course_slug <> ''",
+    "lab": "ON CONFLICT (course_slug) WHERE kind = 'lab' AND course_slug <> ''",
+    "review": "ON CONFLICT (lesson_date) WHERE kind = 'review'",
+    "topic": "ON CONFLICT (lesson_date) WHERE kind = 'topic'",
+}
+
+
+def _conflict_for(kind: str) -> str:
+    return _CONFLICTS.get(kind, _CONFLICTS["topic"])
+
+
 @hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
 async def record_lesson(
     ctx: RunContext[HQDeps],
@@ -299,11 +327,17 @@ async def record_lesson(
     source_urls: str = "",
     path_step: str = "",
     kind: str = "topic",
+    article_kind: str = "",
     course_slug: str = "",
     phase_slug: str = "",
     relationship: str = "",
 ) -> str:
     """File today's lesson so it reaches his Learn view and his phone.
+
+    `kind` is "topic" (a weekday article), "course" (a course phase), "lab"
+    (Saturday's lab card, with `course_slug`) or "review" (Sunday's week
+    review). `article_kind` says which day an article came from: one of
+    spine_incident, spine_evidence, paper, frontier, revision.
 
     `source_urls` is the articles it was built from, comma or newline
     separated. Those readings are marked taught, which is what stops tomorrow
@@ -326,9 +360,15 @@ async def record_lesson(
     relationship = relationship.strip().lower()
     if relationship and relationship not in RELATIONSHIPS:
         raise ModelRetry(f"relationship must be one of {', '.join(RELATIONSHIPS)}")
-    is_course = kind.strip().lower() == "course"
-    if is_course and not course_slug.strip():
-        raise ModelRetry("a course lesson needs course_slug: the phase slug from the brief")
+    kind = kind.strip().lower()
+    if kind not in LESSON_KINDS:
+        raise ModelRetry(f"kind must be one of {', '.join(LESSON_KINDS)}")
+    article_kind = article_kind.strip().lower()
+    if article_kind and article_kind not in ARTICLE_KINDS:
+        raise ModelRetry(f"article_kind must be one of {', '.join(ARTICLE_KINDS)}")
+    is_course = kind == "course"
+    if kind in {"course", "lab"} and not course_slug.strip():
+        raise ModelRetry(f"a {kind} needs course_slug: the phase slug from the brief")
 
     review = "pending"
     if is_course:
@@ -344,8 +384,9 @@ async def record_lesson(
         """
         INSERT INTO hq.lessons (lesson_date, title, one_liner, topic, md_path,
                                 html_path, score, sources, path_step, kind,
-                                course_slug, phase_slug, relationship, review_status)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s)
+                                course_slug, phase_slug, relationship, review_status,
+                                article_kind)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)
         {conflict} DO UPDATE SET
             title = EXCLUDED.title,
             one_liner = EXCLUDED.one_liner,
@@ -358,6 +399,7 @@ async def record_lesson(
             course_slug = COALESCE(NULLIF(EXCLUDED.course_slug, ''), hq.lessons.course_slug),
             phase_slug = COALESCE(NULLIF(EXCLUDED.phase_slug, ''), hq.lessons.phase_slug),
             relationship = COALESCE(NULLIF(EXCLUDED.relationship, ''), hq.lessons.relationship),
+            article_kind = COALESCE(NULLIF(EXCLUDED.article_kind, ''), hq.lessons.article_kind),
             -- A rewritten lesson has not been reviewed. Without this reset a
             -- revision inherited the last round's "revise", and a reviewer that
             -- then failed to record anything looked like a fresh rejection.
@@ -365,8 +407,7 @@ async def record_lesson(
         RETURNING id::text
         """.format(
             # One row per course phase, one topic article per day (migration 027).
-            conflict=("ON CONFLICT (course_slug) WHERE kind = 'course' AND course_slug <> ''"
-                      if is_course else "ON CONFLICT (lesson_date) WHERE kind = 'topic'"),
+            conflict=_conflict_for(kind),
             # A revised course lesson is a different lesson: he has not read it.
             reread=(",\n            lesson_date = EXCLUDED.lesson_date,\n            read_at = NULL"
                     if is_course else ""),
@@ -375,10 +416,11 @@ async def record_lesson(
          md_path.strip()[:300], html_path.strip()[:300], score, json.dumps(urls[:12]),
          path_step.strip()[:120],
          'course' if kind.strip().lower() == 'course' else 'topic',
-         course_slug.strip()[:200], phase_slug.strip()[:200], relationship, review),
+         course_slug.strip()[:200], phase_slug.strip()[:200], relationship, review,
+         article_kind),
     )
     lesson_id = (row or {}).get("id", "")
-    if course_slug.strip():
+    if course_slug.strip() and is_course:
         await db.execute(
             "UPDATE hq.course_phases SET status = 'taught', lesson_id = %s::uuid"
             " WHERE slug = %s",
@@ -1336,6 +1378,122 @@ async def start_course_study(ctx: RunContext[HQDeps], course: str = "") -> str:
     )
 
 
+FRONTIER_PATH = "learning/frontier.md"
+# What the day asks for, when the day decides rather than the phase's gaps.
+ONLY_FOR_KIND = {
+    SPINE_INCIDENT: "fails",
+    PAPER: "foundation",
+    REVISION: "updates,challenges",
+}
+
+
+async def paper_phase() -> dict[str, Any] | None:
+    """The phase whose paper he reads this week.
+
+    A phase he has already read, rotating across the courses in progress, so
+    the second course gets its turn without taking a spine day. Falls back to
+    the phase he is on when nothing has been read yet.
+    """
+    row = await db.fetchone(
+        "SELECT p.slug, p.course, p.title, p.question, p.summary, p.sections"
+        " FROM hq.course_phases p"
+        " LEFT JOIN hq.lessons l ON l.id = p.lesson_id"
+        " WHERE coalesce(p.read_at, l.read_at) IS NOT NULL"
+        " ORDER BY ("
+        "   SELECT max(lesson_date) FROM hq.lessons f"
+        "   WHERE f.article_kind = 'paper'"
+        "     AND left(f.phase_slug, length(p.course)) = p.course"
+        " ) NULLS FIRST, coalesce(p.read_at, l.read_at) DESC LIMIT 1",
+        (),
+    )
+    return await _phase_row(row) if row else await active_phase()
+
+
+async def revision_phase() -> dict[str, Any] | None:
+    """A phase he read long enough ago to have faded, least recently revisited."""
+    row = await db.fetchone(
+        "SELECT p.slug, p.course, p.title, p.question, p.summary, p.sections"
+        " FROM hq.course_phases p"
+        " LEFT JOIN hq.lessons l ON l.id = p.lesson_id"
+        " WHERE coalesce(p.read_at, l.read_at) < now() - make_interval(days => %s)"
+        " ORDER BY ("
+        "   SELECT max(lesson_date) FROM hq.lessons r"
+        "   WHERE r.article_kind = 'revision' AND r.phase_slug = p.slug"
+        " ) NULLS FIRST, coalesce(p.read_at, l.read_at) LIMIT 1",
+        (REVISION_AGE_DAYS,),
+    )
+    return await _phase_row(row) if row else None
+
+
+async def _phase_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """One course_phases row in the shape the briefs expect."""
+    sections = row.get("sections") or []
+    if isinstance(sections, str):
+        try:
+            sections = json.loads(sections)
+        except ValueError:
+            sections = []
+    covered = await db.fetch(
+        "SELECT DISTINCT relationship FROM hq.lessons"
+        " WHERE kind = 'topic' AND phase_slug = %s AND relationship <> ''",
+        (str(row["slug"]),),
+    )
+    seen = [str(c["relationship"]) for c in covered if str(c["relationship"]) in RELATIONSHIPS]
+    return {
+        "slug": str(row["slug"]), "course": str(row["course"]), "title": str(row["title"]),
+        "question": str(row.get("question") or ""), "summary": str(row.get("summary") or ""),
+        "sections": [str(x) for x in sections], "covered": seen, "gaps": evidence_gaps(seen),
+    }
+
+
+async def phase_for_day(kind: str) -> dict[str, Any] | None:
+    """The phase today's run is built around, or None on a frontier day."""
+    if kind == PAPER:
+        return await paper_phase()
+    if kind == REVISION:
+        return await revision_phase() or await active_phase()
+    if kind == FRONTIER:
+        return None
+    return await active_phase()
+
+
+@hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
+async def note_frontier(
+    ctx: RunContext[HQDeps], subject: str, verdict: str, changes: str, url: str = ""
+) -> str:
+    """File what a frontier article found, so new ground has a door into the plan.
+
+    `subject` is the thing itself, in two or three words ("deterministic
+    simulation testing"). `verdict` is `none`, `phase` or `course`: nothing
+    changes, it belongs inside a course, or it is a subject of its own.
+    `changes` is one line on what it would change. The file is his to read and
+    cross out; a subject that keeps coming back is the signal.
+    """
+    choice = verdict.strip().lower()
+    if choice not in {"none", "phase", "course"}:
+        raise ModelRetry("verdict must be 'none', 'phase' or 'course'")
+    if not subject.strip() or not changes.strip():
+        raise ModelRetry("a frontier note needs the subject and what it would change")
+    path = settings().learning_dir.parent / FRONTIER_PATH
+    line = (f"- {_today().date()} · **{subject.strip()[:80]}** · {choice} · "
+            f"{' '.join(changes.split())[:300]}" + (f" · {url.strip()[:200]}" if url.strip() else ""))
+    if not path.is_file():
+        header = (
+            "# Frontier\n\nWhat the frontier days found, and whether it changes"
+            " the path. One line per article: date, subject, verdict, what it"
+            " would change.\n\n`none` changes nothing. `phase` belongs inside a"
+            " course he already has. `course` is a subject of its own.\n\n**This"
+            " file is his.** Cross out what he does not want; a subject that"
+            " appears three times is the one to decide on.\n\n"
+        )
+        await asyncio.to_thread(path.write_text, header)
+    existing = await asyncio.to_thread(path.read_text)
+    await asyncio.to_thread(path.write_text, existing.rstrip("\n") + "\n" + line + "\n")
+    await emit("frontier.noted", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
+               payload={"subject": subject.strip()[:80], "verdict": choice})
+    return f"filed {subject.strip()[:60]!r} as {choice} in {FRONTIER_PATH}"
+
+
 async def active_phase() -> dict[str, Any] | None:
     """The course phase he is on, which the day's article orbits.
 
@@ -1437,8 +1595,16 @@ async def start_learning_run(
     if blocker:
         return blocker
 
-    feeds_today = _today().weekday() in FEED_WEEKDAYS
-    if feeds_today:
+    kind = day_kind(_today().date())
+    if kind == LAB_CARD:
+        return await _start_lab_card(ctx)
+    if kind == WEEK_REVIEW:
+        return await _start_week_review(ctx)
+
+    phase = await phase_for_day(kind)
+    # The signed-in feeds belong to the frontier days: what people are arguing
+    # about is how new ground is found, not how a phase gets its evidence.
+    if kind == FRONTIER and _today().weekday() in FEED_WEEKDAYS:
         payload = feed_payload(topics=topics)
         task_id = await engine.dispatch(
             agent="operator",
@@ -1452,14 +1618,14 @@ async def start_learning_run(
         )
         return (
             f"started the feed pass as task {task_id} for operator; the open-web"
-            " scan, the deep reads and tutor's lesson follow automatically"
+            " scan, the deep reads and tutor's article follow automatically"
         )
-    phase = await active_phase()
-    payload = scan_payload(topics=topics, max_candidates=max_candidates, phase=phase)
+    payload = scan_payload(topics=topics, max_candidates=max_candidates, phase=phase,
+                           kind=kind, only=ONLY_FOR_KIND.get(kind, ""))
     roster, taught, pending, interests, path, covered = await scan_context()
     task_id = await engine.dispatch(
         agent="hunter",
-        title="Scan for today's reading",
+        title=f"Scan for today's reading ({kind.replace('_', ' ')})",
         brief=scan_brief(
             payload, roster=roster, recent=taught, pending=pending,
             interests=interests, requests=await open_requests(),
@@ -1471,10 +1637,72 @@ async def start_learning_run(
         payload={**payload, "run_id": ctx.deps.run_id},
         dedup_key=await attempt_key(f"learning-scan:{_today().date()}"),
     )
+    aimed = f" aimed at {phase['slug']}" if phase else " on new ground"
     return (
-        f"started the open-web scan as task {task_id} for hunter; the deep reads"
-        " and tutor's lesson follow automatically"
+        f"started today's {kind.replace('_', ' ')} scan as task {task_id} for hunter"
+        f"{aimed}; the deep reads and tutor's article follow automatically"
     )
+
+
+async def _start_lab_card(ctx: RunContext[HQDeps]) -> str:
+    """Saturday: the card he builds from, for the phase he is on."""
+    from hq import engine
+
+    phase = await active_phase()
+    if not phase:
+        return "no course phase to build a lab card for; pick a course on the Courses page"
+    week = await db.fetch(
+        "SELECT title, md_path FROM hq.lessons"
+        " WHERE kind = 'topic' AND lesson_date > current_date - 7"
+        " ORDER BY lesson_date",
+        (),
+    )
+    payload = lab_card_payload(phase)
+    task_id = await engine.dispatch(
+        agent="tutor",
+        title=f"Lab card: {str(phase['title'])[:56]}",
+        brief=lab_card_brief(payload, week),
+        source="agent",
+        parent_task_id=ctx.deps.task_id,
+        origin_session_id=ctx.deps.session_id,
+        payload={**payload, "run_id": ctx.deps.run_id},
+        dedup_key=await attempt_key(f"lab-card:{phase['slug']}"),
+    )
+    return f"writing the lab card for {phase['slug']} as task {task_id}"
+
+
+async def _start_week_review(ctx: RunContext[HQDeps]) -> str:
+    """Sunday: what to keep, what to recall, whether the path changes."""
+    from hq import engine
+
+    week = await db.fetch(
+        "SELECT to_char(lesson_date, 'YYYY-MM-DD') AS lesson_date, title, kind,"
+        " article_kind, md_path FROM hq.lessons"
+        " WHERE lesson_date > current_date - 7 ORDER BY lesson_date",
+        (),
+    )
+    older = await db.fetch(
+        "SELECT to_char(lesson_date, 'YYYY-MM-DD') AS lesson_date, title, md_path"
+        " FROM hq.lessons WHERE read_at IS NOT NULL"
+        " AND lesson_date < current_date - %s ORDER BY lesson_date DESC LIMIT 6",
+        (REVISION_AGE_DAYS,),
+    )
+    frontier_file = settings().learning_dir.parent / FRONTIER_PATH
+    shortlist = ""
+    if frontier_file.is_file():
+        shortlist = await asyncio.to_thread(frontier_file.read_text)
+    payload = week_review_payload()
+    task_id = await engine.dispatch(
+        agent="tutor",
+        title=f"Week review: {_today().date()}",
+        brief=week_review_brief(payload, week, older, shortlist[-4000:]),
+        source="agent",
+        parent_task_id=ctx.deps.task_id,
+        origin_session_id=ctx.deps.session_id,
+        payload={**payload, "run_id": ctx.deps.run_id},
+        dedup_key=await attempt_key(f"week-review:{_today().date()}"),
+    )
+    return f"writing the week review as task {task_id}"
 
 
 @hq_tool(action=ActionClass.READ)

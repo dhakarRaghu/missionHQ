@@ -46,6 +46,8 @@ STUDY_STAGE = "deep_study"
 LESSON_STAGE = "lesson_synthesis"
 SOURCE_HUNT_STAGE = "source_hunt"
 ROSTER_MERGE_STAGE = "roster_merge"
+LAB_CARD_STAGE = "lab_card"
+WEEK_REVIEW_STAGE = "week_review"
 
 # The roster of people and publications worth his morning. Written by sage's
 # weekly refresh, read by every stage, and deliberately a vault file rather
@@ -191,6 +193,48 @@ def feed_payload(*, topics: str = "") -> dict[str, Any]:
     }
 
 
+# --- the week -----------------------------------------------------------------
+#
+# Two streams, decided with him on 2026-09-18. Three weekdays serve a course
+# phase; two go looking for new ground. Without the second stream a curriculum
+# only ever teaches what it already planned: "how will I learn new things ...
+# what about extra". Without the first, reading is a random walk again.
+#
+# The weekend is not a reading day. He has time then, and time is for
+# building: the lab card on Saturday, the week review on Sunday.
+SPINE_INCIDENT = "spine_incident"
+SPINE_EVIDENCE = "spine_evidence"
+PAPER = "paper"
+FRONTIER = "frontier"
+REVISION = "revision"
+LAB_CARD = "lab_card"
+WEEK_REVIEW = "week_review"
+
+# Monday to Sunday. Friday alternates: new ground one week, revision the next,
+# so old material is revisited without spending a weekday every week.
+WEEK = (SPINE_INCIDENT, PAPER, SPINE_EVIDENCE, FRONTIER, "", LAB_CARD, WEEK_REVIEW)
+ARTICLE_KINDS = (SPINE_INCIDENT, SPINE_EVIDENCE, PAPER, FRONTIER, REVISION)
+# What a lesson row can be: a course phase, a weekday article, and the two
+# weekend pieces he works from rather than reads.
+LESSON_KINDS = ("topic", "course", "lab", "review")
+# A phase is worth revisiting once it has had time to fade.
+REVISION_AGE_DAYS = 14
+
+
+def day_kind(day: date) -> str:
+    """What today's run produces."""
+    planned = WEEK[day.weekday()]
+    if planned:
+        return planned
+    # Friday: even ISO weeks look forward, odd weeks look back.
+    return FRONTIER if day.isocalendar().week % 2 == 0 else REVISION
+
+
+def wants_phase(kind: str) -> bool:
+    """Whether this kind of day is built around a course phase."""
+    return kind in {SPINE_INCIDENT, SPINE_EVIDENCE, PAPER, REVISION, LAB_CARD}
+
+
 def phase_fields(phase: Mapping[str, Any] | None) -> dict[str, Any]:
     """The active phase, flattened for a payload. Empty when no course is active."""
     if not phase:
@@ -205,6 +249,11 @@ def phase_fields(phase: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _carry_kind(source: Mapping[str, Any]) -> dict[str, Any]:
+    return {"article_kind": str(source.get("article_kind") or SPINE_EVIDENCE),
+            "only": str(source.get("only") or "")}
+
+
 def _carry_phase(source: Mapping[str, Any]) -> dict[str, Any]:
     return {k: source[k] for k in PHASE_KEYS if k in source}
 
@@ -214,13 +263,17 @@ def scan_payload(
     topics: str = "",
     max_candidates: int = MAX_CANDIDATES,
     phase: Mapping[str, Any] | None = None,
+    kind: str = SPINE_EVIDENCE,
+    only: str = "",
 ) -> dict[str, Any]:
     return {
         "workflow": WORKFLOW,
         "stage": SCAN_STAGE,
         "topics": topics.strip() or DEFAULT_TOPICS,
         "max_candidates": max(4, min(int(max_candidates), MAX_CANDIDATES)),
-        **phase_fields(phase),
+        "article_kind": kind,
+        "only": only,
+        **(phase_fields(phase) if wants_phase(kind) else {}),
     }
 
 
@@ -231,6 +284,7 @@ def study_payload(
         "workflow": WORKFLOW,
         "stage": STUDY_STAGE,
         "topics": str(source.get("topics") or DEFAULT_TOPICS),
+        **_carry_kind(source),
         "urls": [str(p.get("url", "")) for p in picks][:MAX_STUDY],
         **_carry_phase(source),
         **({"relationship": str(picks[0].get("relationship") or ""),
@@ -246,9 +300,115 @@ def lesson_payload(
         "workflow": WORKFLOW,
         "stage": LESSON_STAGE,
         "topics": str(source.get("topics") or DEFAULT_TOPICS),
+        **_carry_kind(source),
         "digests": [str(d.get("digest_path", "")) for d in digests][:MAX_STUDY],
         **_carry_phase(source),
     }
+
+
+def lab_card_payload(phase: Mapping[str, Any] | None) -> dict[str, Any]:
+    return {"workflow": WORKFLOW, "stage": LAB_CARD_STAGE, **phase_fields(phase)}
+
+
+def week_review_payload() -> dict[str, Any]:
+    return {"workflow": WORKFLOW, "stage": WEEK_REVIEW_STAGE}
+
+
+def lab_card_brief(payload: Mapping[str, Any], articles: Sequence[Mapping[str, Any]]) -> str:
+    """Tutor: Saturday. The card he builds from, not another thing to read."""
+    slug = str(payload.get("phase_slug") or "")
+    week = "\n".join(f"- {a.get('title')} (`{a.get('md_path')}`)" for a in articles) or "- none"
+    return f"""Write the lab card for **{payload.get("phase_title")}** (`{slug}`) in course
+`{payload.get("phase_course")}`.
+
+**Load the `teaching` skill, then the `course-phase` skill, with `load_skill`.**
+Work to the section "The lab card".
+
+Saturday and Sunday are his building days, and he has time then. This is not
+an article. It is one page he works from: what to build or break, the exact
+commands, what to measure, and how he knows he is done.
+
+Build it from three things:
+
+1. `read_course_source` for this phase: its Hands-on lab, its exercises with
+   their exact commands and expected output, and its Check-it-yourself
+   section. Copy commands character for character.
+2. `read_lesson` on the phase's enhanced page, for anything the lab needs
+   that the source did not have.
+3. This week's articles, listed below. If one showed a failure worth
+   reproducing or a number worth checking on his own machine, add it as one
+   extra exercise at the end, and say which article it came from.
+
+{week}
+
+The card, in this order:
+
+- **What you will have at the end**: the artefact, in one sentence.
+- **Before you start**: what must be installed or running, and the one command
+  that proves it works.
+- **The build**, as numbered steps with the exact command and the output to
+  look for. Mark each step offline, live or "costs at most $X".
+- **Break it**: at least two things to break on purpose, with what the failure
+  looks like when it happens.
+- **Measure**: the numbers to write down, and where each one comes from.
+- **Done when**: the check that decides it, not a feeling.
+- **If you have more time**: one harder extension.
+
+Write it with `write_lesson_part` and `write_lesson` as usual, then
+`record_lesson` with `kind` "lab" and `course_slug` "{slug}".
+"""
+
+
+def week_review_brief(
+    payload: Mapping[str, Any],
+    week: Sequence[Mapping[str, Any]],
+    older: Sequence[Mapping[str, Any]],
+    frontier: str = "",
+) -> str:
+    """Tutor: Sunday. What to keep, what to recall, what changes the plan."""
+    read = "\n".join(
+        f"- {a.get('lesson_date')} · {a.get('kind')}/{a.get('article_kind') or 'course'}"
+        f" · {a.get('title')} (`{a.get('md_path')}`)" for a in week) or "- nothing this week"
+    old = "\n".join(
+        f"- {a.get('lesson_date')} · {a.get('title')} (`{a.get('md_path')}`)"
+        for a in older) or "- nothing old enough yet"
+    shortlist = frontier.strip() or "(the frontier file is empty)"
+    return f"""Write the week review. **Load the `teaching` skill, then the `article` skill,
+with `load_skill`.** Work to the section "The week review".
+
+It is Sunday and he has time. This is ten minutes of reading that makes the
+week stick, then points at next week. Read every piece below with
+`read_lesson` before you write a word about it.
+
+**This week:**
+{read}
+
+**Old enough to have faded (two weeks or more):**
+{old}
+
+**The frontier shortlist so far:**
+{shortlist}
+
+Write these sections:
+
+1. **What you read this week** — one line each, in his words, not the titles.
+2. **The five things worth keeping** — the facts or mechanisms he should still
+   have in six months. Each with where it came from and why it lasts.
+3. **Three questions from older material** — scenarios with numbers, from the
+   phases listed above, answerable from what he has read. Put the answer
+   sketches in a `<details class="answer">` block, with the arithmetic.
+4. **Does the path change?** — read the frontier shortlist. If a subject has
+   appeared more than once, say so and propose what to do: add a phase to a
+   course, or start a course. One proposal at most, with what it would
+   postpone. If nothing recurs, say the path stands.
+5. **Next week** — which phase is next, what the lab card is waiting on, and
+   the one thing he should do first.
+
+Keep it short. No new subject is taught here.
+
+Write it with `write_lesson_part` and `write_lesson`, then `record_lesson`
+with `kind` "review".
+"""
 
 
 def source_hunt_payload(*, focus: str = "") -> dict[str, Any]:
@@ -465,7 +625,7 @@ def _topic_key(lead: Mapping[str, Any]) -> str:
 def evidence_gaps(covered: Sequence[str]) -> list[str]:
     """The relationships a phase has no article for yet, most valuable first."""
     have = {str(c) for c in covered}
-    return [r for r in RELATIONSHIPS if r not in have]
+    return [r for r in EVIDENCE_RELATIONSHIPS if r not in have]
 
 
 def _host(lead: Mapping[str, Any]) -> str:
@@ -474,7 +634,8 @@ def _host(lead: Mapping[str, Any]) -> str:
 
 
 def _select_for_phase(
-    fresh: list[dict[str, Any]], phase_slug: str, gaps: Sequence[str], limit: int
+    fresh: list[dict[str, Any]], phase_slug: str, gaps: Sequence[str], limit: int,
+    only: str = "",
 ) -> list[dict[str, Any]]:
     """One article's sources: all on the active phase, led by one relationship.
 
@@ -491,10 +652,13 @@ def _select_for_phase(
     and a single vendor post, whose numbers nobody else checked, is not a
     lesson he can trust.
     """
+    # `only` is the day asking for one kind of lead: the incident on Monday,
+    # the paper on Tuesday. Empty means the phase's own gaps decide.
+    wanted = {r.strip() for r in only.split(",") if r.strip()} or set(RELATIONSHIPS)
     on_phase = [
         lead for lead in fresh
         if str(lead.get("phase_slug") or "") == phase_slug
-        and lead.get("relationship") in RELATIONSHIPS
+        and lead.get("relationship") in wanted
     ]
     if not on_phase:
         return []
@@ -536,6 +700,7 @@ def select_for_study(
     *,
     phase_slug: str = "",
     gaps: Sequence[str] = (),
+    only: str = "",
 ) -> list[dict[str, Any]]:
     """The best few he has not already been taught, best first.
 
@@ -550,7 +715,7 @@ def select_for_study(
     if not fresh:
         return []
     if phase_slug:
-        return _select_for_phase(fresh, phase_slug, gaps, limit)
+        return _select_for_phase(fresh, phase_slug, gaps, limit, only)
 
     # One topic a day. The best candidate sets the topic; everything else read
     # today must be on that same topic.
@@ -656,6 +821,94 @@ article of the morning.
 """
 
 
+def aim_block(kind: str, phase: Mapping[str, Any] | None) -> str:
+    """What today's scan is looking for. One of five kinds, decided by the day.
+
+    Three kinds serve the course phase he is on. Two do not: the paper day
+    goes under a mechanism he has already learned, and the frontier day looks
+    outside the courses on purpose. He asked for both: "what about extra ...
+    I want article but something around me so I don't go in the wrong
+    direction". The frontier day keeps direction by ending with what it would
+    change, not by staying inside the plan.
+    """
+    if kind == FRONTIER:
+        return """
+
+## Today is a frontier day: find new ground, not evidence for a phase
+
+Do not orbit a course phase today. Leave `phase_slug` and `relationship`
+empty on every lead. Look for something he is NOT already learning:
+
+- a system, engine or protocol he has not used, explained by someone who runs it
+- a practice that is changing, with measurements rather than opinion
+- a result that contradicts something his courses teach as settled
+- a paper or engineering report from a field next to his lanes
+
+It must still clear his bar: a mechanism, real numbers with conditions, or a
+real failure. Not news, not a launch, not a survey of the year.
+
+**Stay next to his lanes.** AI systems, distributed systems, storage,
+reliability, performance and engineering craft. Something outside them is
+worth putting forward only when it changes how he would think about his own
+work, and at most one such lead a fortnight. Say in `why` which lane it
+touches, or why the distance is worth it.
+
+**Every lead says what it would change**, in `adds`: a decision he would make
+differently, a default he would check, a phase of a course that should cover
+it, or nothing at all. "Interesting" is not an answer.
+"""
+    if not phase or not phase.get("slug"):
+        return phase_block(None)
+    slug = phase.get("slug")
+    if kind == PAPER:
+        return f"""
+
+## Today is a paper day: the work under a mechanism he already learned
+
+He reads one paper a week, the way he reads a course: properly, for the idea
+underneath. Today's reading is the paper behind **{phase.get("title")}**
+(`{slug}`) in course `{phase.get("course")}`.
+
+Find the primary paper, not a summary of it:
+
+- the original paper for the mechanism the phase teaches, or the recent paper
+  that changed it
+- prefer a venue that serves the full text: USENIX (OSDI, NSDI, FAST, ATC),
+  arXiv, VLDB, ACM open access, or the authors' own page
+- the phase's own References section and the paper shelf in the roster are
+  the first places to look
+
+Put forward one to three papers on ONE idea, with `relationship` set to
+`foundation` and `phase_slug` to `{slug}`. In `adds`, name the section,
+figure or table that carries the idea, so the read has a target.
+
+A paper is durable: age is not a reason to reject it. A blog post about a
+paper is not the paper. If the phase's mechanism has no paper behind it, say
+so plainly and put forward the closest primary source instead.
+"""
+    if kind == REVISION:
+        return phase_block(phase).replace(
+            "## Today's reading orbits the course phase he is on",
+            "## Today is a revision day: a phase he read a while ago",
+        ) + f"""
+
+He read this phase at least two weeks ago, so today's reading is not more
+evidence for it. Prefer `updates` (what changed since he read it) and
+`challenges` (someone measuring the opposite). If nothing has changed and
+nobody disagrees, say so, and put forward the best `fails` or `measures`
+lead on `{slug}` instead.
+"""
+    if kind == SPINE_INCIDENT:
+        return phase_block(phase) + """
+
+**Today is an incident day.** A real production failure on this phase's
+mechanism outranks everything else: `fails` leads first, and a lead of any
+other relationship only after you have said what incident reading you looked
+for and did not find.
+"""
+    return phase_block(phase)
+
+
 # sources.md is organised by course: `## Course N — Title · <course-slug>`.
 # The whole file outgrew INJECT_CHARS on 2026-09-17, and a silent cut is how
 # the incident sources once never reached hunter. The morning scan needs the
@@ -664,8 +917,12 @@ article of the morning.
 _COURSE_SECTION_RE = re.compile(r"^## Course \d+\b.*·\s*([a-z0-9, -]+?)\s*$")
 
 
-def roster_for(roster: str, course_slug: str) -> str:
+def roster_for(roster: str, course_slug: str, include_courses: bool = True) -> str:
     """The roster with other courses' sections removed.
+
+    `include_courses=False` drops every course section and keeps the shared
+    ones: the frontier day is looking outside the courses, so their shelves
+    are noise, and the whole file no longer fits in one brief anyway.
 
     A section heading ends with its course slugs, comma-separated when a
     course has two (the inference course is also the platform course). An
@@ -680,6 +937,8 @@ def roster_for(roster: str, course_slug: str) -> str:
             sections.append((slugs, [line]))
         else:
             sections[-1][1].append(line)
+    if not include_courses:
+        return "\n".join(line for slugs, lines in sections if not slugs for line in lines)
     if not any(course_slug in slugs for slugs, _ in sections):
         return roster
     kept = [lines for slugs, lines in sections if not slugs or course_slug in slugs]
@@ -716,7 +975,8 @@ def scan_brief(
         else f"\n\n{PATH_PATH} is missing, so there is no bar to read against."
         " Say so in your answer, and hold every lead to the deep-research standard."
     )
-    path_block = bar_block + phase_block(phase)
+    path_block = bar_block + aim_block(
+        str(payload.get("article_kind") or SPINE_EVIDENCE), phase)
     asked = requests or []
     asked_block = (
         "\n\n## He asked for these, in his own words\n\n"
@@ -741,7 +1001,9 @@ def scan_brief(
         else f"\n\n{INTERESTS_PATH} is missing, so fall back to the interests line"
         " above and say in your answer that the file was not there."
     )
-    roster = roster_for(roster, str((phase or {}).get("course") or "")).strip()
+    frontier_day = str(payload.get("article_kind") or "") == FRONTIER
+    roster = roster_for(roster, str((phase or {}).get("course") or ""),
+                        include_courses=not frontier_day).strip()
     # One course's slice measured 11k characters on 2026-09-17, against a
     # 12k cap: one more entry and the shared sections fall off, silently.
     # Twice the cap, and a cut that says it happened.
@@ -998,7 +1260,47 @@ def lesson_brief(
     )
     relationship = str(payload.get("relationship") or "")
     slug = str(payload.get("phase_slug") or "")
-    if slug:
+    kind = str(payload.get("article_kind") or SPINE_EVIDENCE)
+    if kind == FRONTIER:
+        orbit = """## What this article is for
+
+This one does not serve a course phase. It is new ground: something he is not
+already learning. Teach it on its own terms, from the digests, and then do the
+part that keeps it useful.
+
+**End with a section headed "Does this change the path?"** with one of three
+answers, in one short paragraph each:
+
+- **No.** Worth knowing, changes nothing he does. Say what he can now
+  recognise.
+- **Yes, inside a course.** Name the course and the phase it belongs to, and
+  the one section it would add or correct.
+- **Yes, a new subject.** Name it, and say what it would replace or postpone.
+
+Then call `note_frontier` once with that subject and that verdict. It keeps
+the shortlist he reviews, so new ground has a door into the plan instead of
+becoming a random reading list."""
+        record = '`kind` "topic" and `article_kind` "frontier", with no phase_slug'
+    elif kind == PAPER and slug:
+        orbit = f"""## What this article is for
+
+This is paper day. He read the mechanism in the course; today he reads the
+work under it: **{payload.get("phase_title")}** (`{slug}`).
+
+Teach the paper, not a summary of it:
+
+- the problem the authors had, in the world as it was then
+- the idea, in your own plain words, with the one figure or table that carries
+  their evidence, named by number
+- what they measured, on what hardware and workload, and what they did not
+- what later work changed, and what still holds today
+- what it changes for him: a decision, a default, or a way of looking at his
+  own system
+
+Name the sections you read. If the digests could not reach the full text, say
+so rather than writing around it."""
+        record = f'`kind` "topic", `article_kind` "paper", `phase_slug` "{slug}" and `relationship` "foundation"'
+    elif slug:
         need = RELATIONSHIP_NEEDS.get(
             relationship,
             "the scan did not label it; decide which of the six it really is and say so",
@@ -1014,7 +1316,8 @@ What the scan said it adds beyond the course: {payload.get("adds") or "(not give
 
 Do not re-teach the phase. He reads the course for the mechanism; this article
 is where he sees whether that mechanism holds up in a real system."""
-        record = f'`kind` "topic", `phase_slug` "{slug}" and `relationship` "{relationship}"'
+        record = (f'`kind` "topic", `article_kind` "{kind}", `phase_slug` "{slug}"'
+                  f' and `relationship` "{relationship}"')
     else:
         orbit = ("No course phase is active today, so this article stands alone. Say so"
                  " in its header line.")
@@ -1212,7 +1515,11 @@ MAX_REVIEW_ROUNDS = 2
 # teaches a mechanism once; articles show whether it holds up in real systems.
 # Ordered by what a phase gains most from first: a real failure teaches more
 # per hour than anything else he reads.
-RELATIONSHIPS = ("fails", "measures", "applies", "updates", "challenges", "extends")
+RELATIONSHIPS = ("fails", "measures", "applies", "updates", "challenges", "extends",
+                 "foundation")
+# What a phase needs evidence of. `foundation` is not evidence: it is the
+# paper under the mechanism, and it has its own day.
+EVIDENCE_RELATIONSHIPS = RELATIONSHIPS[:6]
 MAX_ARTICLE_SOURCES = 3
 RELATIONSHIP_NEEDS = {
     "fails": "the incident in its own shape: the symptom as first seen, the wrong"
@@ -1227,6 +1534,9 @@ RELATIONSHIP_NEEDS = {
                   " difference in method or assumption that explains the disagreement",
     "extends": "the adjacent concept, why the course stops before it, and how it"
                " connects back to the phase",
+    "foundation": "the paper under the mechanism: the problem it solved, the idea,"
+                  " the evidence in its own figures, what later work changed, and"
+                  " what still holds",
 }
 # The phase context that travels scan -> study -> article in the payload.
 PHASE_KEYS = ("phase_slug", "phase_title", "phase_course", "phase_question",

@@ -95,6 +95,40 @@ prerequisites here.
 - **The one exception is `extends`**, which teaches its own new concept, and
   still does not re-teach the phase.
 
+## Which kind of article is this
+
+The brief says. Five kinds, and they are not written the same way.
+
+- **Incident day** (`spine_incident`) and **evidence day** (`spine_evidence`)
+  serve the phase he is on. Everything below applies as written.
+- **Paper day** (`paper`) is the work under a mechanism he already learned.
+  Teach the paper: the problem the authors had, the idea in plain words, the
+  one figure or table that carries their evidence, what they measured and on
+  what, what later work changed, and what still holds. Name the sections you
+  read. A paper is not news: age is not a weakness, and "this is from 1992"
+  is never a criticism you make of it.
+- **Frontier day** (`frontier`) is new ground: something he is not learning
+  in any course. It serves no phase. Teach it on its own terms, and end with
+  the section **"Does this change the path?"**: no, a phase inside a course
+  he has, or a subject of its own. Then call `note_frontier` once with the
+  subject, the verdict and one line on what it would change. He reads that
+  file; it is how new ground reaches the plan instead of piling up.
+- **Revision day** (`revision`) is a phase he read at least two weeks ago.
+  He has the mechanism; do not teach it again. Say in one paragraph what he
+  already knows, then spend the article on what changed since, or on someone
+  measuring the opposite. If nothing changed, say so plainly and make the
+  article the best failure or measurement on that phase instead.
+
+## The week review
+
+Sunday, and a different job: not a subject, a consolidation. The brief lists
+the week's pieces and older ones. Read each with `read_lesson` before writing
+one word about it. Sections: what he read, the five things worth keeping,
+three scenario questions from material two or more weeks old with answer
+sketches in `<details class="answer">`, whether the path changes (from the
+frontier shortlist), and next week's first step. Keep it to ten minutes.
+Record it with `kind: "review"`.
+
 ## One topic, several sources
 
 Every digest is on the same topic. Use the sources against each other: where

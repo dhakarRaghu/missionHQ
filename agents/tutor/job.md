@@ -14,6 +14,9 @@ tools:
   # A phase written with Claude and the /study skill is read from the repo
   # copy, one section at a time, and rebuilt as the enhanced page.
   - read_course_source
+  # A frontier article ends by saying whether it changes the path; the note
+  # is what gives new ground a door into the plan instead of a reading list.
+  - note_frontier
   - list_readings
   - record_lesson
   - memory_search

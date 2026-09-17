@@ -18,6 +18,7 @@ import {
   learningKeys,
   SCORE_OUT_OF,
   type ArticleRelationship,
+  type Lesson,
 } from "@/lib/api/learning";
 import { exactTime, timeAgo } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,22 @@ const RELATIONSHIP_HINT: Record<ArticleRelationship, string> = {
   challenges: "a counterexample or disagreement",
   extends: "an adjacent idea the course leaves out",
 };
+
+/** What a piece is, in one word, for the list and the header. */
+const PIECE_LABEL: Record<string, string> = {
+  spine_incident: "incident",
+  spine_evidence: "evidence",
+  paper: "paper",
+  frontier: "new ground",
+  revision: "revision",
+};
+
+function pieceLabel(lesson: Lesson): string {
+  if (lesson.kind === "lab") return "lab card";
+  if (lesson.kind === "review") return "week review";
+  if (lesson.kind === "course") return "course";
+  return PIECE_LABEL[lesson.article_kind ?? ""] ?? "";
+}
 
 /**
  * One lesson a day, given the whole window.
@@ -60,7 +77,9 @@ export function LearnView() {
   // share a page because they were both "today's lesson".
   const lessons = useQuery({
     queryKey: [...learningKeys.lessons, "topic"],
-    queryFn: () => learningApi.lessons(30, "topic"),
+    // The weekday articles plus the weekend pieces. Course lessons stay on
+    // the Courses page, beside the phase they teach.
+    queryFn: () => learningApi.lessons(30, "topic,lab,review"),
   });
   // Selection is by id, not by date. Two lessons a day now — the topic one
   // and a course phase — so the date stopped being unique and every click on
@@ -114,7 +133,7 @@ export function LearnView() {
           ) : null}
           {current.score ? (
             <Badge variant="outline" className="shrink-0 tabular-nums">
-              {current.score}/{SCORE_OUT_OF[current.kind] ?? SCORE_OUT_OF.topic}
+              {current.score}/{SCORE_OUT_OF[current.kind]}
             </Badge>
           ) : null}
           {current.relationship ? (
@@ -233,12 +252,12 @@ export function LearnView() {
                   <span className="shrink-0 text-muted-foreground">
                     {lesson.lesson_date}
                   </span>
-                  {lesson.kind === "course" ? (
+                  {pieceLabel(lesson) ? (
                     <Badge
                       variant="outline"
                       className="shrink-0 px-1 py-0 text-[10px]"
                     >
-                      course
+                      {pieceLabel(lesson)}
                     </Badge>
                   ) : null}
                   <span className="truncate">{lesson.title}</span>

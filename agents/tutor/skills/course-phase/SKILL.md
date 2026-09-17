@@ -412,6 +412,26 @@ keys with defaults and versions), **the one formula** with units, **the three
 lines he is most likely to get wrong**, and the one diagram worth keeping. If
 he has to re-read the phase to find one flag, the cheatsheet failed.
 
+## The lab card
+
+Saturday. He has time at the weekend, and the weekend is for building. The
+card is one page he works from, not a page he reads.
+
+- **It is his phase's own lab**, copied exactly: the commands, the expected
+  output, the break-it steps. `read_course_source` gives them; never retype a
+  command from memory.
+- **Order:** what he will have at the end · what must be running first, with
+  the command that proves it · the build, as numbered steps with exact
+  commands and the output to look for · at least two things to break on
+  purpose, with what the failure looks like · the numbers to write down and
+  where each comes from · "done when", as a check, not a feeling · one harder
+  extension.
+- **Tag every step**: offline, live, or "costs at most $X".
+- **This week's articles** may add one extra exercise at the end, when one
+  showed a failure worth reproducing or a number worth checking. Say which
+  article it came from.
+- Record it with `kind: "lab"` and the phase slug as `course_slug`.
+
 ## The course and the articles are different reading
 
 He reads the course phase and, on weekdays, articles that orbit it. The

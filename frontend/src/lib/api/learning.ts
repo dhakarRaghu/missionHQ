@@ -25,7 +25,10 @@ export interface Lesson {
   created_at: string;
   /** "topic" is the daily open-web lesson; "course" is a phase of his own
    * study material. Two a day, so the date alone no longer identifies one. */
-  kind: "topic" | "course";
+  kind: "topic" | "course" | "lab" | "review";
+  /** Which day an article came from: spine_incident, spine_evidence, paper,
+   * frontier or revision. Empty on course lessons and older rows. */
+  article_kind?: string;
   /** The phase slug, when this is a course lesson. */
   course_slug: string;
   /** Until this is set, the evening run will not start the next phase. */
@@ -56,7 +59,14 @@ export type ArticleRelationship =
 
 /** Self-score denominators. A course lesson is scored out of 130 and a topic
  * article out of 90; both were once printed as /80. */
-export const SCORE_OUT_OF = { course: 130, topic: 90 } as const;
+export const SCORE_OUT_OF: Record<Lesson["kind"], number> = {
+  course: 130,
+  topic: 90,
+  // The weekend pieces are not scored against a rubric; they carry a topic
+  // article's denominator when tutor scores one at all.
+  lab: 90,
+  review: 90,
+};
 
 /** One lesson page as markup, with a Content-Security-Policy already injected
  * by the API. It is rendered inside a sandboxed frame and never in this

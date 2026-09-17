@@ -194,19 +194,21 @@ def test_tutor_may_write_lessons_because_it_cannot_read_the_web() -> None:
 
 
 def test_the_nightly_cron_calls_the_pipeline_and_nothing_else() -> None:
-    # Weekdays only: one topic article waits for the owner at a time, and the
-    # weekend belongs to the course and its lab.
+    # Every day since 2026-09-18: the weekday article, then Saturday's lab
+    # card and Sunday's review. The day decides, not the cron line.
     from hq.loader import scan
 
     sage = scan(strict=True)["sage"]
-    nightly = [c for c in sage.cron if c.schedule == "0 22 * * 1-5"]
+    nightly = [c for c in sage.cron if c.schedule == "0 22 * * *"]
 
     assert len(nightly) == 1
     assert "start_learning_run" in nightly[0].prompt
     assert "marked read" in nightly[0].prompt
-    assert "weekdays" in nightly[0].prompt
+    assert "lab card" in nightly[0].prompt and "week review" in nightly[0].prompt
     assert "start_learning_run" in sage.tools
-    assert not [c for c in sage.cron if c.schedule == "0 22 * * *"]
+    # One call decides everything; sage never picks the day itself.
+    assert "exactly once" in nightly[0].prompt
+    assert not [c for c in sage.cron if c.schedule == "0 22 * * 1-5"]
 
 
 def test_topic_learning_waits_for_read_and_for_an_active_run() -> None:
@@ -904,8 +906,12 @@ def test_his_files_are_not_silently_truncated() -> None:
     assert INJECT_CHARS > max(len(path), len(interests)), (
         "a file has outgrown the injection cap again"
     )
-    # The roster travels one course at a time; with no course active, whole.
-    assert ROSTER_CHARS > len(roster), "sources.md has outgrown the roster cap"
+    # The roster travels one course at a time, and a frontier day gets the
+    # shared sections only. The whole file no longer has to fit.
+    from hq.learning_pipeline import FRONTIER
+    assert ROSTER_CHARS > len(roster_for(roster, "", include_courses=False)), (
+        "the shared roster sections have outgrown the cap")
+    assert FRONTIER  # the day that uses that slice
     last = roster.strip().splitlines()[-1]
     slugs = [c.slug for c in load_courses()] + ["inference-internals"]
     for slug in slugs:
@@ -916,7 +922,8 @@ def test_his_files_are_not_silently_truncated() -> None:
         brief = scan_brief(scan_payload(phase=phase), roster=roster, phase=phase)
         assert last in brief, slug
 
-    brief = scan_brief(scan_payload(), roster=roster, path=path, interests=interests)
+    brief = scan_brief(scan_payload(kind=FRONTIER), roster=roster, path=path,
+                       interests=interests)
     # The last line of each file has to survive the trip.
     assert last in brief
     assert path.strip().splitlines()[-1] in brief
@@ -1305,9 +1312,8 @@ def test_one_row_per_course_phase_and_a_revision_is_unread_again() -> None:
 
     sql = dict(load_migrations())[27]
     assert "lessons_course_phase_idx" in sql and "DROP INDEX IF EXISTS hq.lessons_day_kind_idx" in sql
-    src = inspect.getsource(learning_tools.record_lesson)
-    assert "ON CONFLICT (course_slug) WHERE kind = 'course'" in src
-    assert "read_at = NULL" in src
+    assert "ON CONFLICT (course_slug) WHERE kind = 'course'" in learning_tools._CONFLICTS["course"]
+    assert "read_at = NULL" in inspect.getsource(learning_tools.record_lesson)
 
 
 def test_the_gate_waits_for_a_revision_and_a_failed_review() -> None:
@@ -1640,3 +1646,90 @@ def test_a_lesson_with_a_placeholder_is_sent_back() -> None:
     assert lt.placeholders_in("TODO: measure this") == ["TODO"]
     assert lt.placeholders_in("a finished paragraph") == []
     assert "placeholders_in(markdown)" in inspect.getsource(lt.write_lesson)
+
+
+def test_the_week_has_two_streams_and_a_building_weekend() -> None:
+    """He asked for it: "how will I learn new things ... what about extra".
+    Three weekdays serve a phase, two look outside, the weekend builds."""
+    from datetime import date, timedelta
+
+    from hq.learning_pipeline import (
+        FRONTIER,
+        LAB_CARD,
+        PAPER,
+        REVISION,
+        SPINE_EVIDENCE,
+        SPINE_INCIDENT,
+        WEEK_REVIEW,
+        day_kind,
+        wants_phase,
+    )
+
+    week = [day_kind(date(2026, 9, 14) + timedelta(days=i)) for i in range(7)]
+    assert week == [SPINE_INCIDENT, PAPER, SPINE_EVIDENCE, FRONTIER, FRONTIER,
+                    LAB_CARD, WEEK_REVIEW]
+    # The next Friday looks back instead of outward.
+    assert day_kind(date(2026, 9, 25)) == REVISION
+    assert not wants_phase(FRONTIER)
+    assert wants_phase(PAPER) and wants_phase(SPINE_INCIDENT)
+
+
+def test_each_day_asks_the_scan_for_its_own_kind_of_lead() -> None:
+    from hq.learning_pipeline import (
+        FRONTIER,
+        PAPER,
+        REVISION,
+        SPINE_INCIDENT,
+        scan_brief,
+        scan_payload,
+        select_for_study,
+    )
+    from hq.tools.learning_tools import ONLY_FOR_KIND
+
+    phase = {"slug": "p-phase-01-x", "course": "p", "title": "T", "question": "q",
+             "sections": ["1.1 A"], "gaps": ["applies"]}
+    frontier = scan_brief(scan_payload(kind=FRONTIER), phase=None)
+    assert "frontier day" in frontier and "phase_slug` and `relationship`" in frontier
+    paper = scan_brief(scan_payload(kind=PAPER, phase=phase), phase=phase)
+    assert "paper day" in paper and "foundation" in paper
+    assert ONLY_FOR_KIND[SPINE_INCIDENT] == "fails"
+    assert ONLY_FOR_KIND[REVISION] == "updates,challenges"
+
+    # Monday takes the incident even when a higher-scoring lead sits beside it.
+    leads = [
+        {"url": "https://a.dev/explainer", "title": "How it works", "score": 10,
+         "age_days": 2, "phase_slug": "p-phase-01-x", "relationship": "applies"},
+        {"url": "https://b.dev/outage", "title": "The night it broke", "score": 4,
+         "age_days": 9, "phase_slug": "p-phase-01-x", "relationship": "fails"},
+    ]
+    picks = select_for_study(leads, set(), phase_slug="p-phase-01-x",
+                             gaps=["applies"], only="fails")
+    assert [p["url"] for p in picks] == ["https://b.dev/outage"]
+
+
+def test_frontier_notes_land_in_a_file_he_reads() -> None:
+    import inspect
+
+    from hq.tools import learning_tools as lt
+
+    src = inspect.getsource(lt.note_frontier)
+    assert "learning/frontier.md" in lt.FRONTIER_PATH
+    assert "'none', 'phase' or 'course'" in src
+    assert "note_frontier" in load_tutor_tools()
+
+
+def test_the_weekend_builds_instead_of_reading() -> None:
+    import inspect
+
+    from hq.learning_pipeline import lab_card_brief, lab_card_payload, week_review_brief
+    from hq.tools import learning_tools as lt
+
+    phase = {"slug": "c-phase-02-x", "course": "c", "title": "Queues",
+             "question": "q", "sections": [], "gaps": []}
+    card = lab_card_brief(lab_card_payload(phase), [{"title": "An outage", "md_path": "a.md"}])
+    assert "lab card" in card and "Break it" in card and '"lab"' in card
+    assert "An outage" in card  # the week's reading can add one exercise
+    review = week_review_brief({}, [], [], "- 2026-09-18 · dst · course · …")
+    assert "five things worth keeping" in review and "dst" in review
+    run = inspect.getsource(lt.start_learning_run)
+    assert "_start_lab_card" in run and "_start_week_review" in run

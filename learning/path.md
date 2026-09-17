@@ -147,8 +147,25 @@ or better on the same subject should win.
 
 - **The bar above goes to the morning scan** as the standard every lead must
   clear.
-- **One article a weekday**, Monday to Friday. Weekends belong to the course
-  and its lab.
+- **The week has two streams**, decided 2026-09-18. Three weekdays serve a
+  course phase; two go looking for new ground, because a curriculum only
+  teaches what it already planned:
+
+  | Day | What |
+  |---|---|
+  | Mon | The phase I am on, incident first |
+  | Tue | The paper under a mechanism I already learned |
+  | Wed | The phase I am on, the evidence it still lacks |
+  | Thu | Frontier: something outside the courses |
+  | Fri | Frontier, or revision of a phase I read two weeks ago (alternating) |
+  | Sat | The lab card for the phase I am on: build it, break it, measure it |
+  | Sun | The week review: what to keep, three recall questions, does the path change |
+
+- **Frontier stays next to my lanes**: AI systems, distributed systems,
+  storage, reliability, performance, craft. Further away only when it changes
+  how I think, and at most once a fortnight. Every frontier article ends with
+  what it would change, and that line goes in `frontier.md`. A subject that
+  appears there three times is one I decide on.
 - The scan aims at the active phase and the relationship it still lacks. A
   lead for another subject is not picked, however well it scores.
 - It reads **up to three articles on the active phase**, in full — one

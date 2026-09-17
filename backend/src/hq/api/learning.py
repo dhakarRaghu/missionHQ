@@ -88,27 +88,30 @@ def _lesson_file(path: str, suffix: str) -> Path:
 async def list_lessons(limit: int = 30, kind: str = "") -> list[dict[str, Any]]:
     """Lessons, newest first: what he was taught and what it was built from.
 
-    `kind` filters: "topic" for the daily open-web lesson, "course" for a
-    phase of his own material. The Learn page asks for topic lessons only —
-    course articles belong on the Courses page, beside the phase they teach.
+    `kind` filters, and takes several separated by commas: "topic" for a
+    weekday article, "lab" for Saturday's lab card, "review" for Sunday's week
+    review, "course" for a phase of his own material. The Learn page asks for
+    the first three; course lessons belong on the Courses page, beside the
+    phase they teach.
     """
     limit = max(1, min(int(limit), 120))
-    if kind.strip():
+    kinds = [k.strip() for k in kind.split(",") if k.strip()]
+    if kinds:
         return await db.fetch(
             "SELECT id::text, to_char(lesson_date, 'YYYY-MM-DD') AS lesson_date,"
             " title, one_liner, topic, md_path, html_path, score, sources, created_at,"
-            " kind, course_slug, read_at, phase_slug, relationship,"
+            " kind, article_kind, course_slug, read_at, phase_slug, relationship,"
             " (SELECT p.title FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_title,"
             " (SELECT p.course FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_course,"
             " review_status, review_score"
-            " FROM hq.lessons WHERE kind = %s ORDER BY lesson_date DESC, created_at DESC"
+            " FROM hq.lessons WHERE kind = ANY(%s) ORDER BY lesson_date DESC, created_at DESC"
             " LIMIT %s",
-            (kind.strip(), limit),
+            (kinds, limit),
         )
     return await db.fetch(
         "SELECT id::text, to_char(lesson_date, 'YYYY-MM-DD') AS lesson_date,"
         " title, one_liner, topic, md_path, html_path, score, sources, created_at,"
-        " kind, course_slug, read_at, phase_slug, relationship,"
+        " kind, article_kind, course_slug, read_at, phase_slug, relationship,"
             " (SELECT p.title FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_title,"
             " (SELECT p.course FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_course,"
         " review_status, review_score"

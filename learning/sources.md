@@ -47,6 +47,25 @@ time.
 - **Travis Downs** — travisdowns.github.io · archive · "A Concurrency Cost
   Hierarchy".
 
+### Papers — the shelf for this course
+
+Verified 2026-09-18. One a week, on the paper day. A paper is durable: age is
+not a reason to reject it.
+
+- **The Tail at Scale** — CACM 2013 · barroso.org/publications/TheTailAtScale.pdf · behind: fan-out turns rare slowness into the normal tail · read Tables 1 and 2.
+- **Achieving Microsecond-Scale Tail Latency Efficiently** — SOSP 2023 · dslab.epfl.ch/pubs/concord.pdf · behind: queueing and preemption cost · read Figures 2 and 6.
+- **Strongly Tail-Optimal Scheduling in the Light-Tailed M/G/1** — arXiv 2024 · arxiv.org/abs/2404.08826 · behind: scheduling shapes the whole distribution · read section 1.4.
+- **Scalability! But at what COST?** — HotOS 2015 · usenix.org/system/files/conference/hotos15/hotos15-paper-mcsherry.pdf · behind: scaling curves hide absolute slowness · read Figure 1.
+- **Coz: Finding Code that Counts** — SOSP 2015 · sigops.org/s/conferences/sosp/2015/current/2015-Monterey/printable/090-curtsinger.pdf · behind: profiling shows time, not payoff · read Figure 2.
+- **Profiling a Warehouse-Scale Computer** — ISCA 2015 · gwern.net/doc/cs/hardware/2015-kanev.pdf · behind: CPU caches and the datacenter tax · read Figures 4 and 11.
+- **Characterizing a Memory Allocator at Warehouse Scale** — ASPLOS 2024 · people.csail.mit.edu/delimitrou/papers/2024.asplos.memory.pdf · behind: allocation lifetimes drive memory cost · read Figures 8 and 11.
+- **Low-Latency, High-Throughput Garbage Collection** — PLDI 2022 · arxiv.org/abs/2210.17175 · behind: GC pauses set the tail · abstract checked only.
+- **Everything You Always Wanted to Know About Synchronization** — SOSP 2013 · infoscience.epfl.ch (bitstream 68bfb25e) · behind: cache coherence sets the cost of sharing · read Tables 2 and 3.
+- **Non-scalable locks are dangerous** — Linux Symposium 2012 · people.csail.mit.edu/nickolai/papers/boyd-wickizer-locks.pdf · behind: contention collapse, not slowdown · read Figure 2, then section 3.
+- **Huron: Hybrid False Sharing Detection and Repair** — PLDI 2019 · homes.cs.washington.edu/~baris/public/huron.pdf · behind: false sharing on one cache line · read Figure 4, then Table 1.
+
+Thin here: scalability laws. Only COST covers them.
+
 ## Course 2 — Applied AI systems at scale · elite-applied-ai
 
 - **Hamel Husain** — hamel.dev · 2026-08-12 · evals and error analysis.
@@ -83,6 +102,24 @@ time.
 
 Gap: cost per successful task. The posts found on it were marketing. A
 measured one goes straight into this list.
+
+### Papers — the shelf for this course
+
+Verified 2026-09-18.
+
+- **Hidden Technical Debt in Machine Learning Systems** — NeurIPS 2015 · proceedings.neurips.cc (86df7dcf…-Paper.pdf) · behind: why model changes are hard to roll back · text not extractable, sections not checked.
+- **Underspecification Presents Challenges for Credibility in ML** — JMLR 2022 · jmlr.org/papers/v23/20-1335.html · behind: equal test scores, different production behaviour · read section 5.1 and Figure 4.
+- **Retrieval-Augmented Generation for Knowledge-Intensive NLP** — NeurIPS 2020 · arxiv.org/abs/2005.11401 · behind: the retrieval design everyone still copies · read Figure 1 and Table 1.
+- **Evaluating Retrieval Quality in RAG (eRAG)** — arXiv 2024 · arxiv.org/abs/2404.13781 · behind: relevance labels barely predict answer quality · read section 3.2 and Table 1.
+- **τ-bench** — arXiv 2024 · arxiv.org/abs/2406.12045 · behind: agent reliability across repeated runs (pass^k) · read section 5.1 and Figure 4.
+- **AgentDojo** — NeurIPS 2024 · arxiv.org/abs/2406.13352 · behind: tool execution over untrusted data · read section 4.3 and Figure 9(b).
+- **Formalizing and Benchmarking Prompt Injection Attacks and Defenses** — USENIX Security 2024 · usenix.org/conference/usenixsecurity24/presentation/liu-yupei · behind: measuring guardrails · read section 6.3 and Tables 7 to 8.
+- **Defeating Prompt Injections by Design (CaMeL)** — arXiv 2025 · arxiv.org/abs/2503.18813 · behind: guardrails as system design · read section 4.1 and Figure 3.
+- **Judging LLM-as-a-Judge** — arXiv 2023 · arxiv.org/abs/2306.05685 · behind: judge bias and agreement · read section 3.3 and Table 5.
+- **Lessons from the Trenches on Reproducible Evaluation** — arXiv 2024 · arxiv.org/abs/2405.14782 · behind: benchmark discipline · read section 3.
+- **FrugalGPT** — arXiv 2023 · arxiv.org/abs/2305.05176 · behind: cost per successful task through cascades · read section 3 and Figure 5.
+
+Thin here: rollout and rollback of model changes. No paper found on canary or revert of model versions.
 
 ## Course 3 — Inference and AI platform · elite-inference, inference-internals
 
@@ -121,6 +158,25 @@ measured one goes straight into this list.
 - **Sebastian Raschka** — magazine.sebastianraschka.com · 2026-09-09 ·
   architecture explained for builders: model literacy, not serving.
 
+### Papers — the shelf for this course
+
+Verified 2026-09-18.
+
+- **Attention Is All You Need** — NeurIPS 2017 · arxiv.org/abs/1706.03762 · behind: the K/V tensors that become the KV cache · read Figure 2 and section 3.2.
+- **FlashAttention** — NeurIPS 2022 · arxiv.org/abs/2205.14135 · behind: attention is memory-bound, which sets decode cost · read Figure 1 and section 3.1.
+- **Orca** — OSDI 2022 · usenix.org/conference/osdi22/presentation/yu · behind: continuous batching · read section 3 and Figure 5.
+- **PagedAttention / vLLM** — SOSP 2023 · arxiv.org/abs/2309.06180 · behind: paged KV memory · read Figure 3, then section 4.1.
+- **SGLang** — arXiv 2023 · arxiv.org/abs/2312.07104 · behind: prefix caching across requests · read section 3 and Figure 3.
+- **Fast Inference via Speculative Decoding** — ICML 2023 · arxiv.org/abs/2211.17192 · behind: speculative decoding · read Algorithm 1 (2.3) and Figure 2.
+- **AWQ** — MLSys 2024 · arxiv.org/abs/2306.00978 · behind: weight quantization · read Table 1 and Figure 2.
+- **Megatron-LM** — arXiv 2019 · arxiv.org/abs/1909.08053 · behind: tensor parallelism · read Figure 3.
+- **GShard** — arXiv 2020 · arxiv.org/abs/2006.16668 · behind: expert parallelism · read Figure 3 and section 3.2.
+- **DistServe** — OSDI 2024 · arxiv.org/abs/2401.09670 · behind: disaggregated prefill and decode · read Figure 2 and section 3.
+- **Sarathi-Serve** — OSDI 2024 · arxiv.org/abs/2403.02310 · behind: chunked prefill and SLO-aware scheduling · read Figure 7 and section 4.2.
+- **Llumnix** — OSDI 2024 · usenix.org/conference/osdi24/presentation/sun-biao · behind: multi-tenancy and priority · abstract checked only.
+
+Thin here: capacity and multi-tenancy. Only Llumnix, and its full text was not read.
+
 ## Course 4 — Storage and database internals · elite-storage
 
 - **Phil Eaton** — notes.eatonphil.com · 2026-09-13 · WAL bugs, Postgres
@@ -149,6 +205,25 @@ measured one goes straight into this list.
 - **Zerodha tech** — zerodha.tech · archive (2024-03) · running
   multi-terabyte Postgres, in plain English.
 
+### Papers — the shelf for this course
+
+Verified 2026-09-18, every one by full text.
+
+- **ARIES** — ACM TODS 1992 · web.stanford.edu/class/cs345d-01/rl/aries.pdf · behind: WAL and the durability contract · read 6.1 to 6.3.
+- **All File Systems Are Not Created Equal** — OSDI 2014 · usenix.org/system/files/conference/osdi14/osdi14-paper-pillai.pdf · behind: the fsync and ordering assumptions your code makes · read Table 1.
+- **Can Applications Recover from fsync Failures?** — ATC 2020 · usenix.org/system/files/atc20-rebello.pdf · behind: what a failed fsync does · read Tables 1 and 2.
+- **The RocksDB Experience** — FAST 2021 · usenix.org/system/files/fast21-dong.pdf · behind: compaction and amplification in a real fleet · read section 3, Table 3, Figure 2.
+- **Constructing and Analyzing the LSM Compaction Design Space** — PVLDB 2021 · arxiv.org/abs/2202.04522 · behind: compaction as four primitives · read section 3.1 and Table 1.
+- **Closing the B-tree vs. LSM-tree Write Amplification Gap** — VLDB 2022 · arxiv.org/pdf/2107.13987 · behind: the default belief, re-measured · read Figures 9 and 10.
+- **Virtual-Memory Assisted Buffer Management** — SIGMOD 2023 · ibr.cs.tu-bs.de/vss/Publications/2023/leis_23_sigmod.pdf · behind: buffer pools without a hash table · read Figure 1 and Table 1.
+- **LeanStore** — PVLDB 2024 · vldb.org/pvldb/vol17/p4536-leis.pdf · behind: one coherent modern engine · read 2.1, 2.2 and 2.7.
+- **An Empirical Evaluation of In-Memory MVCC** — PVLDB 2017 · vldb.org/pvldb/vol10/p781-Wu.pdf · behind: MVCC split into four decisions · read sections 3 to 6.
+- **Simple Testing Can Expose Most Critical Transaction Bugs** — PVLDB 2025 · vldb.org/pvldb/vol18/p2547-cui.pdf · behind: isolation tested, not trusted · read Table 1 and Figure 2.
+- **Online, Asynchronous Schema Change in F1** — PVLDB 2013 · vldb.org/pvldb/vol6/p1045-rae.pdf · behind: what your migration tool implements · read section 3.3 and Figure 3.
+- **Online Schema Evolution is (Almost) Free for Snapshot Databases** — PVLDB 2022 · vldb.org/pvldb/vol16/p140-hu.pdf · behind: DDL as MVCC data modification · read 4.2 and 6.3.
+
+Thin here: index structures themselves.
+
 ## Course 5 — Distributed systems and verification · elite-distributed
 
 - **Murat Demirbas** — muratbuffalo.blogspot.com · 2026-09-12 · papers read
@@ -175,6 +250,25 @@ measured one goes straight into this list.
   Distributed Systems for Linearizability" (the ideas behind Porcupine).
 - **Meta engineering** — engineering.fb.com · 2026-09-03 · ZippyDB, RDMA,
   scale.
+
+### Papers — the shelf for this course
+
+Verified 2026-09-18.
+
+- **Linearizability: A Correctness Condition for Concurrent Objects** — TOPLAS 1990 · cs.brown.edu/~mph/HerlihyW90/p463-herlihy.pdf · behind: what a history checker asserts · read Figure 1's four histories.
+- **Sagas** — SIGMOD 1987 · sigmodrecord.org/1987/12/09/sagas/ · behind: long transactions as steps plus compensation · landing page only.
+- **Life beyond Distributed Transactions** — CIDR 2007 · cidrdb.org/cidr2007/papers/cidr07p15.pdf · behind: idempotence and the outbox · read section 3.
+- **Elle: Inferring Isolation Anomalies from Experimental Observations** — VLDB 2020 · arxiv.org/abs/2003.10554 · behind: black-box history checking · abstract checked only.
+- **AWDIT: An Optimal Weak Database Isolation Tester** — PLDI 2025 · arxiv.org/abs/2504.06975 · behind: checking weak isolation fast enough for CI · abstract checked only.
+- **Spanner** — OSDI 2012 · usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf · behind: clocks as bounded uncertainty · read section 3, then 5.3.
+- **Millions of Tiny Databases** — NSDI 2020 · usenix.org/conference/nsdi20/presentation/brooker · behind: partitioning to shrink blast radius · abstract checked only.
+- **Bodega: Serving Linearizable Reads via Roster Leases** — arXiv 2025 · arxiv.org/abs/2509.07158 · behind: leases and fencing · abstract checked only.
+- **Paxos Made Live** — PODC 2007 · static.googleusercontent.com/media/research.google.com/en//archive/paxos_made_live.pdf · behind: consensus as a user · read the algorithmic-challenges sections.
+- **FoundationDB** — SIGMOD 2021 · foundationdb.org/files/fdb-paper.pdf · behind: deterministic simulation testing · read the simulation-testing section.
+- **Use of Formal Methods at Amazon Web Services** — 2014 · lamport.azurewebsites.net/tla/formal-methods-amazon.pdf · behind: TLA+ on real services · read the per-service benefit table.
+- **Validating Traces of Distributed Programs Against TLA+ Specifications** — SEFM 2024 · arxiv.org/abs/2404.16075 · behind: spec against implementation · abstract checked only.
+
+Thin here: session guarantees. Terry 1994 has no readable free copy.
 
 ## Course 6 — Reliability, security and change · elite-reliability
 
@@ -211,6 +305,24 @@ measured one goes straight into this list.
 - **CrowdStrike Channel File 291 root cause** — crowdstrike.com (PDF,
   2024-08-06) · archive · a content update pushed everywhere at once.
 
+### Papers — the shelf for this course
+
+Verified 2026-09-18.
+
+- **Dapper** — Google 2010 · research.google/pubs/dapper-a-large-scale-distributed-systems-tracing-infrastructure/ · behind: trace context and sampling · abstract checked only.
+- **The Benefit of Hindsight: Tracing Edge-Cases** — NSDI 2023 · usenix.org/system/files/nsdi23-zhang-lei.pdf · behind: keep traces on a trigger, not by head sampling · read 4.3 and Table 3.
+- **Metastable Failures in Distributed Systems** — HotOS 2021 · sigops.org/s/conferences/hotos/2021/papers/hotos21-s11-bronson.pdf · behind: trigger plus sustaining loop · read Figure 1 and 2.1.
+- **Metastable Failures in the Wild** — OSDI 2022 · usenix.org/system/files/osdi22-huang-lexiang.pdf · behind: the same shape, measured · read Table 1 and Figure 1.
+- **Overload Control for Scaling WeChat Microservices** — SoCC 2018 · cs.columbia.edu/~junfeng/papers/dagor-socc18.pdf · behind: shedding by queueing time and priority · read 4.2 and Figure 6.
+- **Rajomon: Decentralized Overload Control** — NSDI 2025 · usenix.org/conference/nsdi25/presentation/xing · behind: overload across a service graph · abstract checked only.
+- **Making Deployments Safe at Meta** — ISSRE 2026 · arxiv.org/abs/2608.20513 · behind: health checks gating each rollout phase · read section IV.
+- **How to Fight Production Incidents?** — SoCC 2022 · microsoft.com/en-us/research/wp-content/uploads/2022/09/3542929.3563482.pdf · behind: where incident time is lost · read Figures 1 and 3.
+- **Zanzibar** — ATC 2019 · usenix.org/system/files/atc19-pang.pdf · behind: authorization between services · read 4.2 and Figure 5.
+- **in-toto** — USENIX Security 2019 · usenix.org/system/files/sec19-torres-arias.pdf · behind: the build pipeline as attack surface · read 4.1 and Table 4.
+- **BeyondCorp** — ;login: 2014 · usenix.org/system/files/login/articles/login_dec14_02_ward.pdf · behind: trust the device and user, not the network · read Figure 1.
+
+Thin here: SLOs and burn-rate alerting. No paper found; the Google SRE workbook chapter stands in.
+
 ## Course 7 — System design and architecture · elite-system-design
 
 - **Marc Brooker** — brooker.co.za/blog · 2026-07-29 · cost, tail latency and
@@ -241,6 +353,24 @@ measured one goes straight into this list.
 - **Arpit Bhayani, video breakdowns** — arpitbhayani.me/videos · 186 videos
   with slides and notes · worked walkthroughs of real architectures.
 
+### Papers — the shelf for this course
+
+Verified 2026-09-18.
+
+- **Millions of Tiny Databases (Physalia)** — NSDI 2020 · usenix.org/conference/nsdi20/presentation/brooker · behind: cells as the unit of blast radius · read 2.1 and Figure 4.
+- **Amazon DynamoDB** — ATC 2022 · usenix.org/conference/atc22/presentation/elhemali · behind: demand turned into partition capacity · read 1.1, 1.2 and 4.2.
+- **Kora: A Cloud-Native Event Streaming Platform for Kafka** — VLDB 2023 · vldb.org/pvldb/vol16/p3822-povzner.pdf · behind: cells plus randomized tenant placement · read Figures 10 and 4.
+- **Global Capacity Management With Flux** — OSDI 2023 · usenix.org/system/files/osdi23-eriksen.pdf · behind: capacity planning as optimization · read 3.2, 3.3 and 6.2.
+- **Metastable Failures in the Wild** — OSDI 2022 · usenix.org/conference/osdi22/presentation/huang-lexiang · behind: blast radius from feedback loops · read Table 1 and Figure 1.
+- **Zanzibar** — ATC 2019 · usenix.org/system/files/atc19-pang.pdf · behind: ownership as an API other services call · read section 2, Figure 1, Table 1.
+- **TAO** — ATC 2013 · usenix.org/conference/atc13/technical-sessions/presentation/bronson · behind: one owner for a read-heavy graph · abstract checked only.
+- **Borg** — EuroSys 2015 · research.google/pubs/large-scale-cluster-management-at-google-with-borg/ · behind: overcommit and packing as policy · abstract checked only.
+- **Autopilot** — EuroSys 2020 · research.google/pubs/autopilot-workload-autoscaling-at-google-scale/ · behind: sizing from history · abstract checked only.
+- **The Tail at Scale** — CACM 2013 · research.google/pubs/the-tail-at-scale/ · behind: the arithmetic behind latency targets · abstract checked only.
+- **Text Mining and Classification of Architecture Decision Records** — arXiv 2026 · arxiv.org/abs/2609.07375 · behind: what design records actually contain · abstract checked only.
+
+Thin here: shuffle sharding. No paper exists; Physalia and Kora are the closest.
+
 ## Engineering craft — any course
 
 - **Julia Evans** — jvns.ca · 2026-07-21 · mechanisms from first principles.
@@ -251,6 +381,21 @@ measured one goes straight into this list.
   models.
 - **Arpit Bhayani** — arpitbhayani.me/blogs · 2026-08-21 · **the style
   reference for every lesson** — see "How his writing reads", below.
+
+## About the paper shelves
+
+Each course section above has a `### Papers` shelf, verified 2026-09-18. One
+paper a week, on the paper day.
+
+- **Five papers sit on two shelves**: The Tail at Scale, Zanzibar, Millions of
+  Tiny Databases, Metastable Failures in the Wild, and the vLLM paper. Read
+  each once; the second course links back to it rather than spending another
+  paper day.
+- **"abstract checked only"** means the landing page opened but the full text
+  did not, so the reading hint is a guess. Open the PDF and skim its section
+  headings before starting.
+- A shelf is not fixed. A paper that turns out to be wrong for the phase goes,
+  and the frontier days add new ones.
 
 ## Production incidents — the highest-value reading
 
