@@ -97,7 +97,10 @@ async def list_lessons(limit: int = 30, kind: str = "") -> list[dict[str, Any]]:
         return await db.fetch(
             "SELECT id::text, to_char(lesson_date, 'YYYY-MM-DD') AS lesson_date,"
             " title, one_liner, topic, md_path, html_path, score, sources, created_at,"
-            " kind, course_slug, read_at"
+            " kind, course_slug, read_at, phase_slug, relationship,"
+            " (SELECT p.title FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_title,"
+            " (SELECT p.course FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_course,"
+            " review_status, review_score"
             " FROM hq.lessons WHERE kind = %s ORDER BY lesson_date DESC, created_at DESC"
             " LIMIT %s",
             (kind.strip(), limit),
@@ -105,7 +108,10 @@ async def list_lessons(limit: int = 30, kind: str = "") -> list[dict[str, Any]]:
     return await db.fetch(
         "SELECT id::text, to_char(lesson_date, 'YYYY-MM-DD') AS lesson_date,"
         " title, one_liner, topic, md_path, html_path, score, sources, created_at,"
-        " kind, course_slug, read_at"
+        " kind, course_slug, read_at, phase_slug, relationship,"
+            " (SELECT p.title FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_title,"
+            " (SELECT p.course FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_course,"
+        " review_status, review_score"
         " FROM hq.lessons ORDER BY lesson_date DESC LIMIT %s",
         (limit,),
     )
@@ -238,11 +244,16 @@ async def list_courses() -> list[dict[str, Any]]:
     """
     active = await _active_course()
     rows = await db.fetch(
-        "SELECT course, count(*) AS phases,"
-        " count(*) FILTER (WHERE status = 'taught') AS taught,"
-        " coalesce(sum(minutes), 0) AS minutes,"
-        " min(title) FILTER (WHERE status = 'pending') AS next_title"
-        " FROM hq.course_phases GROUP BY course ORDER BY course",
+        "SELECT p.course, count(*) AS phases,"
+        " count(*) FILTER (WHERE p.status = 'taught') AS taught,"
+        " coalesce(sum(p.minutes), 0) AS minutes,"
+        " min(p.title) FILTER (WHERE p.status = 'pending') AS next_title,"
+        " coalesce(c.title, '') AS title, coalesce(c.description, '') AS description,"
+        " coalesce(c.source, 'platform') AS source,"
+        " coalesce(c.course_order, 999) AS course_order"
+        " FROM hq.course_phases p LEFT JOIN hq.courses c ON c.course = p.course"
+        " GROUP BY p.course, c.title, c.description, c.source, c.course_order"
+        " ORDER BY coalesce(c.course_order, 999), p.course",
         (),
     )
     return [{**r, "active": r["course"] == active} for r in rows]
@@ -260,13 +271,19 @@ async def get_course_phases(course: str) -> list[dict[str, Any]]:
     return await db.fetch(
         "SELECT p.slug, p.phase_order, p.title, p.summary, p.difficulty,"
         " p.minutes, p.status, p.url, p.lesson_id::text,"
+        " p.source, p.question, p.sections, p.lab, p.test_out,"
         " l.html_path AS lesson_html_path, l.md_path AS lesson_md_path,"
         " l.title AS lesson_title, l.one_liner AS lesson_one_liner,"
         " to_char(l.lesson_date, 'YYYY-MM-DD') AS lesson_date,"
-        " l.score AS lesson_score, l.read_at AS lesson_read_at"
+        " l.score AS lesson_score, l.read_at AS lesson_read_at,"
+        " l.review_status AS lesson_review_status, l.review_score AS lesson_review_score,"
+        " l.review_notes AS lesson_review_notes,"
+        # Read is a fact about the phase: he can read a published phase
+        # before Mission HQ has added anything to it.
+        " coalesce(p.read_at, l.read_at) AS read_at"
         " FROM hq.course_phases p"
         " LEFT JOIN hq.lessons l ON l.id = p.lesson_id"
-        " WHERE p.course = %s ORDER BY p.phase_order",
+        " WHERE p.course = %s ORDER BY p.phase_order, p.slug",
         (course,),
     )
 
@@ -282,21 +299,29 @@ async def teach_phase(course: str, slug: str) -> dict:
     from hq.learning_pipeline import course_payload, course_study_brief
 
     unread = await db.fetchone(
-        "SELECT title FROM hq.lessons WHERE kind = 'course' AND read_at IS NULL"
+        "SELECT title, review_status FROM hq.lessons WHERE kind = 'course'"
+        " AND (read_at IS NULL OR review_status IN ('revise', 'failed'))"
         " ORDER BY lesson_date DESC LIMIT 1",
         (),
     )
     if unread:
-        return {"started": False,
-                "reason": f"{unread['title']} is still unread — mark it read first"}
+        why = {"revise": "is being revised after review",
+               "failed": "failed review and needs a decision"}.get(
+            str(unread["review_status"]), "is still unread — mark it read first")
+        return {"started": False, "reason": f"{unread['title']} {why}"}
 
     phase = await db.fetchone(
-        "SELECT slug, course, title, summary, url FROM hq.course_phases"
+        "SELECT slug, course, title, summary, url, source FROM hq.course_phases"
         " WHERE slug = %s AND course = %s AND status = 'pending'",
         (slug, course),
     )
     if not phase:
         raise HTTPException(404, f"no pending phase {slug!r} in {course!r}")
+    if phase["source"] == "local":
+        return {"started": False, "reason": (
+            "this phase is planned, not published. Generate it with Claude"
+            f" (/study {course}) and publish it; Mission HQ adds to it after the"
+            " next sync.")}
 
     # Dedup against work that is still alive, never against work that
     # finished. The key used to be the bare slug, so asking to teach a phase
@@ -327,6 +352,67 @@ async def teach_phase(course: str, slug: str) -> dict:
         dedup_key=f"course-phase:{slug}" + (f":a{attempt}" if attempt else ""),
     )
     return {"started": True, "task_id": task_id, "title": phase["title"]}
+
+
+@router.post("/courses/{course}/phases/{slug}/read", operation_id="markPhaseRead")
+async def mark_phase_read(course: str, slug: str) -> dict:
+    """He finished this phase. Unlocks the next one for the evening run."""
+    row = await db.fetchone(
+        "UPDATE hq.course_phases SET read_at = coalesce(read_at, now())"
+        " WHERE slug = %s AND course = %s RETURNING lesson_id::text, title",
+        (slug, course),
+    )
+    if not row:
+        raise HTTPException(404, f"no phase {slug!r} in {course!r}")
+    if row["lesson_id"]:
+        await db.execute(
+            "UPDATE hq.lessons SET read_at = coalesce(read_at, now()) WHERE id = %s::uuid",
+            (row["lesson_id"],),
+        )
+    return {"ok": True, "title": row["title"]}
+
+
+@router.get("/courses/{course}/phases/{slug}/content", operation_id="getPhaseContent")
+async def get_phase_content(course: str, slug: str) -> dict[str, Any]:
+    """The phase's original text, as he and Claude wrote it.
+
+    What he reads is the enhanced page Mission HQ builds from this. The
+    original is shown until that page exists, and stays one click away.
+    """
+    import httpx
+
+    from hq.tools.learning_tools import fetch_platform_document, read_course_source_text
+
+    phase = await db.fetchone(
+        "SELECT slug, source, url FROM hq.course_phases WHERE slug = %s AND course = %s",
+        (slug, course),
+    )
+    if not phase:
+        raise HTTPException(404, f"no phase {slug!r} in {course!r}")
+    if phase["source"] != "platform":
+        return {"slug": slug, "source": phase["source"], "published": False,
+                "content": "", "original_url": ""}
+    # The repo copy first: it is what he and Claude wrote. The platform is the
+    # fallback for a phase generated on another machine.
+    content = read_course_source_text(slug)
+    doc: dict[str, Any] = {}
+    if not content:
+        try:
+            doc = await fetch_platform_document(slug)
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HTTPException(502, f"the study platform did not return {slug}: {exc}") from exc
+        content = doc["content"]
+    return {
+        "slug": slug,
+        "source": "platform",
+        "published": True,
+        "title": doc.get("title") or "",
+        "summary": doc.get("summary") or "",
+        "minutes": doc.get("estimatedMinutes") or 0,
+        "tags": doc.get("tags") or [],
+        "content": content,
+        "original_url": phase["url"],
+    }
 
 
 @router.post("/courses/{course}/activate", operation_id="activateCourse")

@@ -185,6 +185,10 @@ class Settings(BaseSettings):
     # His own study platform. The catalogue at /api/study is public; the phase
     # pages are readable by slug. Tutor works through them one phase a day.
     study_api_base: str = "https://raghu-monitoring.vercel.app"
+    # Never named in anything written for him to read or post: his current
+    # and former employers. His older platform courses name the former one;
+    # an enhanced page built from them must not. Checked by code, not prose.
+    private_employers: tuple[str, ...] = ("Mindtickle", "Juspay")
     halt_file: Path = REPO_DIR / "HALT"
     models_file: Path = BACKEND_DIR / "models.yaml"
 

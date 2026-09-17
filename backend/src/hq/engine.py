@@ -79,6 +79,10 @@ ARTIFACT_TOOLS = (
     # and its task showed as blocked on the board.
     "write_lesson",
     "record_lesson",
+    # A lab is an artifact, and so is a review verdict: a reviewer that ran
+    # the lab and recorded "revise" did its job, and must not show as blocked.
+    "write_lab_files",
+    "record_review",
     "vault_write",
     "record_fact",
     "create_subtask",
@@ -216,7 +220,13 @@ def bootstrap_pre_launch() -> None:
         model_step_config=cast(StepConfig, {
             "retries_allowed": True, "max_attempts": 4,
             "interval_seconds": 5.0, "backoff_rate": 2.0,
-            "timeout_seconds": 600.0,  # one model request at high effort; was 300
+            # The step limit follows the longest request timeout in
+            # models.yaml, plus a minute. It was a fixed 600 while kimi_deep
+            # allowed 900, so a long lesson answer was always cancelled at 600
+            # and retried four times: 2026-09-16, three tutor runs of 80-110
+            # minutes, nothing saved. Long lessons are now written one section
+            # per call; this keeps the two limits from disagreeing again.
+            "timeout_seconds": llm.registry().longest_timeout_s() + 60.0,
         }),
     )
     for name, spec in scan().items():
@@ -234,6 +244,12 @@ async def bootstrap_post_launch() -> None:
     # task may run 40 minutes, so serial is not a bottleneck; a run waiting on
     # approval blocks in recv without holding a model slot.
     _queues["tasks"] = await DBOS.register_queue_async("tasks", worker_concurrency=1)
+    # Course work gets its own lane, one at a time. On 2026-09-17 two course
+    # builds the owner started waited behind a job sweep, which has run for
+    # four hours. Two agent runs plus a chat turn, each one request at a
+    # time, stay inside the key's five parallel requests; a full slot table
+    # is a 429 that the model-step retry already waits out.
+    _queues["courses"] = await DBOS.register_queue_async("courses", worker_concurrency=1)
     _queues["chat"] = await DBOS.register_queue_async("chat", worker_concurrency=1)
     await DBOS.apply_schedules_async(_schedules)
     wanted = {s["schedule_name"] for s in _schedules}
@@ -262,11 +278,27 @@ async def dispatch(
         payload=payload, dedup_key=dedup_key,
     )
     if inserted or status == "backlog":
-        await _enqueue(task_id)
+        await _enqueue(task_id, lane=lane_for(payload))
     return task_id
 
 
-async def _enqueue(task_id: str, *, attempt: int = 0) -> None:
+_COURSE_STAGES = frozenset({
+    learning.COURSE_STAGE, learning.COURSE_WRITTEN_STAGE, learning.COURSE_REVIEW_STAGE,
+})
+
+
+def lane_for(payload: Any) -> str:
+    """Which queue a task runs on: course work, or everything else."""
+    stage = payload.get("stage") if isinstance(payload, dict) else None
+    return "courses" if stage in _COURSE_STAGES else "tasks"
+
+
+async def _lane_of(task_id: str) -> str:
+    row = await db.fetchone("SELECT payload FROM hq.tasks WHERE id = %s", (task_id,))
+    return lane_for((row or {}).get("payload"))
+
+
+async def _enqueue(task_id: str, *, attempt: int = 0, lane: str = "tasks") -> None:
     """Deterministic workflow id, so a replayed dispatch cannot start a second run.
 
     ``attempt`` exists for the owner's Retry. The id is derived from the task,
@@ -291,7 +323,7 @@ async def _enqueue(task_id: str, *, attempt: int = 0) -> None:
     # Durable wall-clock cap enforced by DBOS, outside the agent: a stalled or
     # hung run is cancelled instead of sitting in "running" all night.
     with SetWorkflowID(wf_id), SetWorkflowTimeout(TASK_TIMEOUT_S):
-        await _queues["tasks"].enqueue_async(run_task, task_id)
+        await _queues.get(lane, _queues["tasks"]).enqueue_async(run_task, task_id)
 
 
 async def requeue(task_id: str) -> None:
@@ -304,7 +336,8 @@ async def requeue(task_id: str) -> None:
     row = await db.fetchone(
         "SELECT count(*) AS n FROM hq.runs WHERE task_id = %s", (task_id,)
     )
-    await _enqueue(task_id, attempt=int(row["n"]) if row else 1)
+    await _enqueue(task_id, attempt=int(row["n"]) if row else 1,
+                   lane=await _lane_of(task_id))
 
 
 async def enqueue_chat(session_id: str, text: str, client_id: str) -> WorkflowHandleAsync[str]:
@@ -323,7 +356,7 @@ async def enqueue_agent_tasks(run_id: str) -> None:
         (run_id,),
     )
     for row in rows:
-        await _enqueue(row["id"])
+        await _enqueue(row["id"], lane=await _lane_of(row["id"]))
 
 
 # --- workflows ---------------------------------------------------------------
@@ -754,8 +787,10 @@ async def _cap_overrunning_tasks() -> None:
             data={
                 "reason": (
                     "no progress for over "
-                    f"{TASK_TIMEOUT_S * 2 // 60} minutes; the host was most "
-                    "likely asleep or the process was suspended mid-run"
+                    f"{TASK_TIMEOUT_S * 2 // 60} minutes: either a model "
+                    "request kept hitting its time limit and was retried "
+                    "(DBOSStepTimeoutError in data/logs/backend.log), or the "
+                    "host was asleep mid-run"
                 )
             },
         )
@@ -780,10 +815,33 @@ async def reap() -> None:
     for row in stale:
         await board.apply(row["id"], "reaped", status="blocked",
                           data={"reason": "stale running task at boot"})
+    # A queued workflow that never started carries the code version it was
+    # queued under, and DBOS only dequeues workflows of the running version.
+    # So every restart after a code change stranded whatever was waiting: on
+    # 2026-09-17 two course builds sat ENQUEUED through a restart and never
+    # ran. A workflow that has not started has no recorded steps, so running
+    # it under the new code is safe.
+    await db.execute(
+        "UPDATE dbos.workflow_status SET application_version = %s"
+        " WHERE status = 'ENQUEUED' AND application_version IS DISTINCT FROM %s"
+        " AND workflow_uuid LIKE 'task-%%'",
+        (DBOS.application_version, DBOS.application_version),
+    )
     # A crash between create_task and enqueue leaves a task in backlog forever.
     # Re-enqueue is safe: the workflow id is derived from the task id.
-    for row in await db.fetch("SELECT id::text FROM hq.tasks WHERE status = 'backlog'"):
-        await _enqueue(row["id"])
+    #
+    # A backlog task that already has runs is a retry, and its first workflow
+    # id is taken: _enqueue would get the old cancelled workflow back and start
+    # nothing. On 2026-09-17 a retried lesson sat in backlog through a restart
+    # for exactly that reason. requeue gives it the next attempt's id.
+    for row in await db.fetch(
+        "SELECT t.id::text AS id, EXISTS (SELECT 1 FROM hq.runs r WHERE r.task_id = t.id)"
+        " AS has_runs FROM hq.tasks t WHERE t.status = 'backlog'"
+    ):
+        if row["has_runs"]:
+            await requeue(row["id"])
+        else:
+            await _enqueue(row["id"], lane=await _lane_of(row["id"]))
 
 
 _URL_RE = re.compile(r"https?://[^\s<>\)\]\"'`]+")
@@ -1108,18 +1166,26 @@ async def _record_reading_leads_step(leads: list[dict[str, Any]], default_source
         await db.execute(
             """
             INSERT INTO hq.readings (url, title, author, source, topic,
-                                     posted_date, why, score)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                     posted_date, why, score, shelf_life,
+                                     phase_slug, relationship, adds)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (url) DO UPDATE SET
                 score = GREATEST(EXCLUDED.score, hq.readings.score),
                 why = COALESCE(NULLIF(EXCLUDED.why, ''), hq.readings.why),
+                posted_date = COALESCE(NULLIF(EXCLUDED.posted_date, ''), hq.readings.posted_date),
+                shelf_life = COALESCE(NULLIF(EXCLUDED.shelf_life, ''), hq.readings.shelf_life),
+                phase_slug = COALESCE(NULLIF(EXCLUDED.phase_slug, ''), hq.readings.phase_slug),
+                relationship = COALESCE(NULLIF(EXCLUDED.relationship, ''), hq.readings.relationship),
+                adds = COALESCE(NULLIF(EXCLUDED.adds, ''), hq.readings.adds),
                 last_seen = now()
             """,
             (lead.get("url", ""), str(lead.get("title", ""))[:300],
              str(lead.get("author", ""))[:120],
              str(lead.get("source") or default_source)[:40],
              str(lead.get("topic", ""))[:120], str(lead.get("posted_date", ""))[:40],
-             str(lead.get("why", ""))[:600], int(lead.get("score") or 0)),
+             str(lead.get("why", ""))[:600], int(lead.get("score") or 0),
+             str(lead.get("shelf_life", ""))[:20], str(lead.get("phase_slug", ""))[:200],
+             str(lead.get("relationship", ""))[:20], str(lead.get("adds", ""))[:400]),
         )
     return len(leads)
 
@@ -1133,6 +1199,45 @@ async def _learning_context_step() -> tuple[str, list[str], int, str, str, list[
 
 
 @DBOS.step()
+async def _active_phase_step() -> dict[str, Any] | None:
+    """The course phase the day's article orbits, or None with no active course."""
+    from hq.tools.learning_tools import active_phase
+
+    return await active_phase()
+
+
+@DBOS.step()
+async def _found_count_step(phase_slug: str) -> int:
+    """Unread candidates for one phase: the backlog that matters while it is active."""
+    row = await db.fetchone(
+        "SELECT count(*) AS n FROM hq.readings WHERE status = 'found' AND phase_slug = %s",
+        (phase_slug,),
+    )
+    return int((row or {}).get("n") or 0)
+
+
+@DBOS.step()
+async def _course_review_state_step(slug: str) -> dict[str, Any]:
+    """The verdict the reviewer recorded on the newest lesson for a phase."""
+    row = await db.fetchone(
+        "SELECT review_status, review_notes, review_round FROM hq.lessons"
+        " WHERE kind = 'course' AND course_slug = %s ORDER BY created_at DESC LIMIT 1",
+        (slug,),
+    )
+    return dict(row) if row else {}
+
+
+@DBOS.step()
+async def _mark_review_failed_step(slug: str) -> None:
+    await db.execute(
+        "UPDATE hq.lessons SET review_status = 'failed' WHERE id = ("
+        " SELECT id FROM hq.lessons WHERE kind = 'course' AND course_slug = %s"
+        " ORDER BY created_at DESC LIMIT 1)",
+        (slug,),
+    )
+
+
+@DBOS.step()
 async def _learning_requests_step() -> list[str]:
     """What he asked to learn about, for the scan brief."""
     from hq.tools.learning_tools import open_requests
@@ -1141,20 +1246,34 @@ async def _learning_requests_step() -> list[str]:
 
 
 @DBOS.step()
-async def _pending_readings_step(limit: int) -> list[dict[str, Any]]:
+async def _pending_readings_step(limit: int, phase_slug: str = "") -> list[dict[str, Any]]:
     """Unread candidates, best first.
 
     A 'queued' row older than a day comes back: the study run that claimed it
     never finished, and a candidate stranded in queued is one the ledger would
     never offer again.
     """
-    return await db.fetch(
-        "SELECT url, title, why, score, topic FROM hq.readings"
-        " WHERE status = 'found'"
-        "    OR (status = 'queued' AND last_seen < now() - interval '1 day')"
-        " ORDER BY score DESC, first_seen DESC LIMIT %s",
-        (limit,),
+    # While a phase is active the filter belongs in the query. Taking the top
+    # rows by score first and filtering after let old, higher-scoring leads
+    # from earlier phases fill every slot, and the phase got no article.
+    phase_filter = " AND phase_slug = %s" if phase_slug else ""
+    params: tuple[Any, ...] = (phase_slug, limit) if phase_slug else (limit,)
+    rows = await db.fetch(
+        "SELECT url, title, why, score, topic, posted_date, shelf_life,"
+        " phase_slug, relationship, adds FROM hq.readings"
+        " WHERE (status = 'found'"
+        "    OR (status = 'queued' AND last_seen < now() - interval '1 day'))"
+        + phase_filter
+        + " ORDER BY score DESC, first_seen DESC LIMIT %s",
+        params,
     )
+    # Selection reads the ledger, so the age has to be worked out here. It used
+    # to be computed only on the scan's envelope, which selection never sees —
+    # every ledger row looked undated and the shelf-life gate kept all of them.
+    return [
+        {**row, "age_days": learning.lead_age_days(str(row.get("posted_date") or ""))}
+        for row in rows
+    ]
 
 
 @DBOS.step()
@@ -1163,6 +1282,16 @@ async def _queue_readings_step(urls: list[str]) -> None:
         "UPDATE hq.readings SET status = 'queued', last_seen = now()"
         " WHERE url = ANY(%s) AND status <> 'taught'",
         (urls,),
+    )
+
+
+@DBOS.step()
+async def _phase_articles_step(phase_slug: str) -> list[dict[str, Any]]:
+    """Articles already written around this phase, which he may have read."""
+    return await db.fetch(
+        "SELECT title, md_path, relationship FROM hq.lessons"
+        " WHERE kind = 'topic' AND phase_slug = %s ORDER BY lesson_date",
+        (phase_slug,),
     )
 
 
@@ -1193,7 +1322,8 @@ async def _advance_learning(
         leads = learning.extract_reading_leads(output) if result == "done" else []
         if leads:
             await _record_reading_leads_step(leads, "x")
-        scan = learning.scan_payload(topics=topics)
+        phase = await _active_phase_step()
+        scan = learning.scan_payload(topics=topics, phase=phase)
         roster, taught, pending_count, interests, path, covered = (
             await _learning_context_step()
         )
@@ -1207,7 +1337,7 @@ async def _advance_learning(
             brief=learning.scan_brief(
                 scan, roster=roster, recent=taught, pending=pending_count,
                 interests=interests, requests=await _learning_requests_step(),
-                path=path, covered=covered,
+                path=path, covered=covered, phase=phase,
             )
             + note,
             source="agent",
@@ -1225,8 +1355,15 @@ async def _advance_learning(
             await _record_reading_leads_step(leads, "blog")
         # Selection reads the ledger, not this run's envelope, so a find from
         # Monday's feed and one from today's scan compete on equal terms.
-        pending = await _pending_readings_step(learning.MAX_STUDY * 3)
-        picks = learning.select_for_study(pending, set())
+        phase_slug = str(payload.get("phase_slug") or "")
+        pending = await _pending_readings_step(learning.MAX_STUDY * 3, phase_slug)
+        # While a course is active the phase chooses the subject: a lead for
+        # anything else cannot be picked, however high it scored.
+        picks = learning.select_for_study(
+            pending, set(),
+            phase_slug=str(payload.get("phase_slug") or ""),
+            gaps=[str(g) for g in (payload.get("gaps") or [])],
+        )
         if picks:
             await _queue_readings_step([str(p["url"]) for p in picks])
         # What is left after today's picks. When the backlog runs this low the
@@ -1239,25 +1376,34 @@ async def _advance_learning(
         # sources — the scan found nothing, the backlog is empty — was the one
         # morning that quietly did nothing at all.
         _roster, _titles, pool, *_rest = await _learning_context_step()
+        if phase_slug:
+            pool = await _found_count_step(phase_slug)
         hunt_task_id: str | None = None
         if pool < learning.MIN_PENDING:
+            # A thin backlog on a phase is thin for THAT course: hunt writers
+            # on its subject, not on the four broad lanes, or the hunt brings
+            # back more of what the phase already could not use.
+            focus = topics
+            if phase_slug:
+                focus = (f"{payload.get('phase_course')}: {payload.get('phase_title')}"
+                         f" — {payload.get('phase_question') or ''}").strip(" —")
             hunt_task_id = await dispatch(
                 agent="hunter",
                 title="Find more people worth reading (the backlog is thin)",
                 brief=learning.source_hunt_brief(
-                    learning.source_hunt_payload(focus=topics), roster=_roster
+                    learning.source_hunt_payload(focus=focus), roster=_roster
                 ),
                 source="agent",
                 parent_task_id=task_id,
                 origin_session_id=task.get("origin_session_id"),
-                payload={**learning.source_hunt_payload(focus=topics), "run_id": run_id},
+                payload={**learning.source_hunt_payload(focus=focus), "run_id": run_id},
                 dedup_key=f"learning-sources-auto:{run_id}",
             )
         if not picks:
             # Nothing worth reading today. The hunt above, when it started, is
             # the honest answer: no lesson, and the reason is a thin roster.
             return hunt_task_id
-        study = learning.study_payload({"topics": topics}, picks)
+        study = learning.study_payload({**payload, "topics": topics}, picks)
         return await dispatch(
             agent="hunter",
             title=f"Read {len(picks)} article{'' if len(picks) == 1 else 's'} in full",
@@ -1317,7 +1463,10 @@ async def _advance_learning(
         return await dispatch(
             agent="tutor",
             title=f"Write up: {str(payload.get('title') or 'the phase')[:56]}",
-            brief=learning.course_lesson_brief(payload, digests),
+            brief=learning.course_lesson_brief(
+                payload, digests,
+                articles=await _phase_articles_step(str(payload.get("slug") or "")),
+            ),
             source="agent",
             parent_task_id=task_id,
             origin_session_id=task.get("origin_session_id"),
@@ -1328,17 +1477,89 @@ async def _advance_learning(
             dedup_key=f"course-lesson:{task_id}",
         )
 
+    if learning.is_course_written(payload):
+        # A written phase is not finished until it has been checked by a run
+        # that did not write it. That is a fresh tutor task, not a separate
+        # agent: task runs start with no message history, so the review run
+        # has no memory of the plan it would otherwise defend. The tools keep
+        # the two jobs apart (see learning_tools.current_task_stage).
+        if result != "done":
+            return None
+        if payload.get("source") == "platform":
+            # Additions to a published phase: sources were checked as each one
+            # was written, and the phase itself went through the /study review.
+            return None
+        if "tutor" not in AGENTS:
+            await board.apply(
+                task_id, "noted",
+                data={"reason": f"{payload.get('slug')} was written but tutor is not"
+                                " loaded, so it has not been reviewed"},
+            )
+            return None
+        prior = await _course_review_state_step(str(payload.get("slug") or ""))
+        return await dispatch(
+            agent="tutor",
+            title=f"Review: {str(payload.get('title') or payload.get('slug'))[:56]}",
+            brief=learning.course_review_brief(payload, int(payload.get("round") or 0)),
+            source="agent",
+            parent_task_id=task_id,
+            origin_session_id=task.get("origin_session_id"),
+            payload={**payload, "run_id": run_id, "stage": learning.COURSE_REVIEW_STAGE,
+                     "review_round_before": int(prior.get("review_round") or 0)},
+            dedup_key=f"course-review:{task_id}",
+        )
+
+    if learning.is_course_review(payload):
+        if result != "done":
+            return None
+        slug = str(payload.get("slug") or "")
+        state = await _course_review_state_step(slug)
+        action = learning.review_next_action(state, payload)
+        if action == "passed":
+            return None
+        if action == "no_verdict":
+            await board.apply(
+                task_id, "noted", status="blocked",
+                data={"reason": f"the review of {slug} finished without recording a new verdict"},
+            )
+            return None
+        round_ = int(payload.get("round") or 0) + 1
+        if action == "failed":
+            # Bounded on purpose. A phase that fails review three times needs a
+            # person, not a fourth pass of the same writer.
+            await _mark_review_failed_step(slug)
+            await board.apply(
+                task_id, "noted", status="blocked",
+                data={"reason": f"{slug} still failed review after "
+                                f"{learning.MAX_REVIEW_ROUNDS} revisions; the findings "
+                                "are on the lesson"},
+            )
+            return None
+        return await dispatch(
+            agent="tutor",
+            title=f"Revise: {str(payload.get('title') or slug)[:56]}",
+            brief=learning.course_revision_brief(
+                payload, str(state.get("review_notes") or ""), round_
+            ),
+            source="agent",
+            parent_task_id=task_id,
+            origin_session_id=task.get("origin_session_id"),
+            # Back to the written stage, so the revision is reviewed in turn.
+            payload={**payload, "run_id": run_id,
+                     "stage": learning.COURSE_WRITTEN_STAGE, "round": round_},
+            dedup_key=f"course-revise:{task_id}",
+        )
+
     if learning.is_deep_study(payload):
         urls = [str(u) for u in (payload.get("urls") or [])]
         digests = await _digested_readings_step(urls)
         if not digests:
             return None
-        lesson = learning.lesson_payload({"topics": topics}, digests)
-        _r, _t, _p, _i, lesson_path, _c = await _learning_context_step()
+        lesson = learning.lesson_payload({**payload, "topics": topics}, digests)
         return await dispatch(
             agent="tutor",
-            title="Write today's lesson",
-            brief=learning.lesson_brief(lesson, digests, path=lesson_path),
+            title="Write today's article",
+            brief=learning.lesson_brief(lesson, digests),
             source="agent",
             parent_task_id=task_id,
             origin_session_id=task.get("origin_session_id"),

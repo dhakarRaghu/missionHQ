@@ -58,65 +58,39 @@ however well written it is.
 
 ---
 
-## The direction — subjects, in this order
+## The direction — the course is the spine
 
-Steer here. When one is genuinely covered, mark it `[done]` and the next
-becomes current.
+The direction used to live here as a list of subjects, and nothing read it:
+the morning scan was handed this file as text, and whichever article scored
+highest chose the day's subject. On 2026-09-14 the direction moved into seven
+courses under `learning/courses/`, in this order:
 
-### 1. AI systems ← current
+1. Performance, concurrency and the machine
+2. Applied AI systems at scale
+3. Inference and AI platform — my `inference-internals` course (unit 1 is read before course 2)
+4. Storage and database internals
+5. Distributed systems and verification
+6. Reliability, security and change
+7. System design and architecture
 
-Topics, in order. One topic per day. Mark `[done]` when I have it.
+**One course at a time**, marked active on the Courses page. Its phases run in
+order, and the next one does not start while the last is unread. Change the
+order on the Courses page; change a course's phases in its `course.md`.
 
-1. **How inference actually works** — prefill and decode, the KV cache, why
-   batching changes everything, where the time and money go.
-2. **Retrieval that works** — embeddings, chunking, hybrid search, reranking,
-   and how to tell that retrieval is what is broken.
-3. **Evaluating an LLM system** — golden sets, judges and their biases,
-   catching regressions before shipping.
-4. **Agents in production** — tool calls, retries and idempotency, partial
-   failure, approval boundaries, what to log.
-5. **Cost and latency** — caching, routing, quantization, budgets per request.
-6. **How AI systems fail in production** — real incidents from teams running
-   them.
+## What an article is for
 
-**Build:** a hybrid retrieval pipeline — BM25 plus embeddings, fused with
-reciprocal rank fusion, then a reranker. Write the judge harness *before*
-tuning anything, or you are guessing at whether changes helped.
+Articles are not a second, unrelated stream. Each one orbits the phase I am
+on, and says what it is for relative to it:
 
-### 2. Backend depth
+- **fails** — a real incident on the phase's mechanism
+- **measures** — a benchmark or experiment, with its conditions
+- **applies** — the mechanism in a real system people run
+- **updates** — a default, version or practice that changed
+- **challenges** — a counterexample or disagreement
+- **extends** — an adjacent idea the course leaves out on purpose
 
-1. **Storage engines and the write path** — append-only logs, compaction,
-   what a crash costs.
-2. **Query execution** — joins, indexes, what the planner is actually doing.
-3. **Caching and eviction** — why LRU collapses, what replaced it.
-4. **Concurrency and locking** — deadlocks, isolation, contention.
-5. **Queues and rate limiting** — backpressure, shedding, fairness.
-
-**Build:** a Bitcask-style KV store. Append-only file, in-memory hash of key
-to offset, compaction. About 200 lines. Then kill it mid-write and prove
-recovery works.
-
-### 3. Distributed systems
-
-1. **Replication and lag** — sync, async, and who pays for each.
-2. **Consistency models** — what each one actually promises.
-3. **Consensus** — what Raft and Paxos guarantee, and what they do not.
-4. **Partitioning and rebalancing** — splitting data, moving it while live.
-5. **Failover** — detection, promotion, and what gets lost.
-
-**Build:** give that store a replica. Ship the log to a second process,
-expose a lag counter, kill the primary mid-stream and count the writes lost.
-
-### 4. Failure and algorithms
-
-1. **Detecting failure** — heartbeats, timeouts, phi-accrual.
-2. **Clocks and ordering** — why time is not a number you can trust.
-3. **Probabilistic structures** — Bloom filters and friends, in real systems.
-4. **Anomaly detection** — finding the bad one without labelling everything.
-
-**Build:** heartbeats between the two nodes, then swap the fixed timeout for
-a phi-accrual detector and watch it adapt. Implement a Bloom filter and plot
-measured false-positive rate against the memory given.
+A phase with no incident yet gets one before it gets another explainer. An
+article never re-teaches the course and never unlocks the next phase.
 
 ---
 
@@ -171,17 +145,26 @@ or better on the same subject should win.
 
 ## How the system uses this file
 
-- **One topic a day.** It takes the next unfinished topic from the current
-  subject, then searches for the best articles **on that one topic**.
-- It reads **up to five a day, all on the one topic**, in full, and writes one
-  lesson about **the topic** — not about the articles. Several sources on one
-  topic is how the lesson becomes worth more than any of them. Sources on two
-  different topics is a forced connection, and I will not be able to follow
-  it.
-- If only one good article exists on today's topic, that is fine: a short
-  honest lesson beats padding it with something unrelated.
-- It prefers something **published recently** when quality is equal, because
-  the field moves.
-- Anything typed into the Learn page's box comes **first**, ahead of all of
-  this.
-- Each lesson names the subject, what it read, and the build it feeds.
+- **The bar above goes to the morning scan** as the standard every lead must
+  clear.
+- **One article a weekday**, Monday to Friday. Weekends belong to the course
+  and its lab.
+- The scan aims at the active phase and the relationship it still lacks. A
+  lead for another subject is not picked, however well it scores.
+- It reads **up to three articles on the active phase**, in full — one
+  relationship leads, and a second site comes before a second post from the
+  same site. Weak ones are never added to reach a number.
+- **Every article goes past its sources.** Hunter opens what each article
+  points at (pull requests, issues, papers, docs) and finds at least two
+  independent sources on other sites that confirm, measure differently, or
+  contradict it. A number only the original team reports is labelled as
+  theirs. On 2026-09-16 an article was built from one vendor post and could
+  only say "all numbers are the post's own" — that is the failure this rule
+  prevents.
+- **Where to look is per course**, in `sources.md`: the scan gets the active
+  course's section, not one list for everything.
+- **What expires is news, not knowledge.** A release note goes stale; a
+  postmortem does not.
+- Anything typed into the Learn page's box still comes **first**.
+- If nothing on the phase clears the bar, the morning says so and hunts for
+  better sources instead of teaching something random.

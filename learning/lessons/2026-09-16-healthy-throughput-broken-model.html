@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why were the dashboards green while the model talked nonsense?</title>
+<style>
+  body { background:#fdfdfb; color:#181818; font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; line-height:1.55; margin:0; }
+  main { max-width:70ch; margin:0 auto; padding:2rem 1.2rem 4rem; }
+  h1 { font-size:1.5rem; line-height:1.3; }
+  h2 { font-size:1.15rem; margin-top:2.2rem; }
+  pre { background:#f2f0ea; padding:1em; overflow-x:auto; font-size:0.85rem; border-radius:6px; }
+  code { font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .header-line { color:#555; font-style:italic; }
+  figure { margin:1.6rem 0; }
+  figcaption { font-size:0.85rem; color:#555; margin-top:0.4rem; }
+  button { font-size:0.9rem; padding:0.45em 1em; border:1px solid #888; border-radius:6px; background:#fff; cursor:pointer; }
+  button.active { background:#181818; color:#fff; }
+  #caption { font-size:0.9rem; margin-top:0.6rem; min-height:2.6em; }
+  #tip { font-size:0.8rem; color:#444; min-height:1.4em; margin-top:0.2rem; }
+  ol, ul { padding-left:1.4rem; }
+</style>
+</head>
+<body>
+<main>
+<p class="header-line"><em>fails &middot; Inference Internals Phase 1: The Request Lifecycle &middot; Adds: two real lifecycle failures the course cannot stage, one KV bug hidden behind green dashboards and one 223-second queue stall, and the five questions that found them</em></p>
+
+<h1>Why were the dashboards green while the model talked nonsense?</h1>
+
+<h2>Why you are here: a green dashboard over a broken model</h2>
+<p>Picture your own inference server. KV cache on, tokens coming out at the expected rate, latency charts flat. Your load test passes. Nothing in the serving stack is complaining.</p>
+<p>Then someone runs an eval against the served model and it scores near zero. Not zero points because prompts failed to parse. Zero because the model is reading corrupted state and producing confident garbage, at full speed. Both incidents in this article happened exactly that way. The dashboards reported a healthy system, and the system was wrong.</p>
+<p>The source is a vLLM engineering post about running MiniMax M3, a sparse mixture-of-experts model, on AMD's MI355X GPU. I do not care about the GPU or the 3.14x speedup. I care about the failures they documented on the way, because those failures live exactly where Phase 1 lives: prefill, the KV cache, decode, and the queue in front of all of it.</p>
+
+<h2>Nothing was slow. Everything was wrong.</h2>
+<p>The first bug, tracked as vLLM #45720. The model served fine with an FP8 KV cache on an AMD MI300X. Tokens per second normal. Latency normal. When the team ran GSM8K, a grade-school maths benchmark scored by strict match, the result was 0.0099. Close to zero correct answers. Serving metrics alone would never have caught it, because generation still produced tokens at the expected rates.</p>
+<p>The wrong theory was the most natural one: the FP8 KV cache "was just working". The code assumed the way FP8 values are laid out in memory was portable across all ROCm, AMD's GPU platform. On this hardware the values are stored in a variant called FNUZ, and the code was viewing the cached keys and values through the wrong format. The fast path ran. It did the wrong math.</p>
+<p>The signal that ended the search was not a metric. It was a correctness gate: the GSM8K eval, run beside the performance gate. That mismatch was the only contradiction available. The fix was to correct the FP8 KV view on FNUZ devices. Strict match went from 0.0099 to 0.9575.</p>
+<p>A sibling bug, #47158, passed the wrong expert-parallel mask to the kernel library. The detector there was cosine similarity against a reference model: 0.527 instead of 1.0. Notice the shape. Wrong math still produced plausible text. Phase 1 names every stage of the request lifecycle. Nothing in that lifecycle can see this, because every stage completed normally.</p>
+
+<figure>
+  <svg id="pipe" viewBox="0 0 720 150" width="100%" role="img" aria-label="Request lifecycle under two views"></svg>
+  <div id="tip"></div>
+  <div id="caption"></div>
+  <div style="margin-top:0.5rem">
+    <button id="btnDash" class="active" type="button">Dashboard view</button>
+    <button id="btnEval" type="button">Eval view</button>
+  </div>
+  <figcaption>The same running system, two views. Hover a stage to see what its metrics report. The KV stages serve traffic at full rate while holding corrupted state.</figcaption>
+</figure>
+<script>
+const stages = [
+  {name:"Prompt queue", dash:"queue length: monitored", evalnote:"admits requests normally"},
+  {name:"Prefill", dash:"tokens processed on time", evalnote:"runs fine"},
+  {name:"KV transfer", dash:"copy completed, no errors", evalnote:"wrong layout per layer: writes garbage into the cache"},
+  {name:"Decode", dash:"normal tok/s, flat latency", evalnote:"reads corrupted KV: confident nonsense at full speed"},
+  {name:"Tokens", dash:"finish_reason: stop, as expected", evalnote:"GSM8K strict match ~0.0008"}
+];
+const dashNote = "Dashboard view: every stage reports success. Throughput healthy, latency flat, transfer complete.";
+const evalNote = "Eval view: the GSM8K score is the only instrument that contradicts the dashboards. Token salad at full speed.";
+const svg = document.getElementById("pipe");
+const NS = "http://www.w3.org/2000/svg";
+const cells = stages.map((s, i) => {
+  const g = document.createElementNS(NS, "g");
+  g.style.cursor = "default";
+  const r = document.createElementNS(NS, "rect");
+  r.setAttribute("x", 8 + i * 143); r.setAttribute("y", 30);
+  r.setAttribute("width", 128); r.setAttribute("height", 56);
+  r.setAttribute("rx", 8); r.setAttribute("fill", "#d9ead3");
+  r.setAttribute("stroke", "#4a7a45");
+  const t = document.createElementNS(NS, "text");
+  t.setAttribute("x", 72 + i * 143); t.setAttribute("y", 62);
+  t.setAttribute("text-anchor", "middle");
+  t.setAttribute("font-size", "13"); t.setAttribute("fill", "#181818");
+  t.textContent = s.name;
+  g.appendChild(r); g.appendChild(t);
+  if (i > 0) {
+    const a = document.createElementNS(NS, "text");
+    a.setAttribute("x", i * 143 + 8); a.setAttribute("y", 62);
+    a.setAttribute("text-anchor", "middle"); a.setAttribute("font-size", "14");
+    a.textContent = "\u2192";
+    svg.appendChild(a);
+  }
+  g.addEventListener("mouseenter", () => tip.textContent = (mode === "dash" ? s.dash : s.evalnote) + "  (" + s.name + ")");
+  g.addEventListener("mouseleave", () => tip.textContent = "");
+  svg.appendChild(g);
+  return r;
+});
+const tip = document.getElementById("tip");
+const cap = document.getElementById("caption");
+let mode = "dash";
+function view(m) {
+  mode = m;
+  cells.forEach((r, i) => {
+    const broken = (m === "eval") && (i === 2 || i === 3 || i === 4);
+    r.setAttribute("fill", broken ? "#f4cccc" : "#d9ead3");
+    r.setAttribute("stroke", broken ? "#b0392e" : "#4a7a45");
+  });
+  cap.textContent = m === "dash" ? dashNote : evalNote;
+  document.getElementById("btnDash").classList.toggle("active", m === "dash");
+  document.getElementById("btnEval").classList.toggle("active", m === "eval");
+}
+document.getElementById("btnDash").onclick = () => view("dash");
+document.getElementById("btnEval").onclick = () => view("eval");
+view("dash");
+</script>
+
+<h2>The same bug at the prefill-decode boundary</h2>
+<p>The second failure is the one closest to your phase. Phase 1 runs prefill and decode on the same GPU. Prefill/decode disaggregation splits them onto different workers: one worker fills the KV cache, ships it over the network, a second worker decodes from it. That transfer is a lifecycle stage the course assumes is trivial. It is not.</p>
+<p>Symptom, in the authors' words: "The transfer completed and throughput looked healthy, but GSM8K fell to roughly 0.0008." Token salad. Every serving dashboard was green.</p>
+<p>The wrong theory: the transfer code assumed the first layer's KV layout represented every layer. In fact this model has three different KV geometries: separated K and V tensors, interleaved K and V tensors, and a key-only index cache. Layer 1 told the truth only about layer 1.</p>
+<p>The signal was again the eval, the only instrument contradicting the dashboards. The fix took three pull requests. #46039 computed transfer geometry and byte offsets per layer, with no sharing of layer metadata. #46290 counted the writes scheduled per request, sealed the count after the forward pass, and released buffers only after those writes completed. Ownership and completion, not fire-and-forget. #46332 handled mismatched parallelism: with prefill at TP4 and decode at TP8, two decode ranks consume one prefill rank's output, so both must acknowledge before the prefill rank may reuse its block.</p>
+<p>The generalized rule, from a related cache bug: a cache key must contain every invariant that changes the cached object. Layout is an invariant. Parallelism topology is an invariant. If either can change and the key does not see it, you cache garbage correctly.</p>
+
+<h2>Did the fast path even run?</h2>
+<p>One more failure, and this time the victim was the authors themselves. The post originally attributed part of a speedup to INT4 QuickReduce, a compressed communication path. On audit they found INT4 was configured with a 256KB threshold, but the roughly 1.5MB decode collective never passed QuickReduce's separate 16MB eligibility gate. The code path the gain was attributed to never executed.</p>
+<p>Their words: "configured != eligible != executed". Three facts, and each is cheap to verify and easy to assume. You will flip flags in vLLM or any other serving stack: cache offloading, quantization backends, fused kernels. The flag being set, the path being eligible, and the kernel actually running are three different claims with three different proofs. A profiler or dispatch trace answers the third one. Config answers only the first.</p>
+
+<h2>Why can 2,000 tokens a second be unusable?</h2>
+<p>The last failure is about the queue, and it is the one the course least prepares you for. The first public disaggregated profile, InferenceX run #1762, used one TP8 prefill worker and one TP8 decode worker at concurrency 1024 on an 8K input / 1K output workload. It reached 2,084.6 total tokens/s/GPU. It also had a median time to first token of 223.20 seconds. The throughput number described a system nobody could use.</p>
+<p>The hidden assumption: more aggregate throughput means a working deployment. The signal that located the problem, in their phrase, "the prompt queue was the signal". Requests were waiting in admission, in front of prefill, not in any kernel.</p>
+<p>Run #2144 moved every worker to TP4, searched the prefill-to-decode ratio, and landed on two TP4 prefill workers feeding one TP4 decode worker at concurrency 512. Result: 6,370.5 tokens/s/GPU with a 1.32 second median TTFT. Three times the throughput, 169 times faster to first token, and no kernel got faster. The interesting detail: mean TPOT, the time per output token during decode, got worse, from 31.26 ms to 54.60 ms. That is not a contradiction. The extra prefill capacity drained the admission queue, and the chosen decode point ran each active sequence slower. A disaggregated deployment has at least two latency objectives: time to first token and time per output token. A fix can move them in opposite directions on purpose. Publish both.</p>
+
+<h2>The five questions, and the bug each one caught</h2>
+<p>The post's real result is a method: five diagnostic questions you apply to one decode step, escalating up the stack as each level's bottleneck flattens. Each one found something concrete.</p>
+<ol>
+<li><strong>What shape reached this rank?</strong> Kernels see local GEMM shapes after sharding and head replication, not the model card's global dimensions. Found: decode and prefill need different kernel launchers (7.8 to 9.4% at TP8).</li>
+<li><strong>What work repeats?</strong> Found: the shared expert in every MoE layer ran as a separate dense pass. Fusing it: +30.2% throughput at concurrency 1, +5.6% at 128. The shrinking gain is the signature of launch-overhead amortization.</li>
+<li><strong>Which bytes move?</strong> Weights, persistent KV state, and communication are three byte planes with separate contracts. "The model is MXFP4" says nothing about which plane is quantized.</li>
+<li><strong>Did the intended fast path run, with the intended math?</strong> Found: the FP8 KV bug, the transfer bug, the mask bug, and the QuickReduce retraction.</li>
+<li><strong>When kernels flatten, which queue grows?</strong> Found: the admission queue, and finally an OS limit: one high-concurrency run exhausted the container's file-descriptor cap and died on TCP failures.</li>
+</ol>
+<p>The arc is the lesson. The bottleneck moves from kernel tiles, to repeated work, to KV state, to the queue. The diagnostic question has to move with it. It ends at: follow the queue.</p>
+
+<h2>What a correctness gate looks like</h2>
+<p>The cheapest version of the instrument that caught incidents one and two is a fixed prompt set with a known-answer check. This runs against any OpenAI-compatible server, stdlib only:</p>
+<pre><code>import json, re, urllib.request
+
+PROMPTS = [
+    ("Natalia sold clips to 48 friends in April, and half as many in May. "
+     "How many clips did she sell altogether in April and May?", 72),
+    ("A robe takes 2 bolts of blue fiber and half that much white fiber. "
+     "How many bolts in total does it take?", 3),
+    ("Weng earns $12 an hour for babysitting. She babysat 50 minutes. "
+     "How much did she earn?", 10),
+]  # extend to 30-50 items; three is enough to expose a layout bug
+
+URL = "http://localhost:8000/v1/chat/completions"
+
+def ask(server, prompt):
+    body = json.dumps({
+        "model": "minimax-m3", "temperature": 0,
+        "messages": [{"role": "user",
+                      "content": prompt + " End with '#### &lt;number&gt;'."}],
+        "max_tokens": 512,
+    }).encode()
+    req = urllib.request.Request(server, data=body,
+                                 headers={"Content-Type": "application/json"})
+    r = json.load(urllib.request.urlopen(req, timeout=60))
+    return r["choices"][0]["message"]["content"]
+
+def strict_match(text):
+    m = re.search(r"####\s*(-?[\d,]+(?:\.\d+)?)", text)
+    return float(m.group(1).replace(",", "")) if m else None
+
+score = sum(strict_match(ask(URL, p)) == a for p, a in PROMPTS) / len(PROMPTS)
+print(f"strict match: {score:.4f}  ({len(PROMPTS)} prompts, temperature 0)")</code></pre>
+<p>Pin temperature to 0 so the number is stable. Run it in CI, or after any change to the KV cache, quantization, or a fast-path flag. A strict-match drop with flat throughput is incident one. This harness costs an evening once and pays out the first time a config change corrupts state.</p>
+
+<h2>Fifteen minutes today</h2>
+<p>Take the script above, point it at whatever model you serve locally, and run it once to get a baseline. Then flip one serving flag you have set (KV quantization, cache offload, anything) and run it again. If the load test was your only gate, you now have two gates. Fifteen minutes, and it answers the question behind this whole article.</p>
+
+<h2>A question to test the transfer</h2>
+<p>You enable an FP8 KV cache on your decode workers and long-context replies start reading as garbage under load, while every latency chart is flat. Using the lifecycle from Phase 1, which stage do you instrument first, and what single number do you check before any throughput chart? (A correct answer names the KV cache's storage contract and the strict-match score on a fixed prompt set, and can say why TTFT and TPOT cannot see the problem.)</p>
+
+<h2>Things I could not verify</h2>
+<ul>
+<li>Every performance number is from the post's own text. I did not cross-check against SemiAnalysis InferenceX's independent database (runs #1762, #2144, #2187).</li>
+<li>The pull request numbers are quoted from the post; none were opened.</li>
+<li>MiniMax M3's spec (60 layers, 57 sparse, MXFP8/MXFP4 checkpoints) is as the post states; not checked independently.</li>
+<li>The file-descriptor incident is one sentence with no PR number; treat it as an anecdote.</li>
+<li>This is a vendor post about the vendor's own benchmark. It is an unusually honest one (it retracts a claim against itself), but the numbers stay the authors' numbers.</li>
+<li>The QuickReduce threshold details (256KB codec, 16MB gate, BF16 at TP4) are the authors' reading of their own pinned config, not a source file I checked.</li>
+</ul>
+
+<h2>Two things you could post</h2>
+<ol>
+<li>"Your inference server can hit 2,084 tokens/s/GPU with a 223-second TTFT." Claim: throughput is a vanity metric until you publish the queue. Yours because Mission HQ has real admission queues and you can show same shape in an agent executor.</li>
+<li>"Configured is not eligible is not executed." Claim: the flag you flipped may never have run; ask for the dispatch trace before believing the speedup. Yours because you can walk one gated fast path in your own stack to the kernel level.</li>
+</ol>
+
+<h2>Sources</h2>
+<ul>
+<li><a href="https://vllm.ai/blog/2026-09-10-minimax-m3-mi355x">Following the Bottleneck: Optimizing MiniMax M3 on AMD Instinct MI355X</a> (vLLM blog, 2026-09-10; all numbers are the post's own, not cross-checked)</li>
+</ul>
+</main>
+</body>
+</html>

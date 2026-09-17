@@ -1,0 +1,78 @@
+{
+  "topic": "inference-internals",
+  "title": "LLM Inference Internals for Application Engineers",
+  "module": 1,
+  "language": "python",
+  "totalPhases": 7,
+  "currentPhase": 7,
+  "outline": [
+    {
+      "file": "inference-internals-phase-00-frame.md",
+      "phase": 0,
+      "title": "Frame the problem",
+      "status": "completed",
+      "subtitle": "Why the API hides a machine you are billed for"
+    },
+    {
+      "file": "inference-internals-phase-01-lifecycle.md",
+      "phase": 1,
+      "title": "Core mental model",
+      "status": "completed",
+      "subtitle": "Tokenizer to prefill to KV cache to decode: the request lifecycle"
+    },
+    {
+      "file": "inference-internals-phase-02-internals.md",
+      "phase": 2,
+      "title": "Internals",
+      "status": "completed",
+      "subtitle": "Continuous batching, PagedAttention/RadixAttention, chunked prefill, constrained decoding + the constraint tax, context management & the compaction trigger"
+    },
+    {
+      "file": "inference-internals-phase-03a-caching.md",
+      "parts": [
+        "inference-internals-phase-03a-caching.md",
+        "inference-internals-phase-03b-routing-alerting.md"
+      ],
+      "phase": 3,
+      "title": "Economics and tuning",
+      "status": "completed",
+      "subtitle": "Part A: the five token classes, implicit prefix caching, explicit cache_control and its break-even. Part B: routing cascades with a control group, batch APIs, and per-request cost alerting."
+    },
+    {
+      "file": "inference-internals-phase-04a-serving.md",
+      "parts": [
+        "inference-internals-phase-04a-serving.md",
+        "inference-internals-phase-04b-optimizing.md"
+      ],
+      "phase": 4,
+      "title": "Ecosystem",
+      "status": "completed",
+      "subtitle": "Part A: renting a GPU, serving with vLLM and SGLang, and benchmarking honestly. Part B: quantization with a gate, speculative decoding arithmetic, and the self-host decision. Needs a rented GPU, about $5-10 total."
+    },
+    {
+      "file": "inference-internals-phase-05a-client.md",
+      "parts": [
+        "inference-internals-phase-05a-client.md",
+        "inference-internals-phase-05b-observability.md"
+      ],
+      "phase": 5,
+      "title": "Production operations",
+      "status": "completed",
+      "subtitle": "Part A: streaming timeouts, rate-limit headers, and why retries make overload worse, measured. Part B: four SLO indicators with burn-rate alerting, the run record and its OpenTelemetry names, and why fallback is usually the wrong pattern."
+    },
+    {
+      "file": "inference-internals-phase-06a-capacity-tenants.md",
+      "parts": [
+        "inference-internals-phase-06a-capacity-tenants.md",
+        "inference-internals-phase-06b-incidents-review.md"
+      ],
+      "phase": 6,
+      "title": "Senior design",
+      "status": "completed",
+      "subtitle": "Part A: replica count from measured numbers with Erlang C, headroom for cold starts, autoscaling on the queue, and token-fair multi-tenant scheduling with quotas and cache isolation. Part B: quality incident triage by slice, rollback, and defending the design in review with numbers and their sources."
+    }
+  ],
+  "importedFrom": "https://raghu-monitoring.vercel.app",
+  "importedAt": "2026-09-17",
+  "note": "Imported from the study platform on this laptop. The original material, with its code/ folder, lives on the laptop that generated it."
+}

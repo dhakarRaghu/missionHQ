@@ -1,0 +1,8 @@
+{
+  "baseDir": "learning/study-material",
+  "lastActiveTopic": "inference-internals",
+  "courses": [
+    "inference-internals"
+  ],
+  "dashboardUrl": "https://raghu-monitoring.vercel.app"
+}

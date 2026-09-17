@@ -193,7 +193,12 @@ async def web_fetch(ctx: RunContext[HQDeps], url: str) -> dict:
         except Exception as emit_exc:  # noqa: BLE001 — evidence only; never fail the tool
             log.warning("web_fetch.client_error emit failed: %s", emit_exc)
         return {"url": url, "provenance": "web", "error": f"HTTP {status} for {url}"}
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, ValueError) as exc:
+        # ValueError is check_url's "cannot resolve <host>" (and a bad scheme
+        # or a redirect loop). It was missed here: on 2026-09-16 a source hunt
+        # fetched www.vanlightly.com three times, DNS failed each time, and the
+        # raise ended the whole run with "a tool kept failing".
+        #
         # Everything else that stopped the fetch reaching a page: a hostname
         # that does not resolve, a refused connection, a timeout. Same reason
         # as the 4xx branch above, learned the same way — on 2026-09-10 a
@@ -326,7 +331,7 @@ async def fetch_source(ctx: RunContext[HQDeps], url: str) -> dict:
                     " fetchers; try browser_read and say so in your note"
             if status in (401, 403) else "",
         }
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, ValueError) as exc:  # ValueError: host does not resolve
         return {"url": url, "provenance": "web",
                 "error": f"could not reach {url} ({type(exc).__name__}: {exc})"[:300]}
 

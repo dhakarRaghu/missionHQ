@@ -14,6 +14,7 @@ from hq.tools import (  # noqa: F401
     learning_tools,
     policy_tools,
     request_tools,
+    review_tools,
     vault_tools,
     web_tools,
 )

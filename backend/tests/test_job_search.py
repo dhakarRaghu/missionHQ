@@ -674,7 +674,9 @@ def test_web_fetch_degrades_rather_than_killing_a_run() -> None:
     from hq.tools import web_tools
 
     src = inspect.getsource(web_tools.web_fetch)
-    assert "except httpx.HTTPError" in src
+    # ValueError is check_url's "cannot resolve": the dead-hostname case
+    # itself, which this branch did not catch until 2026-09-17.
+    assert "except (httpx.HTTPError, ValueError)" in src
     assert "could not reach" in src
     # ...but a 5xx must still raise, because that retry is worth having.
     assert "raise  # server trouble" in src

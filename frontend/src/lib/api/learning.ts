@@ -16,7 +16,9 @@ export interface Lesson {
   md_path: string;
   /** Vault path of the self-contained page with the diagram. May be empty. */
   html_path: string;
-  /** Tutor's own score out of 60. */
+  /** Tutor's own score: out of 90 for a topic article, 130 for a course
+   * lesson. The label printed the wrong denominator twice ("69/60"), so use
+   * `SCORE_OUT_OF` rather than writing a number next to it. */
   score: number;
   /** The article urls the lesson was built from. */
   sources: string[];
@@ -28,7 +30,33 @@ export interface Lesson {
   course_slug: string;
   /** Until this is set, the evening run will not start the next phase. */
   read_at: string | null;
+  /** A daily article orbits the active course phase. The slug of that phase,
+   * or "" when the article was written before articles orbited one. Optional
+   * because older rows predate the field. */
+  phase_slug?: string;
+  /** How the article stands to that phase, or "" when it has none. */
+  relationship?: ArticleRelationship | "";
+  phase_title?: string | null;
+  phase_course?: string | null;
+  review_status?: ReviewStatus;
+  review_score?: number | null;
 }
+
+/** What an independent reviewer made of a lesson after running its lab. */
+export type ReviewStatus = "pending" | "passed" | "revise" | "failed";
+
+/** How a daily article relates to the course phase it orbits. */
+export type ArticleRelationship =
+  | "fails"
+  | "measures"
+  | "applies"
+  | "updates"
+  | "challenges"
+  | "extends";
+
+/** Self-score denominators. A course lesson is scored out of 130 and a topic
+ * article out of 90; both were once printed as /80. */
+export const SCORE_OUT_OF = { course: 130, topic: 90 } as const;
 
 /** One lesson page as markup, with a Content-Security-Policy already injected
  * by the API. It is rendered inside a sandboxed frame and never in this
@@ -82,6 +110,14 @@ export interface Course {
   next_title: string | null;
   /** Exactly one course is active; the evening run only touches that one. */
   active: boolean;
+  /** What the course is for, in a line. Optional: the backend adds these two
+   * later, so every reader must cope with them being absent. */
+  description?: string;
+  /** Where the syllabus came from — his study platform, or written here. */
+  source?: "platform" | "local";
+  /** The course's own name, and its place on his path (999 = not on it). */
+  title?: string;
+  course_order?: number;
 }
 
 /** One phase of a course, as it appears on his study platform. */
@@ -106,6 +142,42 @@ export interface CoursePhase {
   lesson_date: string | null;
   lesson_score: number | null;
   lesson_read_at: string | null;
+  /** Read is a fact about the phase: a published phase can be read before
+   * Mission HQ has added anything to it. Prefer this over `lesson_read_at`;
+   * optional because older API builds do not send it. */
+  read_at?: string | null;
+  /** The phase's spec, as the syllabus states it: the question the phase
+   * answers, the ground it covers, the exercise and the way out of it.
+   * Optional — the backend adds these later, so render only what is there. */
+  question?: string;
+  /** Written here as a spec, or a module on his study platform. */
+  source?: "platform" | "local";
+  sections?: string[];
+  lab?: string;
+  test_out?: string;
+  /** The independent reviewer's verdict on the phase's lesson, after it ran
+   * the lab. Null until the phase is taught. Optional for older rows. */
+  lesson_review_status?: ReviewStatus | null;
+  lesson_review_score?: number | null;
+  /** One finding per line, "location → problem → fix". */
+  lesson_review_notes?: string | null;
+}
+
+/** A phase's original text, as written with Claude. What he reads is the
+ * enhanced page Mission HQ builds from it (the lesson's html_path); this is
+ * shown until that exists. A planned (local) phase has `published: false`. */
+export interface PhaseContent {
+  slug: string;
+  source: "platform" | "local";
+  published: boolean;
+  title?: string;
+  summary?: string;
+  minutes?: number;
+  tags?: string[];
+  /** The full published markdown. */
+  content: string;
+  /** The phase on the study platform. */
+  original_url: string;
 }
 
 export const learningKeys = {
@@ -117,6 +189,8 @@ export const learningKeys = {
   courses: ["learning", "courses"] as const,
   coursePhases: (course: string) =>
     ["learning", "courses", course] as const,
+  phaseContent: (course: string, slug: string) =>
+    ["learning", "phase-content", course, slug] as const,
   readings: (status: string) => ["learning", "readings", status] as const,
 };
 
@@ -139,6 +213,16 @@ export const learningApi = {
     sendJson<{ started: boolean; reason?: string; title?: string }>(
       "POST",
       `/learning/courses/${encodeURIComponent(course)}/phases/${encodeURIComponent(slug)}/teach`,
+    ),
+  phaseContent: (course: string, slug: string) =>
+    getJson<PhaseContent>(
+      `/learning/courses/${encodeURIComponent(course)}/phases/${encodeURIComponent(slug)}/content`,
+    ),
+  /** Marks the phase read, which unlocks the next one for the evening run. */
+  markPhaseRead: (course: string, slug: string) =>
+    sendJson<{ ok: boolean; title: string }>(
+      "POST",
+      `/learning/courses/${encodeURIComponent(course)}/phases/${encodeURIComponent(slug)}/read`,
     ),
   activateCourse: (course: string) =>
     sendJson<{ active: string }>(

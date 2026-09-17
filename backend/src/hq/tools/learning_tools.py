@@ -9,25 +9,31 @@ tools only make it durable.
 from __future__ import annotations
 
 import asyncio
+import html as html_lib
 import json
 import logging
 import re
+import shutil
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic_ai import ModelRetry, RunContext
 
-from hq import db
+from hq import courses as courses_spec
+from hq import db, lesson_kit
 from hq.config import settings
 from hq.learning_pipeline import (
+    COURSE_REVIEW_STAGE,
     LESSON_DIR,
     MAX_CANDIDATES,
+    RELATIONSHIPS,
     course_payload,
     course_study_brief,
+    evidence_gaps,
     feed_brief,
     feed_payload,
     scan_brief,
@@ -179,7 +185,21 @@ async def record_reading(
     with `why` saying what was wrong. A skip recorded is a skip not repeated.
     """
     url = url.strip()
-    if not url.startswith(("http://", "https://")):
+    if url.startswith("local://"):
+        # A phase written as a spec in learning/courses/ has no web address; its
+        # course_phases row carries local://<spec path>#phase-N. Refusing it
+        # meant hunter could never record the study note for a local phase, and
+        # every one of them stopped at "study finished with no digest".
+        known = await db.fetchone(
+            "SELECT 1 AS ok FROM hq.course_phases WHERE url = %s AND source = 'local'",
+            (url,),
+        )
+        if not known:
+            raise ModelRetry(
+                "a local:// url must be a local course phase's url, exactly as the"
+                " brief gave it"
+            )
+    elif not url.startswith(("http://", "https://")):
         raise ModelRetry("url must be the full https:// address of the article")
     status = (status or "found").strip().lower()
     if status not in STATUSES:
@@ -240,6 +260,33 @@ async def list_readings(
     )
 
 
+async def current_task_stage(task_id: str | None) -> str:
+    """The workflow stage of the task a tool runs in, or "" outside one.
+
+    Review is a separate tutor run, not a separate agent, so the same tutor
+    holds both the writing tools and `record_review`. The stage is what keeps
+    the two jobs apart: a review run cannot rewrite the lesson, and a writing
+    run cannot approve its own work.
+    """
+    if not task_id:
+        return ""
+    try:
+        row = await db.fetchone(
+            "SELECT payload->>'stage' AS stage FROM hq.tasks WHERE id = %s::uuid",
+            (task_id,),
+        )
+    except Exception as exc:  # noqa: BLE001 — writes stay open, record_review stays shut
+        log.warning("task stage unavailable for %s: %s", task_id, exc)
+        return ""
+    return str((row or {}).get("stage") or "")
+
+
+REVIEW_TASK_WRITES = (
+    "this is a review task: it records a verdict with record_review and never"
+    " writes the lesson, the lab or the lesson record"
+)
+
+
 @hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
 async def record_lesson(
     ctx: RunContext[HQDeps],
@@ -253,28 +300,53 @@ async def record_lesson(
     path_step: str = "",
     kind: str = "topic",
     course_slug: str = "",
+    phase_slug: str = "",
+    relationship: str = "",
 ) -> str:
     """File today's lesson so it reaches his Learn view and his phone.
 
     `source_urls` is the articles it was built from, comma or newline
     separated. Those readings are marked taught, which is what stops tomorrow
     teaching the same material.
+
+    For an article, `phase_slug` is the course phase it orbits and
+    `relationship` is what it is for relative to that phase (fails, measures,
+    applies, updates, challenges, extends). They are what tells the next
+    morning's scan which relationship the phase is still missing.
     """
+    if await current_task_stage(ctx.deps.task_id) == COURSE_REVIEW_STAGE:
+        raise ModelRetry(REVIEW_TASK_WRITES)
     title = title.strip()
     if not title:
         raise ModelRetry("title is required: the lesson's own headline")
     if not md_path.strip():
         raise ModelRetry("md_path is required: where you wrote the lesson")
     urls = [u.strip() for u in source_urls.replace("\n", ",").split(",") if u.strip()]
-    score = max(0, min(int(score or 0), 100))
+    score = max(0, min(int(score or 0), 1000))
+    relationship = relationship.strip().lower()
+    if relationship and relationship not in RELATIONSHIPS:
+        raise ModelRetry(f"relationship must be one of {', '.join(RELATIONSHIPS)}")
+    is_course = kind.strip().lower() == "course"
+    if is_course and not course_slug.strip():
+        raise ModelRetry("a course lesson needs course_slug: the phase slug from the brief")
+
+    review = "pending"
+    if is_course:
+        published = await db.fetchone(
+            "SELECT source FROM hq.course_phases WHERE slug = %s", (course_slug.strip(),)
+        )
+        # The phase itself went through the /study review; its enhanced page
+        # is checked for coverage against the source when it is written.
+        if published and published["source"] == "platform":
+            review = "none"
 
     row = await db.fetchone(
         """
         INSERT INTO hq.lessons (lesson_date, title, one_liner, topic, md_path,
                                 html_path, score, sources, path_step, kind,
-                                course_slug)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
-        ON CONFLICT (lesson_date, kind) DO UPDATE SET
+                                course_slug, phase_slug, relationship, review_status)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s)
+        {conflict} DO UPDATE SET
             title = EXCLUDED.title,
             one_liner = EXCLUDED.one_liner,
             topic = EXCLUDED.topic,
@@ -282,14 +354,28 @@ async def record_lesson(
             html_path = COALESCE(NULLIF(EXCLUDED.html_path, ''), hq.lessons.html_path),
             score = EXCLUDED.score,
             sources = EXCLUDED.sources,
-            path_step = COALESCE(NULLIF(EXCLUDED.path_step, ''), hq.lessons.path_step)
+            path_step = COALESCE(NULLIF(EXCLUDED.path_step, ''), hq.lessons.path_step),
+            course_slug = COALESCE(NULLIF(EXCLUDED.course_slug, ''), hq.lessons.course_slug),
+            phase_slug = COALESCE(NULLIF(EXCLUDED.phase_slug, ''), hq.lessons.phase_slug),
+            relationship = COALESCE(NULLIF(EXCLUDED.relationship, ''), hq.lessons.relationship),
+            -- A rewritten lesson has not been reviewed. Without this reset a
+            -- revision inherited the last round's "revise", and a reviewer that
+            -- then failed to record anything looked like a fresh rejection.
+            review_status = EXCLUDED.review_status{reread}
         RETURNING id::text
-        """,
+        """.format(
+            # One row per course phase, one topic article per day (migration 027).
+            conflict=("ON CONFLICT (course_slug) WHERE kind = 'course' AND course_slug <> ''"
+                      if is_course else "ON CONFLICT (lesson_date) WHERE kind = 'topic'"),
+            # A revised course lesson is a different lesson: he has not read it.
+            reread=(",\n            lesson_date = EXCLUDED.lesson_date,\n            read_at = NULL"
+                    if is_course else ""),
+        ),
         (_today().date(), title[:300], one_liner.strip()[:400], topic.strip()[:120],
          md_path.strip()[:300], html_path.strip()[:300], score, json.dumps(urls[:12]),
          path_step.strip()[:120],
          'course' if kind.strip().lower() == 'course' else 'topic',
-         course_slug.strip()[:200]),
+         course_slug.strip()[:200], phase_slug.strip()[:200], relationship, review),
     )
     lesson_id = (row or {}).get("id", "")
     if course_slug.strip():
@@ -339,6 +425,18 @@ def _md_headings(markdown: str) -> list[str]:
                                           re.MULTILINE)]
 
 
+def html_to_text(html: str) -> str:
+    """A readable markdown-ish copy of a page body: headings, paragraphs, lists."""
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.DOTALL | re.IGNORECASE)
+    for level in (1, 2, 3):
+        text = re.sub(rf"<h{level}[^>]*>", "\n\n" + "#" * level + " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<li[^>]*>", "\n- ", text, flags=re.IGNORECASE)
+    text = re.sub(r"</(p|div|h\d|pre|figure|aside|details|ul|ol|table|tr)>", "\n\n", text,
+                  flags=re.IGNORECASE)
+    text = html_lib.unescape(re.sub(r"<[^>]+>", "", text))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(ln.rstrip() for ln in text.splitlines())).strip()
+
+
 def page_shortfall(markdown: str, html: str) -> str:
     """Why this page is not the lesson, or "" when it is.
 
@@ -369,34 +467,188 @@ def page_shortfall(markdown: str, html: str) -> str:
     )
 
 
+# A course phase is 20-30 KB of markdown and a page of about the same again.
+# Asked for in one tool call, that is one model response of 30k+ tokens with
+# reasoning, and at the gateway's ~50 tokens a second it outlived the
+# 600-second step limit. On 2026-09-16 the inference Phase 1 lesson was
+# attempted three times, 80 to 110 minutes each, and every attempt was
+# cancelled mid-answer with nothing saved. One section per call keeps every
+# response a few minutes long, and a retried run resumes from the parts that
+# were already written instead of starting again.
+DRAFTS_SUBDIR = ".drafts"
+
+
+def _clean_slug(slug: str) -> str:
+    clean = re.sub(r"[^a-z0-9-]+", "-", slug.strip().lower()).strip("-")[:60]
+    if not clean:
+        raise ModelRetry("slug must be lowercase words joined by hyphens")
+    return clean
+
+
+def _draft_dir(task_id: str | None, clean: str) -> Path:
+    owner = re.sub(r"[^a-z0-9-]+", "-", (task_id or "adhoc").lower())[:40]
+    return settings().learning_dir / "lessons" / DRAFTS_SUBDIR / f"{owner}-{clean}"
+
+
+def _draft_parts(folder: Path) -> list[dict[str, Any]]:
+    if not folder.is_dir():
+        return []
+    parts = []
+    for md in sorted(folder.glob("*.md")):
+        html = md.with_suffix(".html")
+        text = md.read_text()
+        parts.append({
+            "part": int(md.stem),
+            "heading": next(iter(_md_headings(text)), ""),
+            "words": len(text.split()),
+            "page_words": _visible_words(html.read_text()) if html.exists() else 0,
+        })
+    return parts
+
+
+def _assemble(folder: Path) -> tuple[str, str]:
+    mds = sorted(folder.glob("*.md"))
+    markdown = "\n\n".join(p.read_text().strip() for p in mds)
+    htmls = [p.with_suffix(".html") for p in mds]
+    html = "\n".join(h.read_text() for h in htmls if h.exists())
+    return markdown, html
+
+
+@hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
+async def write_lesson_part(
+    ctx: RunContext[HQDeps], slug: str, part: int, markdown: str, html: str = ""
+) -> dict[str, Any]:
+    """Save ONE section of a lesson as a draft, then call the next part.
+
+    Use this for anything longer than a short article: one call per section,
+    `part` counting from 1 in reading order. `html` is that section as page
+    body, using the page kit's components (the `teaching` skill lists them);
+    no doctype, head or style — `write_lesson` wraps the parts in the kit.
+    `markdown` is the same section as text; leave it empty for a course page
+    and it is derived from the html. The parts are joined in order, so write
+    each as if the previous one sits directly above it.
+
+    Writing the same `part` again replaces it. When every part is saved, call
+    `write_lesson` with the slug and no markdown: it joins the parts and
+    checks the whole. The result lists every part saved so far, which is also
+    how a retried run finds where it stopped.
+    """
+    if await current_task_stage(ctx.deps.task_id) == COURSE_REVIEW_STAGE:
+        raise ModelRetry(REVIEW_TASK_WRITES)
+    clean = _clean_slug(slug)
+    if not 1 <= int(part) <= 99:
+        raise ModelRetry("part counts from 1 to 99, in reading order")
+    if not markdown.strip() and not html.strip():
+        raise ModelRetry("a part needs its html (and, for an article, its markdown)")
+    if not markdown.strip():
+        # A course page is written as html only; the text copy is derived, so
+        # a writing call does not carry the same section twice.
+        markdown = html_to_text(html)
+    markdown = _FRONTMATTER_RE.sub("", markdown, count=1)
+    html = _FRONTMATTER_RE.sub("", html, count=1)
+    folder = _draft_dir(ctx.deps.task_id, clean)
+    await asyncio.to_thread(folder.mkdir, parents=True, exist_ok=True)
+    name = f"{int(part):02d}"
+    await asyncio.to_thread((folder / f"{name}.md").write_text, markdown)
+    page = folder / f"{name}.html"
+    if html.strip():
+        await asyncio.to_thread(page.write_text, html)
+    elif page.exists():
+        await asyncio.to_thread(page.unlink)
+    return {"slug": clean, "saved": int(part),
+            "parts": await asyncio.to_thread(_draft_parts, folder)}
+
+
+@hq_tool(action=ActionClass.READ, trust=Trust.TOOL)
+async def lesson_draft(ctx: RunContext[HQDeps], slug: str) -> dict[str, Any]:
+    """The parts of this lesson already saved by this task, if any.
+
+    Call it first when you start writing a lesson. A retried run finds its
+    earlier parts here and continues from the next one instead of starting
+    again.
+    """
+    folder = _draft_dir(ctx.deps.task_id, _clean_slug(slug))
+    return {"slug": _clean_slug(slug),
+            "parts": await asyncio.to_thread(_draft_parts, folder)}
+
+
 @hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
 async def write_lesson(
-    ctx: RunContext[HQDeps], slug: str, markdown: str, html: str = ""
+    ctx: RunContext[HQDeps],
+    slug: str,
+    markdown: str = "",
+    html: str = "",
+    title: str = "",
+    subtitle: str = "",
+    eyebrow: str = "",
 ) -> str:
-    """Write today's lesson into the repo and return the two paths.
+    """Write the lesson into the repo and return the two paths.
 
     `slug` is lowercase words joined by hyphens — "what-breaks-in-retrieval".
-    Today's date is prefixed for you. The markdown is the lesson; `html` is
-    the self-contained page with the diagram, and may be empty on a day with
-    no mechanism worth drawing.
+    Today's date is prefixed for you.
+
+    Two ways to call it. For a lesson saved section by section with
+    `write_lesson_part`, pass only the slug: the parts are joined and checked
+    as one. For a short piece, pass the whole `markdown` and `html` at once.
+    `html` is the page body, and may be empty on a day with no page.
+
+    `title`, `subtitle` (the question it answers) and `eyebrow` (for a course
+    phase, "Inference Internals · Phase 3A") head the page. The body is
+    wrapped in the page kit: one design, a contents rail, copy buttons, steps
+    and tabs. For a course phase the page must carry every numbered section
+    of the phase's source and at least its words.
 
     This is the only way to write a lesson. It lands in the repo rather than
     the vault, because the vault is the agents' memory layer and the owner
     should never have to open it to find his own reading.
     """
-    clean = re.sub(r"[^a-z0-9-]+", "-", slug.strip().lower()).strip("-")[:60]
-    if not clean:
-        raise ModelRetry("slug must be lowercase words joined by hyphens")
-    if not markdown.strip():
-        raise ModelRetry("markdown is the lesson itself and cannot be empty")
+    if await current_task_stage(ctx.deps.task_id) == COURSE_REVIEW_STAGE:
+        raise ModelRetry(REVIEW_TASK_WRITES)
+    clean = _clean_slug(slug)
+    folder = _draft_dir(ctx.deps.task_id, clean)
+    from_parts = not markdown.strip()
+    if from_parts:
+        if not await asyncio.to_thread(_draft_parts, folder):
+            raise ModelRetry(
+                "no markdown and no saved parts for this slug: save each section "
+                "with write_lesson_part first, or pass the whole markdown"
+            )
+        markdown, html = await asyncio.to_thread(_assemble, folder)
 
     # Tutor stamps vault frontmatter out of habit. These are repo files, and
     # in an HTML document a `---` block before <!DOCTYPE> renders as stray text.
     markdown = _FRONTMATTER_RE.sub("", markdown, count=1)
     html = _FRONTMATTER_RE.sub("", html, count=1)
 
-    shortfall = page_shortfall(markdown, html)
+    source = await asyncio.to_thread(read_course_source_text, clean)
+    if html.strip() and source:
+        # Late import: review_tools imports this module.
+        from hq.tools.review_tools import _study_note
+
+        _note_path, note = await _study_note(clean)
+        gap = page_coverage(source, html, note)
+        if gap:
+            raise ModelRetry(
+                f"the enhanced page is not complete: {gap}. Fix those parts with"
+                " write_lesson_part (read_course_source gives each section), then"
+                " call write_lesson again"
+            )
+    broken = page_script_problems(html) if html.strip() else ""
+    if broken:
+        raise ModelRetry(
+            f"a figure on the page cannot work: {broken}. Fix the parts with"
+            " write_lesson_part, then call write_lesson again"
+        )
+    if html.strip() and not lesson_kit.is_full_document(html):
+        page_title = title.strip() or next(
+            (ln[2:].strip() for ln in markdown.splitlines() if ln.startswith("# ")), clean)
+        html = lesson_kit.wrap_page(html, title=page_title, subtitle=subtitle.strip(),
+                                    eyebrow=eyebrow.strip())
+
+    shortfall = "" if source else page_shortfall(markdown, html)
     if shortfall:
+        if from_parts:
+            shortfall += " — fix the parts whose page_words fall short with write_lesson_part"
         raise ModelRetry(shortfall)
 
     name = f"{_today().date()}-{clean}"
@@ -409,10 +661,12 @@ async def write_lesson(
     if html.strip():
         html_path = f"{LESSON_DIR}/{name}.html"
         await asyncio.to_thread((lessons / f"{name}.html").write_text, html)
+    if from_parts:
+        await asyncio.to_thread(shutil.rmtree, folder, True)
 
     await emit("lesson.written", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
                payload={"md_path": md_path, "html": bool(html_path),
-                        "chars": len(markdown)})
+                        "chars": len(markdown), "from_parts": from_parts})
     return (
         f"wrote {md_path}" + (f" and {html_path}" if html_path else " (no page)")
         + " — pass these paths to record_lesson"
@@ -470,18 +724,21 @@ async def sync_courses(ctx: RunContext[HQDeps]) -> str:
         if not slug:
             continue
         course, _, tail = slug.partition("-phase-")
+        if (course or slug) in courses_spec.EXCLUDED_PLATFORM_COURSES:
+            continue
         order = 0
         if tail[:2].isdigit():
             order = int(tail[:2])
         await db.execute(
             """
             INSERT INTO hq.course_phases (slug, course, phase_order, title, summary,
-                                          category, difficulty, minutes, url)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                          category, difficulty, minutes, url, source)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'platform')
             ON CONFLICT (slug) DO UPDATE SET
                 title = EXCLUDED.title, summary = EXCLUDED.summary,
                 category = EXCLUDED.category, difficulty = EXCLUDED.difficulty,
-                minutes = EXCLUDED.minutes, synced_at = now()
+                minutes = EXCLUDED.minutes, url = EXCLUDED.url,
+                source = 'platform', synced_at = now()
             """,
             (slug, course or slug, order, str(item.get("title") or "")[:300],
              str(item.get("summary") or "")[:800], str(item.get("category") or "")[:60],
@@ -489,9 +746,88 @@ async def sync_courses(ctx: RunContext[HQDeps]) -> str:
              f"{settings().study_api_base.rstrip('/')}/study/{slug}"),
         )
         seen += 1
+    retired = await retire_published_specs()
+    local = await sync_local_courses()
     await emit("courses.synced", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
-               payload={"phases": seen})
-    return f"synced {seen} course phases from his study platform"
+               payload={"phases": seen, "local_phases": local, "retired": retired})
+    return (f"synced {seen} course phases from his study platform"
+            f" and {local} from learning/courses/")
+
+
+# A path course is written with Claude and the /study skill and published to
+# the platform, phase by phase. Until a phase is published, its spec row is the
+# plan; once it is, the published phase is the course and the plan row goes.
+# A plan row he already has progress on is kept rather than silently dropped.
+_PUBLISHED_ORDERS_SQL = (
+    "SELECT 1 FROM hq.course_phases pub WHERE pub.course = %s"
+    " AND pub.source = 'platform' AND pub.phase_order = %s"
+)
+
+
+async def retire_published_specs() -> int:
+    """Remove plan rows whose phase has been published. Returns how many."""
+    rows = await db.fetch(
+        "DELETE FROM hq.course_phases loc"
+        " WHERE loc.source = 'local' AND loc.status = 'pending'"
+        " AND loc.lesson_id IS NULL AND loc.read_at IS NULL"
+        " AND EXISTS (SELECT 1 FROM hq.course_phases pub"
+        "   WHERE pub.course = loc.course AND pub.source = 'platform'"
+        "   AND pub.phase_order = loc.phase_order)"
+        " RETURNING loc.slug",
+        (),
+    )
+    return len(rows)
+
+
+async def sync_local_courses() -> int:
+    """Register the courses written in learning/courses/ as phases.
+
+    Same rows as the platform's phases, so nothing downstream needs a second
+    path. A phase that already exists keeps its status and lesson — the spec
+    is the thing that updates, not the progress.
+    """
+    count = 0
+    for course in courses_spec.load_courses():
+        await db.execute(
+            """
+            INSERT INTO hq.courses (course, title, description, source, course_order, spec_path)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (course) DO UPDATE SET
+                title = EXCLUDED.title, description = EXCLUDED.description,
+                source = EXCLUDED.source, course_order = EXCLUDED.course_order,
+                spec_path = EXCLUDED.spec_path, synced_at = now()
+            """,
+            (course.course_key, course.title, course.description, course.source,
+             course.order, course.path),
+        )
+        if course.source != "local":
+            continue
+        for phase in course.phases:
+            slug = phase.slug(course.slug)
+            if await db.fetchone(_PUBLISHED_ORDERS_SQL, (course.slug, phase.order)):
+                continue  # published: the platform phase is the course now
+            await db.execute(
+                """
+                INSERT INTO hq.course_phases (slug, course, phase_order, title, summary,
+                                              category, difficulty, minutes, url,
+                                              source, question, sections, lab, test_out,
+                                              spec_path)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'local', %s, %s::jsonb, %s, %s, %s)
+                ON CONFLICT (slug) DO UPDATE SET
+                    title = EXCLUDED.title, summary = EXCLUDED.summary,
+                    minutes = EXCLUDED.minutes, question = EXCLUDED.question,
+                    sections = EXCLUDED.sections, lab = EXCLUDED.lab,
+                    test_out = EXCLUDED.test_out, spec_path = EXCLUDED.spec_path,
+                    synced_at = now()
+                """,
+                (slug, course.slug, phase.order, phase.title,
+                 " ".join(phase.why.split())[:800], "course", "advanced", phase.minutes,
+                 f"local://{course.path}#phase-{phase.order}",
+                 phase.question, json.dumps(phase.sections), phase.lab[:2000],
+                 phase.test_out[:2000], course.path),
+            )
+            count += 1
+    return count
 
 
 def module_shape(body: str) -> dict[str, Any]:
@@ -565,6 +901,31 @@ async def read_course_phase(ctx: RunContext[HQDeps], slug: str) -> dict[str, Any
     slug = slug.strip()
     if not slug or "/" in slug:
         raise ModelRetry("slug is the phase identifier, e.g. kafka-phase-02-...")
+    local = courses_spec.find_phase(slug)
+    if local is not None:
+        course, phase = local
+        # A local phase has a spec, not a module: the question, the sections
+        # it must cover, what it assumes and what it leaves for later. Hunter
+        # researches against that; tutor writes against it.
+        siblings = [
+            {"slug": p.slug(course.slug), "title": p.title} for p in course.phases
+        ]
+        await emit("course.phase_read", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
+                   payload={"slug": slug, "chars": len(phase.body), "source": "local"})
+        return {
+            "slug": slug,
+            "title": f"{course.title} — Phase {phase.order}: {phase.title}",
+            "summary": phase.question,
+            "source": "local",
+            "spec": True,
+            "sections": phase.sections,
+            "content": phase.body[:PHASE_MAX_CHARS],
+            "truncated": False,
+            "sequence": course_sequence(siblings, slug),
+            "shape": {**module_shape(phase.body), "is_spec": True,
+                      "declares_no_lab": not phase.lab.strip()},
+            "course_description": course.description,
+        }
     url = f"{settings().study_api_base.rstrip('/')}/api/study"
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.get(url, headers={"User-Agent": "MissionHQ/1.0"})
@@ -589,6 +950,267 @@ async def read_course_phase(ctx: RunContext[HQDeps], slug: str) -> dict[str, Any
                 "shape": module_shape(body),
             }
     raise ModelRetry(f"no phase with slug {slug!r}; call list_courses first")
+
+
+# --- the course source and the enhanced page ---------------------------------
+#
+# Course phases are written with Claude and the /study skill. The markdown is
+# published to the study platform, and the same file is kept in this repo
+# under learning/study-material/<course>/. Mission HQ builds the version he
+# reads here: a visual page, section by section, from that file plus hunter's
+# research.
+#
+# The repo copy is the source tutor reads, not the platform. The platform's
+# publish API takes writes without authentication, so its text is web text;
+# the repo file is what he and Claude wrote.
+STUDY_MATERIAL_DIR = "study-material"
+_FENCE_RE = re.compile(r"^(```|~~~)")
+_SECTION_NUM_RE = re.compile(r"^(\d+\.\d+)\b")
+_PLATFORM_TTL_S = 300.0
+_platform_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def split_sections(content: str) -> list[tuple[str, str]]:
+    """(heading, text) for each `## ` section, outside code fences.
+
+    The first entry is the text before the first section, with heading "".
+    The same rule the /study publish script uses for its table of contents: a
+    fenced markdown example must not start a section.
+    """
+    out: list[tuple[str, list[str]]] = [("", [])]
+    fenced = False
+    for line in content.splitlines():
+        if _FENCE_RE.match(line.strip()):
+            fenced = not fenced
+        elif not fenced and line.startswith("## "):
+            out.append((line[3:].strip(), [line]))
+            continue
+        out[-1][1].append(line)
+    return [(h, "\n".join(lines).strip()) for h, lines in out if h or "".join(lines).strip()]
+
+
+def module_sections(content: str) -> list[str]:
+    """The `## ` headings of a phase, outside code fences."""
+    return [h for h, _ in split_sections(content) if h]
+
+
+def _prose_words(text: str) -> int:
+    return len(re.sub(r"```.*?```", " ", text, flags=re.DOTALL).split())
+
+
+def course_source_file(slug: str) -> Path:
+    course = slug.partition("-phase-")[0]
+    return settings().learning_dir / STUDY_MATERIAL_DIR / course / f"{slug}.md"
+
+
+def read_course_source_text(slug: str) -> str:
+    path = course_source_file(slug)
+    return path.read_text() if path.is_file() else ""
+
+
+async def fetch_platform_document(slug: str) -> dict[str, Any]:
+    """One published phase from the study platform, cached for a few minutes."""
+    import time
+
+    hit = _platform_cache.get(slug)
+    if hit and time.monotonic() - hit[0] < _PLATFORM_TTL_S:
+        return hit[1]
+    url = f"{settings().study_api_base.rstrip('/')}/api/study"
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(url, params={"slug": slug},
+                                headers={"User-Agent": "MissionHQ/1.0"})
+        resp.raise_for_status()
+        doc = resp.json()
+    if isinstance(doc, list):
+        doc = next((d for d in doc if isinstance(d, dict) and d.get("slug") == slug), {})
+    if not isinstance(doc, dict) or not isinstance(doc.get("content"), str):
+        raise ValueError(f"the study platform has no content for {slug}")  # noqa: TRY004
+    _platform_cache[slug] = (time.monotonic(), doc)
+    return doc
+
+
+def match_section(sections: Sequence[str], wanted: str) -> str | None:
+    """The heading `wanted` names: a number ("3.2"), or the heading's start."""
+    key = " ".join(str(wanted).split()).strip().lower()
+    if not key:
+        return None
+    for heading in sections:
+        number = _SECTION_NUM_RE.match(heading.lower())
+        if number and number.group(1) == key:
+            return heading
+    for heading in sections:
+        if heading.lower().startswith(key):
+            return heading
+    return None
+
+
+@hq_tool(action=ActionClass.READ, trust=Trust.VAULT)
+async def read_course_source(
+    ctx: RunContext[HQDeps], slug: str, section: str = ""
+) -> dict[str, Any]:
+    """The course phase as he and Claude wrote it, one section at a time.
+
+    With no `section`: the phase's title, its sections in order (index,
+    heading, words) and its total words. With `section` — an index from that
+    list ("0" is the opening before the first heading), a number ("3.2") or
+    the start of a heading — that section's full markdown.
+
+    This is the material you enhance. Read each section right before you
+    write its part of the page, so nothing is written from memory.
+    """
+    text = await asyncio.to_thread(read_course_source_text, slug.strip())
+    if not text:
+        raise ModelRetry(
+            f"no source for {slug} in learning/{STUDY_MATERIAL_DIR}/. The phase has"
+            " not been written with /study on this machine yet."
+        )
+    parts = split_sections(text)
+    if not section.strip():
+        title = next((ln[2:].strip() for ln in text.splitlines() if ln.startswith("# ")), slug)
+        return {
+            "slug": slug, "title": title, "words": _prose_words(text),
+            "sections": [{"index": i, "heading": h or "(opening)", "words": _prose_words(t)}
+                         for i, (h, t) in enumerate(parts)],
+        }
+    key = section.strip()
+    if key.isdigit() and int(key) < len(parts):
+        heading, body = parts[int(key)]
+    else:
+        found = match_section([h for h, _ in parts], key)
+        if found is None:
+            raise ModelRetry(f"no section {section!r}; call read_course_source without a section")
+        heading, body = next(p for p in parts if p[0] == found)
+    return {"slug": slug, "heading": heading or "(opening)", "markdown": body}
+
+
+_EXERCISE_ID_RE = re.compile(r"\*\*(E\d+)\b")
+_RUN_CMD_RE = re.compile(r"Run:\s*`([^`]{4,})`")
+_PAGE_URL_RE = re.compile(r"https?://[^\s<>\"'`)\]]+")
+MAX_LISTED = 8
+
+
+def _listed(items: Sequence[str]) -> str:
+    shown = ", ".join(items[:MAX_LISTED])
+    return shown + (f" and {len(items) - MAX_LISTED} more" if len(items) > MAX_LISTED else "")
+
+
+_ID_ATTR_RE = re.compile(r"""\bid\s*=\s*["']([^"']+)["']""")
+_SCRIPT_RE = re.compile(r"<script[^>]*>(.*?)</script>", re.DOTALL | re.IGNORECASE)
+_ID_LOOKUP_RE = re.compile(
+    r"""getElementById\(\s*["']([^"']+)["']\s*\)|querySelector(?:All)?\(\s*["']#([\w-]+)["']"""
+)
+
+
+def page_script_problems(page_html: str) -> str:
+    """Figures that cannot work, found without running them.
+
+    A page is written one section per call, so two sections can each draw an
+    `id="arr1"`, and the second figure's script then drives the first one's
+    markup. And a script that looks up an id the markup does not have leaves
+    a figure dead while the page looks fine (2026-09-12: `.vcells` against
+    `id="vcells"`).
+    """
+    ids = _ID_ATTR_RE.findall(page_html)
+    seen = set(ids)
+    dupes = sorted({i for i in seen if ids.count(i) > 1})
+    scripts = "\n".join(_SCRIPT_RE.findall(page_html))
+    wanted = {a or b for a, b in _ID_LOOKUP_RE.findall(scripts)}
+    missing = sorted(w for w in wanted if w not in seen)
+    problems = []
+    if dupes:
+        problems.append("ids used more than once (give each figure its own prefix): "
+                        + _listed(dupes))
+    if missing:
+        problems.append("scripts look up ids that are not in the page: " + _listed(missing))
+    return "; ".join(problems)
+
+
+def page_coverage(source: str, page_html: str, note: str = "") -> str:
+    """Why the enhanced page is not a complete, faithful version, or "".
+
+    Measured checks only, because a same-model reviewer passes what reads
+    well. The enhanced page must keep:
+
+    * every numbered section ("3.1", "3.2") and at least the source's words:
+      "I'm not saying to reduce anything";
+    * every exercise id, every exact `Run:` command, and every answer sketch:
+      the original's commands and outputs came from real runs;
+    * only links from the source or hunter's study note;
+    * no employer name, past or present.
+    """
+    sections = [h for h, _ in split_sections(source) if h]
+    numbers = [m.group(1) for h in sections if (m := _SECTION_NUM_RE.match(h))]
+    visible = html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page_html)))
+    flat = " ".join(visible.split())
+    problems = []
+
+    missing = [n for n in numbers if not re.search(rf"(?<![\d.]){re.escape(n)}(?![\d])", visible)]
+    if missing:
+        problems.append("sections missing from the page: " + _listed(missing))
+
+    want = int(_prose_words(source) * PAGE_COVERAGE)
+    have = _visible_words(page_html)
+    if have < want:
+        problems.append(
+            f"the page carries {have} words against {_prose_words(source)} in the"
+            f" source; an enhanced version never teaches less (floor {want})"
+        )
+
+    exercises = sorted(set(_EXERCISE_ID_RE.findall(source)), key=lambda e: int(e[1:]))
+    lost = [e for e in exercises if not re.search(rf"\b{e}\b", visible)]
+    if lost:
+        problems.append("exercises missing: " + _listed(lost))
+
+    employers = [name.lower() for name in settings().private_employers]
+    # A command whose path names an employer cannot be copied as is: the
+    # employer rule wins, and the skill says to rename the path and say so.
+    commands = [c.strip() for c in _RUN_CMD_RE.findall(source)
+                if not any(name in c.lower() for name in employers)]
+    changed = [c for c in commands if " ".join(c.split()) not in flat]
+    if changed:
+        problems.append(
+            "these exact commands are missing or were changed; copy them character"
+            " for character: " + _listed([f"`{c}`" for c in changed])
+        )
+
+    sketches = len(re.findall(r"<details", source, re.IGNORECASE))
+    if sketches and len(re.findall(r"<details", page_html, re.IGNORECASE)) < sketches:
+        problems.append(
+            f"the source has {sketches} answer-sketch block(s); keep each as"
+            ' <details class="answer">'
+        )
+
+    allowed = source + "\n" + note
+    # SVG and XHTML namespace strings look like links and are not ones.
+    foreign = sorted({u.rstrip(".,;:") for u in _PAGE_URL_RE.findall(page_html)
+                      if u.rstrip(".,;:") not in allowed
+                      and not u.startswith(("http://www.w3.org/", "https://www.w3.org/"))})
+    if foreign:
+        problems.append(
+            "links that are in neither the phase nor hunter's note: " + _listed(foreign)
+        )
+
+    prose = html_lib.unescape(re.sub(r"<[^>]+>", " ", re.sub(
+        r"<(pre|script|style|h[1-6]|code)[^>]*>.*?</\1>", " ", page_html,
+        flags=re.DOTALL | re.IGNORECASE)))
+    dashes = prose.count("\u2014")
+    if dashes > max(10, have // 400):
+        problems.append(
+            f"{dashes} em dashes in the prose; he reads English as a second language"
+            " and a dash hides a second sentence. Split those sentences"
+        )
+
+    lowered = visible.lower()
+    named = [name for name in settings().private_employers if name.lower() in lowered]
+    # Links count too: a url can name the employer in its path.
+    named += [name for name in settings().private_employers
+              if name not in named and name.lower() in page_html.lower()]
+    if named:
+        problems.append(
+            "the page names an employer (" + ", ".join(named) + "). Replace every"
+            " mention with the mechanism it illustrates, in general terms"
+        )
+    return "; ".join(problems)
 
 
 @hq_tool(action=ActionClass.READ, trust=Trust.VAULT)
@@ -617,14 +1239,25 @@ async def start_course_study(ctx: RunContext[HQDeps], course: str = "") -> str:
     from hq import engine  # late import to avoid cycles
 
     unread = await db.fetchone(
-        "SELECT title, to_char(lesson_date, 'YYYY-MM-DD') AS d FROM hq.lessons"
-        " WHERE kind = 'course' AND read_at IS NULL ORDER BY lesson_date DESC LIMIT 1",
+        "SELECT title, to_char(lesson_date, 'YYYY-MM-DD') AS d, review_status,"
+        " read_at IS NULL AS unread FROM hq.lessons"
+        " WHERE kind = 'course' AND (read_at IS NULL OR review_status IN ('revise', 'failed'))"
+        " ORDER BY lesson_date DESC LIMIT 1",
         (),
     )
     if unread:
+        # Reading a lesson that is still being revised, or that failed review,
+        # is not finishing it. Starting the next phase on top of either is how
+        # a course moves on from material nobody has checked.
+        if unread["review_status"] == "revise":
+            return (f"not starting a new phase: {unread['title']!r} is being revised"
+                    " after review; the next phase waits for the fixed version.")
+        if unread["review_status"] == "failed":
+            return (f"not starting a new phase: {unread['title']!r} failed review;"
+                    " its findings are on the Courses page and need a decision.")
         return (
             f"not starting a new phase: {unread['title']!r} from {unread['d']} is"
-            " still unread. Mark it read on the Learn page and the next one runs."
+            " still unread. Mark it read on the Courses page and the next one runs."
         )
 
     # One course at a time. His words: "we will be learning all topic one by
@@ -641,19 +1274,28 @@ async def start_course_study(ctx: RunContext[HQDeps], course: str = "") -> str:
             "no active course. Pick one on the Courses page — it works one"
             " course at a time rather than spreading across all of them."
         )
-    where = "WHERE status = 'pending' AND course = %s"
+    where = "WHERE status = 'pending' AND read_at IS NULL AND course = %s"
     params: tuple[Any, ...] = (chosen,)
     nxt = await db.fetchone(
-        f"SELECT slug, course, title, summary, url, minutes, difficulty"
+        f"SELECT slug, course, title, summary, url, minutes, difficulty, source"
         f" FROM hq.course_phases {where}"
         " ORDER BY (SELECT count(*) FROM hq.course_phases p2"
         "           WHERE p2.course = hq.course_phases.course AND p2.status = 'taught') DESC,"
-        "          course, phase_order LIMIT 1",
+        "          course, phase_order, slug LIMIT 1",
         params,
     )
     if not nxt:
         return (f"no pending phases left in {chosen!r}; pick the next course on"
                 " the Courses page")
+    if nxt["source"] == "local":
+        # Phases are written with Claude and the /study skill, not here. A
+        # plan row means that has not happened yet; writing it from scratch
+        # with a weaker model is exactly what this replaced.
+        return (
+            f"not starting: {nxt['title']!r} is planned but not published yet."
+            f" Generate it with Claude (/study {chosen}) and publish it to the"
+            " study platform; the next sync picks it up and Mission HQ adds to it."
+        )
 
     payload = course_payload(dict(nxt))
     task_id = await engine.dispatch(
@@ -672,6 +1314,87 @@ async def start_course_study(ctx: RunContext[HQDeps], course: str = "") -> str:
     )
 
 
+async def active_phase() -> dict[str, Any] | None:
+    """The course phase he is on, which the day's article orbits.
+
+    The phase he is reading now if its lesson is still unread, otherwise the
+    next one to be taught. None when no course is active — and then the
+    article stands alone rather than the morning teaching nothing.
+    """
+    try:
+        row = await db.fetchone(
+            "SELECT value FROM hq.control WHERE key = 'learning:active_course'", ()
+        )
+        course = str((row or {}).get("value") or "").strip('"')
+        if not course:
+            return None
+        phase = await db.fetchone(
+            "SELECT p.slug, p.course, p.title, p.question, p.summary, p.sections"
+            " FROM hq.course_phases p LEFT JOIN hq.lessons l ON l.id = p.lesson_id"
+            " WHERE p.course = %s"
+            "   AND ((p.status = 'taught' AND l.read_at IS NULL) OR p.status = 'pending')"
+            " ORDER BY (p.status = 'taught') DESC, p.phase_order LIMIT 1",
+            (course,),
+        )
+        if not phase:
+            return None
+        covered_rows = await db.fetch(
+            "SELECT DISTINCT relationship FROM hq.lessons"
+            " WHERE kind = 'topic' AND phase_slug = %s AND relationship <> ''",
+            (phase["slug"],),
+        )
+    except Exception as exc:  # noqa: BLE001 — no phase means a standalone article, not none
+        log.warning("active phase unavailable: %s", exc)
+        return None
+    sections = phase.get("sections") or []
+    if isinstance(sections, str):
+        try:
+            sections = json.loads(sections)
+        except ValueError:
+            sections = []
+    covered = [str(r["relationship"]) for r in covered_rows
+               if str(r["relationship"]) in RELATIONSHIPS]
+    return {
+        "slug": str(phase["slug"]),
+        "course": str(phase["course"]),
+        "title": str(phase["title"]),
+        "question": str(phase.get("question") or ""),
+        "summary": str(phase.get("summary") or ""),
+        "sections": [str(x) for x in sections],
+        "covered": covered,
+        "gaps": evidence_gaps(covered),
+    }
+
+
+async def topic_learning_blocker() -> str | None:
+    """Explain why another topic article must not start yet.
+
+    Topic articles follow the same pace rule as course phases: one article is
+    waiting for the owner at a time.  The scheduled run is deliberately the
+    gate, rather than the console button, so a read late at night cannot make
+    two topic lessons land on the same calendar date.
+    """
+    unread = await db.fetchone(
+        "SELECT title FROM hq.lessons WHERE kind = 'topic' AND read_at IS NULL"
+        " ORDER BY lesson_date DESC, created_at DESC LIMIT 1",
+        (),
+    )
+    if unread:
+        return f"not starting a new topic article: {unread['title']!r} is still unread"
+
+    active = await db.fetchone(
+        "SELECT title FROM hq.tasks"
+        " WHERE status IN ('backlog', 'running', 'needs_approval')"
+        " AND payload->>'workflow' = 'learning_journey'"
+        " AND payload->>'stage' IN ('feed_pass', 'reading_scan', 'deep_study', 'lesson_synthesis')"
+        " ORDER BY created_at DESC LIMIT 1",
+        (),
+    )
+    if active:
+        return f"not starting a new topic article: {active['title']!r} is already in progress"
+    return None
+
+
 @hq_tool(action=ActionClass.READ)
 async def start_learning_run(
     ctx: RunContext[HQDeps], topics: str = "", max_candidates: int = MAX_CANDIDATES
@@ -684,6 +1407,10 @@ async def start_learning_run(
     lesson, both queued automatically as each stage finishes.
     """
     from hq import engine  # late import to avoid cycles
+
+    blocker = await topic_learning_blocker()
+    if blocker:
+        return blocker
 
     feeds_today = _today().weekday() in FEED_WEEKDAYS
     if feeds_today:
@@ -702,7 +1429,8 @@ async def start_learning_run(
             f"started the feed pass as task {task_id} for operator; the open-web"
             " scan, the deep reads and tutor's lesson follow automatically"
         )
-    payload = scan_payload(topics=topics, max_candidates=max_candidates)
+    phase = await active_phase()
+    payload = scan_payload(topics=topics, max_candidates=max_candidates, phase=phase)
     roster, taught, pending, interests, path, covered = await scan_context()
     task_id = await engine.dispatch(
         agent="hunter",
@@ -710,7 +1438,7 @@ async def start_learning_run(
         brief=scan_brief(
             payload, roster=roster, recent=taught, pending=pending,
             interests=interests, requests=await open_requests(),
-            path=path, covered=covered,
+            path=path, covered=covered, phase=phase,
         ),
         source="agent",
         parent_task_id=ctx.deps.task_id,

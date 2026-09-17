@@ -210,6 +210,80 @@
     --pane-width: 18rem;
   }
 
+  /* Three-pane reading workspace (Courses): the syllabus, the lesson itself,
+   * and a side drawer. `.console-split` only knows two columns, and a course
+   * is read a phase at a time, so where he is in the course, what he is
+   * reading and what the lesson contains are three separate things.
+   *
+   * The drawer's two widths are stated here rather than in the component
+   * because on a 13-inch screen it has to be able to give its width back to
+   * the lesson: closed it is a strip with a toggle in it. */
+  .console-workspace {
+    display: grid;
+    min-height: 0;
+    gap: 1rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @media (width >= 48rem) {
+    .console-workspace {
+      grid-template-columns:
+        var(--pane-width, 16rem) minmax(0, 1fr) var(--side-width, 2.25rem);
+      /* Same reason as `.console-split`: an auto row sizes to its tallest
+       * child and pushes the shell's header off screen. */
+      grid-template-rows: minmax(0, 1fr);
+      gap: 1rem;
+    }
+
+    .console-workspace[data-side="open"] {
+      --side-width: 17rem;
+    }
+
+    /* No side panel: the enhanced page carries its own contents rail. */
+    .console-workspace[data-side="none"] {
+      grid-template-columns: var(--pane-width, 16rem) minmax(0, 1fr);
+    }
+
+    /* Full view: no syllabus column, the reader takes the width. */
+    .console-workspace[data-focus="on"] {
+      grid-template-columns: minmax(0, 1fr) var(--side-width, 2.25rem);
+    }
+
+    .console-workspace[data-focus="on"][data-side="none"] {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* The three course panes fill the workspace row on wide screens. Stacked on
+   * a phone, the workspace scrolls instead and each pane gets a definite
+   * height of its own, so the reader still scrolls inside itself (the side
+   * panel follows that scroll) and the page never scrolls sideways. */
+  .syllabus-pane,
+  .reader-pane,
+  .side-pane {
+    height: 100%;
+  }
+
+  @media (width < 48rem) {
+    .console-workspace {
+      overflow-y: auto;
+      grid-auto-rows: max-content;
+    }
+
+    .syllabus-pane {
+      height: 22rem;
+    }
+
+    .reader-pane {
+      height: 85dvh;
+    }
+
+    .side-pane {
+      height: auto;
+      max-height: 24rem;
+    }
+  }
+
   /* Board columns: one per live task state, side by side on wide screens and
    * stacked below the md breakpoint. Column width is stated here rather than
    * as an arbitrary Tailwind grid template. */

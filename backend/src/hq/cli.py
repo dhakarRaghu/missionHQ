@@ -8,6 +8,8 @@
     evals run <agent> [--live] [--all] score the golden set (stored refs; --live re-runs)
     evals history <agent>              recent eval scores for the agent
     reindex                            rebuild the vault full-text index
+    sync-courses                       pull published course phases from the study platform (run after /study publishes)
+    import-course <topic>              copy a platform course written elsewhere into learning/study-material/ (owner's deliberate step)
     board-check                        replay task_events and report tasks whose stored status differs (exit 1 if any)
     prompt-check <agent|all>           zero-tool judge audits an agent's instruction corpus (exit 1 on a high contradiction)
     vault-health [--merge-plan]        dry-run vault maintenance report: duplicates, orphans, unsourced, stale, future-dated
@@ -141,6 +143,55 @@ async def cmd_reindex() -> int:
         return 0
     finally:
         await db.close_pool()
+
+
+async def cmd_sync_courses() -> int:
+    """After /study publishes a phase: pull it in so it replaces its plan row."""
+    import inspect
+    from types import SimpleNamespace
+
+    from hq import db
+    from hq.tools import learning_tools
+
+    await db.open_pool()
+    try:
+        # The tool body, without the agent machinery around it.
+        sync = inspect.unwrap(learning_tools.sync_courses)
+        deps = SimpleNamespace(run_id=None, task_id=None, agent="owner")
+        print(await sync(SimpleNamespace(deps=deps)))
+        return 0
+    finally:
+        await db.close_pool()
+
+
+async def cmd_import_course(topic: str) -> int:
+    """Copy one course from the study platform into the repo, as its source.
+
+    Tutor builds enhanced pages from the repo copy, never from the platform,
+    because the platform accepts writes without authentication. Importing is
+    therefore a step the owner takes on purpose, for a course he knows is his.
+    """
+    import json
+
+    import httpx
+
+    from hq.config import settings
+
+    base = settings().study_api_base.rstrip("/")
+    async with httpx.AsyncClient(timeout=60) as client:
+        items = (await client.get(f"{base}/api/study")).json()
+    folder = settings().learning_dir / "study-material" / topic
+    folder.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for item in items if isinstance(items, list) else []:
+        slug = str(item.get("slug") or "")
+        if slug.startswith(f"{topic}-phase-") and isinstance(item.get("content"), str):
+            (folder / f"{slug}.md").write_text(item["content"])
+            count += 1
+    (folder / "course.json").write_text(json.dumps(
+        {"topic": topic, "importedFrom": base, "phases": count}, indent=2))
+    print(f"imported {count} phases of {topic} into {folder}")
+    return 0 if count else 1
 
 
 async def cmd_board_check() -> int:
@@ -325,6 +376,10 @@ def main() -> None:
         raise SystemExit(asyncio.run(cmd_reindex()))
     if args[0] == "health":
         raise SystemExit(asyncio.run(cmd_health()))
+    if args[0] == "import-course" and len(args) == 2:
+        raise SystemExit(asyncio.run(cmd_import_course(args[1])))
+    if args[0] == "sync-courses":
+        raise SystemExit(asyncio.run(cmd_sync_courses()))
     if args[0] == "board-check":
         raise SystemExit(asyncio.run(cmd_board_check()))
     if args[0] == "prompt-check" and len(args) == 2:

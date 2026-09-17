@@ -185,6 +185,12 @@ class ModelRegistry:
             raise RuntimeError("no usable models in models.yaml — check credentials in .env")
         return out
 
+    def longest_timeout_s(self, default: float = 300.0) -> float:
+        """The longest per-request timeout any entry declares in models.yaml."""
+        found = [float((e.settings or {})["timeout_s"]) for e in self.entries.values()
+                 if "timeout_s" in (e.settings or {})]
+        return max(found, default=default)
+
     def model_settings_for(self, name_or_role: str):
         """Pydantic AI model settings for a registry entry: reasoning effort,
         output cap and request timeout come from models.yaml, not code."""

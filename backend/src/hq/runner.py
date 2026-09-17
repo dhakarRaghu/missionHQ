@@ -573,8 +573,9 @@ async def execute_external(
             input_tokens=int(payload["input_tokens"]),
             output_tokens=int(payload["output_tokens"]),
             cost_usd=float(payload["cost_usd"]),
-            error=(f"the {runtime} browser extension is not connected in this"
-                   " browser, so nothing was read"),
+            error=(f"the {runtime} browser extension is not connected or not"
+                   " signed in, so nothing was read. Open Chrome, sign in to"
+                   f" the {runtime} extension, and allow it to use Chrome"),
         )
     return RunOutcome(
         output=text,

@@ -1,19 +1,36 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, FileText, Maximize2, PanelsTopLeft, Plus, X } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
+import { LessonPageFrame } from "@/components/features/learn/lesson-frame";
 import { Markdown } from "@/components/features/vault/markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { learningApi, learningKeys } from "@/lib/api/learning";
+import {
+  learningApi,
+  learningKeys,
+  SCORE_OUT_OF,
+  type ArticleRelationship,
+} from "@/lib/api/learning";
 import { exactTime, timeAgo } from "@/lib/time";
 import { cn } from "@/lib/utils";
+
+/** What each relationship to the course phase promises the article holds. */
+const RELATIONSHIP_HINT: Record<ArticleRelationship, string> = {
+  fails: "a real incident on the phase's mechanism",
+  measures: "a benchmark or experiment, with its conditions",
+  applies: "the mechanism in a real system",
+  updates: "a default, version or practice that changed",
+  challenges: "a counterexample or disagreement",
+  extends: "an adjacent idea the course leaves out",
+};
 
 /**
  * One lesson a day, given the whole window.
@@ -96,9 +113,26 @@ export function LearnView() {
             </Badge>
           ) : null}
           {current.score ? (
-            <Badge variant="outline" className="shrink-0">
-              {current.score}/80
+            <Badge variant="outline" className="shrink-0 tabular-nums">
+              {current.score}/{SCORE_OUT_OF[current.kind] ?? SCORE_OUT_OF.topic}
             </Badge>
+          ) : null}
+          {current.relationship ? (
+            <>
+              <Badge
+                variant="secondary"
+                className="shrink-0"
+                title={RELATIONSHIP_HINT[current.relationship]}
+              >
+                {current.relationship}
+              </Badge>
+              <Link
+                href="/courses"
+                className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              >
+                orbits {current.phase_title || current.phase_slug || "the course phase"}
+              </Link>
+            </>
           ) : null}
           <span
             className="text-xs text-muted-foreground"
@@ -338,35 +372,6 @@ function AskBox() {
         Served first, before the roster, on the next morning run.
       </p>
     </Drawer>
-  );
-}
-
-/** The lesson's own page, in a frame that can run scripts and reach nothing. */
-function LessonPageFrame({ path, title }: { path: string; title: string }) {
-  const page = useQuery({
-    queryKey: learningKeys.page(path),
-    queryFn: () => learningApi.page(path),
-  });
-
-  if (page.isPending) return <Skeleton className="min-h-0 flex-1" />;
-  if (page.isError) {
-    return (
-      <ErrorState
-        message={(page.error as Error).message}
-        onRetry={() => void page.refetch()}
-      />
-    );
-  }
-  return (
-    <iframe
-      title={`${title} (lesson page)`}
-      srcDoc={page.data.html}
-      // No same-origin: this markup is generated from unvetted pages. Popups
-      // are allowed only so a source link opens a real tab instead of
-      // replacing the lesson with the live site.
-      sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-      className="min-h-0 w-full flex-1 rounded-md border bg-background"
-    />
   );
 }
 

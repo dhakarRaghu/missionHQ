@@ -56,7 +56,8 @@ _ABSENT_WORD = (
     r"(?:unavailable|not available|no longer available|not connected|"
     r"unreachable|cannot be reached|could not connect|unable to reach|"
     r"could not reach|failed to (?:reach|connect|start)|"
-    r"isn'?t available|isn'?t connected|not supported|unsupported)"
+    r"isn'?t available|isn'?t connected|not supported|unsupported|"
+    r"cannot open|could not open|unable to open|cannot inspect|was denied)"
 )
 _NO_BROWSER_RE = re.compile(
     rf"(?:\bno\s+{_BROWSER_WORD}\b)"                 # "no browser is available"
@@ -69,6 +70,12 @@ _NO_BROWSER_EXACT = (
     "no_browser_tool",
     "native messaging host",
     "tool is not currently supported or available",
+    # 2026-09-16/17: the extension lost its sign-in. Codex said so without
+    # the word "browser" near it — "Codex auth token is unavailable" — or
+    # talked about a "signed-in browser tab" it "cannot open", and three
+    # feed runs were filed as no_artifact instead of this clear block.
+    "auth token is unavailable",
+    "computer use was not approved",
 )
 
 
