@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The decision before the lifecycle: does cache-aware routing actually pay?</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+.addition{margin:1.8rem 0;padding:1rem 1.1rem 1rem 1.2rem;border-radius:12px;
+  border:1px solid var(--line);border-left:4px solid var(--violet);background:var(--violet-soft)}
+.addition::before{display:block;font-size:.7rem;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--violet);margin-bottom:.3rem;content:"Added · deeper"}
+.addition[data-kind=update]::before{content:"Added · what changed since"}
+.addition[data-kind=correction]{border-left-color:var(--bad);background:var(--bad-soft)}
+.addition[data-kind=correction]::before{content:"Correction";color:var(--bad)}
+.addition[data-kind=incident]{border-left-color:var(--warn);background:var(--warn-soft)}
+.addition[data-kind=incident]::before{content:"Production incident";color:var(--warn)}
+.addition[data-kind=practice]{border-left-color:var(--ok);background:var(--ok-soft)}
+.addition[data-kind=practice]::before{content:"Added · practice";color:var(--ok)}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">measures · Inference Internals · Phase 1: The Request Lifecycle · Adds: the measured routing decision one hop before the lifecycle, on real agentic traffic</div><h1>The decision before the lifecycle: does cache-aware routing actually pay?</h1><p class="subtitle">Where should a request land before the lifecycle starts, what does that decision cost, and how sticky should the router stay?</p></header>
+<h2 id="story">Why you are here: turn 37 lands on the wrong pod</h2>
+<p class="why">Your coding agent is on turn 37 of a session. The prompt it sends is 99% identical to turn 36. Same system prompt. Same accumulated history. A few hundred new tokens at the end. Your serving layer has two vLLM replicas behind the default Kubernetes Service, and the Service balances round-robin. Turn 36 ran on pod A, so pod A holds the KV blocks for the whole 100K-token prefix. Turn 37 lands on pod B. Pod B knows nothing about the session. It prefills the full 100K tokens from scratch.</p>
+<p>The user waits. The GPU does work it already did once. Nothing in your request handling was wrong. The lifecycle from Phase 1 ran perfectly, on the wrong machine.</p>
+<p>The decision that cost you happened one hop before the lifecycle started, when the router picked a pod. This article measures that decision. Does making it cache-aware actually pay, where does the payoff stop, and how do you set its limit without tuning weights?</p>
+
+<h2 id="workload">What does real agentic traffic look like?</h2>
+<p class="why">Every number below drives the routing economics in the rest of the article. If the workload were chat, none of it would hold.</p>
+<p>Phase 1 models one generic request. A prompt arrives, it is prefilled, it decodes an output of comparable size. SemiAnalysis's AgentX benchmark instead replays captured coding-agent sessions, and the vLLM and Inferact team published what that traffic looks like on their stacks. These medians are the blog's own figures, attributed to AgentX traces. Hunter could not find the exact numbers in SemiAnalysis's public FAQ, so treat them as vendor-reported, not independently confirmed:</p>
+<div class="stats">
+<div class="stat"><b>43</b><span>median turns per session</span></div>
+<div class="stat"><b>142K in / 444 out</b><span>median tokens per turn</span></div>
+<div class="stat"><b>&gt;96%</b><span>prefix-cache hit rate</span></div>
+<div class="stat"><b>44%</b><span>of sessions spawn subagents</span></div>
+</div>
+<p>Read the middle two together. Turn k+1 resends almost the entire prompt of turn k. The workload is nearly pure prefill of prefixes the engine has already cached, plus a tiny appended tail. Decode barely registers: 444 tokens in a 142K-token turn. Phase 1.2 told you prefill is the expensive half. On agentic traffic that stops being a half and becomes nearly the whole bill.</p>
+<p>The same post measured its serving stack on this workload, with conditions stated: DeepSeek V4 Pro served 83K total tokens per GPU-second at a P90 interactivity of 58.3 tok/s, on 12 GB300 GPUs at 256 concurrency. MiniMax M3 reached 70K on 2 B300s, and Kimi K3 11.8K on 16 GB300s. All three are the authors' own measurements with no independent reproduction. Three beliefs failed in their data: pipeline parallelism underperformed on warm, prefix-heavy turns; decode context parallelism won on Kimi K3 but only matched expert parallelism on DeepSeek V4, so it does not transfer across architectures; and load-balancing routing lost to session-aware sticky routing, because KV locality outweighed balanced queues.</p>
+<p>The third one is the claim this article tests. It is the only one three independent projects have now measured. And its cost lands before prefill even begins.</p>
+<h2 id="measured">Does sticky routing beat load balancing, measured?</h2>
+<p class="why">llm-d is the Kubernetes-native serving stack that puts a scheduler in front of the replicas. Its endpoint picker (EPP) inspects each request and chooses a pod before vLLM ever sees it. In August 2026 the team published the measurement that answers the question above, with unusually complete conditions.</p>
+<p><b>The setup.</b> Ten Qwen3-32B vLLM servers on GKE, each TP=2 across 2 H100s, <code>max-num-batched-tokens</code> 8192, behind a Gateway API InferencePool. Five schedulers ran on the same traffic. The baseline <code>k8</code> bypassed the EPP and used plain Kubernetes round-robin: the no-scheduler case, which is what most deployments actually run. The main candidate was token-aware routing: stay on the endpoint that holds your cached prefix, measured against a fixed token threshold, plus a load scorer matched to the bottleneck. The authors state the method weakness themselves: each combination of workload, configuration and concurrency ran once, and they report achieved values, not confidence intervals.</p>
+<p><b>The results, at each workload's knee.</b> The knee is the highest load where the service still held its latency targets.</p>
+<table>
+<thead><tr><th>Workload</th><th>What limits it</th><th>Knee: token-aware</th><th>Knee: round-robin</th><th>Throughput at the knee</th></tr></thead>
+<tbody>
+<tr><td>code-generation (mean ~70K-token prompts, 800 out)</td><td>prefill compute</td><td>conc 60</td><td>conc 30</td><td><b>46K vs 16K in-tok/s (2.9×)</b></td></tr>
+<tr><td>reasoning (1,000 in / mean 8,000 out, 250-token shared prompt)</td><td>decode slots</td><td>conc 350</td><td>conc 250</td><td><b>7.0K vs 6.8K out-tok/s (~parity)</b></td></tr>
+<tr><td>b2b-saas (150 prefixes × 5 questions, ~900K cacheable tokens, more than total cluster KV)</td><td>prefill + pathological cache</td><td>QPS 38</td><td>QPS 18</td><td><b>90K vs 45K in-tok/s (2.0×)</b></td></tr>
+</tbody>
+</table>
+<p>Two readings. First, where prefill dominates, the payoff is 2× to 2.9× over the default a Kubernetes deployment ships with. Second, where decode dominates, the affinity filter contributes nothing: a 250-token shared system prompt gives an affinity score of 0.25 against the 0.8 threshold, so the filter is a structural no-op and the two configs land within noise of each other. The win is conditional on the workload. Phase 1 predicts this: if the prompt is small and the output is long, prefill is not the bill, so skipping prefill cannot save you.</p>
+<div class="callout note"><b>Two disclosures keep this honest.</b> The tuned legacy blend, a weighted mix of prefix score, queue depth and KV utilization, posted the best TTFT p99 on b2b-saas, and the authors say the matched configs are not claimed to beat a bespoke weight set on the workload it was designed for. And the shape is not llm-d's private discovery: the AgentX FAQ documents SGLang's router shipping cache-aware as its default policy with least-loaded diversion, and NVIDIA Dynamo shipping opt-in KV-aware routing. Three projects, one principle.</div>
+<p>So stickiness pays, conditionally. The design question that remains is the harder one: how sticky, and where do you let go?</p>
+<h2 id="tau">How do you set the stickiness limit without tuning?</h2>
+<p class="why">Staying sticky has a cost. The warm endpoint queues. So the real design is a valve: stay on the endpoint holding your prefix, until staying costs more than leaving. The question is where to put the release point, called τ.</p>
+<p>The old llm-d scheduler answered with a weighted blend of prefix score, queue depth, KV utilization and LRU, and the authors describe it as hard to predict and harder to tune. The new answer is that τ is not tuned at all. It is derived from one measurement.</p>
+<p><b>One prerequisite the phase did not need: chunked prefill.</b> vLLM does not prefill a 70K-token prompt in one step. It prefills in chunks of <code>max-num-batched-tokens</code> (call it B) tokens per iteration, so decode steps of other requests keep interleaving. The consequence for routing: the cost of waiting behind a warm endpoint is bounded by per-chunk throughput, not per-token throughput.</p>
+<p><b>The derivation.</b> Call R_peak the endpoint's peak prefill rate, B / T(B), where T(B) is the measured wall time to prefill one full chunk on your hardware. Call T_max the TTFT deterioration you are willing to accept. Then τ = R_peak × T_max: the amount of uncached work an endpoint may queue before the wait exceeds your ceiling.</p>
+<p>Their reference path makes it concrete. Qwen3-32B, vLLM, TP=2 on 2 H100s, B = 8192. A single-request calibration measured T(B) = 0.40s, so R_peak = 20,480 tokens/s per endpoint. With T_max = 14s, τ = 286,720 uncached tokens: 35 full chunks of pending prefill work, about 14 seconds of queueing at peak. The shipped plugin computes the same thing in the time domain as <code>peakPrefillThroughput × maxTTFTPenaltyMs</code> and defaults to 15,928 × 18s = 286,704. The two methods disagree on R_peak by 25% and, in the authors' words, agree on the quantity that matters, the override threshold.</p>
+<figure class="diagram">
+<svg viewBox="0 0 660 190">
+<text x="10" y="18" fill="currentColor" font-size="13">uncached prefill tokens queued on the warm endpoint</text>
+<rect x="10" y="26" width="640" height="22" fill="none" stroke="currentColor" stroke-opacity="0.4"></rect>
+<rect id="rx-fill" x="10" y="26" width="128" height="22" fill="#2b8a3e"></rect>
+<line x1="377" y1="18" x2="377" y2="56" stroke="#c92a2a" stroke-width="2"></line>
+<text x="377" y="70" fill="currentColor" font-size="12" text-anchor="middle">τ = 286,720 uncached tokens ≈ 14s of queued chunks</text>
+<text x="330" y="86" fill="currentColor" font-size="12" text-anchor="middle">your request</text>
+<line id="rx-arrow" x1="330" y1="90" x2="170" y2="104" stroke="currentColor" stroke-width="1.5"></line>
+<rect id="rx-warm" x="60" y="106" width="220" height="64" rx="8" fill="none" stroke="#2b8a3e" stroke-width="2"></rect>
+<text x="170" y="132" fill="currentColor" font-size="13" text-anchor="middle">warm endpoint</text>
+<text x="170" y="152" fill="currentColor" font-size="11" text-anchor="middle">holds your 142K-prefix KV</text>
+<rect id="rx-cold" x="380" y="106" width="220" height="64" rx="8" fill="none" stroke="currentColor" stroke-opacity="0.35"></rect>
+<text x="490" y="132" fill="currentColor" font-size="13" text-anchor="middle">cold endpoint</text>
+<text x="490" y="152" fill="currentColor" font-size="11" text-anchor="middle">would re-prefill the whole prefix</text>
+</svg>
+<figcaption>The saturation valve. The highlighted box is where your request lands. Values are the llm-d reference calibration (Qwen3-32B, vLLM, TP=2, 2× H100, chunk size 8192), not constants. Drag the slider.</figcaption>
+</figure>
+<p><input id="rx-slider" type="range" min="0" max="500000" step="5000" value="100000" style="width:100%"></p>
+<p id="rx-out"></p>
+<script>(function(){var s=document.getElementById('rx-slider'),fill=document.getElementById('rx-fill'),warm=document.getElementById('rx-warm'),cold=document.getElementById('rx-cold'),arrow=document.getElementById('rx-arrow'),out=document.getElementById('rx-out');var TAU=286720,RPEAK=20480,W=640,MAXV=500000;function fmt(n){return n.toLocaleString('en-US')}function upd(){var v=+s.value;fill.setAttribute('width',(v/MAXV*W).toFixed(1));var below=v<=TAU;arrow.setAttribute('x2',below?'170':'490');warm.setAttribute('stroke',below?'#2b8a3e':'currentColor');warm.setAttribute('stroke-opacity',below?'1':'0.35');cold.setAttribute('stroke',below?'currentColor':'#c92a2a');cold.setAttribute('stroke-opacity',below?'0.35':'1');var wait=(v/RPEAK).toFixed(1);out.textContent=below?('Below τ: '+fmt(v)+' uncached tokens already queued here. At peak chunk throughput of '+fmt(RPEAK)+' tok/s that is '+wait+'s of waiting, inside the TTFT ceiling. The router keeps you: cache hit, and you pay prefill for the few hundred new tokens only.'):('Above τ: '+wait+'s of queued chunks exceeds the 14s ceiling. The valve releases you to a colder endpoint. You re-prefill the ~142K-token prefix, about '+(142000/RPEAK).toFixed(1)+'s of work at the same throughput, instead of waiting in the queue. The router picked the smaller cost.');}s.addEventListener('input',upd);upd();})();</script>
+<p><b>The durable warning: τ does not transplant.</b> R_peak is a property of the whole serving path, not the GPU. The project's own calibration matrix, keyed on model, accelerator, engine, TP and quantization, spans: gpt-oss-120B on H100 at 39,065 (a sparse MoE with only ~5B active parameters, so a prefill step touches few weights), Qwen3-32B on TPU v7x at 27,336, GLM-5.2 NVFP4 on 8 B200s under SGLang at 24,027, Qwen3-32B on H100 at the 20,480 above, and Qwen3-VL-32B on H200 at 15,751. Carry the reference τ of 286,720 to the gpt-oss path and the valve opens 1.9× too early. Carry it to Qwen3-VL and it stays shut 1.3× too long. Same hardware class, 2.5× spread. Recalibrate per deployment.</p>
+<div class="callout warn"><b>One disagreement inside the project's own docs.</b> The matrix at HEAD still lists Qwen3-32B on SGLang/H100 as a measured 30,720 with a note that SGLang reaches roughly 1.9× the vLLM prefill throughput. The blog post, which is newer, says that figure is 2× too high and that 15,360 is correct, and the matrix has not absorbed the correction. Hunter could not resolve which is right. The likely mechanism: the two calibration paths measure different things, a single-request fit versus median TTFT through the full serving path, and one of them is distorted somewhere. Treat both as unsettled until the matrix is updated.</div>
+<p>So the limit is derivable, on your hardware, in one measurement. But does any of this survive outside Google's cluster? The third measurement is one engineer, one rented GPU.</p>
+<h2 id="gh200">What does a high hit rate buy on hardware one engineer can rent?</h2>
+<p class="why">The llm-d measurements ran on Google's cluster with a 32B model. Karthika Raghavan, a platform engineer in Vancouver, ran the same stack on one rented box in April 2026, and her numbers answer a different question: what does cache warmth look like as an operating metric?</p>
+<p><b>Conditions.</b> One Lambda Labs GH200 (Grace CPU plus H100 with 96GB HBM3e), llm-d v0.4.0, <code>vllm/vllm-openai:latest</code>, an Istio gateway, and Qwen3-0.6B, a deliberately tiny model so the serving machinery, not the model, is what shows up. Single pod, aggregated serving. She is candid about what that means: the EPP's scorers run, but with one pod there is no cross-pod decision, and round-robin with one pod is also consistent routing. The experiment measures cache warmth, not routing. Load came from Locust with three tenant personas, each holding a sticky ~200-token system prompt, at a 4:1 mix of session requests to cold requests. Requests travelled Mac to SSH tunnel to <code>kubectl port-forward</code> to gateway: variable network latency she does not control.</p>
+<div class="stats">
+<div class="stat"><b>81.1%</b><span>prefix KV hit rate</span></div>
+<div class="stat"><b>15 / 19 / ~34 ms</b><span>TTFT p50 / p95 / settled p99</span></div>
+<div class="stat"><b>26,826</b><span>requests, zero failures, ~30 min</span></div>
+<div class="stat"><b>0.15%</b><span>KV pool utilization</span></div>
+</div>
+<p><b>The reading skills are the real content.</b> First, the warmup signature: TTFT p99 dropping 39 → 32 → 34ms and staying flat is what steady state looks like. A p99 that drifts upward is eviction or queue growth. Second, hit-rate arithmetic as a cost argument: she converts 81.1% into roughly 5× less prefill work than a round-robin deployment that scatters the same tenant's requests across pods with cold caches. That is her own derivation, 1/(1 − 0.81) ≈ 5.3, not a measurement. Her version for your dashboard: in a system with 100 GPU-hours of work per day, moving hit rate from 80% to 90% saves 10 GPU-hours. A cache hit is prefill work skipped entirely, and Phase 1.3 told you skipped prefill is the ~90% discount in physical form.</p>
+<p><b>One version delta to keep straight.</b> Her v0.4.0 EPP config, the weighted blend of prefix, queue and KV-utilization scorers, is exactly what the August llm-d post calls the superseded legacy blend. Her 81.1% is mechanism-real, but it was produced by the scheduler generation the newer design replaces. The direction of the field is what sections 2 and 3 measured.</p>
+<p>So: 2.9× at cluster scale, a derivable valve, 81% warmth on one box. All three agree on direction. Where does each one stop holding?</p>
+<h2 id="breaks">Where does all of this break?</h2>
+<p class="why">A <code>measures</code> article owes you the failure envelope, and all three sources supply one.</p>
+<ol class="steps">
+<li><b>When the cacheable set outgrows the cluster.</b> The b2b-saas workload caches ~900K tokens against a fleet whose total KV is smaller. There the cluster is bimodal: it either converges to a stable partition of prefixes across endpoints, or cascades into what the authors call eviction churn, where every endpoint tries to cache every prefix and the hit rate collapses. Two runs of the same configuration can land in different modes. The team refuses to tune τ on that workload because, in their words, the bimodality means such a claim would not generalise. This matches the AgentX side: the vLLM post pushes KV blocks to a distributed store precisely because 256 concurrent 100K-token sessions do not fit in HBM.</li>
+<li><b>The valve costs cache warmth on purpose.</b> At QPS 50 and above on b2b-saas, the matched config's hit rate fell from the 90–95% range to 70–73%, while the legacy blend, which has no valve, held 96–97%. That drop is the override doing its job: trading warmth for survival near compute saturation. If you ever see hit rate fall while latency holds, check whether your router just paid cache to buy queue headroom.</li>
+<li><b>A healthy average can hide an unfair tail.</b> Raghavan names the failure mode her own experiment cannot produce: when a few tenants dominate traffic, their KV stays hot and long-tail tenants always miss. The aggregate hit rate still reads 80%, but cold tenants pay full prefill on every request, and it surfaces as p99 SLA breaches, not in the averages. Her three flat personas cannot show it, so this is a prediction about power-law production traffic, not a measurement. The fix class she names: per-tenant cache accounting and long-tail isolation.</li>
+<li><b>Decode-heavy workloads.</b> Covered in section 2: parity. If your product is long generation on short prompts, cache-aware routing is mostly a no-op and a good active-stream balancer is the whole game.</li>
+<li><b>Marketing arithmetic.</b> The vLLM post claims a 14.6× to 106× serving-cost advantage over Opus 5 API pricing. That compares self-hosted GPU amortized cost against a per-token API price with margin in it, and the derivation is not published. Treat it as marketing-grade. It is the only number in these three sources with no method behind it.</li>
+<li><b>Method limits, stated by the authors.</b> The llm-d results are single runs with no confidence intervals, on the authors' own cluster, and no independent rerun exists. The interaction between <code>maxTTFTPenaltyMs</code> and the latency-predictor gate is, in their words, not characterized systematically.</li>
+</ol>
+<h2 id="try">Fifteen minutes today</h2>
+<p class="why">Calibrate your own stickiness budget, once, per deployment. You need one vLLM server you control.</p>
+<ol class="steps">
+<li>Write down the tuple that defines a calibration: model, accelerator, engine and version, TP degree, <code>max-num-batched-tokens</code> (B), quantization.</li>
+<li>Send one request with a prompt of about B fresh tokens (random content, so nothing is cached), <code>max_tokens=1</code>, and time to the first token of the response. That is T(B).</li>
+<li>R_peak = B / T(B). Pick T_max, the TTFT deterioration your users would accept. τ = R_peak × T_max. That is the most uncached work one endpoint should queue for the sake of a cache hit.</li>
+<li>Compare your R_peak with the nearest row of the calibration matrix. If you are far from it, the reason is in your tuple: engine, sparsity, quantization. That delta is information.</li>
+</ol>
+<p>If you have no GPU handy, do the paper version: take the matrix row closest to your serving stack and compute what the router you actually run today would need to know to make the valve decision. You will find it needs your prompt token counts and its own queue, which is exactly why the default Kubernetes Service can never do it.</p>
+
+<h2 id="transfer">A question to test the transfer</h2>
+<p>Exercises Phase 1.2 and 1.3. You serve a coding agent on six vLLM replicas behind a round-robin Service. Median turn: 130K cached tokens plus 400 new ones. A seventh replica joins during a scale-up, and the balancer starts sending it every seventh request. A user on turn 40 of her session is routed to the new pod. What does she observe, and why could the new pod not help even though it is idle and healthy?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>Her TTFT jumps from sub-second to the time for a full 130K-token prefill, because Phase 1.3's KV blocks physically live in GPU memory of the pods that computed them. Idle compute on the new pod buys nothing without the prefix KV, and Phase 1.2's prefill is the expensive part of this workload. The fix is at the routing layer, not the serving layer: session-aware stickiness, optionally with a calibrated τ release, which is why every serious router converged on some form of it.</p>
+</details>
+<h2 id="unverified">Things I could not verify</h2>
+<ul>
+<li>The AgentX workload medians (43 turns, 142K/444 tokens, &gt;96% hits, 44% subagents) are reported by the vLLM blog and attributed to SemiAnalysis, but do not appear in the public AgentX FAQ or release post. SemiAnalysis's full report would confirm.</li>
+<li>Every vLLM performance figure (83K/70K/11.8K TPGS, the 93% and 2.3× scheduling gains, the 2.65× PCP8 speedup, the ~10% KV memory saving) is a single-team measurement with no independent reproduction, as is the 14.6×–106× cost claim, which has no published method.</li>
+<li>The llm-d blog's tail was truncated by the fetch cap: the end of "Recommendations" and the appendix configs were not read.</li>
+<li>The SGLang/H100 calibration value is contested between the project's own documents: 30,720 in the matrix, 15,360 in the newer blog post. Unresolved at HEAD on 2026-09-17.</li>
+<li>The llm-d 2×–2.9× gains are single runs with no confidence intervals and no independent reproduction. The Vertex AI, Red Hat and Mistral production claims carry no citation.</li>
+<li>Raghavan's NVLink-C2C 900 GB/s figure comes from an NVIDIA page hunter did not open; her Mac Mini comparison numbers come from her own earlier posts, also unopened; her ~50% hit-rate cliff is a heuristic with no measurement at the boundary; and with one pod her run exercised no routing decision at all.</li>
+</ul>
+
+<h2 id="posts">Two things you could post</h2>
+<ol>
+<li>"Round-robin load balancing is the wrong default for LLM serving, and it is measured: 2 to 3× throughput lost on prefill-bound agentic traffic." Yours because you run agents on Kubernetes and can name which hop in your own stack ignores the cache today.</li>
+<li>"A config value you should measure, not tune: the stickiness limit derived from one calibration run." Yours because the derive-it-once method is general engineering craft, and you can show the two-line arithmetic instead of a vendor screenshot.</li>
+</ol>
+
+<h2 id="sources">Sources</h2>
+<p><b>The articles</b></p>
+<ul class="sources">
+<li><a href="https://vllm.ai/blog/2026-09-08-vllm-agentx">vLLM x AgentX: Optimizing for Real-World Agentic Serving</a> — vLLM Team and Inferact, 2026-09-08. The agentic workload characterization, the three failed beliefs, all TPGS and speedup figures.</li>
+<li><a href="https://llm-d.ai/blog/sticky-until-saturated-token-aware-routing">Sticky Until Saturated: Token-Aware Routing in llm-d</a> — Google llm-d team, 2026-08-17. The five-scheduler measurements, the τ derivation, the reconciliation of two calibration methods, the failure disclosures.</li>
+<li><a href="https://kraghavan.ca/llm-infrastructure/inference/2026/04/19/llm-d-epp-prefix-cache-results.html">llm-d in Action: EPP Prefix Cache Routing and What It Actually Means</a> — Karthika Raghavan, 2026-04-19. The single-GH200 run, the warmup signature, hit-rate-as-cost arithmetic, the per-tenant unfairness prediction.</li>
+</ul>
+<p><b>What they point at</b></p>
+<ul class="sources">
+<li><a href="https://raw.githubusercontent.com/llm-d/llm-d/main/guides/recipes/router/calibration/README.md">llm-d router calibration README</a> — the shipped calibration method and the 15,928 default.</li>
+<li><a href="https://raw.githubusercontent.com/llm-d/llm-d/main/guides/recipes/router/calibration/configuration-matrix.md">llm-d configuration matrix</a> — measured R_peak per (model, accelerator, engine); holds the unresolved SGLang discrepancy.</li>
+</ul>
+<p><b>Independent sources</b></p>
+<ul class="sources">
+<li><a href="https://raw.githubusercontent.com/SemiAnalysisAI/agentx-harness/master/docs/benchmark-modes/semianalysis-agentx-faq.md">SemiAnalysis AgentX FAQ</a> — how AgentX replays real traces and prevents inflated cache hits; documents SGLang's and NVIDIA Dynamo's cache-aware routers.</li>
+<li><a href="https://newsletter.semianalysis.com/p/agentx-inferencexv3-does-cuda-moat">AgentX 1.0 release post</a> — SemiAnalysis; directionally confirms the workload shape, not the exact medians.</li>
+</ul>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+</body>
+</html>

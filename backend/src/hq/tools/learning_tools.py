@@ -645,6 +645,14 @@ async def write_lesson(
         html = lesson_kit.wrap_page(html, title=page_title, subtitle=subtitle.strip(),
                                     eyebrow=eyebrow.strip())
 
+    left_behind = placeholders_in(markdown) + placeholders_in(html)
+    if left_behind:
+        raise ModelRetry(
+            "these placeholders are still in the lesson: " + ", ".join(left_behind[:8])
+            + ". Write the thing itself, in both the markdown and the page, then"
+            " call write_lesson again"
+        )
+
     shortfall = "" if source else page_shortfall(markdown, html)
     if shortfall:
         if from_parts:
@@ -1101,6 +1109,20 @@ _ID_LOOKUP_RE = re.compile(
 )
 
 
+# Written-in placeholders. On 2026-09-17 an article's markdown carried
+# "<figure: the valve>" where the page had the real figure: the page was
+# right and the text copy told him to imagine one.
+_PLACEHOLDER_RE = re.compile(
+    r"<figure:[^>]*>|<diagram[^>]*>|\bTODO\b|\bTBD\b|\[placeholder|lorem ipsum",
+    re.IGNORECASE,
+)
+
+
+def placeholders_in(text: str) -> list[str]:
+    """Every "fill this in later" marker left in a finished lesson."""
+    return sorted({m.group(0).strip() for m in _PLACEHOLDER_RE.finditer(text)})
+
+
 def page_script_problems(page_html: str) -> str:
     """Figures that cannot work, found without running them.
 
@@ -1332,8 +1354,11 @@ async def active_phase() -> dict[str, Any] | None:
             "SELECT p.slug, p.course, p.title, p.question, p.summary, p.sections"
             " FROM hq.course_phases p LEFT JOIN hq.lessons l ON l.id = p.lesson_id"
             " WHERE p.course = %s"
-            "   AND ((p.status = 'taught' AND l.read_at IS NULL) OR p.status = 'pending')"
-            " ORDER BY (p.status = 'taught') DESC, p.phase_order LIMIT 1",
+            # Read is recorded on the phase since the enhanced pages (028);
+            # a phase he has read is not the one the article should orbit.
+            "   AND coalesce(p.read_at, l.read_at) IS NULL"
+            "   AND (p.status = 'taught' OR p.status = 'pending')"
+            " ORDER BY (p.status = 'taught') DESC, p.phase_order, p.slug LIMIT 1",
             (course,),
         )
         if not phase:

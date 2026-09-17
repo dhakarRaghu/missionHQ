@@ -1629,3 +1629,14 @@ def test_namespace_strings_are_not_links_and_dash_heavy_prose_is_sent_back() -> 
     assert page_coverage(source, svg) == ""
     dashy = body + "<p>" + "a — b " * 30 + "</p>"
     assert "em dashes" in page_coverage(source, dashy)
+
+
+def test_a_lesson_with_a_placeholder_is_sent_back() -> None:
+    import inspect
+
+    from hq.tools import learning_tools as lt
+
+    assert lt.placeholders_in("text <figure: the valve> more") == ["<figure: the valve>"]
+    assert lt.placeholders_in("TODO: measure this") == ["TODO"]
+    assert lt.placeholders_in("a finished paragraph") == []
+    assert "placeholders_in(markdown)" in inspect.getsource(lt.write_lesson)

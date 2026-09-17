@@ -30,7 +30,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from hq.config import settings
+from hq.config import REPO_DIR, settings
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +77,52 @@ _NO_BROWSER_EXACT = (
     "auth token is unavailable",
     "computer use was not approved",
 )
+
+
+# The browser tool (the `cua_repl` MCP server from Codex's computer-use
+# plugin) asks a Codex app-server for the ChatGPT auth token, and the
+# app-server reports that token only when the model provider is `openai`.
+# Mission HQ runs Codex's models on the Grid (juspay) provider, so every
+# browser call failed with "Codex auth token is unavailable" (2026-09-16/17).
+# The fix is scoped to our runs: the browser tool is started with a wrapper
+# as its CODEX_CLI_PATH, so its app-server sees the ChatGPT sign-in, while the
+# models stay on Grid. The server definition is read from the installed
+# plugin each run, so a Codex update does not leave a stale copy here.
+AUTH_WRAPPER = REPO_DIR / "ops" / "codex-chatgpt-auth.sh"
+BROWSER_SERVER = "cua_repl"
+
+
+def _codex_home() -> Path:
+    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+
+
+def browser_auth_override(codex_home: Path | None = None) -> list[str]:
+    """`-c` arguments that give the browser tool the ChatGPT token, or []."""
+    home = codex_home or _codex_home()
+    files = sorted(
+        home.glob("plugins/cache/openai-bundled/unified-computer-use/*/.mcp.json"),
+        key=lambda f: f.stat().st_mtime,
+    )
+    if not files or not AUTH_WRAPPER.is_file():
+        return []
+    try:
+        server = json.loads(files[-1].read_text())["mcpServers"][BROWSER_SERVER]
+        env = dict(server.get("env") or {})
+        command = str(server["command"])
+        args = [str(a) for a in server.get("args") or []]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        log.warning("browser tool definition unreadable, running without the auth fix: %s", exc)
+        return []
+    real = env.get("CODEX_CLI_PATH")
+    if real:
+        env["CODEX_REAL_CLI_PATH"] = real
+    env["CODEX_CLI_PATH"] = str(AUTH_WRAPPER)
+    dump = json.dumps
+    timeout = int(server.get("startup_timeout_sec") or 120)
+    env_table = ",".join(f"{k}={dump(str(v))}" for k, v in env.items())
+    table = (f"{{command={dump(command)},args={dump(args)},"
+             f"startup_timeout_sec={timeout},env={{{env_table}}}}}")
+    return ["-c", f"mcp_servers.{BROWSER_SERVER}={table}"]
 
 
 class CodexRuntimeError(RuntimeError):
@@ -198,6 +244,7 @@ async def run_turn(
     for pair in (p.strip() for p in cfg.codex_config.split(",")):
         if pair:
             argv += ["-c", pair]
+    argv += browser_auth_override()
     if session_id:
         argv += ["resume", session_id, prompt]
     else:

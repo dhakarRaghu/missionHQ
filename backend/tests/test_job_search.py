@@ -827,3 +827,27 @@ def test_a_throttled_gateway_is_waited_out_not_called_unreadable() -> None:
     # A fallback chain raises a group; the reason is inside it.
     group = ExceptionGroup("all models failed", [Boom("nope"), Boom("429 throttling_error")])
     assert _throttled(group)
+
+
+def test_the_codex_browser_tool_gets_the_chatgpt_token_while_models_stay_on_grid(tmp_path) -> None:
+    """2026-09-16/17: every operator browser call failed with "Codex auth
+    token is unavailable". The browser tool's app-server reports the ChatGPT
+    token only for the `openai` provider, and our runs use Grid."""
+    import json
+
+    from hq.runtimes import codex_cli
+
+    plugin = tmp_path / "plugins/cache/openai-bundled/unified-computer-use/26.1/.mcp.json"
+    plugin.parent.mkdir(parents=True)
+    plugin.write_text(json.dumps({"mcpServers": {"cua_repl": {
+        "command": "/node", "args": ["/cua-repl.mjs"], "startup_timeout_sec": 120,
+        "env": {"CODEX_CLI_PATH": "/Applications/ChatGPT.app/codex", "CODEX_HOME": "/h"},
+    }}}))
+    args = codex_cli.browser_auth_override(tmp_path)
+    assert args[0] == "-c" and args[1].startswith("mcp_servers.cua_repl={command=")
+    assert f'CODEX_CLI_PATH="{codex_cli.AUTH_WRAPPER}"' in args[1]
+    assert 'CODEX_REAL_CLI_PATH="/Applications/ChatGPT.app/codex"' in args[1]
+    wrapper = codex_cli.AUTH_WRAPPER.read_text()
+    assert "model_provider=openai" in wrapper and "CODEX_REAL_CLI_PATH" in wrapper
+    # No plugin installed: run without the fix rather than fail.
+    assert codex_cli.browser_auth_override(tmp_path / "nowhere") == []
