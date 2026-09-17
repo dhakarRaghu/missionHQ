@@ -382,6 +382,48 @@ Thin here: shuffle sharding. No paper exists; Physalia and Kora are the closest.
 - **Arpit Bhayani** — arpitbhayani.me/blogs · 2026-08-21 · **the style
   reference for every lesson** — see "How his writing reads", below.
 
+## Papers he already picked: Arpit Bhayani's shelf
+
+- **Papershelf** — arpitbhayani.me/papershelf · 111 papers, one a week, grouped
+  by topic, with his own notes on many of them. Checked 2026-09-18. He is the
+  style reference for this whole system, and his taste in papers is close to
+  the owner's. Use it as a place to find the paper for a phase.
+- **His Paper Notes posts** — arpitbhayani.me/blogs (titles starting "Paper
+  Notes") · the shape a paper article should have: a TL;DR with the headline
+  numbers, three things worth knowing, then the mechanism explained part by
+  part, in plain words.
+- His shelf links to his own copies. Always find the canonical source (USENIX,
+  arXiv, VLDB, ACM open access) and cite that.
+
+Titles from his shelf that map to a course, for the paper day. They are
+suggestions, not verified entries: find the paper, then check it fits the
+phase.
+
+- **Performance**: The NUMA Experience · The Impact of Thread-Per-Core
+  Architecture on Application Tail Latency · NanoLog · In-Memory Performance
+  for Big Data · Snapshot-Free Memory Reclamation for Lock-Free Structures.
+- **Applied AI**: Lost in the Middle · Language Models are Few-Shot Learners ·
+  Improving Language Understanding by Generative Pre-Training · Vector
+  Database: Storage and Retrieval · Manu: A Cloud Native Vector Database ·
+  Panda: Performance Debugging for Databases using LLM Agents.
+- **Inference**: Attention Is All You Need · Lost in the Middle.
+- **Storage**: MyRocks · The Bw-Tree · Segcache · SILK · Umbra · Leaper ·
+  TreeLine · Designing Access Methods: The RUM Conjecture · SIEVE · Amazon
+  Aurora · Predicate Caching · Take Out the TraChe · BonsaiKV · Flajolet-Martin
+  probabilistic counting · The Bloom Paradox · Space-Time Trade-offs in Hash
+  Coding with Allowable Errors.
+- **Distributed**: Spanner · Chubby · Megastore · Dynamo · The Google File
+  System · Challenges to Adopting Stronger Consistency at Scale · Distributed
+  Transactions at Scale in Amazon DynamoDB · TiDB · Epoxy · PolarDB-SCC ·
+  Skip graphs · Kademlia.
+- **Reliability**: Gorilla · Zanzibar · Firecracker · Anycast as a Load
+  Balancing feature · How to break software · Automated Unit Test Improvement
+  using LLMs at Meta.
+- **System design**: Kora · Amazon DynamoDB (ATC 2022) · Amazon Redshift
+  re-invented · Intelligent Scaling in Amazon Redshift · Web Search for a
+  Planet · Real-time Data Infrastructure at Uber · Magnet (Spark shuffle) ·
+  The story of AWS Glue · On-demand Container Loading in AWS Lambda.
+
 ## About the paper shelves
 
 Each course section above has a `### Papers` shelf, verified 2026-09-18. One

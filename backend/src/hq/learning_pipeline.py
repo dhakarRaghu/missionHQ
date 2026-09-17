@@ -875,8 +875,10 @@ Find the primary paper, not a summary of it:
   that changed it
 - prefer a venue that serves the full text: USENIX (OSDI, NSDI, FAST, ATC),
   arXiv, VLDB, ACM open access, or the authors' own page
-- the phase's own References section and the paper shelf in the roster are
-  the first places to look
+- look in this order: the course's `### Papers` shelf in the roster, the
+  phase's own References section, then Arpit Bhayani's papershelf (111 papers
+  he picked, listed in the roster). His shelf links to his own copies; find
+  the canonical source and cite that one
 
 Put forward one to three papers on ONE idea, with `relationship` set to
 `foundation` and `phase_slug` to `{slug}`. In `adds`, name the section,

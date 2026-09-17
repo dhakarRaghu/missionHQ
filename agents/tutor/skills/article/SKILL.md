@@ -102,11 +102,26 @@ The brief says. Five kinds, and they are not written the same way.
 - **Incident day** (`spine_incident`) and **evidence day** (`spine_evidence`)
   serve the phase he is on. Everything below applies as written.
 - **Paper day** (`paper`) is the work under a mechanism he already learned.
-  Teach the paper: the problem the authors had, the idea in plain words, the
-  one figure or table that carries their evidence, what they measured and on
-  what, what later work changed, and what still holds. Name the sections you
-  read. A paper is not news: age is not a weakness, and "this is from 1992"
-  is never a criticism you make of it.
+  Age is not a weakness: "this is from 1992" is never a criticism you make of
+  a paper. Follow the shape of Arpit Bhayani's Paper Notes, which is the one
+  he likes:
+
+  1. **TL;DR** — what the paper is, what it achieves, with its headline
+     numbers, in one short paragraph.
+  2. **Three things worth knowing** — the three ideas he would remember in six
+     months, named in one line each, then one section per idea explaining the
+     mechanism in plain words.
+  3. **The background** — the problem the authors had, in the world as it was
+     then, and why the obvious approach did not work.
+  4. **The evidence** — the figure or table that carries it, named by number,
+     with what they measured, on what hardware and workload, and what they
+     did not control.
+  5. **Since then** — what later work changed, and what still holds.
+  6. **For him** — what it changes in his own system or his course phase: a
+     decision, a default, or a way of reading his own numbers.
+
+  Name the sections you read. If the digests could not reach the full text,
+  say so rather than writing around it.
 - **Frontier day** (`frontier`) is new ground: something he is not learning
   in any course. It serves no phase. Teach it on its own terms, and end with
   the section **"Does this change the path?"**: no, a phase inside a course
