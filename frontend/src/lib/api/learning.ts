@@ -130,6 +130,45 @@ export interface Course {
   course_order?: number;
 }
 
+/** Where a curriculum module stands: whether the research behind it exists,
+ * and whether it is ready to be turned into a course. */
+export type CurriculumStatus = "complete" | "ready" | "partial" | "not started";
+
+/**
+ * One module of the applied-AI curriculum — the plan, not the courses.
+ *
+ * Most of the twenty-two modules have no course yet. The page shows all of
+ * them so the plan is visible as a plan, and a module whose course exists
+ * carries its `topic`, which is how the two are linked.
+ */
+export interface CurriculumModule {
+  /** 1 to 22, and the order the modules are listed in. */
+  number: number;
+  /** Model, Knowledge, Agents, Evals, Infrastructure, Security or Product. */
+  layer: string;
+  title: string;
+  status: CurriculumStatus;
+  /** The research file under `_curriculum/`, or "brief below" when the only
+   * brief is the block in the README. */
+  research: string;
+  /** A plan, not a number: "7", "3 to 4", "to be sized". */
+  planned_phases: string;
+  /** Its place on the core path of eight, or 0 when it is not on it. */
+  core_order: number;
+  /** The published course, or "" when no course exists for the module yet. */
+  topic: string;
+  /** Only sent when `topic` names a course that exists. */
+  phases?: number;
+  taught?: number;
+  read?: number;
+}
+
+/** The whole curriculum, with how many modules stand at each status. */
+export interface Curriculum {
+  modules: CurriculumModule[];
+  counts: Record<CurriculumStatus, number>;
+}
+
 /** One phase of a course, as it appears on his study platform. */
 export interface CoursePhase {
   slug: string;
@@ -197,6 +236,7 @@ export const learningKeys = {
   note: (path: string) => ["learning", "note", path] as const,
   requests: ["learning", "requests"] as const,
   courses: ["learning", "courses"] as const,
+  curriculum: ["learning", "curriculum"] as const,
   coursePhases: (course: string) =>
     ["learning", "courses", course] as const,
   phaseContent: (course: string, slug: string) =>
@@ -224,6 +264,10 @@ export const learningApi = {
       `/learning/lessons/${lessonDate}/read${queryString({ kind })}`,
     ),
   courses: () => getJson<Course[]>("/learning/courses"),
+  /** The applied-AI plan behind the courses: 22 modules, most without a
+   * course yet. Read from the repo, so it changes only when a research run
+   * writes to it. */
+  curriculum: () => getJson<Curriculum>("/learning/curriculum"),
   coursePhases: (course: string) =>
     getJson<CoursePhase[]>(`/learning/courses/${encodeURIComponent(course)}`),
   teachPhase: (course: string, slug: string) =>

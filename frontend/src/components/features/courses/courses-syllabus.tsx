@@ -20,12 +20,13 @@ import { learningApi, learningKeys, type Course, type CoursePhase } from "@/lib/
 import { cn } from "@/lib/utils";
 
 /**
- * Left pane: the course he picked, and where he is in it.
+ * Lower half of the left column: the course he picked, and where he is in it.
  *
- * The course picker moved to a row above the workspace. Here the course's
- * reason is a short, expandable summary rather than a paragraph that pushed
- * the phases off the screen, so the syllabus — the phases in order, with the
- * question each one answers — is what the pane is mostly made of.
+ * The course switcher sits above it, capped and scrolling on its own, so the
+ * phases keep the rest of the column. The course's reason is a short,
+ * expandable summary rather than a paragraph that pushed the phases off the
+ * screen, so the syllabus — the phases in order, with the question each one
+ * answers — is what this half is mostly made of.
  */
 export function CoursesSyllabus({
   course,
@@ -59,7 +60,10 @@ export function CoursesSyllabus({
   const description = tidy(course.description);
 
   return (
-    <aside aria-label="Syllabus" className="syllabus-pane flex min-h-0 flex-col gap-3">
+    <section
+      aria-label="Syllabus"
+      className="flex min-h-0 flex-1 flex-col gap-3 border-t pt-2"
+    >
       <header className="shrink-0 space-y-2">
         <div>
           <h2 className="text-base font-semibold leading-snug">{courseTitle(course)}</h2>
@@ -145,7 +149,7 @@ export function CoursesSyllabus({
           )}
         </ol>
       )}
-    </aside>
+    </section>
   );
 }
 

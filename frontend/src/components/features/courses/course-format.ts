@@ -1,4 +1,9 @@
-import type { Course, CoursePhase } from "@/lib/api/learning";
+import type {
+  Course,
+  CoursePhase,
+  CurriculumModule,
+  CurriculumStatus,
+} from "@/lib/api/learning";
 
 /** Courses without a place on the path sort last with this order. */
 export const OFF_PATH = 999;
@@ -72,4 +77,60 @@ export function phaseState(phase: CoursePhase): PhaseState {
 /** The A and B parts of a split phase share its order number. */
 export function phaseParts(list: CoursePhase[], phase: CoursePhase): CoursePhase[] {
   return list.filter((p) => p.phase_order === phase.phase_order);
+}
+
+/** Where the curriculum lives in the repo, for the paths the module panel
+ * prints. He opens these files in the editor, so they must be exact. */
+export const CURRICULUM_DIR = "learning/study-material/_curriculum";
+
+/**
+ * The file that holds a module's research.
+ *
+ * Most rows name a dossier; a module with no research yet says "brief below",
+ * which means the block in the README is all there is.
+ */
+export function researchPath(module: CurriculumModule): string {
+  const file = /\.md$/.test(module.research) ? module.research : "README.md";
+  return `${CURRICULUM_DIR}/${file}`;
+}
+
+/** True when the module's only brief is the block in the README. */
+export function briefIsInReadme(module: CurriculumModule): boolean {
+  return !/\.md$/.test(module.research);
+}
+
+/** The colour a status chip carries. Tokens, not palette classes. */
+export function statusTone(
+  status: CurriculumStatus,
+): "success" | "running" | "blocked" | "muted" {
+  if (status === "complete") return "success";
+  if (status === "ready") return "running";
+  if (status === "partial") return "blocked";
+  return "muted";
+}
+
+/**
+ * What to do next with a module, in plain words.
+ *
+ * The status word alone does not say what is missing, and every module but
+ * one is still a plan, so the page says the next step rather than making him
+ * remember what "partial" meant.
+ */
+export function moduleNextStep(module: CurriculumModule): string {
+  if (module.status === "complete") {
+    return "This module is done. Its course is published.";
+  }
+  if (module.status === "ready") {
+    return "The dossier exists. Generate the course with /study.";
+  }
+  if (module.status === "partial") {
+    return "Research reports exist in raw-research/. There is no dossier yet.";
+  }
+  return "No research yet. The README block is the brief.";
+}
+
+/** "7", "3 to 4" and "to be sized" are all valid plans, so the label carries
+ * the text as written rather than pretending it is a number. */
+export function plannedPhasesText(module: CurriculumModule): string {
+  return `phases planned: ${module.planned_phases || "to be sized"}`;
 }

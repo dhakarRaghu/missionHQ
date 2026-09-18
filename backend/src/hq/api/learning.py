@@ -262,6 +262,39 @@ async def list_courses() -> list[dict[str, Any]]:
     return [{**r, "active": r["course"] == active} for r in rows]
 
 
+@router.get("/curriculum", operation_id="getCurriculum")
+async def get_curriculum() -> dict[str, Any]:
+    """The applied-AI curriculum: 22 modules in 7 layers, and what exists.
+
+    The plan lives in the repo, written by his research runs. Most modules
+    have no course yet, and the page should say so plainly rather than
+    showing only the courses that happen to exist. A module whose course is
+    published carries its topic, so the two can be linked.
+    """
+    from hq.curriculum import load_modules
+
+    modules = load_modules()
+    topics = [m.topic for m in modules if m.topic]
+    built = {
+        row["course"]: row
+        for row in await db.fetch(
+            "SELECT p.course, count(*) AS phases,"
+            " count(*) FILTER (WHERE p.status = 'taught') AS taught,"
+            " count(*) FILTER (WHERE coalesce(p.read_at, l.read_at) IS NOT NULL) AS read"
+            " FROM hq.course_phases p LEFT JOIN hq.lessons l ON l.id = p.lesson_id"
+            " WHERE p.course = ANY(%s) GROUP BY p.course",
+            (topics,),
+        )
+    }
+    return {
+        "modules": [{**m.to_dict(), **{k: v for k, v in (built.get(m.topic) or {}).items()
+                                       if k != "course"}}
+                    for m in modules],
+        "counts": {s: sum(1 for m in modules if m.status == s)
+                   for s in ("complete", "ready", "partial", "not started")},
+    }
+
+
 @router.get("/courses/{course}", operation_id="getCoursePhases")
 async def get_course_phases(course: str) -> list[dict[str, Any]]:
     """Every phase of one course, in order, with the article written for it.

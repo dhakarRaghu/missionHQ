@@ -4,14 +4,22 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { phaseState } from "@/components/features/courses/course-format";
-import { CoursePicker } from "@/components/features/courses/course-picker";
+import { CourseModulePanel } from "@/components/features/courses/course-module";
+import { CourseNav } from "@/components/features/courses/course-nav";
 import { CoursesReader } from "@/components/features/courses/courses-reader";
 import { CoursesSide } from "@/components/features/courses/courses-side";
 import { CoursesSyllabus } from "@/components/features/courses/courses-syllabus";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { learningApi, learningKeys, type Course, type CoursePhase } from "@/lib/api/learning";
+import {
+  learningApi,
+  learningKeys,
+  type Course,
+  type CoursePhase,
+  type Curriculum,
+  type CurriculumModule,
+} from "@/lib/api/learning";
 import { cn } from "@/lib/utils";
 
 /**
@@ -28,13 +36,27 @@ import { cn } from "@/lib/utils";
  * the evening run only touches that one, and the rest sit still until he
  * switches. Tutor teaches one phase a night, and will not start the next while
  * the last lesson is unread.
+ *
+ * The left column carries both halves of "where am I": the switcher over
+ * every course and every module of the plan, and under it the syllabus of the
+ * one he picked. The switcher is capped so it can never push the phases off
+ * the screen, however many courses there are.
  */
 export function CoursesView() {
   const courses = useQuery({
     queryKey: learningKeys.courses,
     queryFn: () => learningApi.courses(),
   });
+  // The plan behind the courses. It is read from a file in the repo, so it
+  // changes about once a research run: stale time keeps it out of the way.
+  const curriculum = useQuery({
+    queryKey: learningKeys.curriculum,
+    queryFn: () => learningApi.curriculum(),
+    staleTime: 5 * 60_000,
+  });
   const [selected, setSelected] = useState<string | null>(null);
+  // A module with no course takes the centre pane instead of the reader.
+  const [openModule, setOpenModule] = useState<CurriculumModule | null>(null);
 
   const all = courses.data ?? [];
   const active = all.find((c) => c.active);
@@ -67,25 +89,61 @@ export function CoursesView() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      <CoursePicker courses={all} current={current} onPick={setSelected} />
-      <CourseWorkspace
-        // Keyed by course so the remembered phase is read once per course
-        // instead of being reconciled on every switch.
-        key={current.course}
-        course={current}
-      />
-    </div>
+    <CourseWorkspace
+      courses={all}
+      course={current}
+      curriculum={curriculum.data}
+      curriculumPending={curriculum.isPending}
+      curriculumError={
+        curriculum.isError ? (curriculum.error as Error).message : null
+      }
+      onRetryCurriculum={() => void curriculum.refetch()}
+      openModule={openModule}
+      // Picking a course closes the module panel: he asked for a course, so
+      // the reader is what he should be looking at.
+      onPickCourse={(course) => {
+        setSelected(course);
+        setOpenModule(null);
+      }}
+      onOpenModule={setOpenModule}
+      onCloseModule={() => setOpenModule(null)}
+    />
   );
 }
 
-function CourseWorkspace({ course }: { course: Course }) {
+function CourseWorkspace({
+  courses,
+  course,
+  curriculum,
+  curriculumPending,
+  curriculumError,
+  onRetryCurriculum,
+  openModule,
+  onPickCourse,
+  onOpenModule,
+  onCloseModule,
+}: {
+  courses: Course[];
+  course: Course;
+  curriculum: Curriculum | undefined;
+  curriculumPending: boolean;
+  curriculumError: string | null;
+  onRetryCurriculum: () => void;
+  openModule: CurriculumModule | null;
+  onPickCourse: (course: string) => void;
+  onOpenModule: (module: CurriculumModule) => void;
+  onCloseModule: () => void;
+}) {
   const phases = useQuery({
     queryKey: learningKeys.coursePhases(course.course),
     queryFn: () => learningApi.coursePhases(course.course),
   });
-  const [picked, setPicked] = useState<string | null>(() =>
-    rememberedPhase(course.course),
+  // Which phase he is reading, and which course that answer belongs to. The
+  // workspace is not remounted on a switch any more, because the switcher
+  // lives inside it and would lose its open groups and its scroll position,
+  // so the phase is read back here instead.
+  const [picked, setPicked] = useState<{ course: string; slug: string | null }>(
+    () => ({ course: course.course, slug: rememberedPhase(course.course) }),
   );
   const [sideOpen, setSideOpen] = useState(true);
   // Full view: the phase over the whole window, for reading a long course
@@ -101,21 +159,26 @@ function CourseWorkspace({ course }: { course: Course }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [focus]);
 
+  if (picked.course !== course.course) {
+    setPicked({ course: course.course, slug: rememberedPhase(course.course) });
+  }
+
   const list = phases.data ?? [];
-  const current = list.find((p) => p.slug === picked) ?? whereHeIs(list);
+  const current = list.find((p) => p.slug === picked.slug) ?? whereHeIs(list);
   // A published phase is read as its enhanced page, which carries its own
-  // contents rail inside its frame, so the side panel steps aside.
-  const pageOnScreen = current?.source === "platform";
+  // contents rail inside its frame, so the side panel steps aside. A module
+  // panel has no phase behind it at all, so it steps aside too.
+  const pageOnScreen = Boolean(openModule) || current?.source === "platform";
 
   const select = (slug: string) => {
-    setPicked(slug);
+    setPicked({ course: course.course, slug });
     rememberPhase(course.course, slug);
   };
 
   return (
     <div
       className={cn(
-        "console-workspace min-h-0 flex-1",
+        "console-workspace h-full min-h-0",
         focus && "fixed inset-0 z-50 bg-background p-3 md:p-5",
       )}
       data-side={pageOnScreen ? "none" : sideOpen ? "open" : "closed"}
@@ -125,26 +188,43 @@ function CourseWorkspace({ course }: { course: Course }) {
       aria-label={focus ? "Full view" : undefined}
     >
       {focus ? null : (
-      <CoursesSyllabus
-        course={course}
-        phases={list}
-        pending={phases.isPending}
-        error={phases.isError ? (phases.error as Error).message : null}
-        onRetry={() => void phases.refetch()}
-        selected={current?.slug ?? null}
-        onSelect={select}
-      />
+        <div className="courses-nav">
+          <CourseNav
+            courses={courses}
+            current={course}
+            curriculum={curriculum}
+            pending={curriculumPending}
+            error={curriculumError}
+            onRetry={onRetryCurriculum}
+            openModule={openModule}
+            onPickCourse={onPickCourse}
+            onOpenModule={onOpenModule}
+          />
+          <CoursesSyllabus
+            course={course}
+            phases={list}
+            pending={phases.isPending}
+            error={phases.isError ? (phases.error as Error).message : null}
+            onRetry={() => void phases.refetch()}
+            selected={current?.slug ?? null}
+            onSelect={select}
+          />
+        </div>
       )}
-      <CoursesReader
-        course={course.course}
-        phase={current}
-        phases={list}
-        onSelect={select}
-        focus={focus}
-        onToggleFocus={() => setFocus((on) => !on)}
-      />
+      {openModule ? (
+        <CourseModulePanel module={openModule} onBack={onCloseModule} />
+      ) : (
+        <CoursesReader
+          course={course.course}
+          phase={current}
+          phases={list}
+          onSelect={select}
+          focus={focus}
+          onToggleFocus={() => setFocus((on) => !on)}
+        />
+      )}
       {pageOnScreen ? null : (
-      <CoursesSide
+        <CoursesSide
           phase={current}
           open={sideOpen}
           onToggle={() => setSideOpen((open) => !open)}

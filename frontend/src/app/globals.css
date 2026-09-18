@@ -254,11 +254,35 @@
     }
   }
 
+  /* Courses left column: the course switcher above, the syllabus of the
+   * course he picked below.
+   *
+   * The switcher used to be a row of cards across the top of the page. With
+   * eight path courses, twenty-two curriculum modules and eleven platform
+   * courses that row scrolled sideways and pushed the phases below the fold,
+   * so it is a column now, capped at a little under half the height and
+   * scrolling inside itself. The cap is the point: however many courses he
+   * adds, the phase list keeps its share of the column. */
+  .courses-nav {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .courses-switcher {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 45%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
   /* The three course panes fill the workspace row on wide screens. Stacked on
    * a phone, the workspace scrolls instead and each pane gets a definite
    * height of its own, so the reader still scrolls inside itself (the side
    * panel follows that scroll) and the page never scrolls sideways. */
-  .syllabus-pane,
+  .courses-nav,
   .reader-pane,
   .side-pane {
     height: 100%;
@@ -270,8 +294,10 @@
       grid-auto-rows: max-content;
     }
 
-    .syllabus-pane {
-      height: 22rem;
+    /* Stacked above the reader, the column still holds two sections, so it
+     * needs more room than the syllabus alone used to take. */
+    .courses-nav {
+      height: 28rem;
     }
 
     .reader-pane {

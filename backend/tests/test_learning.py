@@ -1789,3 +1789,37 @@ def test_publishing_writes_a_draft_and_nothing_else() -> None:
     assert "papershelf" in brief and "Never name his employer" in brief
     assert "publish_post" in load_tutor_tools()
     assert "post_brief" in inspect.getsource(api.draft_post)
+
+
+def test_the_curriculum_is_read_from_the_repo_not_invented() -> None:
+    """22 modules in 7 layers, with a core path of 8. The plan lives in
+    learning/study-material/_curriculum/README.md; the page shows all of it,
+    including the modules that have no course yet."""
+    from hq.curriculum import STATUSES, layers, load_modules
+
+    modules = load_modules()
+    assert [m.number for m in modules] == list(range(1, len(modules) + 1))
+    assert len(modules) == 22
+    assert [name for name, _ in layers(modules)] == [
+        "Model", "Knowledge", "Agents", "Evals", "Infrastructure", "Security", "Product",
+    ]
+    assert all(m.status in STATUSES for m in modules)
+    # Module 1 is the published inference course; it is course 3 of the path.
+    first = modules[0]
+    assert first.number == 1 and first.status == "complete"
+    assert first.topic == "inference-internals" and first.core_order == 1
+    # The core path is the eight he does first, in order.
+    core = sorted((m.core_order, m.number) for m in modules if m.core_order)
+    assert [n for _, n in core] == [1, 2, 11, 6, 7, 9, 16, 15]
+    # A module with no course carries no topic, and says where its research is.
+    later = next(m for m in modules if m.number == 11)
+    assert later.topic == "" and later.research.endswith(".md")
+
+
+def test_a_missing_curriculum_file_is_not_an_error() -> None:
+    """The page asks for the plan on every load. A repo without the file (or
+    a half-written table) shows no modules rather than failing the request."""
+    from hq import curriculum
+
+    assert curriculum._parse("# nothing here\n", 0.0) == ()
+    assert curriculum._parse("| 1 | Model | X | unknown | a.md | 7 |\n", 1.0) == ()
