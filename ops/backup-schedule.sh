@@ -7,6 +7,12 @@
 #   ops/backup-schedule.sh run-now    run one backup right now through launchd
 #   ops/backup-schedule.sh logs       tail the backup log
 #
+# A second job mirrors the database off this machine once a week:
+#   ops/backup-schedule.sh install-remote   Sunday 04:10, runs `backup.sh sync-remote`
+#   ops/backup-schedule.sh uninstall-remote
+# Everything stays local. The mirror is a copy, and nothing reads it while
+# Mission HQ runs. Its URL lives in backend/.env as BACKUP_DATABASE_URL.
+#
 # The job runs `ops/backup.sh run`. Test a restore with `ops/backup.sh restore-drill`.
 set -euo pipefail
 
@@ -30,6 +36,20 @@ case "${1:-status}" in
     launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
     rm -f "$DST"
     echo "removed $LABEL"
+    ;;
+  install-remote)
+    mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/data/logs"
+    # The plist carries __ROOT__ so this repo can live anywhere.
+    sed "s|__ROOT__|$ROOT|g" "$HERE/com.missionhq.remote-backup.plist" \
+        > "$HOME/Library/LaunchAgents/com.missionhq.remote-backup.plist"
+    launchctl bootout "$DOMAIN/com.missionhq.remote-backup" 2>/dev/null || true
+    launchctl bootstrap "$DOMAIN" "$HOME/Library/LaunchAgents/com.missionhq.remote-backup.plist"
+    echo "installed com.missionhq.remote-backup (Sundays at 04:10)"
+    ;;
+  uninstall-remote)
+    launchctl bootout "$DOMAIN/com.missionhq.remote-backup" 2>/dev/null || true
+    rm -f "$HOME/Library/LaunchAgents/com.missionhq.remote-backup.plist"
+    echo "removed com.missionhq.remote-backup"
     ;;
   run-now)
     launchctl kickstart "$DOMAIN/$LABEL"

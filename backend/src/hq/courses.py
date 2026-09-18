@@ -36,6 +36,9 @@ EXCLUDED_PLATFORM_COURSES = frozenset({
     "haskell",
     "next-js-16-app-router-server-vs-client-components",
     "go-mastery",
+    "database-schema-design-principles",
+    "databases",
+    "own-production-code-understanding",
 })
 
 

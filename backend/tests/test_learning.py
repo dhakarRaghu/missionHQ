@@ -1073,18 +1073,21 @@ def test_an_undated_lead_is_kept_but_flagged() -> None:
 
 
 def test_every_course_spec_parses_and_is_complete() -> None:
-    """The seven courses in learning/courses/ are the spine of the path.
+    """The courses in learning/courses/ are the spine of the path.
 
     A phase that parses without its question, sections, lab or test-out is a
     phase tutor cannot teach against, and the failure would only show up on
-    the morning it was scheduled.
+    the morning it was scheduled. The count is not fixed: he adds courses
+    (course 8 arrived on 2026-09-18). The orders must stay 1..N, in file
+    order, because that is the order he works them in.
     """
     from hq.courses import load_courses
 
     courses = load_courses()
-    assert [c.order for c in courses] == [1, 2, 3, 4, 5, 6, 7]
+    assert [c.order for c in courses] == list(range(1, len(courses) + 1))
     local = [c for c in courses if c.source == "local"]
-    assert len(local) == 6 and sum(len(c.phases) for c in local) >= 26
+    assert len(local) == len(courses) - 1  # one platform course: inference
+    assert sum(len(c.phases) for c in local) >= 26
     for course in local:
         assert course.description, course.slug
         for phase in course.phases:
@@ -1098,12 +1101,22 @@ def test_every_course_spec_parses_and_is_complete() -> None:
     assert inference.platform_course == "inference-internals"
 
 
-def test_excluded_platform_courses_are_the_three_he_named() -> None:
+def test_excluded_platform_courses_are_the_ones_he_named() -> None:
+    """Three languages and frameworks he dropped, then three one-phase stubs
+    he dropped on 2026-09-18. Excluded in code as well as deleted, so a sync
+    cannot bring them back."""
     from hq.courses import EXCLUDED_PLATFORM_COURSES
+    from hq.db import load_migrations
 
     assert EXCLUDED_PLATFORM_COURSES == {
         "haskell", "next-js-16-app-router-server-vs-client-components", "go-mastery",
+        "database-schema-design-principles", "databases",
+        "own-production-code-understanding",
     }
+    sql = dict(load_migrations())[30]
+    for course in ("database-schema-design-principles", "databases",
+                   "own-production-code-understanding"):
+        assert course in sql
 
 
 def test_the_phase_chooses_the_article_not_the_score() -> None:

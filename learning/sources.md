@@ -371,6 +371,55 @@ Verified 2026-09-18.
 
 Thin here: shuffle sharding. No paper exists; Physalia and Kora are the closest.
 
+## Course 8 — Production infrastructure: change and proof · elite-production-infra
+
+Added 2026-09-18 with the course. These are hosts already verified elsewhere
+in this file, pointed at this course's subjects; the next source hunt fills
+the gaps, which are marked at the end.
+
+- **HashiCorp blog** — hashicorp.com/blog · Terraform state, plan and drift,
+  from the people who build it. Mixed: skip the product announcements.
+- **OpenTofu blog** — opentofu.org/blog · the fork's own changes, state
+  encryption and registry work.
+- **Gruntwork blog** — gruntwork.io/blog · infrastructure-as-code practice at
+  scale, module design and test ladders.
+- **Cloudflare** — blog.cloudflare.com · 2026-09-16 · the config change that
+  reaches everything at once; their postmortems are the best of that kind.
+- **Slack engineering** — slack.engineering · 2026-07-14 · staged rollout and
+  automatic rollback of a platform.
+- **Meta engineering** — engineering.fb.com · 2026-09-03 · deployment safety
+  at fleet scale.
+- **Uber engineering** — uber.com/blog/engineering · 2026-09-11 · change
+  management and capacity in production.
+- **Trail of Bits** — blog.trailofbits.com · 2026-09-15 · build pipelines as
+  an attack surface, signing and verification.
+- **Filippo Valsorda** — words.filippo.io · 2026-07-26 · supply chain,
+  dependencies and signing, in plain terms.
+- **The Update Framework and Sigstore blogs** — theupdateframework.io,
+  blog.sigstore.dev · artifact signing and verification, by the projects
+  themselves.
+- **GitHub availability reports** — github.blog/tag/github-availability-report
+  · 2026-09-09 · pipeline and platform failures, monthly.
+- **AWS post-event summaries** — aws.amazon.com/premiumsupport/technology/pes/
+  · archive · what a control-plane failure does to everyone downstream.
+
+### Papers — the shelf for this course
+
+- **in-toto: farm-to-table guarantees** — USENIX Security 2019 ·
+  usenix.org/system/files/sec19-torres-arias.pdf · behind: the pipeline as
+  the attack surface · read 4.1 and Table 4.
+- **Making Deployments Safe at Meta** — ISSRE 2026 · arxiv.org/abs/2608.20513
+  · behind: health checks gating each phase of a rollout · read section IV.
+- **How to Fight Production Incidents?** — SoCC 2022 ·
+  microsoft.com/en-us/research/wp-content/uploads/2022/09/3542929.3563482.pdf
+  · behind: where recovery time is lost · read Figures 1 and 3.
+- **The CrowdStrike Channel File 291 root cause** — 2024-08-06 · archive · a
+  content update that shipped everywhere without a deploy.
+
+Thin here: infrastructure-as-code has no research shelf worth the name, and
+the drift and rehearsal subjects have no paper at all. The next hunt looks for
+practitioners rather than papers.
+
 ## Engineering craft — any course
 
 - **Julia Evans** — jvns.ca · 2026-07-21 · mechanisms from first principles.
