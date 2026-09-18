@@ -1,6 +1,6 @@
 # The courses
 
-Seven courses, in order. This is the spine of the learning system: the
+Eight courses, in order. This is the spine of the learning system: the
 course decides what is taught next, and the daily articles orbit the phase
 that is active.
 
@@ -32,6 +32,8 @@ learning/courses/
   05-distributed/course.md      Distributed systems and verification
   06-reliability/course.md      Reliability, security and change
   07-system-design/course.md    System design and architecture
+  08-production-infra/course.md Production infrastructure: change, supply chain and proof
+  08-production-infra/notes.md  out-of-scope list and corrections to commonly-repeated facts
 ```
 
 ## The format, which code reads
@@ -62,6 +64,30 @@ leaves-for-later: <terms the phase must NOT lean on, with where they arrive>
 lesson may not use a term that is neither assumed nor introduced earlier, and
 may not pre-teach what is left for later. `### Sections` is the coverage
 contract: every listed section appears, in order.
+
+## Optional files beside a course.md
+
+A course directory may hold two more files. Read both before generating any
+phase of that course. Course 8 has both; courses 1 to 7 have neither yet.
+
+```
+NN-<name>/
+  course.md     the spec. The approved outline. Required
+  sources.md    fetch-verified sources, dated incidents and hard numbers, per phase
+  notes.md      topics deliberately out of scope, and facts commonly published wrongly
+```
+
+`sources.md` exists so generation does not repeat research that is already
+done. It carries the URL, the date it was verified, and the conditions attached
+to every number. Re-check version numbers before publishing, because versions
+move. Do not re-check the dated incidents.
+
+`notes.md` is the correction list. Several widely published facts about
+Terraform, SLSA, SBOM formats and DORA are wrong. Read it before writing a
+sentence that repeats one.
+
+If a phase needs a number that neither file carries, it is **not checked**.
+Say so in the material rather than reaching for a figure.
 
 ## How long it really takes
 
