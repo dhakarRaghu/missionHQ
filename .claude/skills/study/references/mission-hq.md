@@ -40,9 +40,16 @@ published stays "planned" on the Courses page.
 
 ## The path courses start from a spec
 
-The seven path courses are specified in `learning/courses/NN-<name>/course.md`.
+The eight path courses are specified in `learning/courses/NN-<name>/course.md`.
 Read `learning/courses/README.md` for the format. For these courses the spec
 is the approved outline. Do not design a new one.
+
+If the course directory holds a `sources.md`, read it before researching
+anything. It pins the fetch-verified sources, dated incidents and hard numbers
+per phase, so generation does not repeat research that is already done.
+Re-check version numbers before publishing. Do not re-check the dated incidents.
+If it holds a `notes.md`, read that too: it lists facts that are commonly
+published wrongly, and topics deliberately left out of the course.
 
 `/study <slug>`, for example `/study elite-performance`:
 
