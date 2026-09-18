@@ -1733,3 +1733,46 @@ def test_the_weekend_builds_instead_of_reading() -> None:
     assert "five things worth keeping" in review and "dst" in review
     run = inspect.getsource(lt.start_learning_run)
     assert "_start_lab_card" in run and "_start_week_review" in run
+
+
+def test_a_post_is_checked_before_it_reaches_his_site() -> None:
+    """A lesson is written for him; a post is for a stranger. The checks are
+    code, not judgement: private words, an employer, invented links, or a
+    rewrite that dropped the substance instead of the context."""
+    from hq.tools.learning_tools import POST_MIN_WORDS, post_problems
+
+    source = ("The vLLM post https://vllm.ai/blog/x measured it. "
+              + "word " * (POST_MIN_WORDS + 50))
+    good = "A real article. https://vllm.ai/blog/x\n" + "word " * (POST_MIN_WORDS + 20)
+    assert post_problems(good, source) == ""
+
+    private = good + "\nHunter's study note says the course phase covers it."
+    gap = post_problems(private, source)
+    assert "private notes" in gap and "study note" in gap
+
+    assert "employer" in post_problems(good + " We did this at Mindtickle.", source)
+    assert "did not have" in post_problems(good + " https://invented.example/x", source)
+    assert "lost the substance" in post_problems("Too short.", source)
+
+
+def test_publishing_writes_a_draft_and_nothing_else() -> None:
+    import inspect
+
+    from hq.api import learning as api
+    from hq.learning_pipeline import POST_SECTIONS, post_brief, post_payload
+    from hq.tools import learning_tools as lt
+
+    src = inspect.getsource(lt.publish_post)
+    assert "draft: true" in src and "post_problems" in src
+    # No git, no network, no deploy: it writes one file into his site and
+    # says so. Only the docstring may use the words.
+    for call in ("subprocess", "httpx", "urllib", "git "):
+        assert call not in src.split('"""')[2], call
+    assert "No commit, no push, no deploy" in src
+    assert POST_SECTIONS == ("writing", "papershelf")
+    brief = post_brief(post_payload(
+        {"lesson_date": "2026-09-17", "md_path": "learning/lessons/x.md", "title": "T"},
+        "papershelf"))
+    assert "papershelf" in brief and "Never name his employer" in brief
+    assert "publish_post" in load_tutor_tools()
+    assert "post_brief" in inspect.getsource(api.draft_post)

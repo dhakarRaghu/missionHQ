@@ -35,6 +35,7 @@ from hq.learning_pipeline import (
     LESSON_KINDS,
     MAX_CANDIDATES,
     PAPER,
+    POST_SECTIONS,
     RELATIONSHIPS,
     REVISION,
     REVISION_AGE_DAYS,
@@ -1275,6 +1276,141 @@ def page_coverage(source: str, page_html: str, note: str = "") -> str:
             " mention with the mechanism it illustrates, in general terms"
         )
     return "; ".join(problems)
+
+
+# --- publishing to his own site ----------------------------------------------
+#
+# A lesson is written for him: it names the course phase, the study note and
+# the system that produced it. His site has readers with none of that, so a
+# post is a rewrite, and these checks refuse anything that still reads like
+# private notes. Nothing is committed or pushed from here: the file lands in
+# his site's content folder and he decides what goes live.
+PRIVATE_WORDS = (
+    "study note", "quarantine/", "phase_slug", "course phase", "the phase he",
+    "the phase you are on", "hunter", "tutor", "sage", "librarian", "scout",
+    "record_lesson", "write_lesson", "evening run", "learning/lessons",
+)
+POST_MIN_WORDS = 400
+_FRONTMATTER_UNSAFE = re.compile(r'["\n\r]')
+
+
+def _read_lesson_text(path: str) -> str:
+    """The lesson's own text, for checking a post against it. "" when absent."""
+    rel = PurePosixPath(path.strip())
+    if rel.is_absolute() or ".." in rel.parts or not str(rel).startswith(f"{LESSON_DIR}/"):
+        return ""
+    root = settings().learning_dir.resolve()
+    full = (root.parent / rel).resolve()
+    if not full.is_file() or root not in full.parents:
+        return ""
+    return full.read_text()
+
+
+def post_problems(markdown: str, source: str) -> str:
+    """Why this is not ready to be public, or "".
+
+    Measured, not judged: private words, an employer, a placeholder, a link
+    the lesson did not have, or a post so short the rewrite dropped the
+    substance instead of the context.
+    """
+    problems = []
+    lowered = markdown.lower()
+    private = sorted({w for w in PRIVATE_WORDS if w in lowered})
+    if private:
+        problems.append(
+            "these belong to his private notes, not a post: " + _listed(private)
+        )
+    named = [n for n in settings().private_employers if n.lower() in lowered]
+    if named:
+        problems.append("it names an employer (" + ", ".join(named) + ")")
+    left = placeholders_in(markdown)
+    if left:
+        problems.append("placeholders are still in it: " + _listed(left))
+    if source:
+        new_links = sorted({u.rstrip(".,;:") for u in _PAGE_URL_RE.findall(markdown)
+                            if u.rstrip(".,;:") not in source})
+        if new_links:
+            problems.append("links the lesson did not have: " + _listed(new_links))
+    words = _prose_words(markdown)
+    if words < POST_MIN_WORDS:
+        problems.append(
+            f"{words} words; a post under {POST_MIN_WORDS} has lost the substance,"
+            " not just the private context"
+        )
+    dashes = markdown.count("\u2014")
+    if dashes > max(5, words // 400):
+        problems.append(f"{dashes} em dashes; split those sentences")
+    return "; ".join(problems)
+
+
+@hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
+async def publish_post(
+    ctx: RunContext[HQDeps],
+    section: str,
+    slug: str,
+    title: str,
+    summary: str,
+    tags: str,
+    markdown: str,
+    source_lesson: str = "",
+) -> dict[str, Any]:
+    """Write one post into his own site's content folder, after the checks.
+
+    `section` is "writing" (an article) or "papershelf" (a paper note).
+    `slug` is lowercase words joined by hyphens. `tags` are comma separated.
+    `source_lesson` is the lesson path this came from, so the links can be
+    checked against it.
+
+    It writes a file and nothing else. No commit, no push, no deploy: he
+    reads the file, edits what he wants, and publishes it himself.
+    """
+    section = section.strip().lower()
+    if section not in POST_SECTIONS:
+        raise ModelRetry(f"section must be one of {', '.join(POST_SECTIONS)}")
+    clean = _clean_slug(slug)
+    title, summary = title.strip(), " ".join(summary.split())
+    if not title or not summary:
+        raise ModelRetry("a post needs a title and a one-line summary")
+    if _FRONTMATTER_UNSAFE.search(title) or _FRONTMATTER_UNSAFE.search(summary):
+        raise ModelRetry('the title and summary go in frontmatter: no quotes or newlines')
+    tag_list = [t.strip().lower() for t in tags.replace("\n", ",").split(",") if t.strip()]
+    if not 2 <= len(tag_list) <= 8:
+        raise ModelRetry("give two to eight tags, comma separated")
+
+    source = ""
+    if source_lesson.strip():
+        source = await asyncio.to_thread(_read_lesson_text, source_lesson.strip())
+    gap = post_problems(markdown, source)
+    if gap:
+        raise ModelRetry(f"this is not ready for his site: {gap}. Fix it and call again")
+
+    root = settings().portfolio_dir
+    if not root.is_dir():
+        raise ModelRetry(f"his site is not at {root}; nothing was written")
+    folder = root / "content" / section
+    await asyncio.to_thread(folder.mkdir, parents=True, exist_ok=True)
+    body = markdown.strip()
+    front = "\n".join([
+        "---",
+        f'title: "{title}"',
+        f"date: {_today().date()}",
+        f'summary: "{summary}"',
+        "tags: [" + ", ".join(tag_list) + "]",
+        f"section: {section}",
+        "draft: true",
+        "---",
+        "",
+    ])
+    path = folder / f"{clean}.md"
+    await asyncio.to_thread(path.write_text, front + body + "\n")
+    await emit("post.drafted", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
+               payload={"section": section, "slug": clean, "words": _prose_words(body)})
+    return {
+        "path": str(path),
+        "words": _prose_words(body),
+        "next": "he reads it, edits it, sets draft: false and pushes. Nothing was"
+                " committed or published from here.",
+    }
 
 
 @hq_tool(action=ActionClass.READ, trust=Trust.VAULT)

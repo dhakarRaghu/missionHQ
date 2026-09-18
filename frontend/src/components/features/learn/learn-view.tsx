@@ -3,7 +3,16 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, FileText, Maximize2, PanelsTopLeft, Plus, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  FileText,
+  Maximize2,
+  PanelsTopLeft,
+  Plus,
+  Send,
+  X,
+} from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
@@ -66,6 +75,13 @@ function pieceLabel(lesson: Lesson): string {
  */
 export function LearnView() {
   const queryClient = useQueryClient();
+  // A post for his own site. Tutor rewrites the lesson for a reader with none
+  // of his context, the checks run, and a draft file lands in the site's
+  // content folder. Publishing stays his: nothing is committed or pushed.
+  const draftPost = useMutation({
+    mutationFn: ({ lesson, section }: { lesson: Lesson; section: "writing" | "papershelf" }) =>
+      learningApi.draftPost(lesson.lesson_date, section, lesson.kind),
+  });
   const markRead = useMutation({
     mutationFn: (l: { lesson_date: string; kind: string }) =>
       learningApi.markRead(l.lesson_date, l.kind),
@@ -201,6 +217,25 @@ export function LearnView() {
                 Mark as read
               </Button>
             )}
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={draftPost.isPending}
+              title={
+                current.article_kind === "paper"
+                  ? "Rewrite this as a paper note for your site, as a draft"
+                  : "Rewrite this as an article for your site, as a draft"
+              }
+              onClick={() =>
+                draftPost.mutate({
+                  lesson: current,
+                  section: current.article_kind === "paper" ? "papershelf" : "writing",
+                })
+              }
+            >
+              <Send aria-hidden className="size-3.5" />
+              {draftPost.isPending ? "Preparing…" : "Draft a post"}
+            </Button>
             {current.html_path ? (
               // A new tab, not a lightbox: the lesson keeps its own sandboxed
               // frame there, so the diagrams get the whole screen without the

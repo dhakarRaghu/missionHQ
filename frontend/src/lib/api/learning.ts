@@ -211,6 +211,13 @@ export const learningApi = {
     getJson<LessonPage>(`/learning/page${queryString({ path })}`),
   note: (path: string) =>
     getJson<LessonNote>(`/learning/note${queryString({ path })}`),
+  /** Prepare a lesson as a post for his own site. Writes a draft file there
+   * and nothing else: no commit, no push, no publish. */
+  draftPost: (lessonDate: string, section: "writing" | "papershelf", kind: string) =>
+    sendJson<{ started: boolean; reason?: string; task_id?: string; title?: string }>(
+      "POST",
+      `/learning/lessons/${lessonDate}/post${queryString({ section, kind })}`,
+    ),
   markRead: (lessonDate: string, kind: string) =>
     sendJson<{ ok: boolean; title: string }>(
       "POST",

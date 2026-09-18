@@ -134,6 +134,39 @@ The brief says. Five kinds, and they are not written the same way.
   measuring the opposite. If nothing changed, say so plainly and make the
   article the best failure or measurement on that phase instead.
 
+## Publishing to his site
+
+A lesson is written for him. A post is written for a stranger who reads his
+site. The brief names the lesson and the section: `writing` for an article,
+`papershelf` for a paper note.
+
+**What comes out.**
+
+- **The opening changes.** A lesson opens with a situation from his course; a
+  post opens with the situation itself, told so anyone serving systems
+  recognises it.
+- **Every private reference goes**: the course, the phase, the study note,
+  the agents, the pipeline. `publish_post` refuses the post if any of them
+  are still there.
+- **Every fact stays**, with its number, its conditions and its source. If
+  the lesson labelled a number as one team's own, the post says so too.
+- **The limits stay.** Turn the "could not verify" list into one honest
+  paragraph near the end. It is the part that earns trust.
+- **His voice**: plain English, short sentences, no idioms, no em dashes in
+  prose, and his employer is never named.
+- **No new links.** Only urls the lesson already carried.
+- For `papershelf`, keep the paper-note shape: TL;DR with the numbers, three
+  things worth knowing, the background, the evidence by figure, what changed
+  since, and what it means for a working engineer.
+
+**Then call `publish_post`** with the section, a slug, the title, a one-line
+summary, three to six tags, the markdown, and `source_lesson` set to the
+lesson path so the links can be checked against it.
+
+It writes one file, marked `draft: true`, into his site and does nothing
+else. No commit, no push, no deploy. Say in your report what you cut, and
+what you were unsure about.
+
 ## The week review
 
 Sunday, and a different job: not a subject, a consolidation. The brief lists

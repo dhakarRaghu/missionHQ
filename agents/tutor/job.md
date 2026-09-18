@@ -17,6 +17,10 @@ tools:
   # A frontier article ends by saying whether it changes the path; the note
   # is what gives new ground a door into the plan instead of a reading list.
   - note_frontier
+  # A post for his own site: the rewrite is checked for private words, an
+  # employer, invented links and lost substance before the file is written.
+  # It writes a file and nothing else; publishing stays his.
+  - publish_post
   - list_readings
   - record_lesson
   - memory_search

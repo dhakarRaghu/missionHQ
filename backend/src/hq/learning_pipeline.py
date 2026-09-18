@@ -48,6 +48,10 @@ SOURCE_HUNT_STAGE = "source_hunt"
 ROSTER_MERGE_STAGE = "roster_merge"
 LAB_CARD_STAGE = "lab_card"
 WEEK_REVIEW_STAGE = "week_review"
+POST_STAGE = "post_draft"
+# Where a post lands on his site. `writing` is an article, `papershelf` is a
+# paper note, which is the shape he likes (arpitbhayani.me/papershelf).
+POST_SECTIONS = ("writing", "papershelf")
 
 # The roster of people and publications worth his morning. Written by sage's
 # weekly refresh, read by every stage, and deliberately a vault file rather
@@ -304,6 +308,59 @@ def lesson_payload(
         "digests": [str(d.get("digest_path", "")) for d in digests][:MAX_STUDY],
         **_carry_phase(source),
     }
+
+
+def post_payload(lesson: Mapping[str, Any], section: str) -> dict[str, Any]:
+    return {
+        "workflow": WORKFLOW,
+        "stage": POST_STAGE,
+        "section": section,
+        "lesson_date": str(lesson.get("lesson_date") or ""),
+        "md_path": str(lesson.get("md_path") or ""),
+        "title": str(lesson.get("title") or ""),
+    }
+
+
+def post_brief(payload: Mapping[str, Any]) -> str:
+    """Tutor: turn one lesson into a post for his own site.
+
+    The lesson was written for him: it talks about the phase he is on, the
+    study note behind it, and the system that produced it. A reader of his
+    site has none of that. This is the rewrite, and the checks in
+    `publish_post` refuse anything that still reads like private notes.
+    """
+    section = str(payload.get("section") or "writing")
+    kind = ("a paper note, in the shape of arpitbhayani.me/papershelf"
+            if section == "papershelf" else "an article")
+    return f"""Prepare {kind} for his own site, from the lesson
+`{payload.get("md_path")}` ("{payload.get("title")}").
+
+**Load the `teaching` skill, then the `article` skill, with `load_skill`.**
+Work to the section "Publishing to his site".
+
+Read the lesson first with `read_lesson`. Then rewrite it for a reader who
+has none of his context:
+
+- **Cut every private reference.** No course phase, no study note, no agent
+  names, no "the phase you are on", no Mission HQ internals. If a point only
+  made sense because of his course, either explain it on its own terms or
+  drop it.
+- **Keep every fact, number and condition**, with its source. A post that
+  softens a measured claim is worse than no post.
+- **Keep the failures and the limits.** The "could not verify" list becomes a
+  short, honest paragraph rather than a private checklist.
+- **Speak as himself**, plainly: his English is his second language and his
+  readers are engineers. No idioms, no em dashes in prose.
+- **Never name his employer**, past or present.
+- **Add no new links.** Only urls already in the lesson.
+
+Then call `publish_post` with the section `{section}`, a slug, the title, a
+one-line summary, three to six tags, and the markdown. It runs the checks and
+writes the file into his site. It does not commit and does not publish: he
+reads it, edits it, and pushes it himself.
+
+Report the path it wrote, what you cut, and anything you were unsure about.
+"""
 
 
 def lab_card_payload(phase: Mapping[str, Any] | None) -> dict[str, Any]:

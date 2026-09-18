@@ -291,6 +291,46 @@ async def get_course_phases(course: str) -> list[dict[str, Any]]:
     )
 
 
+@router.post("/lessons/{lesson_date}/post", operation_id="draftPost")
+async def draft_post(lesson_date: str, section: str = "writing", kind: str = "topic") -> dict:
+    """Prepare this lesson as a post for his own site.
+
+    Tutor rewrites it for a reader with none of his context, the checks run,
+    and the file lands in his site's content folder. Nothing is committed,
+    pushed or published: that stays his.
+    """
+    from hq import engine
+    from hq.learning_pipeline import POST_SECTIONS, post_brief, post_payload
+
+    if section not in POST_SECTIONS:
+        raise HTTPException(400, f"section must be one of {', '.join(POST_SECTIONS)}")
+    row = await db.fetchone(
+        "SELECT to_char(lesson_date, 'YYYY-MM-DD') AS lesson_date, title, md_path"
+        " FROM hq.lessons WHERE lesson_date = %s::date AND kind = %s",
+        (lesson_date, kind),
+    )
+    if not row or not row["md_path"]:
+        raise HTTPException(404, f"no {kind} lesson on {lesson_date} to post")
+    live = await db.fetchone(
+        "SELECT id::text FROM hq.tasks WHERE dedup_key = %s"
+        " AND status IN ('backlog', 'running')",
+        (f"post:{section}:{lesson_date}",),
+    )
+    if live:
+        return {"started": False, "reason": "already preparing this post",
+                "task_id": live["id"]}
+    payload = post_payload(dict(row), section)
+    task_id = await engine.dispatch(
+        agent="tutor",
+        title=f"Post draft: {str(row['title'])[:56]}",
+        brief=post_brief(payload),
+        source="web",
+        payload=payload,
+        dedup_key=f"post:{section}:{lesson_date}",
+    )
+    return {"started": True, "task_id": task_id, "title": row["title"]}
+
+
 @router.post("/courses/{course}/phases/{slug}/teach", operation_id="teachPhase")
 async def teach_phase(course: str, slug: str) -> dict:
     """Study one named phase now, instead of waiting for tonight's run.

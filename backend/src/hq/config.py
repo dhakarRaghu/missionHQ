@@ -189,6 +189,9 @@ class Settings(BaseSettings):
     # and former employers. His older platform courses name the former one;
     # an enhanced page built from them must not. Checked by code, not prose.
     private_employers: tuple[str, ...] = ("Mindtickle", "Juspay")
+    # His own site, beside this repo. Posts are written into its content
+    # folder and never committed or pushed from here: publishing is his.
+    portfolio_dir: Path = REPO_DIR.parent / "portfolio"
     halt_file: Path = REPO_DIR / "HALT"
     models_file: Path = BACKEND_DIR / "models.yaml"
 
