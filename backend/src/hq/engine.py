@@ -7,6 +7,7 @@ the API lifespan BEFORE DBOS.launch(); queues + schedules after.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import replace
@@ -1292,6 +1293,23 @@ async def _queue_readings_step(urls: list[str]) -> None:
 
 
 @DBOS.step()
+async def _page_additions_step(slug: str) -> list[dict[str, Any]]:
+    """What the newest page for this phase added, with the urls it cites."""
+    from hq.tools.learning_tools import page_additions
+
+    row = await db.fetchone(
+        "SELECT l.html_path FROM hq.lessons l WHERE l.course_slug = %s AND l.kind = 'course'"
+        " AND l.html_path <> ''", (slug,))
+    path = str((row or {}).get("html_path") or "")
+    if not path:
+        return []
+    full = (settings().learning_dir.parent / path).resolve()
+    if not full.is_file():
+        return []
+    return page_additions(await asyncio.to_thread(full.read_text))
+
+
+@DBOS.step()
 async def _phase_articles_step(phase_slug: str) -> list[dict[str, Any]]:
     """Articles already written around this phase, which he may have read."""
     return await db.fetch(
@@ -1493,9 +1511,54 @@ async def _advance_learning(
         if result != "done":
             return None
         if payload.get("source") == "platform":
-            # Additions to a published phase: sources were checked as each one
-            # was written, and the phase itself went through the /study review.
+            # The phase itself went through the /study review, and the page is
+            # checked by code. What nobody has read is what Mission HQ added:
+            # a claim in one of those boxes reaches him unexamined. One run
+            # opens every url they cite and checks the claim against it.
+            if "hunter" not in AGENTS:
+                return None
+            additions = await _page_additions_step(str(payload.get("slug") or ""))
+            if not additions:
+                return None
+            claims = learning.claims_payload(payload, int(payload.get("claims_round") or 0))
+            return await dispatch(
+                agent="hunter",
+                title=f"Check the additions: {str(payload.get('title') or '')[:48]}",
+                brief=learning.claims_brief(claims, additions),
+                source="agent",
+                parent_task_id=task_id,
+                origin_session_id=task.get("origin_session_id"),
+                payload={**claims, "run_id": run_id},
+                dedup_key=f"course-claims:{task_id}",
+            )
+
+    if learning.is_claims_check(payload):
+        if result != "done":
             return None
+        failures = learning.extract_claim_failures(output)
+        round_ = int(payload.get("claims_round") or 0)
+        if not failures:
+            return None
+        if round_ + 1 >= learning.MAX_CLAIMS_ROUNDS:
+            await board.apply(
+                task_id, "noted", status="blocked",
+                data={"reason": f"{len(failures)} claim(s) on {payload.get('slug')} still"
+                                " do not match their sources after a fix; the page is on"
+                                " the Courses page and the findings are in this task"},
+            )
+            return None
+        return await dispatch(
+            agent="tutor",
+            title=f"Fix {len(failures)} claim(s): {str(payload.get('title') or '')[:40]}",
+            brief=learning.claims_revision_brief(payload, failures),
+            source="agent",
+            parent_task_id=task_id,
+            origin_session_id=task.get("origin_session_id"),
+            payload={**payload, "run_id": run_id,
+                     "stage": learning.COURSE_WRITTEN_STAGE,
+                     "claims_round": round_ + 1},
+            dedup_key=f"course-claims-fix:{task_id}",
+        )
         if "tutor" not in AGENTS:
             await board.apply(
                 task_id, "noted",

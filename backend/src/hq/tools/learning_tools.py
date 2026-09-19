@@ -1226,11 +1226,14 @@ EASE_TOLERANCE = 3.0       # words of slack on the average
 LONG_TOLERANCE = 0.08      # slack on the share of long sentences
 PLAIN_SENTENCE_WORDS = 17.0  # plain in its own right, whatever the source does
 PLAIN_LONG_SHARE = 0.18
-RESTATEMENT_SHARE = 0.15   # leads + key-point boxes + cheatsheet, of the page
+RESTATEMENT_SHARE = 0.12   # leads and key-point boxes, of the page
 MEASURABLE_SOURCE_WORDS = 400  # below this the ratios mean nothing
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+# The cheatsheet is not counted: it is a reference card he uses while working,
+# not the same point told again. Counting it cost the Kubernetes page two
+# rounds and pushed tutor to cut something useful.
 _RESTATEMENT_RE = re.compile(
-    r'<p class="why".*?</p>|<div class="keypoints".*?</div>|<pre class="cheatsheet".*?</pre>',
+    r'<p class="why".*?</p>|<div class="keypoints".*?</div>',
     re.DOTALL | re.IGNORECASE,
 )
 
@@ -1317,6 +1320,32 @@ def repeated_sentences(page_html: str) -> list[tuple[str, str]]:
 def _restatement_words(page_html: str) -> int:
     """Words spent saying a point a second time, in the kit's summary blocks."""
     return sum(_visible_words(block) for block in _RESTATEMENT_RE.findall(page_html))
+
+
+_ADDITION_RE = re.compile(
+    r'<aside class="addition"[^>]*data-kind="([a-z]+)"[^>]*>(.*?)</aside>',
+    re.DOTALL | re.IGNORECASE,
+)
+_HREF_RE = re.compile(r'href="(https?://[^"]+)"')
+
+
+def page_additions(page_html: str) -> list[dict[str, Any]]:
+    """What Mission HQ added to a phase: kind, text, and the urls it cites.
+
+    The claims in these boxes are the part of the page that his own course
+    did not carry, so they are the part nobody has checked. This is what the
+    claims run reads.
+    """
+    out: list[dict[str, Any]] = []
+    for index, (kind, block) in enumerate(_ADDITION_RE.findall(page_html), start=1):
+        text = " ".join(html_lib.unescape(re.sub(r"<[^>]+>", " ", block)).split())
+        out.append({
+            "id": f"a{index}",
+            "kind": kind,
+            "text": text[:1200],
+            "urls": sorted(set(_HREF_RE.findall(block))),
+        })
+    return out
 
 
 def page_coverage(source: str, page_html: str, note: str = "") -> str:
@@ -1406,10 +1435,10 @@ def page_coverage(source: str, page_html: str, note: str = "") -> str:
     if measurable and have and said_again / have > RESTATEMENT_SHARE:
         problems.append(
             f"{said_again} of {have} words ({said_again / have:.0%}) are the same"
-            f" points said again in key-point boxes, why-leads and the cheatsheet"
+            f" points said again in key-point boxes and why-leads"
             f" (ceiling {RESTATEMENT_SHARE:.0%}). One restatement per concept: keep"
-            " the key-points box, drop the lead when the first paragraph already"
-            " says why, and keep the cheatsheet to values and commands"
+            " the key-points box and drop the lead when the first paragraph"
+            " already says why"
         )
 
     exercises = sorted(set(_EXERCISE_ID_RE.findall(source)), key=lambda e: int(e[1:]))

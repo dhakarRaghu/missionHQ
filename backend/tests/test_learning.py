@@ -1886,3 +1886,46 @@ def test_a_course_build_gets_the_time_it_needs_and_a_reachable_reading_limit() -
                           " cannot drain between bursts, which is the condition everyone"
                           " forgets when they read an average.")] * 40) + "</p>")
     assert "reads heavier" in page_coverage(source, heavy)
+
+
+def test_what_mission_hq_adds_is_checked_against_the_sources_it_cites() -> None:
+    """The phase came from /study with its own review, and the page is checked
+    by code. The addition boxes are the one part nobody has read before him."""
+    import inspect
+
+    from hq import engine
+    from hq.learning_pipeline import (
+        MAX_CLAIMS_ROUNDS,
+        claims_brief,
+        claims_payload,
+        claims_revision_brief,
+        extract_claim_failures,
+        is_claims_check,
+    )
+    from hq.tools.learning_tools import page_additions
+
+    page = (
+        '<aside class="addition" data-kind="update"><p>The default is 0.92 at v0.29.0.</p>'
+        '<p>Sources: <a href="https://example.dev/cache.py">cache.py</a></p></aside>'
+        '<aside class="addition" data-kind="incident"><p>It failed in production.</p></aside>'
+    )
+    found = page_additions(page)
+    assert [a["kind"] for a in found] == ["update", "incident"]
+    assert found[0]["urls"] == ["https://example.dev/cache.py"] and found[1]["urls"] == []
+
+    payload = claims_payload({"slug": "c-phase-02a-x", "course": "c", "title": "T",
+                              "url": "https://p/x", "source": "platform"})
+    assert is_claims_check(payload)
+    brief = claims_brief(payload, found)
+    assert "fetch_source" in brief and "cites nothing is a finding" in brief
+
+    assert extract_claim_failures('```json\n{"checked":2,"failed":[]}\n```') == []
+    failures = extract_claim_failures(
+        '```json\n{"checked":2,"failed":[{"id":"a1","problem":"the tag says 0.9","fix":"use 0.9"}]}\n```')
+    assert failures[0]["id"] == "a1"
+    fix = claims_revision_brief(payload, failures)
+    assert "the tag says 0.9" in fix and "rewrite only the parts" in fix.lower()
+
+    chain = inspect.getsource(engine._advance_learning)
+    assert "_page_additions_step" in chain and "is_claims_check" in chain
+    assert "MAX_CLAIMS_ROUNDS" in chain or str(MAX_CLAIMS_ROUNDS)
