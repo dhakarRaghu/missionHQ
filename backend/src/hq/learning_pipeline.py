@@ -1691,11 +1691,17 @@ Phase: **{payload.get("title")}**
 Slug: `{payload.get("slug")}`  ·  Course: {payload.get("course")}
 {payload.get("summary")}
 
-**Load the `deep-research` skill first and work to it.** This becomes a
-lesson he studies from and runs code from, so every number needs its baseline
-and conditions, every default needs the version and the file you read it in,
-and anything you could not confirm goes in the mandatory "Things I could NOT
-verify" section rather than being quietly stated.
+**Load the `deep-research` skill and the `study-standard` skill, and work to
+both.** `study-standard` is the bar his own courses are written to: how to
+rank a source, why a default is checked in the source tree at a tag rather
+than in the docs, what conditions a number carries, and the audit you owe
+this phase. He reads Mission HQ's version, not the original, so a gap you do
+not find is a gap he studies from.
+
+Label every claim verified, inferred or not checked, and end the note with
+the mandatory "Things I could NOT verify" section. He runs this code and acts
+on these numbers, so a claim stated more strongly than its evidence is worse
+than a missing one.
 
 First call `sync_courses` — he adds phases to that platform, and the
 catalogue here should be current before you read. Then call
@@ -1764,6 +1770,14 @@ work.
 Organise your findings under the phase's `## ` section headings, exactly as
 written: tutor works each finding into the section it belongs to.
 
+Include the **Gaps against the standard** section that `study-standard`
+describes: every place this phase falls short of the bar, and the source that
+would fill it. A mechanism with no failure mode, a claim with no number, a
+config key without its default and version, a section nobody can exercise. It
+is not limited to what his platform happens to cover: if he will meet
+something in production that this phase does not teach, that is a gap, and
+the page is where it gets taught.
+
 Do not write anything for him to read. Tutor builds the enhanced page from
 the phase and your digest.
 """
@@ -1781,8 +1795,10 @@ def _enhancement_brief(payload: Mapping[str, Any], lines: str, article_block: st
     return f"""Build the enhanced page for course phase **{payload.get("title")}** (`{slug}`)
 from the course `{payload.get("course")}`.
 
-**Load the `teaching` skill, then the `course-phase` skill, with `load_skill`.
-Work to the section "Building the enhanced page".**
+**Load the `teaching` skill, then `course-phase`, then `study-standard`, with
+`load_skill`. Work to "Building the enhanced page" in `course-phase`.**
+`study-standard` is the bar his courses are written to, and the note's "Gaps
+against the standard" section is your list of what this page must add.
 
 The phase was written with Claude and the /study skill. Its original stays on
 the study platform, unchanged. He reads YOUR version, here: the whole course,

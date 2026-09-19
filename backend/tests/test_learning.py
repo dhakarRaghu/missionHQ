@@ -1249,7 +1249,7 @@ def test_course_briefs_load_one_shared_skill_and_one_object_skill() -> None:
     platform = {**local, "source": "platform"}
     for payload in (local, platform):
         brief = learning.course_lesson_brief(payload, [])
-        assert "`teaching` skill" in brief and "`course-phase` skill" in brief
+        assert "`teaching` skill" in brief and "course-phase" in brief
         assert "daily-lesson" not in brief
     assert "write_lab_files" in learning.course_lesson_brief(local, [])
     assert "shape.words" not in learning.course_lesson_brief(local, [])
