@@ -193,6 +193,15 @@ and give the public equivalent.
 
 ## The page is the lesson
 
+**Simpler is the goal of every rewrite.** Rewording his sentence is welcome
+when the new one is shorter and plainer. It is waste when it is only
+different, and the check compares the page's average sentence length with his.
+
+**Say it once.** Every idea gets one explanation and at most one summary.
+A lead that repeats the first paragraph, a key-point box that repeats the
+lead, and a cheatsheet line that repeats both are three readings of one idea.
+He reads every word, so each repeat costs him minutes and teaches nothing.
+
 **The HTML page is the file he opens.** Not a summary, not a landing page for
 a diagram. Every section is on the page, in order, with its full text. On
 2026-09-13 a 1,449-word lesson shipped a page with 284 words and three

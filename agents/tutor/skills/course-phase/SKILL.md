@@ -30,6 +30,32 @@ learn from: visual, interactive where that teaches, and carrying what hunter
 found after the original was written. It is not a summary and not a set of
 notes about the original.
 
+**Length is not the goal, and neither is more.** The enhanced page runs
+between the source's own length and about a third again. The first two pages
+came in at 1.8x and 1.9x, and he said it plainly: "some content is too much or
+repeated ... I don't want to compromise the quality". Everything you add must
+be something the source does not have. `write_lesson` measures this and sends
+the page back.
+
+**Rewrite only to make it simpler.** He said it: "rewriting is fine, the
+language simpler for me to understand". So you may reword any sentence, and
+you should when it is long or tangled. But the page must read more easily
+than his own text: shorter sentences on average, and fewer of them over 25
+words. `write_lesson` measures both and sends back a page that reads harder.
+A sentence that is already clear gains nothing from being reworded.
+
+**A number is a fact.** When you rewrite a passage, every number in it comes
+through: sizes, versions, prices, dates, measured results. The check lists
+the ones you dropped. If a number is wrong now, correct it and say so in a
+correction box, never by deleting it.
+
+**Say each point once.** A concept gets its explanation, and one summary: the
+key-points box. Do not also open with a lead that says the same thing, and do
+not repeat it again in the cheatsheet. The lead is for a section whose first
+paragraph does not already say why it matters. The cheatsheet holds values,
+flags, commands and formulas, not sentences. Leads, key-point boxes and the
+cheatsheet together stay under about 15% of the page.
+
 **What you keep, always.** Every numbered section, every exercise with its
 exact command and expected output, every checkpoint with its answer sketch,
 the references, the cheatsheet, and every number with its conditions. The
@@ -70,7 +96,7 @@ still names it.
   for answer sketches, `pre.cheatsheet` for the cheatsheet.
 - **Teaching.** Where a paragraph is dense, split it, add the missing step,
   or put a small worked example beside it. Never replace a precise sentence
-  with a vaguer one.
+  with a vaguer one, and never reword one that is already clear.
 
 **What you add, from the note.** Put each finding inside the section it
 belongs to, as `<aside class="addition" data-kind="…">`:

@@ -697,6 +697,14 @@ async def write_lesson(
         )
 
     shortfall = "" if source else page_shortfall(markdown, html)
+    if not source and html.strip():
+        words = _visible_words(html)
+        if words > ARTICLE_MAX_WORDS:
+            raise ModelRetry(
+                f"the article is {words} words, which is about {words // 200} minutes;"
+                f" the band is {ARTICLE_MIN_WORDS} to {ARTICLE_MAX_WORDS}. Cut"
+                " restatement and background he already has, not the evidence"
+            )
     if shortfall:
         if from_parts:
             shortfall += " — fix the parts whose page_words fall short with write_lesson_part"
@@ -1190,14 +1198,107 @@ def page_script_problems(page_html: str) -> str:
     return "; ".join(problems)
 
 
+# Measured on the first two enhanced pages, 2026-09-18. Both ran to about
+# 11,200 words against a 6,000-7,600-word source: 1.5x to 1.9x. The extra was
+# not new teaching. Some was the same point said again in a lead, a key-point
+# box and a cheatsheet; some was the source reworded in a weaker model's
+# sentences (the Kubernetes page kept only 43% of his own). He said it plainly:
+# "some content is too much or repeated ... I don't want to compromise the
+# quality". So the cut comes out of restatement and paraphrase, never sections.
+# An article is nine to thirteen minutes. The 2026-09-17 one ran to 3,379
+# words, seventeen minutes, for one routing decision.
+ARTICLE_MIN_WORDS = 1_800
+ARTICLE_MAX_WORDS = 2_600
+PAGE_FLOOR = 0.95          # an enhanced page never teaches less than the source
+PAGE_CEILING = 1.3         # and adds at most a third again
+# He may rewrite freely, on one condition: "rewriting is fine for any, the
+# language simpler for me to understand". So the check is not whether his
+# sentences survive. It is whether a rewritten page reads more easily than
+# the source, and whether the facts came through it.
+LONG_SENTENCE_WORDS = 25
+EASE_TOLERANCE = 1.0       # words of slack on the average, for rounding
+RESTATEMENT_SHARE = 0.15   # leads + key-point boxes + cheatsheet, of the page
+MEASURABLE_SOURCE_WORDS = 400  # below this the ratios mean nothing
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_RESTATEMENT_RE = re.compile(
+    r'<p class="why".*?</p>|<div class="keypoints".*?</div>|<pre class="cheatsheet".*?</pre>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _sentences(text: str) -> list[str]:
+    """Sentences long enough to carry a claim."""
+    flat = " ".join(re.sub(r"```.*?```", " ", text, flags=re.DOTALL).split())
+    return [s for s in _SENTENCE_SPLIT_RE.split(flat) if len(s.split()) > 7]
+
+
+def _shingles(sentence: str, size: int = 5) -> set[tuple[str, ...]]:
+    words = [w.lower().strip(".,;:()\"`*") for w in sentence.split()]
+    return {tuple(words[i:i + size]) for i in range(max(0, len(words) - size + 1))}
+
+
+def _page_text(page_html: str) -> str:
+    stripped = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", page_html,
+                      flags=re.DOTALL | re.IGNORECASE)
+    return html_lib.unescape(re.sub(r"<[^>]+>", " ", stripped))
+
+
+def reading_ease(text: str) -> tuple[float, float]:
+    """(average sentence length, share of sentences over 25 words).
+
+    Two numbers, because he reads English as a second language and said the
+    ideas were never the problem: "the sentences were". A rewrite has to move
+    both down, or it was not worth doing.
+    """
+    sentences = _sentences(text)
+    if not sentences:
+        return 0.0, 0.0
+    lengths = [len(s.split()) for s in sentences]
+    long_ones = sum(1 for n in lengths if n > LONG_SENTENCE_WORDS)
+    return sum(lengths) / len(lengths), long_ones / len(lengths)
+
+
+def _numbers(text: str) -> set[str]:
+    """Every number in the prose, normalised. Facts survive a rewrite or the
+    rewrite lost them."""
+    flat = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    return {n.replace(",", "").rstrip(".") for n in re.findall(r"\d[\d,.]*", flat)
+            if len(n.rstrip(".")) > 1}
+
+
+def _sentences_kept(source: str, page_html: str) -> tuple[int, int]:
+    """(kept, total) of the source's sentences that survive on the page.
+
+    Five-word runs, not exact matches: a sentence he wrote may be split or
+    lightly edited and still be his. Used to tell a rewrite from an edit, not
+    to forbid one.
+    """
+    page = [_shingles(s) for s in _sentences(_page_text(page_html))]
+    kept = 0
+    originals = _sentences(source)
+    for sentence in originals:
+        marks = _shingles(sentence)
+        if marks and any(len(marks & p) / len(marks) > 0.5 for p in page):
+            kept += 1
+    return kept, len(originals)
+
+
+def _restatement_words(page_html: str) -> int:
+    """Words spent saying a point a second time, in the kit's summary blocks."""
+    return sum(_visible_words(block) for block in _RESTATEMENT_RE.findall(page_html))
+
+
 def page_coverage(source: str, page_html: str, note: str = "") -> str:
     """Why the enhanced page is not a complete, faithful version, or "".
 
     Measured checks only, because a same-model reviewer passes what reads
     well. The enhanced page must keep:
 
-    * every numbered section ("3.1", "3.2") and at least the source's words:
-      "I'm not saying to reduce anything";
+    * every numbered section ("3.1", "3.2"), and a length inside the band:
+      never less than the source, and at most a third again;
+    * the facts when it rewrites, and simpler sentences than his when it
+      rewrites most of a section;
+    * one restatement per concept, not three;
     * every exercise id, every exact `Run:` command, and every answer sketch:
       the original's commands and outputs came from real runs;
     * only links from the source or hunter's study note;
@@ -1213,12 +1314,61 @@ def page_coverage(source: str, page_html: str, note: str = "") -> str:
     if missing:
         problems.append("sections missing from the page: " + _listed(missing))
 
-    want = int(_prose_words(source) * PAGE_COVERAGE)
+    source_words = _prose_words(source)
     have = _visible_words(page_html)
-    if have < want:
+    # The band, the fidelity floor and the restatement ceiling are ratios, and
+    # a ratio of a handful of sentences says nothing. A real phase is
+    # thousands of words; below that, only the section and command checks run.
+    measurable = source_words >= MEASURABLE_SOURCE_WORDS
+    if measurable and have < int(source_words * PAGE_FLOOR):
         problems.append(
-            f"the page carries {have} words against {_prose_words(source)} in the"
-            f" source; an enhanced version never teaches less (floor {want})"
+            f"the page carries {have} words against {source_words} in the source;"
+            f" an enhanced version never teaches less (floor {int(source_words * PAGE_FLOOR)})"
+        )
+    elif measurable and have > int(source_words * PAGE_CEILING):
+        problems.append(
+            f"the page carries {have} words against {source_words} in the source"
+            f" ({have / max(source_words, 1):.1f}x, ceiling {int(source_words * PAGE_CEILING)})."
+            " Cut restatement, not teaching: say each point once, and add only"
+            " what the source does not have"
+        )
+
+    if measurable:
+        # Simpler, always. He reads English as a second language, and the
+        # first enhanced page came back with longer sentences than his own
+        # (19 words against 15, and twice the share over 25). Rewriting is
+        # welcome — "rewriting is fine ... the language simpler for me to
+        # understand" — but only in that direction.
+        page_avg, page_long = reading_ease(_page_text(page_html))
+        src_avg, src_long = reading_ease(source)
+        if page_avg > src_avg + EASE_TOLERANCE:
+            kept, total = _sentences_kept(source, page_html)
+            problems.append(
+                f"the page reads harder than his own text: sentences average"
+                f" {page_avg:.0f} words against {src_avg:.0f}, and {page_long:.0%}"
+                f" run over {LONG_SENTENCE_WORDS} words against {src_long:.0%}"
+                f" ({kept}/{total} of his sentences kept). Split the long ones."
+                " Rewriting is welcome when it makes a sentence simpler, and only"
+                " then"
+            )
+        # A rewrite must carry the facts through it.
+        lost = sorted(_numbers(source) - _numbers(_page_text(page_html)))
+        if len(lost) > max(3, len(_numbers(source)) // 10):
+            problems.append(
+                f"{len(lost)} numbers the source states are missing from the page: "
+                + _listed(lost)
+                + ". A number is a fact: keep it, or say in a correction box why it"
+                " changed"
+            )
+
+    said_again = _restatement_words(page_html) if measurable else 0
+    if measurable and have and said_again / have > RESTATEMENT_SHARE:
+        problems.append(
+            f"{said_again} of {have} words ({said_again / have:.0%}) are the same"
+            f" points said again in key-point boxes, why-leads and the cheatsheet"
+            f" (ceiling {RESTATEMENT_SHARE:.0%}). One restatement per concept: keep"
+            " the key-points box, drop the lead when the first paragraph already"
+            " says why, and keep the cheatsheet to values and commands"
         )
 
     exercises = sorted(set(_EXERCISE_ID_RE.findall(source)), key=lambda e: int(e[1:]))

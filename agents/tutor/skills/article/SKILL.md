@@ -250,10 +250,11 @@ exercises. It must be answerable from the phase plus this article.
 
 ## Length
 
-Roughly 8 to 15 minutes of reading. Length follows what the relationship needs
-to be delivered well: an incident walked properly needs more room than a
-changed default. No padding. The page is the lesson: the whole article is on
-the page, as `teaching` says.
+**1,800 to 2,600 words**, which is nine to thirteen minutes. Length follows
+what the relationship needs: an incident walked properly needs more room than
+a changed default, but nothing needs 3,400 words, which is where the
+2026-09-17 article landed. Say each point once, as `teaching` says. The page
+is the lesson: the whole article is on the page.
 
 ## Write it and record it
 
