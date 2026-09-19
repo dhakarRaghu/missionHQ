@@ -1222,7 +1222,10 @@ REPEAT_OVERLAP = 0.45      # five-word runs shared, for two sentences to count a
 # sentences survive. It is whether a rewritten page reads more easily than
 # the source, and whether the facts came through it.
 LONG_SENTENCE_WORDS = 25
-EASE_TOLERANCE = 1.0       # words of slack on the average, for rounding
+EASE_TOLERANCE = 3.0       # words of slack on the average
+LONG_TOLERANCE = 0.08      # slack on the share of long sentences
+PLAIN_SENTENCE_WORDS = 17.0  # plain in its own right, whatever the source does
+PLAIN_LONG_SHARE = 0.18
 RESTATEMENT_SHARE = 0.15   # leads + key-point boxes + cheatsheet, of the page
 MEASURABLE_SOURCE_WORDS = 400  # below this the ratios mean nothing
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
@@ -1362,15 +1365,21 @@ def page_coverage(source: str, page_html: str, note: str = "") -> str:
         # understand" — but only in that direction.
         page_avg, page_long = reading_ease(_page_text(page_html))
         src_avg, src_long = reading_ease(source)
-        if page_avg > src_avg + EASE_TOLERANCE:
+        # Against a source that is already very plain (Phase 2A averages 13
+        # words), "no longer than his" is unreachable once additions and their
+        # conditions arrive, and tutor spent a whole run failing it. The page
+        # has to be plain in its own right, and not much heavier than his.
+        avg_limit = max(src_avg + EASE_TOLERANCE, PLAIN_SENTENCE_WORDS)
+        long_limit = max(src_long + LONG_TOLERANCE, PLAIN_LONG_SHARE)
+        if page_avg > avg_limit or page_long > long_limit:
             kept, total = _sentences_kept(source, page_html)
             problems.append(
-                f"the page reads harder than his own text: sentences average"
-                f" {page_avg:.0f} words against {src_avg:.0f}, and {page_long:.0%}"
-                f" run over {LONG_SENTENCE_WORDS} words against {src_long:.0%}"
-                f" ({kept}/{total} of his sentences kept). Split the long ones."
-                " Rewriting is welcome when it makes a sentence simpler, and only"
-                " then"
+                f"the page reads heavier than it should: sentences average"
+                f" {page_avg:.0f} words (limit {avg_limit:.0f}; his source is"
+                f" {src_avg:.0f}) and {page_long:.0%} run over"
+                f" {LONG_SENTENCE_WORDS} words (limit {long_limit:.0%}; his is"
+                f" {src_long:.0%}), with {kept}/{total} of his sentences kept."
+                " Split the longest sentences in the parts you added"
             )
         # A rewrite must carry the facts through it.
         lost = sorted(_numbers(source) - _numbers(_page_text(page_html)))

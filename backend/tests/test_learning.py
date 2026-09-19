@@ -1850,3 +1850,39 @@ def test_repo_files_name_the_tool_that_reads_them() -> None:
     assert "read_course_source" in _missing_note("learning/study-material/k/x.md")
     assert "brief" in _missing_note("learning/sources.md")
     assert "memory_search" in _missing_note("daily/2026-09-19.md")
+
+
+def test_a_course_build_gets_the_time_it_needs_and_a_reachable_reading_limit() -> None:
+    """Phase 2A was cancelled at 40 minutes with nine sections written: the
+    reading check could not be satisfied against a 13-word-average source, so
+    tutor rewrote the phase twice and ran out of clock."""
+    import inspect
+
+    from hq import engine
+    from hq.tools.learning_tools import (
+        PLAIN_LONG_SHARE,
+        PLAIN_SENTENCE_WORDS,
+        page_coverage,
+        reading_ease,
+    )
+
+    assert engine.COURSE_TIMEOUT_S > engine.TASK_TIMEOUT_S
+    enqueue = inspect.getsource(engine._enqueue)
+    assert 'lane == "courses"' in enqueue and "SetWorkflowTimeout(cap)" in enqueue
+
+    # A plain source: the page may be plain too, not plainer.
+    source = ("## 1.1 — Queues\n" + " ".join(["The queue grows when work arrives faster."] * 60))
+    page = ("<h2><span class='num'>1.1</span> Queues</h2><p>"
+            + " ".join(["The queue grows when arrivals beat service and the wait grows."] * 90)
+            + "</p>")
+    avg, long_share = reading_ease(page)
+    assert avg <= PLAIN_SENTENCE_WORDS and long_share <= PLAIN_LONG_SHARE
+    assert "reads heavier" not in page_coverage(source, page)
+
+    # A genuinely heavy page is still sent back.
+    heavy = ("<h2><span class='num'>1.1</span> Queues</h2><p>"
+             + " ".join([("The queue grows whenever the arrival rate exceeds the service"
+                          " rate for long enough that the buffer in front of the worker"
+                          " cannot drain between bursts, which is the condition everyone"
+                          " forgets when they read an average.")] * 40) + "</p>")
+    assert "reads heavier" in page_coverage(source, heavy)

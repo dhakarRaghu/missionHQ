@@ -46,6 +46,11 @@ from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, scan
 # run that thinks harder and calls more tools needs the wall clock to match, or
 # the cap becomes the new failure mode. _cap_overrunning_tasks keys off this.
 TASK_TIMEOUT_S = 40 * 60   # a cron/board run may not exceed 40 minutes
+# Building a course page is a different shape of work: a dozen sections, each
+# a model call of a minute or two, plus a check and a fix round. The 40-minute
+# cap cancelled Phase 2A at 20:56 with nine sections written and nothing
+# recorded, so the course lane gets its own.
+COURSE_TIMEOUT_S = 100 * 60
 CHAT_TIMEOUT_S = 12 * 60   # a chat turn may not exceed 12 minutes (approval waits excluded: they block in recv)
 
 # The two system schedules that are not "every minute". Each is named in TWO
@@ -320,9 +325,10 @@ async def _enqueue(task_id: str, *, attempt: int = 0, lane: str = "tasks") -> No
         # the same outcome the step_id branch already relies on.
         return
     wf_id = f"task-{task_id}" if attempt == 0 else f"task-{task_id}-retry-{attempt}"
+    cap = COURSE_TIMEOUT_S if lane == "courses" else TASK_TIMEOUT_S
     # Durable wall-clock cap enforced by DBOS, outside the agent: a stalled or
     # hung run is cancelled instead of sitting in "running" all night.
-    with SetWorkflowID(wf_id), SetWorkflowTimeout(TASK_TIMEOUT_S):
+    with SetWorkflowID(wf_id), SetWorkflowTimeout(cap):
         await _queues.get(lane, _queues["tasks"]).enqueue_async(run_task, task_id)
 
 
