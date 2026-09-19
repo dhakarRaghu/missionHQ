@@ -1,12 +1,12 @@
 # Phase 3A — The bill and the cache (the phase that pays for the course)
 
-Phase 1 taught you to measure one request. Phase 2 taught you what the server does with it. This phase is about the bill, and it starts with a confession about the meter you built in Phase 1.
+Phase 1 taught you to measure one request. Phase 2 taught you what the server does with it. This phase is about the bill. It starts with a problem in the meter you built in Phase 1.
 
-That meter is wrong. It prices every input token at the full input price. Real providers bill input tokens in several classes, and the cheapest class costs a tenth of the most expensive. A meter that cannot see the classes reports a number that is too high. That is not a safe error. It hides the savings you already earn, and it hides the moment you stop earning them.
+That meter is wrong. It prices every input token at the full input price. Real providers bill input tokens in several classes. The cheapest class costs a tenth of the most expensive one. A meter that cannot see the classes reports a number that is too high. That error is not safe. It hides the savings you already get, and it hides the moment you stop getting them.
 
-Phase 1's codebase-anchor question asked you to find that gap. Phase 0's Story 1 described what happens when nobody does: a team paid full price on every agent step for four months, because a timestamp sat at the top of their prompt and their cache never matched.
+Phase 1's codebase-anchor question asked you to find that gap. Phase 0's Story 1 showed what happens when nobody finds it. A timestamp sat near the top of a team's prompt, so their cache never matched. They paid full price on every agent step for four months.
 
-Phase 3 is split into two documents because it covers five separate topics and pays three debts from earlier phases. This is part A.
+Phase 3 has two documents, because it covers five separate topics. This is part A.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -24,24 +24,29 @@ Phase 3 is split into two documents because it covers five separate topics and p
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-After part A you can read a provider's real invoice from the `usage` object, lay out a prompt so the cache hits, prove the hit rate with a number, and decide whether explicit caching pays for itself from your own break-even arithmetic.
+After part A you can do four things:
 
-Time: 1.5 to 2 hours. Three of the four scripts run with no API key.
+1. Read a provider's real invoice from the `usage` object.
+2. Lay out a prompt so the cache hits.
+3. Prove the hit rate with a number.
+4. Decide whether explicit caching pays for itself, from your own break-even arithmetic.
+
+Time: 1.5 to 2 hours. All three scripts in part A have an offline mode with no API key. E4 to E8 need a key.
 
 Setup:
 
-```
+```bash
 cd ~/Desktop/project/code/study-material/inference-internals/code
-pip install -e .          # or: uv sync   (Phase 3 adds the anthropic package)
+uv sync                   # or: pip install -e .   Phase 3 adds the anthropic package
 python pricing.py --self-test
 ```
 
-That last command must print "all checks passed" before you start. Everything here computes money, so the arithmetic gets tested first.
+The last command must print "all checks passed" before you start. Everything in this phase computes money, so you test the arithmetic first.
 
 ---
 
 ## 3.1 — The five token classes, and two multipliers (why your meter overcharges)
-Why this matters: you cannot tune a bill you cannot read. And you cannot read this bill with two numbers.
+Why this matters: you cannot tune a bill you cannot read. Two numbers are not enough to read this bill.
 
 Phase 1's formula was:
 
@@ -49,7 +54,7 @@ Phase 1's formula was:
 cost = input_tokens x input_price + output_tokens x output_price
 ```
 
-Here is what a real request can contain instead:
+A real request can contain these classes instead:
 
 ```
 ┌──────────────────┬────────────────────────────────┬───────────────────────┐
@@ -68,21 +73,24 @@ Here is what a real request can contain instead:
 └──────────────────┴────────────────────────────────┴───────────────────────┘
 ```
 
-Three of those five did not exist in your Phase 1 meter. The result is a formula that reports a number larger than your invoice.
+A prefix is the start of the prompt, from token 0 up to some position. Three of those five rows did not exist in your Phase 1 meter. So that formula reports a number larger than your invoice.
 
 ### Two more axes that are not token classes at all
 
-The table above splits tokens by how they were processed. Two other things change the same invoice without changing any token count, and a meter that ignores them is wrong in both directions.
+The table above splits tokens by how the server processed them. Two other things change the same invoice without changing any token count. A meter that ignores them can be wrong in both directions.
 
-**The service tier multiplies the whole request.** Batch is the tier you already met, at half price. Providers also sell tiers in the other direction: a slower tier priced below standard, and a faster, higher-priority tier priced above it. The tier applies to every class at once, so it is a multiplier rather than a price.
+**The service tier multiplies the whole request.** A service tier is a speed and price level per request. Batch is the tier you already met, at half price. Providers also sell tiers in the other direction. One is a slower tier priced below standard. Another is a faster, higher-priority tier priced above standard. The tier applies to every class at once. So it is a multiplier, not a price.
 
-Two practical consequences. First, the tier appears in the usage object on at least one provider, as a `service_tier` field, so you can record what you were actually charged rather than what you asked for. Second, and this catches finance teams: on one provider the priority tier uses a different billing model and **is excluded from the cost-reporting endpoint entirely**. You must read the usage endpoint instead. A reconciliation job that queries only cost will silently under-count.
+This has two practical results:
 
-There is a third multiplier in the same family. At least one provider charges 1.1x for pinning inference to a specific region. That applies to cached reads and writes as well as to fresh input.
+1. On at least one provider, the tier appears in the usage object as a `service_tier` field. So you can record the tier you were charged for, not only the tier you asked for.
+2. This one catches finance teams. On one provider, the priority tier uses a different billing model. It **is excluded from the cost-reporting endpoint entirely**. You must read the usage endpoint instead. A reconciliation job that queries only the cost endpoint will under-count, and it will not tell you.
 
-**Modality changes the price of an input token.** Image and audio inputs are converted to tokens, and those tokens are frequently priced above text tokens. They are reported separately, in nested fields such as `image_tokens` and `audio_tokens` inside the same details object that carries the cached count.
+There is a third multiplier in the same family. At least one provider charges 1.1x for pinning inference to a specific region. That multiplier applies to cached reads and writes as well as to fresh input.
 
-Here is the rule that matters, and it is the same rule the OpenTelemetry conventions state for their attributes:
+**Modality changes the price of an input token.** Modality means the kind of input, such as text, image, or audio. The provider converts image and audio inputs to tokens. Those tokens often cost more than text tokens. The provider reports them separately. They appear in nested fields such as `image_tokens` and `audio_tokens`. These fields sit in the same details object that carries the cached count.
+
+The OpenTelemetry conventions state the same rule for their attributes:
 
 ```
   the detailed counts are SUBSETS of the total, never additions to it
@@ -95,9 +103,11 @@ Here is the rule that matters, and it is the same rule the OpenTelemetry convent
   WRONG:  total = prompt_tokens + image_tokens        (double counts)
   RIGHT:  total = prompt_tokens
           image_tokens tells you WHICH of them cost more
+
+  the numbers above are an example
 ```
 
-A multimodal cost meter that adds the nested counts to the total reports roughly double the real bill. `pricing.py` models the surcharge rather than the price, so an image token is charged the text rate once and then the extra on top. Its self-test proves that arithmetic:
+A multimodal cost meter that adds the nested counts to the total can report up to double the real bill. `pricing.py` models the surcharge, not a separate price. It charges an image token the text rate once. Then it adds only the extra on top. Its self-test proves that arithmetic:
 
 ```
   [ok ] image surcharge adds only the EXTRA
@@ -106,15 +116,14 @@ A multimodal cost meter that adds the nested counts to the total reports roughly
   [ok ] unknown tier prices at the standard rate
 ```
 
-That last check is the design rule from earlier in this section, applied again. An unknown tier prices at the **standard** rate and prints a warning. It never guesses a discount, because a guessed discount is an error you do not notice.
+The last check follows a rule from this section. An unknown tier prices at the **standard** rate and prints a warning. It never guesses a discount. A guessed discount is an error you do not notice.
 
-**Why an overcharge is still a bug.** An estimate that is too high feels safe. It is not, for two reasons.
+**Why an overcharge is still a bug.** An estimate that is too high feels safe. It is not safe, for two reasons.
 
-First, it hides your own wins. If caching already cuts your bill by half and your meter cannot see it, you cannot prove the work was worth doing, and you cannot tell when it stops working.
+1. It hides your own wins. Say caching already cuts your bill by half and your meter cannot see it. Then you cannot prove the work was worth doing. You also cannot tell when it stops working.
+2. It breaks every comparison you build on top. A routing decision between two models is a ratio. Say one model caches and the other does not. An overcharging meter then compares them on the wrong basis. It can pick the wrong model.
 
-Second, it breaks every comparison you build on top. A routing decision between two models is a ratio. If one model caches and the other does not, an overcharging meter compares them on the wrong basis and picks the wrong model.
-
-**The fix, as code.** Phase 3 ships `pricing.py`, one module that every later script imports. It has exactly one job: turn a token split into money.
+**The fix, as code.** Phase 3 ships `pricing.py`. It is one module, and every later script imports it. It has one job: turn a token split into money.
 
 ```python
 from pricing import Price, Usage, cost
@@ -131,13 +140,13 @@ c.naive_total   # 0.0280  -> what the Phase 1 formula says
 c.overcharge    # 0.0135  -> money your old meter invented
 ```
 
-Verify it on your machine:
+These are the same prices and counts as check 2 in `pricing.py:215` to `pricing.py:220`. A run on 2026-09-17 printed `0.0145 0.028 0.0135` for the three values. Verify it on your machine:
 
-```
+```bash
 python pricing.py --self-test
 ```
 
-One design decision in that module is worth copying into your own code. When the price sheet does not define a cached price, the module falls back to the **full** input price, not to zero:
+One design decision in that module is worth copying into your own code. The price sheet may not define a cached price. Then the module falls back to the **full** input price, not to zero. The RIGHT version below is the shipped code at `pricing.py:164`.
 
 ```python
 # WRONG: an unknown price defaults to free. Every unpriced class now makes the
@@ -153,28 +162,36 @@ cached_rate = (price.cached_input_per_mtok
                else price.input_per_mtok)
 ```
 
-The wrong version produces no error message. It produces a dashboard that says you are saving money.
+The wrong version produces no error message. It produces a dashboard that says you are saving money. The self-test catches it. Check 8 expects $0.02 for 10,000 cached tokens at a $2.00 input price. With the zero fallback, the total is $0.00. A copy of `pricing.py` with that change printed `[FAIL] unknown cached price falls back to full price` on 2026-09-17.
 
-**The price sheet grew too.** `prices.yaml` is now schema version 3. It carries `cached_input_per_mtok`, `cache_write_per_mtok`, `cache_write_1h_per_mtok`, `batch_multiplier`, `tier_multipliers`, `modality_multipliers`, `min_cache_tokens`, `context_window`, `max_output`, and a `priced_on` date per model. The Phase 1 and Phase 2 scripts still read it, because adding keys breaks nothing.
+**The price sheet grew too.** `prices.yaml` is now schema version 3. It carries these fields per model:
 
-The `priced_on` field is not decoration. Prices change, and a number in your repository with no date attached is a number nobody can audit.
+- `cached_input_per_mtok`, `cache_write_per_mtok`, `cache_write_1h_per_mtok`
+- `batch_multiplier`, `tier_multipliers`, `modality_multipliers`
+- `min_cache_tokens`, `context_window`, `max_output`
+- a `priced_on` date
 
-**The sentence to remember:** a bill has five token classes and two multipliers, your first meter had two classes and nothing else, and the pieces it was missing are exactly the ones that move the number most.
+The Phase 1 and Phase 2 scripts still read this file. Adding keys breaks nothing.
 
-**The trap:** an overcharging meter looks conservative and behaves like a blindfold. You cannot see a saving you do not measure, and you cannot see it stop.
+The `priced_on` field has a purpose. Prices change. Nobody can audit a price in your repository that has no date next to it.
 
-**Try this now:** run `python pricing.py --role deep` and read the `cached/input ratio` line. If it prints that the cached price is not set, that is your first task in this phase.
+**The sentence to remember:** a bill has five token classes and two multipliers. Your first meter had two classes and nothing else. The missing pieces move the number the most.
+
+**The trap:** an overcharging meter looks conservative, but it hides information. You cannot see a saving you do not measure, and you cannot see it stop.
+
+**Try this now:** run `python pricing.py --role deep`. The last line shows either `cached/input ratio: ...` or `cached price NOT SET for this model`. For `deep` it prints NOT SET on the current sheet. Filling in that price is your first task in this phase.
+
 ---
 
 ## 3.2 — Implicit prefix caching (automatic, invisible, and easy to lose)
 
-Why this matters: Phase 2 explained the radix tree that makes prefix reuse possible on the server. This section is the commercial side of the same mechanism. You do not have to ask for it, you cannot see it in the response body unless you look, and you can destroy it with one line of code.
+Why this matters: Phase 2 explained the radix tree that lets the server reuse a prefix. This section is the billing side of the same mechanism. You do not have to ask for it. You cannot see it in the response body unless you look for it. One line of code can break it.
 
-**The mechanism in one paragraph.** The provider hashes your prompt prefix in blocks. If a later request from the same organisation starts with the same bytes, the server reuses the stored work and charges you a fraction of the input price for those tokens. Nothing in your code changes. Phase 2's exercise E5 measured the effect in a simulator. This is the real thing.
+**The mechanism in one paragraph.** The provider hashes your prompt prefix in blocks. A later request from the same organisation may start with the same bytes. The server then reuses the stored work. It charges you a fraction of the input price for those tokens. Nothing in your code changes. Phase 2's exercise E5 measured the effect in a simulator.
 
 ### The rules, with the numbers
 
-All figures below were read from the provider documentation on 2026-09-12. They change. Check yours and write the date next to them.
+All figures below come from the provider documentation, read on 2026-09-12. They change. Check yours and write the date next to them.
 
 ```
 ┌──────────────────────┬────────────────────────┬───────────────────────────┐
@@ -193,13 +210,12 @@ All figures below were read from the provider documentation on 2026-09-12. They 
 └──────────────────────┴────────────────────────┴───────────────────────────┘
 ```
 
-**Two of those rows are recent changes, and older material gets both wrong.**
+**Two of those rows changed recently. Older material gets both of them wrong.**
 
-First, **cache writes now cost money on OpenAI too**, at 1.25x the uncached input rate. Caching used to be free to try. It is not any more, and a workload that writes many entries it never reads back now loses money. Section 3.3 gives you the break-even arithmetic for exactly this.
+1. **Cache writes now cost money on OpenAI too.** The price is 1.25x the uncached input rate. Caching used to be free to try. It is not free any more. A workload that writes many entries and never reads them back now loses money. Section 3.3 gives you the break-even arithmetic for this case.
+2. **The discount itself changed.** Prompt caching launched in October 2024 with a **50%** discount. It is now 0.1x, which is a 90% discount. Say you put a multiplier in your cost code two years ago. That multiplier is wrong today. The error is in your favour: you under-reported your savings the whole time.
 
-Second, the discount itself moved. When prompt caching launched in October 2024 the announcement offered a **50%** discount. It is now 0.1x, which is 90%. A multiplier hardcoded in your cost code two years ago is wrong today, in your favour, which means you under-reported your savings the whole time.
-
-### Where the number actually is
+### Where the number is
 
 You cannot see a cache hit without reading the usage object. The field path differs by API, and this catches people:
 
@@ -210,7 +226,7 @@ Responses          usage.input_tokens_details.cached_tokens
                    usage.input_tokens_details.cache_write_tokens
 ```
 
-There is a second difference that matters more, and it is the single most bug-prone fact in this phase:
+A second difference matters more. It is the fact in this phase that causes the most bugs:
 
 ```
 ┌───────────┬──────────────────────────────────────────────────────────────┐
@@ -222,17 +238,19 @@ There is a second difference that matters more, and it is the single most bug-pr
 └───────────┴──────────────────────────────────────────────────────────────┘
 ```
 
-Anthropic's own documentation states that `input_tokens` "represents only the tokens that come after the last cache breakpoint". If you write one summation function and point it at both providers, one of them will be wrong by the size of your entire system prompt. Write an adapter per provider. `cost_meter.py` has both, in `extract_usage`, and it prints which shape it matched so a silent mismatch cannot hide.
+Anthropic's documentation states that `input_tokens` "represents only the tokens that come after the last cache breakpoint". Say you write one summation function and use it for both providers. Then one provider's numbers will be wrong by the size of your whole system prompt. Write one adapter per provider.
+
+`cost_meter.py` has both adapters, in `extract_usage` at `cost_meter.py:66`. It prints the shape it matched, so a mismatch cannot stay hidden.
 
 ### Measure it on your own account
 
-```
+```bash
 python phase03_economics/cost_meter.py --replay --role cache_demo     # offline
 export OPENAI_API_KEY=sk-...
 python phase03_economics/cost_meter.py --model <your-model> --role cache_demo
 ```
 
-The replay output on this machine, with the verified gpt-5.6-terra prices:
+The replay uses the verified gpt-5.6-terra prices. Its token counts are synthetic. The output on the author's machine on 2026-09-17, trimmed to call 2 and the summary line:
 
 ```
 call 2 (warm cache)
@@ -245,54 +263,111 @@ call 2 (warm cache)
 warm call is 4.18x cheaper than the cold call.
 ```
 
-The live version sends the same prompt twice and reads the real counts. If call 2 reports zero cached tokens, the script prints a diagnosis rather than leaving you guessing.
+The same run prints two batch lines. All three per-call costs:
+
+```
+Replay, role cache_demo, per call, from the run above
+
+  cold call, full price          ████████████████████████████████████  $0.028400
+  warm call, cached              █████████                             $0.006800
+  warm call, cached and batched  ████                                  $0.003400
+
+  cold to warm: 4.18x cheaper      cold to warm and batched: 8.35x cheaper
+```
+
+The live version sends the same prompt twice and reads the real counts. Call 2 may report zero cached tokens. The script then prints a diagnosis, so you do not have to guess.
 
 ### What breaks a hit
 
-Phase 2 gave you the rule: the match runs from token 0 forward and stops at the first difference. Here is the concrete list of things that cause that difference, taken from both providers' documentation.
+Phase 2 gave you the rule. The match runs from token 0 forward and stops at the first difference. Here is the list of things that cause that difference. It comes from both providers' documentation.
 
-**Content changes you expect:** any edit to the text before the boundary, including a timestamp, a session id, a user name, or a request id.
+**Content changes you expect.** Any edit to the text before the boundary breaks the hit. Examples are a timestamp, a session id, a user name, or a request id.
 
-**Setting changes you do not expect.** On OpenAI, changing any of these invalidates the prefix: the model, the tool definitions including **their ordering**, `parallel_tool_calls`, the structured-output format, `reasoning.effort`, verbosity, and the context-management setting. On Anthropic, changing tool definitions invalidates everything, and toggling web search, citations, or the speed setting invalidates the system and message levels. Adding or removing an image anywhere invalidates the message level.
+**Setting changes you do not expect.** On OpenAI, a change to any of these settings breaks the prefix:
 
-**A serialization bug you will never guess.** Anthropic's documentation warns that some languages randomise map key order when producing JSON, and names Go and Swift. Your tool definitions then serialise differently on each process start, and your cache hit rate quietly depends on which pod served the request. The fix is to force deterministic key order in whatever serialises your tool schemas.
+- the model
+- the tool definitions, including **their order**
+- `parallel_tool_calls`
+- the structured-output format
+- `reasoning.effort`
+- verbosity
+- the context-management setting
 
-**Truncation.** When your history grows past the window and your code trims from the front, every subsequent request has a different prefix. That is Phase 2's compaction problem meeting this phase's bill.
+On Anthropic, a change to the tool definitions breaks everything. Turning web search, citations, or the speed setting on or off breaks the system and message levels. Adding or removing an image anywhere breaks the message level.
 
-**Parallel fan-out at cold start.** A cache entry only becomes usable after the first response begins. Firing ten agent calls at once with the same fresh system prompt writes ten entries and reads none. With writes priced at 1.25x, that fan-out costs more than not caching at all. Warm the cache with one call, then fan out.
+**A serialization bug you will not guess.** Some languages randomise map key order when they produce JSON. Anthropic's documentation warns about this and names Go and Swift. Your tool definitions then serialise differently each time a process starts. Your cache hit rate then depends on which pod served the request. The fix is to force a fixed key order in the code that serialises your tool schemas.
+
+**Truncation.** Your history can grow past the context window. If your code then trims messages from the front, every later request has a different prefix. This is Phase 2's compaction problem, from section 2.6, showing up on this phase's bill.
+
+**Parallel fan-out at cold start.** A cache entry becomes usable only after the first response begins. Say you start ten agent calls at once, with the same new system prompt. They write ten entries and read none. With writes priced at 1.25x, that fan-out costs more than no caching at all. Warm the cache with one call first. Then fan out.
+
+```
+Ten calls with the same 12,000-token system prompt, input tokens only.
+Prices from the gpt-5.6-terra row: input $2.00, write $2.50, read $0.20 per Mtok.
+Steps are an order of events, not measured times.
+
+┌─────────────────────────────────────┬──────────────────────────────────────┐
+│ all ten at once                     │ one warm-up call, then nine          │
+├─────────────────────────────────────┼──────────────────────────────────────┤
+│ step 1  calls 1 to 10 start         │ step 1  call 1 starts                │
+│         no entry exists yet         │         no entry exists yet          │
+│ step 2  10 WRITES, 0 READS          │ step 2  call 1 response begins       │
+│                                     │         the entry is now usable      │
+│                                     │ step 3  calls 2 to 10 start          │
+│                                     │         1 WRITE, 9 READS             │
+├─────────────────────────────────────┼──────────────────────────────────────┤
+│ 10 x 12,000 x $2.50 / 1e6 = $0.300  │ 12,000 x $2.50 / 1e6     = $0.0300   │
+│                                     │ 9 x 12,000 x $0.20 / 1e6 = $0.0216   │
+│                                     │ total                    = $0.0516   │
+└─────────────────────────────────────┴──────────────────────────────────────┘
+No caching at all: 10 x 12,000 x $2.00 / 1e6 = $0.240
+```
 
 ### What it is worth in production
 
-Two teams published measured numbers with their conditions stated.
+Two teams published measured numbers and stated their conditions.
 
-A security-testing platform running multi-agent workflows, 20 to 40 steps per task, with system prompts over 20,000 tokens, moved its cache hit rate from **7.6% to 73.7% in a single deploy**, and later to 85%. The change was moving volatile content out of the prefix. Their reported saving went from 59% to 70% of LLM cost. Their sharpest illustration is two tasks of nearly identical token volume: one ran at a 91.8% cache rate and the other at 3.2%, and the second cost roughly **60 times** more.
+**ProjectDiscovery.** This team runs a security-testing platform with multi-agent workflows. Each task has 20 to 40 steps. Each system prompt is over 20,000 tokens. The team moved volatile content out of the prefix. Their cache hit rate went from **7.6% to 73.7% in a single deploy**, and later to 85%. Their reported saving went from 59% to 70% of LLM cost.
 
-A production assistant team measured an **85.8% hit rate and a 77% reduction in input-token cost**. Note their own caveat: their dollar figures are illustrative because volume is confidential. The percentages are measured.
+```
+ProjectDiscovery cache hit rate, from their weekly table
 
-Caching also buys latency, not only money. OpenAI's cookbook reports cached requests being about 7% faster at the 1,024-token minimum and up to **67% faster time to first token at 150,000 tokens and above**. That is Phase 1's TTFT lesson arriving on your invoice.
+  before the reordering  ███                                         7.6%
+  the week it shipped    █████████████████████████████              73.7%
+  later                  ██████████████████████████████████           85%
+```
 
-**And on Anthropic it buys throughput.** Cache-read tokens do not count toward the input tokens-per-minute rate limit on most models. The provider's own worked example: a 2,000,000 token-per-minute limit with an 80% hit rate processes an effective 10,000,000 tokens per minute. If you are rate limited rather than cost limited, caching is still the fix.
+Their clearest example compares two tasks with nearly the same token volume. One task ran at a 91.8% cache rate. The other ran at 3.2%. The second task cost about **60 times** more.
+
+**Deriv.** A production assistant team measured an **85.8% hit rate and a 77% reduction in input-token cost**. Note their own caveat. Their dollar figures are illustrative, because their volume is confidential. The percentages are measured.
+
+Caching also reduces latency, not only cost. TTFT is time to first token, the wait before the first output token arrives. OpenAI's cookbook reports cached requests about 7% faster at the 1,024-token minimum. At 150,000 tokens and above, it reports up to **67% faster TTFT**. This is Phase 1's TTFT lesson, now on your invoice.
+
+**On Anthropic, caching also raises throughput.** On most models, cache-read tokens do not count toward the input tokens-per-minute rate limit. The provider gives a worked example. A limit of 2,000,000 tokens per minute with an 80% hit rate processes an effective 10,000,000 tokens per minute. If your limit is the rate limit and not the cost, caching still helps.
 
 ### One provider works differently
 
-Google's implicit context caching carries a sentence worth quoting exactly: it offers **"no cost saving guarantee"**. Its explicit caching does guarantee savings and is documented as beta. It also bills differently from both others, charging **storage by the hour**, for example $0.50 per million tokens per hour on one current model. OpenAI and Anthropic charge a one-time write premium instead. That changes the break-even completely: an idle cache entry costs you nothing on two providers and rent on the third.
+Google's documentation for implicit context caching says it offers **"no cost saving guarantee"**. Its explicit caching does guarantee savings, and the documentation labels it beta. Google also bills in a different way. It charges **storage by the hour**. One current model costs $0.50 per million tokens per hour. OpenAI and Anthropic charge a one-time write premium instead.
 
-**The sentence to remember:** implicit caching is free to turn on and easy to lose, so the only number that tells you it is working is the cached-token count in the usage object.
+That difference changes the break-even completely. An idle cache entry costs you nothing on two providers. On the third, you pay for every hour it is stored.
 
-**The trap:** a prefix below the minimum is not an error. It caches nothing and returns success. Anthropic states this explicitly: shorter prompts cannot be cached even when marked, and no error is returned.
+**The sentence to remember:** implicit caching is free to turn on and easy to lose. Only the cached-token count in the usage object tells you it is working.
 
-**Try this now:** run `python phase03_economics/cost_meter.py --replay --role deep`. The `deep` row has no cached price in the sheet, so the gap shows as zero. That is the fallback from 3.1 doing its job, and it is your reminder to fill the sheet in.
+**The trap:** a prefix below the minimum is not an error. It caches nothing and returns success. Anthropic states this directly: shorter prompts cannot be cached even when marked, and no error is returned.
+
+**Try this now:** run `python phase03_economics/cost_meter.py --replay --role deep`. The `deep` row has no cached price in the sheet. So the gap line shows `$0.000000  (0.0% overstated)`, and the warm call is `1.00x cheaper`. The last line is a WARNING that the price is missing. That is the fallback from 3.1 working as designed. It also reminds you to fill in the sheet.
+
 ---
 
 ## 3.3 — Explicit caching with cache_control (the lab Phase 1 owed you)
 
-Why this matters: Phase 1 exercise E6 measured implicit caching and excluded Claude models on purpose, with a note that they need explicit breakpoints and that this phase would cover it. This is that lab. It is also the better teacher, because explicit caching makes every decision visible that implicit caching hides.
+Why this matters: Phase 1 exercise E6 measured implicit caching. It excluded Claude models on purpose, because they need explicit breakpoints. It said this phase would cover them. This section is that lab. Explicit caching also teaches more. It shows you every decision that implicit caching hides.
 
-**The trade in one line.** Implicit caching decides the boundary for you and you cannot control the lifetime. Explicit caching lets you place the boundary and buy a longer lifetime, and charges you for the privilege.
+**The trade.** Implicit caching picks the boundary for you, and you cannot control the lifetime. Explicit caching lets you place the boundary and buy a longer lifetime. You pay extra for that control.
 
-### How a breakpoint actually works
+### How a breakpoint works
 
-You mark one content block with `cache_control`. That writes exactly one entry: a hash of the prefix ending at that block. The system does not write entries for earlier positions.
+A breakpoint is a content block that you mark with `cache_control`. That mark writes exactly one entry. The entry is a hash of the prefix that ends at that block. The system does not write entries for earlier positions.
 
 ```
 system blocks                                      what gets cached
@@ -309,13 +384,13 @@ system blocks                                      what gets cached
 messages: the live conversation
 ```
 
-On the next request the server hashes the prefix at your breakpoint and looks for a match. If there is none, it walks backward one block at a time, up to a documented lookback of 20 blocks. You get at most 4 breakpoints per request, and asking for a fifth returns a 400.
+On the next request, the server hashes the prefix at your breakpoint and looks for a match. If there is no match, it walks backward one block at a time. The documented lookback limit is 20 blocks. You get at most 4 breakpoints per request. A fifth one returns HTTP 400.
 
-**The order is fixed.** Cache prefixes are built in the order tools, then system, then messages. A change at one level invalidates that level and every level after it. So a tool-definition edit invalidates everything, and a new user message invalidates nothing above it.
+**The order is fixed.** The provider builds cache prefixes in this order: tools, then system, then messages. A change at one level breaks that level and every level after it. So an edit to a tool definition breaks everything. A new user message breaks nothing above it.
 
-### The break-even, derived rather than quoted
+### The break-even, derived
 
-A write costs more than an uncached token. A read costs less. So explicit caching is a bet that you will read the entry enough times before it expires.
+A write costs more than an uncached token. A read costs less. So explicit caching only pays if you read the entry enough times before it expires.
 
 ```
 extra cost to write   = (write_rate - input_rate) x tokens
@@ -324,28 +399,36 @@ saving per read       = (input_rate - cached_rate) x tokens
 reads needed to profit = (write_rate - input_rate) / (input_rate - cached_rate)
 ```
 
-Put the verified multipliers in. A 5-minute write costs 1.25x input and a read costs 0.1x:
+Put in the verified multipliers. A 5-minute write costs 1.25x input. A read costs 0.1x:
 
 ```
 (1.25 - 1.00) / (1.00 - 0.10) = 0.25 / 0.90 = 0.28 reads
 ```
 
-So a single read already profits. Now the 1-hour tier at 2x:
+So one read already makes a profit. Now the 1-hour tier at 2x:
 
 ```
 (2.00 - 1.00) / (1.00 - 0.10) = 1.00 / 0.90 = 1.11 reads
 ```
 
-Two reads. That matches the provider's own published guidance exactly: caching pays off after one cache read at the 5-minute duration and after two at the 1-hour duration. Deriving it yourself matters, because the multipliers change and the formula does not.
-
-`cache_control_lab.py` prints this line before every run, computed from your own price sheet:
+That means two reads. This matches the provider's own guidance. Caching pays off after one read at the 5-minute duration. It pays off after two reads at the 1-hour duration. Derive it yourself anyway. The multipliers change, and the formula does not.
 
 ```
-break-even: the write costs 1.25x input, each read saves 90%.
-You need 0.28 reads to profit, so 1 read(s) in practice.
+reads needed before the entry pays for itself
+
+  5-minute write, 1.25x   ███████                              0.28  → read 1
+  1-hour write,   2.00x   ████████████████████████████         1.11  → read 2
 ```
 
-**When the 1-hour tier wins.** A 2x write is worth it when your gaps between calls exceed 5 minutes. That is a human conversation with pauses, a batch job, or a nightly agent. It is not worth it for a tight tool-calling loop, where the 5-minute entry never expires anyway.
+In live mode, `cache_control_lab.py` prints this line before the first turn. It computes the numbers from your own price sheet, at `cache_control_lab.py:412`:
+
+```
+break-even: the write costs 1.25x input, each read saves 90%. You need 0.28 reads to profit, so 1 read(s) in practice.
+```
+
+This line was not run here, because it needs an API key. It is inferred from the code and the `claude` price row. `--explain` does not print it.
+
+**When the 1-hour tier wins.** A 2x write pays when the gaps between your calls are longer than 5 minutes. Examples are a human conversation with pauses, a batch job, or a nightly agent. It does not pay for a fast tool-calling loop. In that loop, the 5-minute entry never expires anyway.
 
 ### Reading the usage object
 
@@ -357,17 +440,24 @@ usage.cache_creation.ephemeral_5m_input_tokens    the split, by TTL
 usage.cache_creation.ephemeral_1h_input_tokens
 ```
 
-The identity to hold on to:
+TTL is time to live, the lifetime of a cache entry. The identity to remember:
 
 ```
 total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens
 ```
 
-A team that reports `input_tokens` as "input tokens" on a dashboard will show a number near zero for a heavily cached agent and never question it. That exact bug is documented in a public issue against an observability product: an agent run whose true cost was $0.522 was reported as $0.238, which is 45.5% of actual, because the instrumentation emitted neither cache reads nor cache writes and logged the input as **20 tokens**. Twenty tokens for a multi-turn agent run is an obviously wrong number, and it sat on a dashboard unnoticed because it was presented with the same confidence as a correct one.
+Say a team shows `input_tokens` on a dashboard as "input tokens". For a heavily cached agent, that number is near zero, and nobody questions it. A public issue against the Langfuse observability product documents this bug:
+
+- The true cost of the agent run was $0.522.
+- The dashboard reported $0.238, which is 45.5% of the true cost.
+- The instrumentation sent neither cache reads nor cache writes.
+- The dashboard logged the input as **20 tokens**.
+
+Twenty tokens for a multi-turn agent run is clearly wrong. It stayed on a dashboard unnoticed. The dashboard showed it in the same way as a correct number.
 
 ### Run the lab
 
-```
+```bash
 python phase03_economics/cache_control_lab.py --explain          # no key needed
 export ANTHROPIC_API_KEY=sk-ant-...
 python phase03_economics/cache_control_lab.py --model <model-id> --role claude --turns 5
@@ -375,120 +465,140 @@ python phase03_economics/cache_control_lab.py --model <model-id> --role claude -
 python phase03_economics/cache_control_lab.py --model <model-id> --role claude --turns 5 --break-it
 ```
 
-Turn 1 costs **more** than the control run, because you paid the write premium. From turn 2 the per-turn cost drops hard. The script prints a running total so you can see the exact turn where the cached run overtakes the control.
+Turn 1 costs **more** than the control run, because you paid the write premium. From turn 2, the cost per turn drops a lot. The script prints a running total. You can see the exact turn where the cached run becomes cheaper than the control.
 
-`--break-it` puts a timestamp block **above** the breakpoint. Every turn then reports a cache creation and no read. You pay the premium repeatedly and collect the discount never. That is the single most expensive mistake in explicit caching, and it is the same mistake as Phase 0's Story 1 wearing different clothes.
+`--break-it` puts a timestamp block **above** the breakpoint. Every turn then reports a cache write and no read. You pay the premium every time and never get the discount. This is the most expensive mistake in explicit caching. It is the same mistake as Phase 0's Story 1, in a different API.
 
-### Two rules that are easy to miss
+### Rules that are easy to miss
 
-**The silent no-op.** A prefix below the model's minimum is not cached, and no error is returned. The minimums vary a lot: 512 tokens on some models and 4,096 on others. The price sheet now carries `min_cache_tokens` per model, and the lab warns you before it spends anything.
+**The silent no-op.** The provider does not cache a prefix below the model's minimum, and it returns no error. The minimums vary a lot, from 512 tokens on some models to 4,096 on others. The price sheet now carries `min_cache_tokens` per model. The lab warns you before it sends any request, at `cache_control_lab.py:401`.
 
-**Batch jobs want the long tier.** Provider guidance is explicit: because a batch can take longer than 5 minutes, use the 1-hour duration for shared context inside a batch. And one feature does not work there. Pre-warming a cache with a zero-token generation is not supported inside a batch, because the entry would expire before the follow-up request ran.
+**Batch jobs need the long tier.** The provider guidance is direct. A batch can take longer than 5 minutes. So use the 1-hour duration for shared context inside a batch. One feature does not work in a batch. You cannot pre-warm a cache with a zero-token generation there. The entry would expire before the follow-up request ran.
 
-**The discounts stack.** Anthropic states that the batch discount and caching discounts combine. The equivalent claim for OpenAI is **not** documented on its batch page, so do not assume it. The check is one experiment: submit a batch with a repeated long prefix and read the cached-token count in the output file.
+**The discounts stack.** Anthropic states that the batch discount and the caching discounts combine. OpenAI's batch page does **not** document the same claim, so do not assume it. You can check it with one experiment. Submit a batch with a repeated long prefix. Then read the cached-token count in the output file.
 
-**The sentence to remember:** explicit caching is a purchase, not a setting, so compute the break-even in reads before you place a breakpoint.
+**The sentence to remember:** explicit caching is a purchase, not a setting. Compute the break-even in reads before you place a breakpoint.
 
-**The trap:** a volatile block above the breakpoint turns every request into a cache write. You then pay 1.25x for input that would have cost 1x if you had never enabled caching at all.
+**The trap:** a volatile block above the breakpoint turns every request into a cache write. You then pay 1.25x for input that would cost 1x with caching turned off.
 
-**Try this now:** run `python phase03_economics/cache_control_lab.py --explain --break-it` and read the block order it prints. Then predict, before running anything live, what the `written` and `read` columns will show on turn 3.
+**Try this now:** run `python phase03_economics/cache_control_lab.py --explain --break-it`. Read the block order it prints. The timestamp block comes first, and the block with `cache_control` comes second. Before you run anything live, predict what the `written` and `read` columns will show on turn 3.
 
 ---
 
 ## 🧪 Hands-on lab — part A
 
-Setup: `cd ~/Desktop/project/code/study-material/inference-internals/code && pip install -e .`
+Setup: `cd ~/Desktop/project/code/study-material/inference-internals/code && uv sync`.
 
-**Live-run status, stated honestly:** every offline script was executed on the author's machine on 2026-09-12, and the outputs printed above are real outputs from those runs. No API key was available on this machine, so E4 to E8 were not executed against a live provider. Their command flags were checked against the shipped scripts.
+**Run status.** The author first ran every offline command on 2026-09-12. A review re-ran them on 2026-09-17, and the Expected lines below match that run. No API key was available, so E4 to E8 did not run against a live provider. The review checked their flags against each script's `--help`.
 
 - [ ] **E1 (offline).** Test the money arithmetic before you trust it.
   - Run: `python pricing.py --self-test`
-  - Expected: eight checks pass, including "unknown cached price falls back to full price".
-  - Then break it on purpose. Open `pricing.py`, change that fallback to `0.0`, and rerun. One check fails and tells you exactly which mistake you just made. Change it back.
-  - Teaches: a cost module is a piece of software with a correctness property, not a one-line formula.
+  - Expected: 13 checks pass, and the last line is `all checks passed`. One check is "unknown cached price falls back to full price". A `WARNING` line about tier `mystery` also appears. That warning is expected, because one check uses an unknown tier on purpose.
+  - Then break it on purpose. Open `pricing.py` at line 164. Change the fallback to `0.0`, and run the test again. That check now fails and names the mistake you made. Change it back.
+  - Teaches: a cost module is software with a correctness property. It is more than a one-line formula.
 
 - [ ] **E2 (offline).** Read your own price sheet.
   - Run: `python pricing.py --role deep` then `python pricing.py --role cheap`
-  - Expected: a `Price` row for each, and a `cached/input ratio` line.
-  - Then edit `prices.yaml`. Replace both models with the ones you actually use, fill in every field you can find on the provider's pricing page, and set `priced_on` to today. Leave a field out rather than guessing it.
-  - Teaches: the price sheet is the input to every number in this phase. A guessed price produces a confident wrong answer.
+  - Expected: a `Price(...)` row for each. Each row ends with `cached_input_per_mtok=None`. The next line is `cached price NOT SET for this model`. A row with a cached price prints `cached/input ratio: ...` instead. Try `python pricing.py --role cache_demo` to see `0.100`.
+  - Then edit `prices.yaml`. Replace both models with the ones you use. Fill in every field you can find on the provider's pricing page. Set `priced_on` to today. If you cannot find a field, leave it out. Do not guess it.
+  - Teaches: the price sheet is the input to every number in this phase. A guessed price produces a wrong answer that looks certain.
 
 - [ ] **E3 (offline).** See the gap your Phase 1 meter was hiding.
-  - Run: `python phase03_economics/cost_meter.py --replay --role deep`
-  - Expected: the cold call shows a zero gap. The warm call shows the naive formula overstating by about 66%, and the warm call priced 2.96x cheaper than the cold one. The batch lines show a further halving.
-  - Then run with `--role cheap` and compare the ratios. They differ, because the cached-to-input ratio differs per model.
-  - Teaches: the size of the prize, before you spend anything measuring it live.
+  - Run: `python phase03_economics/cost_meter.py --replay --role cache_demo`
+  - Expected: the cold call shows a gap of `$0.000000`. The warm call shows the naive formula overstating by 76.1%. The warm call is 4.18x cheaper than the cold call. The batch lines show $0.003400 for the warm batched call, 8.35x cheaper than the cold call.
+  - Then run it with `--role deep` and with `--role cheap`. Both show a gap of zero and `1.00x cheaper`, then a WARNING line. Neither row has a cached price, so the ratio is 1.00 by construction. The batch lines still halve the cost, for example $0.027200 to $0.013600 for `deep`.
+  - Teaches: the size of the saving, before you spend anything to measure it live. It also shows that a missing price hides the saving completely.
 
 - [ ] **E4 (UNVERIFIED against a live provider).** See a real cache hit on your own account.
   - Run: `python phase03_economics/cost_meter.py --model <your-model> --role cache_demo`
-  - Expected: call 1 reports 0 cached tokens. Call 2 reports most of the 12,000-token prefix as cached, and the gap column shows the naive formula overstating by more than half.
-  - If call 2 also reports 0: read the diagnosis the script prints. The usual causes are a prefix under the minimum, too long a pause between calls, or a gateway that drops the details object.
+  - Expected: call 1 reports 0 cached tokens. Call 2 reports most of the 12,000-token prefix as cached. The gap column shows the naive formula overstating by more than half.
+  - If call 2 also reports 0: read the diagnosis the script prints. The usual causes are a prefix below the minimum, or too long a pause between calls. A gateway that drops the details object is a third cause.
   - Costs at most: about $0.05.
-  - Teaches: the cached-token count is the only proof caching is working.
+  - Teaches: the cached-token count is the only proof that caching works.
 
-- [ ] **E5 (break-it, UNVERIFIED against a live provider).** Destroy the hit with one line.
-  - Edit `cost_meter.py` and prepend the current timestamp to the prompt inside `build_prompt`, so it lands at position 0. Rerun E4.
-  - Expected: call 2 now reports 0 cached tokens and the true cost equals the naive cost. You changed roughly 25 characters and lost the entire discount.
-  - Then move the timestamp to the END of the prompt and rerun. The hit comes back.
-  - Teaches: Phase 0's Story 1, reproduced on your own bill in two minutes. Remove your edit afterwards.
+- [ ] **E5 (break-it, UNVERIFIED against a live provider).** Break the hit with one line.
+  - Edit `build_prompt` at `cost_meter.py:56`. Put the current timestamp at the start of the returned prompt, at position 0. Run E4 again.
+  - Expected: call 2 now reports 0 cached tokens, and the true cost equals the naive cost. You changed about 25 characters and lost the whole discount.
+  - Then move the timestamp to the END of the prompt and run it again. The hit comes back.
+  - Teaches: Phase 0's Story 1, on your own bill, in two minutes. Remove your edit afterwards.
 
-- [ ] **E6 (break-it, UNVERIFIED against a live provider).** Fall below the minimum and get no error.
+- [ ] **E6 (break-it, UNVERIFIED against a live provider).** Go below the minimum and get no error.
   - Run: `python phase03_economics/cost_meter.py --model <your-model> --role cache_demo --prefix-tokens 400`
-  - Expected: both calls succeed, both report 0 cached tokens, and nothing anywhere says why. A prefix below the documented minimum is a silent no-op.
+  - Expected: both calls succeed, and both report 0 cached tokens. Nothing in the output says why. A prefix below the documented minimum does nothing and raises no error.
   - Then raise it to 1,200 and watch the hit appear.
-  - Teaches: absence of an error is not evidence that a feature is working.
+  - Teaches: the lack of an error does not prove that a feature works.
 
-- [ ] **E7 (UNVERIFIED against a live provider).** Explicit caching, and find the break-even turn.
+- [ ] **E7 (UNVERIFIED against a live provider).** Use explicit caching, and find the break-even turn.
   - Run offline first: `python phase03_economics/cache_control_lab.py --explain`. Read the block order and the usage fields it names.
-  - Then: `python phase03_economics/cache_control_lab.py --model <model-id> --role claude --turns 5` and again with `--no-cache`.
-  - Expected: the script prints the break-even in reads before it starts. Turn 1 of the cached run costs MORE than the control, because you paid the write premium. By turn 2 or 3 the cached run's running total drops below the control's. Write down which turn.
+  - Then: `python phase03_economics/cache_control_lab.py --model <model-id> --role claude --turns 5`. Run it again with `--no-cache`.
+  - Expected: the script prints the break-even in reads before the first turn. Turn 1 of the cached run costs MORE than the control, because you paid the write premium. By turn 2 or 3, the cached run's running total drops below the control's. Write down which turn.
   - Costs at most: about $0.10 for both runs.
-  - Teaches: explicit caching is a purchase with a payback period, not a switch.
+  - Teaches: explicit caching is a purchase with a payback period. It is not a switch.
 
-- [ ] **E8 (break-it, UNVERIFIED against a live provider).** Pay the premium forever and never collect.
+- [ ] **E8 (break-it, UNVERIFIED against a live provider).** Pay the premium every turn and never collect.
   - Run: `python phase03_economics/cache_control_lab.py --model <model-id> --role claude --turns 5 --break-it`
-  - Expected: every turn shows a non-zero `written` column and a zero `read` column. You paid 1.25x input on every single turn. This run costs more than never enabling caching at all.
-  - Teaches: a volatile block above the breakpoint inverts the whole feature. Compare this total against the `--no-cache` control from E7 and write down the difference.
+  - Expected: every turn shows a non-zero `written` column and a zero `read` column. You paid 1.25x input on every turn. This run costs more than a run with caching turned off.
+  - Teaches: a volatile block above the breakpoint reverses the benefit of the feature. Compare this total with the `--no-cache` control from E7, and write down the difference.
 
 ---
 
 ## 🔍 Check it yourself — questions against the course code
 
-This course has no anchor repository, so these target the code you now own. The last one works on any repository you have.
+This course has no anchor repository, so these questions target the course code. The last one works on any repository.
 
-1. Open `pricing.py` and find the `cost` function. Locate the line that chooses `cached_rate`. Explain in one sentence why it falls back to `price.input_per_mtok` rather than to `0.0`, and name the specific wrong conclusion the zero version would produce on a dashboard.
+1. Open `pricing.py` at line 156, the `cost` function. Line 164 chooses `cached_rate`. Explain in one sentence why it falls back to `price.input_per_mtok` and not to `0.0`. Then name the wrong conclusion the zero version would produce on a dashboard.
 
-2. Open `prices.yaml`. The `gpt-4.1-mini` and `gpt-4.1` rows have no `cached_input_per_mtok`. That is deliberate. Read the comment block at the top, then answer: what does `pricing.py` charge for a cached token on those two models, and is that error in the safe direction or the dangerous one?
+2. Open `prices.yaml`. The `gpt-4.1-mini` and `gpt-4.1` rows have no `cached_input_per_mtok`. That is deliberate. Read the comment block above those two rows. Then answer two questions. What does `pricing.py` charge for a cached token on those two models? Is that error in the safe direction or the dangerous one?
 
-3. Open `phase03_economics/cost_meter.py` and find `extract_usage`. It contains two separate code paths that never share a summation. Write down, from the code alone, which provider includes cached tokens inside its base input count and which reports them separately. Then find the line that makes a silent mismatch impossible.
+3. Open `phase03_economics/cost_meter.py` at line 66, `extract_usage`. It has two separate code paths that never share a summation. Use only the code to answer. Which provider includes cached tokens inside its base input count? Which one reports them separately? Then find the line that returns the name of the matched shape, so a mismatch cannot stay hidden.
 
-4. In any repository you own that calls an LLM: find where the response usage is read. Answer three questions. Does it record a cached-token count? Does it record cost per request, or only tokens? Is there any code that would notice if the cached count went to zero tomorrow? Three honest "no" answers is the normal starting point, and it is exactly Phase 0's Story 1 waiting to happen.
+4. In any repository you own that calls an LLM, find where the code reads the response usage. Answer three questions:
+   - Does it record a cached-token count?
+   - Does it record cost per request, or only tokens?
+   - Would any code notice if the cached count went to zero tomorrow?
+
+   Three honest "no" answers are the normal starting point. They are Phase 0's Story 1, waiting to happen.
+
 ---
 
 ## ✅ Checkpoint 3A — answer in your own words
 
-1. Show the math. A model prices input at $2.00 per million tokens, cached input at $0.20, cache writes at $2.50, and output at $12.00. Your agent step sends 20,000 input tokens of which 18,000 hit the cache, and generates 400 output tokens. (a) Compute the true cost. (b) Compute what the Phase 1 two-price formula would report. (c) State the factor by which the old meter overstates this request. (d) Your finance team uses the old number to set customer pricing. Name the specific business error that creates.
+1. Show the math. A model has these prices per million tokens: input $2.00, cached input $0.20, cache writes $2.50, output $12.00. Your agent step sends 20,000 input tokens. Of those, 18,000 hit the cache. The step generates 400 output tokens. (a) Compute the true cost. (b) Compute what the Phase 1 two-price formula would report. (c) State how many times higher the old meter's number is. (d) Your finance team uses the old number to set customer prices. Name the business error that this creates.
 
-2. A colleague says: "We turned on prompt caching and our costs did not move, so caching does not work for our workload." Give three separate, specific causes that produce exactly that observation. For each one, name the single number you would look at to confirm or eliminate it.
+2. A colleague says: "We turned on prompt caching and our costs did not move. So caching does not work for our workload." Give three separate, specific causes of that observation. For each cause, name the one number you would check to confirm or rule it out.
 
-3. Show the math, then decide. A provider charges 2x input for a one-hour cache write, 1.25x for a five-minute write, and 0.1x for a read. (a) Derive the number of reads needed before the one-hour tier profits. (b) Your agent makes one call every 12 minutes for an hour. Which tier, and why? (c) Your agent makes one call every 20 seconds for two minutes, then stops. Which tier, and why is the answer different?
+3. Show the math, then decide. A provider charges 2x input for a one-hour cache write, 1.25x for a five-minute write, and 0.1x for a read. (a) Derive the number of reads needed before the one-hour tier makes a profit. (b) Your agent makes one call every 12 minutes for an hour. Which tier do you pick, and why? (c) Your agent makes one call every 20 seconds for two minutes, then stops. Which tier do you pick, and why is the answer different?
 
-4. This is broken. Your cost dashboard reports $0.24 for an agent run the provider billed at $0.52. The dashboard shows 20 input tokens and 13,545 output tokens for a multi-turn run with a large system prompt. (a) Name the specific cause. (b) Explain why 20 input tokens should have been obviously wrong to any reader. (c) Name the two usage fields that were missing. (d) Say why this class of bug survives code review.
+4. This is broken. Your cost dashboard reports $0.24 for an agent run. The provider billed $0.52. The dashboard shows 20 input tokens and 13,545 output tokens. The run had many turns and a large system prompt. (a) Name the cause. (b) Explain why 20 input tokens should have looked wrong to any reader. (c) Name the two missing usage fields. (d) Say why this kind of bug gets through code review.
 
-5. Walk me through what happens. Your agent serves a burst of 10 identical requests at once, at cold start, each carrying the same 12,000-token system prompt, on a provider that charges 1.25x for cache writes. (a) Trace what the cache does across those 10 requests. (b) Compare the total input cost against the same 10 requests with caching disabled. (c) State the one change to your call pattern that fixes it, and what it costs you in latency.
+5. Walk me through what happens. Your agent gets a burst of 10 identical requests at once, at cold start. Each carries the same 12,000-token system prompt. The provider charges 1.25x for cache writes. (a) Trace what the cache does across those 10 requests. (b) Compare the total input cost with the same 10 requests with caching turned off. (c) State the one change to your call pattern that fixes it, and its latency cost.
 
 <details>
 <summary>Answer sketches — write yours first, then compare</summary>
 
-1. (a) Uncached input is 20,000 - 18,000 = 2,000 tokens. 2,000 x $2.00 / 1e6 = $0.004. Cached 18,000 x $0.20 / 1e6 = $0.0036. Output 400 x $12.00 / 1e6 = $0.0048. True total $0.0124. (b) Naive: 20,000 x $2.00 / 1e6 + $0.0048 = $0.04 + $0.0048 = $0.0448. (c) $0.0448 / $0.0124 = about 3.6x. (d) You price the product against a cost 3.6x your real cost. You lose deals you could have won, and you cannot explain your own margin when someone checks the invoice.
+1. (a) Uncached input is 20,000 - 18,000 = 2,000 tokens. 2,000 x $2.00 / 1e6 = $0.004. Cached input is 18,000 x $0.20 / 1e6 = $0.0036. Output is 400 x $12.00 / 1e6 = $0.0048. The true total is $0.0124.
+   (b) Naive: 20,000 x $2.00 / 1e6 + $0.0048 = $0.04 + $0.0048 = $0.0448.
+   (c) $0.0448 / $0.0124 = about 3.6x.
+   (d) You set prices against a cost 3.6x higher than your real cost. You lose deals you could have won. You also cannot explain your own margin when someone checks the invoice.
 
-2. Three causes with their confirming numbers. First, the prefix is below the minimum, so nothing caches and no error appears. Check the cached-token count; it is exactly 0 on every call. Second, something volatile sits early in the prompt, so every request is cold. The cached count is also 0, so separate this from the first cause by raising the prefix length and seeing whether anything changes. Third, the saving is real and your meter cannot see it. Check whether your code reads the cached-token field at all; if it does not, your cost number cannot move by construction. A fourth acceptable answer: writes cost 1.25x, so a write-heavy workload with few reads genuinely does not save.
+2. Here are three causes, each with the number that confirms it.
+   - The prefix is below the minimum. Nothing caches, and no error appears. Check the cached-token count. It is exactly 0 on every call.
+   - Something volatile sits early in the prompt, so every request is cold. The cached count is also 0. To tell this apart from the first cause, make the prefix longer and see whether anything changes.
+   - The saving is real, but your meter cannot see it. Check whether your code reads the cached-token field at all. If it does not, your cost number can never move.
+   - A fourth answer is also correct. Writes cost 1.25x. A workload with many writes and few reads does not save money.
 
-3. (a) (2.00 - 1.00) / (1.00 - 0.10) = 1.11, so two reads. (b) A 12-minute gap means a five-minute entry always expires before reuse, so that tier gives you a write every time and no reads. The one-hour tier gives one write and four reads within the hour, which clears the two-read break-even. Choose one hour. (c) Calls 20 seconds apart never let a five-minute entry expire, so the cheaper 1.25x write is already reused. The extra 0.75x for the longer tier buys nothing. Choose five minutes.
+3. (a) (2.00 - 1.00) / (1.00 - 0.10) = 1.11, so two reads.
+   (b) With a 12-minute gap, a five-minute entry always expires before the next call. That tier gives you a write every time and no reads. The one-hour tier gives one write and four reads within the hour. Four reads clear the two-read break-even. Pick one hour.
+   (c) Calls 20 seconds apart never let a five-minute entry expire. So the cheaper 1.25x write is already reused. The extra 0.75x for the longer tier buys nothing. Pick five minutes.
 
-4. (a) The instrumentation did not emit cache-read or cache-write tokens, so cost was recomputed from partial counts. (b) On that provider `input_tokens` counts only tokens after the last cache breakpoint, so a multi-turn run with a large system prompt cannot have 20 real input tokens. The field was read as if it meant total input. (c) `cache_read_input_tokens` and `cache_creation_input_tokens`. (d) The wrong number is plausible, arrives through the same code path as correct numbers, and is displayed with identical confidence. Nothing errors. Only reconciliation against the provider's own cost report catches it.
+4. (a) The instrumentation did not send cache-read or cache-write tokens. So the tool recomputed the cost from partial counts.
+   (b) On that provider, `input_tokens` counts only the tokens after the last cache breakpoint. A multi-turn run with a large system prompt cannot have only 20 real input tokens. The tool read the field as if it meant total input.
+   (c) `cache_read_input_tokens` and `cache_creation_input_tokens`.
+   (d) The wrong number looks plausible. It comes through the same code path as correct numbers. Nothing raises an error. Only a comparison with the provider's own cost report catches it.
 
-5. (a) A cache entry becomes usable only after the first response begins. All 10 requests start before any entry exists, so all 10 write and none read. (b) With writes at 1.25x, the 10 requests cost 1.25 times what they would have cost with caching switched off entirely. Caching made this burst more expensive, not less. (c) Send one warm-up call, wait for it to start returning, then fan out the remaining 9 against a warm entry. It costs you the latency of one extra round trip at the start of the burst.
+5. (a) A cache entry becomes usable only after the first response begins. All 10 requests start before any entry exists. So all 10 write, and none read.
+   (b) With writes at 1.25x, the 10 requests cost 1.25 times the cost with caching turned off. For the 12,000-token prompt at $2.00 input, that is $0.300 against $0.240. Caching made this burst more expensive.
+   (c) Send one warm-up call. Wait until its response starts. Then send the other 9 against the warm entry. The cost is the latency of one extra round trip at the start of the burst.
 
 </details>
 
@@ -496,81 +606,80 @@ This course has no anchor repository, so these target the code you now own. The 
 
 ## References & Further Learning
 
-Every URL below was fetched and checked on 2026-09-12. Where a page blocked automated fetching or a claim could not be confirmed, the entry says so. Prices and limits in this area change faster than anything else in the course, so treat every number as dated rather than permanent.
+Every URL below was fetched and checked on 2026-09-12. Some pages blocked automated fetching, and some claims could not be confirmed. The entry says so in those cases. Prices and limits in this area change faster than anything else in the course. Treat every number as a dated value.
 
 ### Must-read before the lab
 
-**OpenAI prompt caching guide** — https://developers.openai.com/api/docs/guides/prompt-caching
-The primary source for section 3.2. The older `platform.openai.com` path now redirects here, so cite this one. Focus on the prompt-cache-options section and the invalidation list.
-Verified numbers: a 1,024-token minimum, a 30-minute sliding reuse window on current models, cache reads at 0.1x the input rate, **cache writes at 1.25x**, and at most four cache writes per request. Caches are not shared across organisations or across regional processing boundaries.
-The write price is the part most secondary material omits. Caching is no longer free to try.
+- **OpenAI prompt caching guide** — https://developers.openai.com/api/docs/guides/prompt-caching
+  The primary source for section 3.2. The older `platform.openai.com` path now redirects here, so cite this one. Focus on the prompt-cache-options section and the invalidation list.
+  Verified numbers: a 1,024-token minimum, and a 30-minute sliding window on current models. Reads cost 0.1x input, **writes cost 1.25x**, and a request makes at most four writes. Caches are not shared across organisations or regional processing boundaries.
 
-**Anthropic prompt caching** — https://platform.claude.com/docs/en/build-with-claude/prompt-caching
-The primary source for section 3.3, and the better document of the two because it describes the lookup algorithm rather than only the API. Focus on how breakpoints work, the minimum-length table, the invalidation table, and the one-hour duration section.
-Verified: a write creates exactly one entry, a hash of the prefix ending at your marked block. The system walks backward up to 20 blocks looking for a match. At most 4 breakpoints, with a 400 error on the fifth. Prefixes build in the order tools, system, messages. Minimum cacheable length runs from 512 to 4,096 tokens depending on the model, and below the minimum **nothing caches and no error is returned**. Reads cost 0.1x, five-minute writes 1.25x, one-hour writes 2x. The page states the break-even directly: one read for the five-minute tier, two reads for the one-hour tier.
+- **Anthropic prompt caching** — https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+  The primary source for section 3.3. It is the better of the two documents, because it describes the lookup algorithm and not only the API. Focus on how breakpoints work, the minimum-length table, the invalidation table, and the one-hour duration section.
+  Verified facts: one entry per breakpoint, a 20-block lookback, at most 4 breakpoints, and the order tools, system, messages. Minimums run from 512 to 4,096 tokens, and below the minimum **nothing caches and no error is returned**. Reads cost 0.1x, five-minute writes 1.25x, one-hour writes 2x. The page states the break-even directly: one read for the five-minute tier, two for the one-hour tier.
 
-**Anthropic rate limits** — https://platform.claude.com/docs/en/api/rate-limits
-Read one fact from this page. On most models, only uncached input tokens count toward the input tokens-per-minute limit. The page's worked example: a 2,000,000 token-per-minute limit with an 80% hit rate processes an effective 10,000,000 tokens per minute. If you are throughput limited rather than cost limited, caching is still the answer.
+- **Anthropic rate limits** — https://platform.claude.com/docs/en/api/rate-limits
+  Read one fact from this page. On most models, only uncached input tokens count toward the input tokens-per-minute limit. Section 3.2 quotes the page's worked example of 2,000,000 tokens per minute at an 80% hit rate.
 
 ### Deep dives
 
-**Prompt Caching 201** — https://developers.openai.com/cookbook/examples/prompt_caching_201
-The cleanest latency evidence available. Cached requests run about 7% faster at the 1,024-token minimum and up to 67% faster to first token at 150,000 tokens and above. It also reports one coding customer's hit rate improving from 60% to 87% after adopting a cache key.
-Honest note: the workload is described only as "coding" and no model is named for that improvement.
+- **Prompt Caching 201** — https://developers.openai.com/cookbook/examples/prompt_caching_201
+  The clearest latency evidence available, and the source of section 3.2's 7% and 67% figures. It also reports one coding customer's hit rate. It rose from 60% to 87% after the customer adopted a cache key.
+  Honest note: the page describes the workload only as "coding". It names no model for that improvement.
 
-**How We Cut LLM Costs by 59% With Prompt Caching** — ProjectDiscovery, 10 April 2026.
-https://projectdiscovery.io/blog/how-we-cut-llm-cost-with-prompt-caching
-The best production write-up on this topic, because it states its measurement method: effective per-token rates derived from real spend, compared against what the same volume would have cost at the standard rate. Focus on the weekly hit-rate table.
-Conditions: an autonomous security-testing platform, 20 to 40 LLM steps per task, system prompts over 20,000 tokens per agent. The hit rate moved from 7.6% to 73.7% in the week they shipped the prompt reordering, and later to 85%. Savings moved from 59% to 70%. Their sharpest number is a comparison of two tasks with nearly identical token volume, one at a 91.8% cache rate and one at 3.2%, with roughly 60x the cost.
+- **How We Cut LLM Costs by 59% With Prompt Caching, ProjectDiscovery, 10 April 2026** — https://projectdiscovery.io/blog/how-we-cut-llm-cost-with-prompt-caching
+  The best production write-up on this topic, because it states its measurement method. The team derived effective per-token rates from real spend. They compared those rates with the standard-rate cost of the same volume. Focus on the weekly hit-rate table.
+  Conditions: an autonomous security-testing platform, 20 to 40 LLM steps per task, and system prompts over 20,000 tokens per agent. Section 3.2 quotes its hit rates, its 59% to 70% savings, and its 60x two-task comparison.
 
-**How prompt caching cut our production AI agent input costs by 77%** — Deriv, 23 July 2026.
-https://derivai.substack.com/p/prompt-caching-production-ai-agent-costs
-A second independent production measurement: an 85.8% hit rate producing a 77% reduction in input-token cost.
-Honest note the author states themselves: the dollar figures are illustrative because production volume is confidential. Use the percentages, not the dollars.
+- **How prompt caching cut our production AI agent input costs by 77%, Deriv, 23 July 2026** — https://derivai.substack.com/p/prompt-caching-production-ai-agent-costs
+  A second independent production measurement. Section 3.2 quotes its 85.8% hit rate and 77% saving.
+  Honest note, from the author: the dollar figures are illustrative, because production volume is confidential. Use the percentages, not the dollars.
 
-**Google context caching** — https://ai.google.dev/gemini-api/docs/generate-content/caching
-Read it for the contrast. Implicit caching there carries the phrase "no cost saving guarantee", explicit caching is documented as beta, and storage is billed **by the hour** rather than as a one-time write premium. That single difference changes the break-even arithmetic completely.
+- **Google context caching** — https://ai.google.dev/gemini-api/docs/generate-content/caching
+  Read it for the contrast in section 3.2. Implicit caching has "no cost saving guarantee", and storage is billed **by the hour**.
 
-**Batch APIs** — https://developers.openai.com/api/docs/guides/batch and https://platform.claude.com/docs/en/build-with-claude/batch-processing
-Both price batch at 50% of synchronous rates. Focus on the limits and the expiry behaviour, which differ: one returns and bills completed requests when a batch expires, the other does not bill expired requests. One of the two states explicitly that batch and caching discounts combine and recommends the one-hour cache tier inside batches. The other does not document the interaction at all, so do not assume it.
+- **Batch APIs** — https://developers.openai.com/api/docs/guides/batch and https://platform.claude.com/docs/en/build-with-claude/batch-processing
+  Both providers price batch at 50% of synchronous rates. Focus on the limits and the expiry behaviour, which differ. When a batch expires, one provider returns and bills the completed requests. The other does not bill expired requests. One of the two states that batch and caching discounts combine. It recommends the one-hour cache tier inside batches. The other does not document the interaction at all, so do not assume it.
 
 ### Cost accounting and alerting
 
-**OpenTelemetry GenAI semantic conventions** — https://github.com/open-telemetry/semantic-conventions-genai
-The attribute registry lives at `docs/registry/attributes/gen-ai.md` in that repository. There is no released version, so cite a commit. The one checked here is dated 2026-09-10.
-What to take from it: all 118 attributes are development stability, cached tokens are defined as `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_write.input_tokens`, reasoning tokens as `gen_ai.usage.reasoning.output_tokens`, and detailed attributes are always subsets of the totals rather than additions.
-What is missing: there is **no cost attribute**, and no batch attribute. A cost convention exists only as open pull request 443, proposing `gen_ai.usage.cost.amount`, `.currency` and `.source`. Adopt those names now to migrate cheaply later.
-The trap: the standard token metric carries only an input-or-output dimension. With caching on, you cannot compute spend from it. Use span attributes.
+- **OpenTelemetry GenAI semantic conventions** — https://github.com/open-telemetry/semantic-conventions-genai
+  The attribute registry is at `docs/registry/attributes/gen-ai.md` in that repository. There is no released version, so cite a commit. The commit checked here is dated 2026-09-10.
+  What to take from it: all 118 attributes have development stability. Cached tokens are `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_write.input_tokens`. Reasoning tokens are `gen_ai.usage.reasoning.output_tokens`. Detailed attributes are subsets of the totals.
+  What is missing: there is **no cost attribute**, and no batch attribute. Open pull request 443 proposes `gen_ai.usage.cost.amount`, `.currency` and `.source`. Use those names now.
+  The trap: the standard token metric has only an input-or-output dimension. With caching on, you cannot compute spend from it. Use span attributes.
 
-**Provider usage and cost APIs** — https://platform.claude.com/docs/en/manage-claude/usage-cost-api
-Read it to learn what the provider cannot do for you. Cost reporting is daily-bucketed on both major providers. This one documents roughly five minutes of lag on token data and states that amounts come back as decimal strings in the lowest currency unit. The other documents no reporting lag that could be found.
-The conclusion this forces: daily data cannot drive per-request alerting, so you meter locally and reconcile daily.
+- **Provider usage and cost APIs** — https://platform.claude.com/docs/en/manage-claude/usage-cost-api
+  Read it to learn what the provider cannot do for you. Both major providers report cost in daily buckets. This one documents about five minutes of lag on token data. It returns amounts as decimal strings in the lowest currency unit. No documented lag was found for the other. So you meter locally and reconcile daily.
 
-**Spend limits** — https://developers.openai.com/api/docs/guides/spend-limits and https://developers.cloudflare.com/ai-gateway/features/spend-limits/
-The first documents alerts versus hard limits, the error codes returned, and states twice that "Enforcement is not instantaneous, so recorded spend can slightly exceed the configured amount". The second offers per-provider, per-model and per-metadata budgets with fixed or rolling windows, and can fall back to a cheaper model instead of returning an error. It also admits that "a burst of concurrent requests can briefly exceed the limit" and that cost tracking is best-effort estimation.
-Read both for the same lesson: every provider-side control is enforced against stale spend.
+- **Spend limits** — https://developers.openai.com/api/docs/guides/spend-limits and https://developers.cloudflare.com/ai-gateway/features/spend-limits/
+  The first page covers alerts, hard limits, and their error codes. It states twice that "Enforcement is not instantaneous, so recorded spend can slightly exceed the configured amount".
+  The second offers budgets per provider, model, or metadata value, and can fall back to a cheaper model. It admits that "a burst of concurrent requests can briefly exceed the limit".
+  The shared lesson: every provider-side control enforces against spend data that is already out of date.
 
-**Budgets and rate limits in a gateway** — https://docs.litellm.ai/docs/proxy/users
-The only documented pre-call budget mechanism found. It reserves the worst-case cost from `max_tokens` before the request, rejects if the reservation would breach, then settles to the actual cost. It also documents its own weak spots honestly: a cross-pod counter that can come back stale after a restart, a fail-closed mode that rejects with 503 rather than admitting an unverifiable request, and the fact that a batch submission cannot be priced at all because the request carries a file reference rather than prompts.
+- **Budgets and rate limits in a gateway** — https://docs.litellm.ai/docs/proxy/users
+  The only documented pre-call budget mechanism found. It reserves the worst-case cost from `max_tokens`. It rejects a request that would go over budget. It then settles to the actual cost. Its documented weak spots: a cross-pod counter can be stale after a restart, and a fail-closed mode rejects with 503. It cannot price a batch submission, because the request carries a file reference, not prompts.
 
-**Update on Security at METR** — 31 August 2026.
-https://metr.org/blog/2026-08-31-security-update/
-The closest thing to a primary incident account in this area. Roughly $600,000 of API credits consumed over about three weeks through an exposed internal application. The three stated reasons detection failed are the section's thesis: high token volume looked normal, the dashboard did not show the relevant signal, and no spend ceiling existed because the tokens were free.
-Read it first, before the rest of section 3.5.
+- **Update on Security at METR, 31 August 2026** — https://metr.org/blog/2026-08-31-security-update/
+  The closest thing to a primary incident account in this area. An exposed internal application used about $600,000 of API credits over about three weeks. The post gives three reasons that detection failed, and they are the main point of section 3.5:
+  1. High token volume looked normal.
+  2. The dashboard did not show the relevant signal.
+  3. No spend ceiling existed, because the tokens were free.
 
-**Token Budgets: An Empirical Catalog of 63 LLM-Agent Budget-Overrun Incidents** — June 2026.
-https://arxiv.org/abs/2606.04056
-Screened 167 candidates and retained 63 across 21 frameworks, with an inter-rater agreement of 0.837 on inclusion. Its largest cause clusters are retry loops and missing cost observability. Its one-sentence conclusion is the one to quote: it found no case where a budget overrun was prevented before a user paid for it.
-Honest note: a single-author preprint with no peer review, and the agreement on its mechanism clusters is much weaker at 0.44. Cite the aggregate counts, not individual entries.
+  Read it first, before the rest of section 3.5.
 
-**A cost dashboard that was wrong by more than half** — https://github.com/langfuse/langfuse/issues/13807
-A fully instrumented, reproducible case. True cost $0.522, dashboard cost $0.238, which is 45.5% of actual, because the instrumentation emitted neither cache reads nor cache writes and reported the input as 20 tokens for a multi-turn agent run. Read it as the concrete form of section 3.3's warning about `input_tokens`.
+- **Token Budgets: An Empirical Catalog of 63 LLM-Agent Budget-Overrun Incidents, June 2026** — https://arxiv.org/abs/2606.04056
+  The authors screened 167 candidates and kept 63, across 21 frameworks. Inter-rater agreement on inclusion was 0.837. The largest cause clusters are retry loops and missing cost observability. Its one-sentence conclusion is the one to quote. It found no case where a budget overrun was prevented before a user paid for it.
+  Honest note: this is a single-author preprint with no peer review. Agreement on its mechanism clusters is much weaker, at 0.44. Cite the total counts, not individual entries.
+
+- **A cost dashboard that was wrong by more than half** — https://github.com/langfuse/langfuse/issues/13807
+  A fully instrumented case that you can reproduce, and the source of section 3.3's $0.522 and $0.238 figures. The issue body gives $0.52231845 and $0.237606, rechecked on 2026-09-17. That ratio is 45.5%. Read it as the real example behind the warning about `input_tokens`.
 
 ### Not verified, stated so you do not repeat it
 
-- Whether OpenAI batch requests hit the prompt cache is **not documented** on its batch page. The equivalent Anthropic claim is documented. The check is one experiment: submit a batch with a repeated long prefix and read the cached-token count in the output file.
-- A widely circulated "$47,000 runaway bill" story traces only to secondary posts whose own figures contradict the headline framing. There is no first-party source. The same applies to most large dollar figures in this topic area.
-- A frequently cited post claiming a major vendor treats a sub-90% cache hit rate as a serious incident could not be found on that vendor's site. Treat it as misattributed.
+- OpenAI's batch page does **not document** whether batch requests hit the prompt cache. Anthropic documents its equivalent claim. Section 3.3 gives the one-experiment check.
+- A widely shared "$47,000 runaway bill" story traces only to secondary posts. Their own figures contradict the headline. There is no first-party source. The same is true of most large dollar figures in this topic area.
+- A post is often cited for this claim: a vendor treats a hit rate below 90% as an incident. The claim is not on the vendor's site. Treat it as misattributed.
 
 ---
 
@@ -620,13 +729,13 @@ WHAT BREAKS A HIT
   front-truncating history | a different org, workspace, or region
 
 THE COMMANDS (part A)
-  pricing.py --self-test                     → the money arithmetic, offline
+  pricing.py --self-test                     → the money arithmetic, 13 checks
   pricing.py --role deep                     → read your own price sheet
-  cost_meter.py --replay --role cache_demo   → the size of the prize, offline
+  cost_meter.py --replay --role cache_demo   → the size of the saving, offline
   cost_meter.py --model X --role cache_demo  → a real cache hit, live
   cache_control_lab.py --explain             → the request shape, offline
   cache_control_lab.py --model X --role claude          → explicit caching
   cache_control_lab.py --model X --role claude --break-it → pay forever
 ```
 
-Part B covers routing cascades, batch APIs, and the per-request cost alerting that catches a cache regression in ten requests instead of four months.
+Part B covers routing cascades, batch APIs, and per-request cost alerting. That alerting catches a cache regression within ten requests, not four months.

@@ -4,7 +4,7 @@ This is the final phase of Module 1. It has two parts.
 
 This part answers two questions that section 4.6 left open. How many replicas do you need? And when several tenants share them, who gets served first?
 
-Section 4.6 computed the cost per token at a given utilisation. It assumed you already knew the fleet size. This part computes that size from measured numbers, and then shows why a correctly sized fleet can still fail one tenant.
+Section 4.6 computed the cost per token at a given utilisation. It assumed you already knew the fleet size. This part computes that size from measured numbers. Then it shows why a correctly sized fleet can still fail one tenant.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -57,24 +57,24 @@ THE KNEE — the naive fleet of 3 replicas (96 slots) as load rises
 └─────────────┴──────────────┴──────────────────┘
 ```
 
-Waiting time is not proportional to utilisation. It stays near zero, then climbs steeply in the last few percent. The naive plan lands at 95%, where half of all requests queue and the mean wait is 429 milliseconds before the first token can even start.
+Waiting time is not proportional to utilisation. It stays near zero, then climbs steeply in the last few percent. The naive plan lands at 95%. There, 51% of requests must wait. The mean queue wait is 429 milliseconds, before prefill even starts.
 
 ### The mathematics, in three lines
 
 You do not need a queueing course. You need three results.
 
-**Little's Law.** The average number of requests in a system equals the arrival rate times the average time each one spends there: `L = λW`. Its author's own retrospective states that it holds whatever the queue discipline, and even when conditions change over time. It is the one law in this section with almost no assumptions.
+**Little's Law.** It says `L = λW`. L is the average number of requests in the system. λ is the arrival rate. W is the average time each request spends there. Its author's own retrospective states that it holds whatever the queue discipline, and even when conditions change over time. It is the one law in this section with almost no assumptions.
 
-**One server.** For a single server with random arrivals and random service times, mean waiting time in units of mean service time is `ρ / (1 − ρ)`, where ρ is utilisation:
+**One server.** Take one server with random arrivals and random service times. Its mean wait, measured in units of the mean service time, is `ρ / (1 − ρ)`. ρ is utilisation:
 
 ```
   utilisation   50%    70%    80%    90%    95%
   mean wait     1      2.3    4      9      19      (in service times)
 ```
 
-At 95%, a request waits 19 times as long as it takes to serve. A widely read engineering blog describes things getting "a little crazy around 80% utilization", which is where this curve starts to bend. That rule comes from a blog, not from a textbook, and it is about a **single** server.
+At 95%, a request waits 19 times as long as it takes to serve. Dan Slimmon's blog post on queues says things get "a little crazy around 80% utilization". That is where this curve starts to bend. That rule comes from a blog, not from a textbook, and it is about a **single** server.
 
-**Many servers.** The Erlang C formula gives the probability that an arrival has to wait when c identical servers share one queue. `capacity_plan.py` implements it, and its self-test checks it against a published textbook table:
+**Many servers.** Take c identical servers that share one queue. The Erlang C formula gives the probability that an arrival must wait. `capacity_plan.py` implements it, and its self-test checks it against a published textbook table:
 
 ```
   c servers at 90% utilisation    P(wait)    mean wait
@@ -85,9 +85,9 @@ At 95%, a request waits 19 times as long as it takes to serve. A widely read eng
     20                            0.55       0.28
 ```
 
-Read that table carefully. At the **same** 90% utilisation, twenty servers sharing one queue wait about thirty times less than one server. This is called pooling, and it is why "keep everything under 80%" is too conservative for a large fleet and too loose for a small one. The right utilisation depends on how many servers share the queue.
+Read that table carefully. At the **same** 90% utilisation, twenty servers sharing one queue wait about thirty times less than one server. This effect is called pooling. It is why "keep everything under 80%" is too cautious for a large fleet and too loose for a small one. The right utilisation depends on how many servers share the queue.
 
-**One implementation note.** The textbook form of Erlang C contains `a^c / c!`, which overflows a floating-point number long before realistic fleet sizes. My first version overflowed at 2,000 servers. The script now uses the Erlang B recursion, whose every intermediate value stays between 0 and 1, and a self-test covers it. This is the whole calculation, from `capacity_plan.py:60`:
+**One implementation note.** The textbook form of Erlang C contains `a^c / c!`. That term overflows a floating-point number well before realistic fleet sizes. My first version overflowed at 2,000 servers. The script now uses the Erlang B recursion. Every value in that recursion stays between 0 and 1, and a self-test covers it. This is the whole calculation, from `capacity_plan.py:60`:
 
 ```python
 def erlang_c(c: int, a: float) -> float:
@@ -117,9 +117,9 @@ Worked example with the default numbers. One replica has 32 slots, and each requ
 
 Erlang C assumes arrivals are random in the Poisson sense and service times are exponential. Real LLM traffic breaks both.
 
-**Arrivals are burstier.** ServeGen, a study of production traces from Alibaba's model service, found that language-model traffic has a coefficient of variation above 1 in 20-minute windows. The **coefficient of variation** is the standard deviation divided by the mean. A Poisson process has exactly 1. So a Poisson model understates the bursts. The same study found that reasoning-model traffic stays close to 1 or below.
+**Arrivals are burstier.** ServeGen studied production traces from Alibaba's model service. In 20-minute windows, language-model traffic had a coefficient of variation above 1. The **coefficient of variation** is the standard deviation divided by the mean. A Poisson process has exactly 1. So a Poisson model understates the bursts. The same study found that reasoning-model traffic stays close to 1 or below.
 
-**Service times vary more.** For a single server, the standard result is that mean waiting time depends on the **variance** of service time, not just its mean. LLM output lengths vary enormously, from a handful of tokens to thousands, so the variance is large. That link between the formula and LLM traffic is inferred. No LLM paper found in the research states it that way.
+**Service times vary more.** For a single server, mean waiting time depends on the **variance** of service time, not only its mean. This is the standard M/G/1 result. LLM output lengths range from a few tokens to thousands, so the variance is large. That link between the formula and LLM traffic is inferred. No LLM paper found in the research states it that way.
 
 So treat the script's replica count as a **floor**. Replay a real trace with Phase 4A's benchmark client before you commit money.
 
@@ -138,23 +138,23 @@ ServeGen, the burstiness study above, reported that out of 2,412 clients, the to
 
 ### Plan in work, not in requests
 
-The Google SRE book's chapter on handling overload warns that modelling capacity as queries per second often makes for a poor metric, because different queries can have very different resource requirements. For an LLM the difference is large. An 8,192-token prompt is 16 times the prefill tokens of a 512-token prompt, and prefill attention grows faster than the token count.
+The Google SRE book's chapter on handling overload warns about one habit. Modelling capacity as queries per second "often makes for a poor metric". The reason is that queries need very different resources. For an LLM the difference is large. An 8,192-token prompt has 16 times the prefill tokens of a 512-token prompt. Prefill attention work grows faster than the token count.
 
-The better planning unit comes from the disaggregated-serving research. **Goodput** is the maximum request rate a GPU can serve while still meeting the latency targets for a chosen share of requests, for example 90%. Raw throughput with no latency target attached is not a capacity number.
+The better planning unit comes from the disaggregated-serving research. **Goodput** is the highest request rate a GPU can serve while meeting the latency targets. The targets apply to a chosen share of requests, for example 90%. Raw throughput with no latency target attached is not a capacity number.
 
-That research also sizes prefill and decode separately, because they are different kinds of work (Phase 2). In its worked example on a 13B model, one GPU running both phases served about 1.6 requests per second within target. Two prefill GPUs plus one decode GPU served 10, which is 3.3 per GPU, about 2.1 times more. If you run a disaggregated deployment, plan each pool on its own.
+That research also sizes prefill and decode separately, because they are different kinds of work (Phase 2). Its worked example uses a 13B model. One GPU running both phases served about 1.6 requests per second within target. Two prefill GPUs plus one decode GPU served 10, which is 3.3 per GPU, about 2.1 times more. If you run a disaggregated deployment, plan each pool on its own.
 
 ### Redundancy: N+1 and N+2
 
 The Google SRE book recommends capacity for a planned and an unplanned outage at the same time. This is called **N+2**. It means enough capacity for peak, plus one replica being upgraded, plus one replica that fails during the upgrade.
 
-The published worked example is worth copying exactly. One backend handles about 100 queries per second, expected peak is about 3,470, so the minimum is 35 tasks. The team runs **at least 37**. In one small region, the same source accepts N+1 instead, because the overhead of N+2 is too large relative to the traffic.
+The published worked example is worth copying exactly. One backend handles about 100 queries per second, expected peak is about 3,470, so the minimum is 35 tasks. The team runs **at least 37**. In one small region, the same source accepts N+1 instead. There, N+2 would cost too much relative to the traffic.
 
 The script defaults to N+1 and takes `--redundancy 2` if you want the stricter version.
 
 ### Adding capacity is slow, so some headroom must already be standing
 
-The same source gives the rule that decides how far ahead you must plan: the demand forecast must extend **beyond the lead time required for acquiring capacity**.
+The same source says how far ahead to plan. The demand forecast must extend **beyond the lead time required for acquiring capacity**.
 
 For a GPU replica, the lead time is measured in minutes, and the measurements are sobering:
 
@@ -172,7 +172,7 @@ For a GPU replica, the lead time is measured in minutes, and the measurements ar
 └──────────────────────────────┴────────────┴──────────────────────────────────┘
 ```
 
-I could not find a primary source with a measured time to provision the GPU node itself, so those numbers start after the machine exists.
+The research found no primary source that measures the time to provision the GPU node itself. So these numbers start after the machine exists.
 
 While a new replica boots, demand keeps rising, and the replicas you already have must absorb that rise alone. The script computes the headroom that forces:
 
@@ -188,14 +188,14 @@ final fleet: 6 replicas = 6 GPUs = $15,286/month
 utilisation at today's peak: 48%.
 ```
 
-**Every second you remove from cold start is capacity you no longer have to keep idle.** That is the business case for the loading optimisations in the table.
+**A shorter cold start means less idle capacity.** This section's plan keeps one standing replica only because of the cold start. That is the cost case for the loading optimisations in the table.
 
 ### Autoscale on the queue, not on the GPU
 
 GPU utilisation is the obvious autoscaling signal, and it is the wrong one. Three sources agree:
 
 - The AWS EKS inference guide says GPU utilisation shows **whether** the GPU is busy, not **how** busy it is. It adds that vLLM can stay near 100% across a wide range of load.
-- The GKE autoscaling guide says GPU utilisation does not measure how much work is done while the GPU is active.
+- The GKE autoscaling guide says GPU utilisation does not measure how much work the GPU does while it is active.
 - The llm-d autoscaling guide says utilisation is often near 100% during batching, whatever the actual load.
 
 ```
@@ -211,11 +211,11 @@ metric: vllm:num_requests_waiting
 target: 5
 ```
 
-The published guidance ranks the signals: **queue depth first**, then p95 latency or time to first token, then KV-cache usage as a backstop. Published starting points:
+The AWS guide ranks three signals. **Queue depth comes first.** Next is p95 latency or time to first token. KV-cache usage is a backstop. Published starting points:
 
 - The vLLM production-stack autoscaling example scales on a waiting-request threshold of 5.
 - Google Cloud suggests starting with a queue target between 3 and 5.
-- AWS suggests scaling out when the queue stays above 25 for 30 to 60 seconds, with p95 latency above 5 seconds as a second trigger. It scales in only when the queue is empty and p95 is under 3 seconds for 5 minutes.
+- AWS suggests scaling out when the queue stays above 25 for 30 to 60 seconds. p95 latency above 5 seconds is a second trigger. It scales in only when the queue is empty and p95 is under 3 seconds for 5 minutes.
 
 This is the autoscaling block from the vLLM production-stack example, copied from its documentation on 2026-09-17. It is Helm values for the stack's chart, and KEDA turns it into a scaling rule. **KEDA** is a Kubernetes autoscaler that can scale on any Prometheus query.
 
@@ -241,11 +241,11 @@ Not run in this course, because it needs a Kubernetes cluster with GPUs. The KED
 - `cooldownPeriod: 360` is how long KEDA waits after the last active trigger before it scales back to 0. It applies only to scaling to 0.
 - Scaling from 1 to N replicas is handled by the Kubernetes horizontal pod autoscaler, which has its own timing. The cold-start numbers above still apply to every new replica.
 
-Two rules from the site-reliability material tie it together: autoscale **before** load shedding starts, and keep a minimum number of instances in each location so failover has somewhere to go.
+The Google SRE workbook adds two rules. First, autoscale **before** load shedding starts. Second, keep a minimum number of instances in each location, so failover has somewhere to go.
 
-**The sentence to remember:** plan on the queue, not the average, because waiting time stays flat and then explodes, and a small fleet reaches that point much sooner than a large one.
+**The sentence to remember:** plan on the queue, not the average. Waiting stays flat and then rises steeply, and a small fleet reaches that point sooner.
 
-**The trap:** planning with "peak divided by capacity". It lands the fleet at the steep part of the curve, and it ignores bursts, variable request sizes, failures, and the minutes a new replica takes to start.
+**The trap:** planning with "peak divided by capacity". It puts the fleet on the steep part of the curve. It also ignores bursts, variable request sizes, failures, and the minutes a new replica takes to start.
 
 **Try this now:** run `python phase06_design/capacity_plan.py --slots 8 --peak-rps 5.7` and compare the naive fleet's wait against the default run. Fewer slots per replica means less pooling, and the same utilisation waits much longer.
 
@@ -280,7 +280,7 @@ So a limit of "100 requests per minute" says almost nothing about load. One tena
   a scheduler that counts requests treats these three bars as equal
 ```
 
-The factor of 2 for output tokens is a modelling choice. It says that a decode token costs more than a prompt token. The VTC paper, described below, uses the same weights of 1 and 2 in its experiments, and says they follow API pricing. The real ratio of server time depends on the engine and the hardware.
+The factor of 2 for output tokens is a modelling choice. It says that a decode token costs more than a prompt token. The VTC paper, described below, uses the same weights of 1 and 2. It says they follow API pricing. The real ratio of server time depends on the engine and the hardware.
 
 ### The two layers: quota at the gateway, fairness in the scheduler
 
@@ -337,16 +337,16 @@ Run: `python phase06_design/fair_queue_sim.py`. The output, averaged over three 
 ┌────────┬──────────┬───────────────┬──────────────┬───────┬──────┐
 │ policy │ tenant   │ mean TTFT     │ p99 TTFT     │ share │ done │
 ├────────┼──────────┼───────────────┼──────────────┼───────┼──────┤
-│ fifo   │ heavy    │       15.46 s │      29.15 s │  68%  │  254 │
+│ fifo   │ heavy    │       15.46 s │      29.18 s │  68%  │  254 │
 │        │ busy     │       14.13 s │      28.13 s │  31%  │ 1299 │
-│        │ light    │       15.25 s │      27.23 s │   1%  │   32 │
+│        │ light    │       15.25 s │      27.52 s │   1%  │   32 │
 ├────────┼──────────┼───────────────┼──────────────┼───────┼──────┤
-│ rr     │ heavy    │        9.74 s │      16.80 s │  90%  │  347 │
-│        │ busy     │       22.39 s │      49.78 s │   9%  │  394 │
-│        │ light    │        0.19 s │       0.45 s │   1%  │   57 │
+│ rr     │ heavy    │        9.74 s │      16.88 s │  90%  │  347 │
+│        │ busy     │       22.39 s │      49.95 s │   9%  │  394 │
+│        │ light    │        0.19 s │       0.48 s │   1%  │   57 │
 ├────────┼──────────┼───────────────┼──────────────┼───────┼──────┤
-│ vtc    │ heavy    │       19.80 s │      37.68 s │  50%  │  178 │
-│        │ busy     │        5.89 s │      11.22 s │  49%  │ 1983 │
+│ vtc    │ heavy    │       19.80 s │      37.83 s │  50%  │  178 │
+│        │ busy     │        5.89 s │      11.23 s │  49%  │ 1983 │
 │        │ light    │        0.12 s │       0.17 s │   1%  │   57 │
 └────────┴──────────┴───────────────┴──────────────┴───────┴──────┘
 ```
@@ -355,8 +355,8 @@ TTFT is time to first token. `share` is the tenant's share of the server's work.
 
 Read the three blocks in order.
 
-1. **fifo punishes everyone equally.** The light tenant sends 1% of the demand and still waits 27 seconds at p99. It waits behind the heavy tenant's backlog.
-2. **Round robin protects the light tenant and hurts the busy one.** The light tenant waits 0.45 seconds. The busy tenant waits 50 seconds at p99, worse than under fifo. The heavy tenant takes 90% of the server.
+1. **fifo punishes everyone equally.** The light tenant sends 1% of the demand and still waits 27.5 seconds at p99. It waits behind the heavy tenant's backlog.
+2. **Round robin protects the light tenant and hurts the busy one.** The light tenant waits 0.48 seconds. The busy tenant waits 50 seconds at p99, worse than under fifo. The heavy tenant takes 90% of the server.
 3. **Token fairness splits the server evenly between the two backlogged tenants.** Heavy gets 50% and busy gets 49%. Busy completes 1,983 requests instead of 394.
 4. **Under token fairness, busy still waits 11 seconds at p99.** That is correct behaviour. Busy asks for 53% of the server and receives its half, so its own excess queues. The light tenant asks for less than its share and waits 0.17 seconds.
 
@@ -365,16 +365,16 @@ Point 4 is the one to remember. A fair scheduler does not remove waiting. It mov
 WRONG: "round robin is fair, because every tenant gets the same number of turns."
 
 ```
-rr     heavy   share 90%   p99 16.80 s
-rr     busy    share  9%   p99 49.78 s
+rr     heavy   share 90%   p99 16.88 s
+rr     busy    share  9%   p99 49.95 s
 heavy's work divided by busy's work: 9.8x under round robin
 ```
 
 RIGHT: fairness is measured in the resource that runs out. For an LLM server, that resource is token work.
 
 ```
-vtc    heavy   share 50%   p99 37.68 s
-vtc    busy    share 49%   p99 11.22 s
+vtc    heavy   share 50%   p99 37.83 s
+vtc    busy    share 49%   p99 11.23 s
 heavy's work divided by busy's work: 1.0x under token fairness
 ```
 
@@ -393,7 +393,7 @@ So token fairness cannot promise exactly equal work at every moment. It promises
 
 Round robin's gap grows with request size, because one turn buys more work. Token fairness's gap does not move.
 
-The simulation charges each prompt to the tenant's counter at admission, as the VTC paper's Algorithm 2 does. Decode work is charged as it runs. An earlier version of this script charged the prompt only while prefill ran. That let the heavy tenant be admitted several times before its counter moved, and the light tenant's p99 wait rose to 1.48 seconds.
+The simulation charges each prompt to the tenant's counter at admission, as the VTC paper's Algorithm 2 does. Decode work is charged as it runs. An earlier version of this script charged the prompt only while prefill ran. The heavy tenant could then be admitted several times before its counter moved. The light tenant's p99 wait rose to 1.48 seconds.
 
 The VTC paper proves a bound of this kind. Verified, Theorem 4.4. For any two tenants that both have waiting requests, the difference in service is at most:
 
@@ -463,8 +463,8 @@ The test had three well-behaved tenants and one busy tenant. Each sent 0.5 reque
 
 The paper names two causes:
 
-1. **The scheduler prefers prefill and forms batches in arrival order.** A burst of long requests still reaches the GPU before later short ones.
-2. **The KV cache evicts the least recently used blocks first.** The busy tenant fills the cache, so the blocks evicted are the well-behaved tenants' blocks. Their next request must recompute its prefix. Section 3.2 showed what a lost prefix cache costs.
+1. **The scheduler prefers prefill and forms batches in arrival order.** Long requests that arrived first still reach the GPU first.
+2. **The KV cache evicts the least recently used blocks first.** The busy tenant fills the cache. So the evicted blocks belong to the well-behaved tenants. Their next request must recompute its prefix. Section 3.2 showed what a lost prefix cache costs.
 
 The second cause is the one this simulation does not model. `fair_queue_sim.py` has no KV cache. That is where the simulation stops matching a real server.
 
@@ -490,7 +490,7 @@ vLLM:    priority=10 for premium, priority=0 for free  -> free goes first
 SGLang:  priority=10 for premium, priority=0 for free  -> premium goes first
 ```
 
-RIGHT: map a named priority class to a number per engine, in one place in the gateway, and test the order on each engine.
+RIGHT: map each named priority class to a number for each engine. Do it in one place in the gateway. Then test the order on each engine.
 
 vLLM also rejects a non-zero `priority` when the server does not run the priority policy. The request fails instead of being served at default priority.
 
@@ -531,8 +531,8 @@ Both vLLM and SGLang accept a per-request `cache_salt` field. Requests share cac
 
 The salt has three costs and limits:
 
-- **It removes cache sharing between tenants.** A long system prompt that every tenant shares is now cached once per tenant. The prefix-cache hit rate from section 3.2 drops, and so does the saving.
-- **SGLang's salt does not cover remote storage.** The source comment says keys in its remote KV storage tier stay token-only. Verified from SGLang v0.5.19 source.
+- **It removes cache sharing between tenants.** A shared long system prompt is now cached once per tenant. The prefix-cache hit rate from section 3.2 drops, and so does the saving.
+- **SGLang's salt does not cover remote storage.** The source comment says remote KV storage keys use tokens only. Verified from SGLang v0.5.19 source.
 - **No independent test was found.** vLLM's documentation says the salt prevents timing attacks. The research agent found no independent evaluation of that claim.
 
 So the decision is a trade. If tenants must not learn anything about each other's prompts, set the salt to the tenant ID. If the only shared prefix is a public system prompt, a shared cache may be acceptable. Write that decision down, because a reviewer will ask.
@@ -543,12 +543,12 @@ A separate fleet per tenant gives perfect isolation and the worst utilisation. P
 
 The published numbers for sharing are for many models, not many tenants of one model. The research agent found no public cost comparison for tenants of one model. Two data points, both verified:
 
-- **Aegaeon, SOSP 2025, Alibaba.** Moving many rarely used models from dedicated GPUs to a shared pool reduced 1,192 GPUs to 213, an 82% saving. Before the change, 94.1% of models received 1.35% of requests.
-- **S-LoRA, MLSys 2024.** One A100 80GB served 2,000 LoRA adapters of Llama-7B at 7.61 requests per second, against 8.05 with 5 adapters. A **LoRA adapter** is a small set of extra weights that customises a shared base model. Per-tenant adapters on one base model cost little throughput.
+- **Aegaeon, SOSP 2025, Alibaba.** Alibaba moved many rarely used models from dedicated GPUs to a shared pool. The GPU count fell from 1,192 to 213, an 82% saving. Before the change, 94.1% of models received 1.35% of requests.
+- **S-LoRA, MLSys 2024.** One A100 80GB served Llama-7B with 2,000 LoRA adapters at 7.61 requests per second. With 5 adapters, it served 8.05. A **LoRA adapter** is a small set of extra weights that customises a shared base model. Per-tenant adapters on one base model cost little throughput.
 
-The usual answer is a shared pool with token quotas and a fair or priority scheduler. Reserve a dedicated fleet for a tenant whose latency promise the shared pool cannot keep, and price that fleet at its real utilisation.
+The usual answer is a shared pool with token quotas and a fair or priority scheduler. Give a tenant a dedicated fleet only when the shared pool cannot keep its latency promise. Price that fleet at its real utilisation.
 
-**The sentence to remember:** a tenant's share must be counted in the resource that runs out, and for an LLM server that resource is token work, not requests.
+**The sentence to remember:** count a tenant's share in the resource that runs out. For an LLM server, that resource is token work, not requests.
 
 **The trap:** a request-per-minute quota and a round-robin scheduler. Both look fair, and both let one tenant with long prompts take most of the fleet. The second trap is believing that fair throughput means fair latency.
 
@@ -561,7 +561,7 @@ The usual answer is a shared pool with token quotas and a fair or priority sched
 
 Every exercise in this part runs offline. Nothing costs money.
 
-**Run status:** every command below was executed on the author's machine on 2026-09-17, and the numbers printed in sections 6.1 and 6.2 are real outputs of those runs.
+**Run status:** every command below was run on the author's machine on 2026-09-17. The numbers in sections 6.1 and 6.2 are real outputs of those runs.
 
 - [ ] **E1 (offline).** Check the mathematics before you trust it.
   - Run: `python phase06_design/capacity_plan.py --self-test`
@@ -570,13 +570,13 @@ Every exercise in this part runs offline. Nothing costs money.
 
 - [ ] **E2 (offline).** Find the knee.
   - Run: `python phase06_design/capacity_plan.py`
-  - Expected: mean queue wait of about 5ms at 80% utilisation, 94ms at 90%, 429ms at 95% and 3,688ms at 99%.
+  - Expected mean queue wait: about 5ms at 80% utilisation, 94ms at 90%, 429ms at 95%, and 3,688ms at 99%.
   - Write down the utilisation where the wait first exceeds your own latency target.
   - Teaches: waiting time stays flat, then climbs steeply. Planning to the average puts you on the steep part.
 
 - [ ] **E3 (offline).** Measure what pooling is worth.
   - Run: `python phase06_design/capacity_plan.py --slots 8 --peak-rps 5.7`
-  - Expected: the same 95% utilisation now waits about 2,445ms instead of 429ms, because each replica has fewer slots sharing the queue.
+  - Expected: at the same 95% utilisation, the wait is now about 2,445ms instead of 429ms. Each replica has fewer slots sharing its queue.
   - Teaches: the safe utilisation depends on how many servers share one queue. There is no single percentage that is safe for every fleet.
 
 - [ ] **E4 (break-it, offline).** Watch the naive plan fail.
@@ -595,12 +595,12 @@ Every exercise in this part runs offline. Nothing costs money.
 
 - [ ] **E6 (offline).** Verify the fairness simulation.
   - Run: `python phase06_design/fair_queue_sim.py --self-test`
-  - Expected: 9 checks pass. Two of them test the idle-tenant rule: a returning tenant gets 1.0x a steady tenant's work with the rule, and 4.0x without it.
+  - Expected: 9 checks pass. Two of them test the idle-tenant rule. With the rule, a returning tenant gets 1.0x a steady tenant's work. Without it, the returning tenant gets 4.0x.
   - Teaches: the property being tested is a bound on unfairness. The idle-tenant rule is tested by removing it.
 
 - [ ] **E7 (offline).** Three schedulers, one server.
   - Run: `python phase06_design/fair_queue_sim.py`
-  - Expected: under round robin the busy tenant's p99 wait is about 50 seconds, worse than first-come-first-served. Under token fairness, heavy and busy each get about half the work, busy waits about 11 seconds, and light waits 0.17 seconds.
+  - Expected: under round robin the busy tenant's p99 wait is about 50 seconds, worse than first-come-first-served. Under token fairness, heavy and busy each get about half the work. Busy waits about 11 seconds, and light waits 0.17 seconds.
   - Then run `--busy-rate 30`. Busy now asks for less than half the server, and its token-fair p99 falls to about 1.4 seconds.
   - Teaches: equal turns is not equal service when requests differ in size. A fair scheduler moves the waiting to the tenants that ask for more than their share.
 
@@ -633,7 +633,7 @@ This course has no anchor repository, so these questions point at the course's o
 
 ## ✅ Checkpoint 6A — answer in your own words
 
-1. **The spreadsheet plan.** A teammate measured 8 requests per second per replica, and forecasts a peak of 22.8 requests per second. They propose 3 replicas. Use the knee table from section 6.1 to explain what happens at that peak. Then give your replica count and one reason for each replica above 3.
+1. **The spreadsheet plan.** A teammate measured 8 requests per second per replica. They forecast a peak of 22.8 requests per second. They propose 3 replicas. Use the knee table from section 6.1 to explain what happens at that peak. Then give your replica count and one reason for each replica above 3.
 
 2. **Two fleets, same utilisation.** Fleet A has 3 replicas with 32 slots each. Fleet B has 12 replicas with 8 slots each. Both run at 90% utilisation with the same mean request time. Which one waits longer in the queue, and why? Name the effect.
 
@@ -643,14 +643,14 @@ This course has no anchor repository, so these questions point at the course's o
 
 5. **The enterprise tenant.** One tenant sends 8,000-token prompts at 8 requests per second. Your gateway limits each tenant to 600 requests per minute, and the scheduler uses round robin. Other tenants complain about slow responses. Explain why both mechanisms failed. Say what you would change in each, and what that tenant would see after the change.
 
-6. **Fair, and still slow.** You deployed a token-fair scheduler. The work shares are now close to equal, but a small tenant's p99 TTFT is still 60 seconds when a busy tenant sends 6,000-token outputs. Give the two causes that FairInference names. Say which one `fair_queue_sim.py` does not model.
+6. **Fair, and still slow.** You deployed a token-fair scheduler. The work shares are now close to equal. But when a busy tenant sends 6,000-token outputs, a small tenant's p99 TTFT is still 60 seconds. Give the two causes that FairInference names. Say which one `fair_queue_sim.py` does not model.
 
 7. **The shared system prompt.** Ten tenants share a 3,000-token system prompt. Security asks you to set `cache_salt` to the tenant ID. What do you gain, and what does it cost? Give one case where you would accept the cost and one where you might not.
 
 <details>
 <summary>Answer sketches</summary>
 
-1. Three replicas give 96 slots. At 22.8 rps and 4 seconds per request, that is 95% utilisation. The knee table shows a mean queue wait of about 429ms, and it climbs to seconds with a little more load. The plan: 4 replicas meet the 250ms target today, 4 still fit 25% growth, N+1 makes 5, and standing headroom for a slow cold start makes 6. Each replica has a stated reason.
+1. Three replicas give 96 slots. At 22.8 rps and 4 seconds per request, that is 95% utilisation. The knee table shows a mean queue wait of about 429ms. A little more load pushes it to seconds. The plan: 4 replicas meet the 250ms target today. 4 still fit 25% growth. N+1 makes 5. Standing headroom for a slow cold start makes 6. Each replica has a stated reason.
 
 2. Fleet B waits longer. Each replica has its own queue. A request cannot use a free slot on another replica. More slots behind one queue means more pooling, and pooled servers wait less at the same utilisation. E3 showed it: 8 slots at 95% waited 2,445ms, against 429ms with 32 slots.
 
@@ -658,11 +658,11 @@ This course has no anchor repository, so these questions point at the course's o
 
 4. 320 seconds is 5.33 minutes. At 1.5 rps per minute, that is 8 rps of new demand before the replica helps. You must keep enough standing headroom to absorb 8 rps, which is one more replica in the default plan. Two ways to shorten it. First, use a smaller or pre-pulled image, because image pull was 44% of one measured cold start. Second, use a streaming weight loader, which cut one measured load from 48 seconds to about 5.
 
-5. 8 rps is 480 requests per minute, under the 600 limit. The quota counts requests, so it never triggers. Round robin gives that tenant one turn per round, and each turn costs about 11 times a small tenant's work. Change the quota to tokens per minute, and change the scheduler to token-fair admission. The heavy tenant now absorbs its own backlog. In the simulation its p99 wait rose from 16.8 to 37.7 seconds, while the light tenant's stayed at 0.17 seconds. A tenant that asks for more than its share still waits. A tenant under its share does not.
+5. 8 rps is 480 requests per minute, under the 600 limit. The quota counts requests, so it never triggers. Round robin gives that tenant one turn per round, and each turn costs about 11 times a small tenant's work. Change the quota to tokens per minute, and change the scheduler to token-fair admission. The heavy tenant now absorbs its own backlog. In the simulation its p99 wait rose from 16.9 to 37.8 seconds, while the light tenant's stayed at 0.17 seconds. A tenant that asks for more than its share still waits. A tenant under its share does not.
 
-6. First, the scheduler prefers prefill and forms batches in arrival order. Second, the KV cache evicts the least recently used blocks, which are the small tenant's blocks, so its prefixes are recomputed. The simulation has no KV cache, so it does not model the second cause. Token fairness equalises work. It does not isolate latency.
+6. First, the scheduler prefers prefill and forms batches in arrival order. Second, the KV cache evicts the least recently used blocks. Those are the small tenant's blocks, so its prefixes are recomputed. The simulation has no KV cache, so it does not model the second cause. Token fairness equalises work. It does not isolate latency.
 
-7. You gain isolation. No tenant can learn from response timing whether another tenant sent a given prefix. The cost: the 3,000-token prompt is cached ten times, not once. Each tenant's first request pays the full prefill, and cache memory holds ten copies. Accept it when prompts carry customer data, or when a leak would break a contract. You might skip it when the only shared prefix is a public system prompt and the rest of each request is never cached across tenants. Record the decision either way.
+7. You gain isolation. No tenant can learn from response timing whether another tenant sent a given prefix. The cost: the 3,000-token prompt is cached ten times, not once. Each tenant's first request pays the full prefill, and cache memory holds ten copies. Accept it when prompts carry customer data, or when a leak would break a contract. You might skip it when the only shared prefix is a public system prompt. The rest of each request must then never be shared across tenants. Record the decision either way.
 
 </details>
 
@@ -707,7 +707,7 @@ Every URL below returned HTTP 200 when checked on 2026-09-17.
 - **vLLM production-stack, autoscaling with KEDA** — https://docs.vllm.ai/projects/production-stack/en/latest/use_cases/autoscaling-keda.html
   Focus on: the scaled object. Note the threshold, polling interval and cooldown.
 - **KEDA, ScaledObject specification** — https://keda.sh/docs/2.17/reference/scaledobject-spec/
-  Focus on: `pollingInterval` and `cooldownPeriod`, and the note that scaling from 1 to N is left to the horizontal pod autoscaler.
+  Focus on: `pollingInterval` and `cooldownPeriod`. Also read the note that the horizontal pod autoscaler handles scaling from 1 to N.
 - **vLLM, `vllm bench serve`** — https://docs.vllm.ai/en/latest/cli/bench/serve/
   Focus on: the goodput options. Use them to measure the per-replica number that `capacity_plan.py` needs.
 
@@ -715,7 +715,7 @@ Every URL below returned HTTP 200 when checked on 2026-09-17.
 
 - **Sheng and others, "Fairness in Serving Large Language Models", OSDI 2024** — https://www.usenix.org/conference/osdi24/presentation/sheng
   Also on arXiv: https://arxiv.org/abs/2401.00588
-  Focus on: section 3.1 for the cost function, Algorithm 2 for the scheduler, Theorems 4.4 and 4.8 for the bounds, and Table 2. Read this paper first.
+  Focus on: section 3.1 for the cost function and Algorithm 2 for the scheduler. Then read Theorems 4.4 and 4.8 for the bounds, and Table 2. Read this paper first.
 - **FairInference** — https://arxiv.org/abs/2609.18112
   Focus on: section 2.2 and Table 4. Posted 2026-09-16 and not peer reviewed. Read it for the two causes of latency interference.
 - **FairServe, Microsoft** — https://arxiv.org/abs/2411.15997
@@ -728,7 +728,7 @@ Every URL below returned HTTP 200 when checked on 2026-09-17.
   Focus on: the token bucket definition. Note that it counts bytes, not packets.
 - **vLLM scheduler source, v0.29.0** — https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/v1/core/sched/scheduler.py
   Focus on: `_preempt_request`, and how the victim is chosen under the priority policy.
-- **SGLang server arguments** — https://docs.sglang.ai/advanced_features/server_arguments.html
+- **SGLang server arguments** — https://docs.sglang.io/docs/advanced_features/server_arguments
   Focus on: the priority scheduling flags. Note which value goes first.
 - **LiteLLM, users, keys and teams** — https://docs.litellm.ai/docs/proxy/users
   Focus on: `tpm_limit`, `rpm_limit` and `max_parallel_requests` per key and team.
@@ -804,4 +804,4 @@ CACHE ISOLATION
 
 ---
 
-Part B covers the two moments when this work is tested by other people: a quality incident and a design review.
+Part B covers the two moments when other people test this work. They are a quality incident and a design review.

@@ -277,6 +277,30 @@ def has_title(text: str) -> bool:
     return any(ln.startswith("# ") for ln in body.splitlines())
 
 
+def trim_to_cap(rel_path: str, content: str) -> tuple[str, int]:
+    """An agent's own block, cut to its cap by dropping its oldest lines.
+
+    Agents spent three and four calls each night failing the cap by a few
+    characters and trying again (2026-09-17: seven refusals in one evening).
+    The block is the agent's own scratch memory and its newest lines are the
+    ones worth keeping, so the oldest go and the tool says how many. Shared
+    blocks are not trimmed here: what to drop from those is a judgement.
+    """
+    cap = block_cap(rel_path)
+    if cap is None or len(content) <= cap or not _WORKING_MEMORY_RE.match(rel_path):
+        return content, 0
+    _meta, body = parse_frontmatter(content)
+    head = content[: len(content) - len(body)]
+    lines = body.splitlines()
+    keep_first = 1 if lines and lines[0].startswith("# ") else 0
+    title, rest = lines[:keep_first], lines[keep_first:]
+    dropped = 0
+    while rest and len("\n".join([*head.splitlines(), *title, *rest])) > cap:
+        rest.pop(0)
+        dropped += 1
+    return head + "\n".join([*title, *rest]).rstrip() + "\n", dropped
+
+
 def write_problem(rel_path: str, content: str, *, actor: str, existing: str | None) -> str | None:
     """Every code gate that needs only the target path, the new content and
     the current content: owner-only block, memory-block cap (``block_cap``),

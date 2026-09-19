@@ -23,15 +23,15 @@ Time: 2 to 3 hours.
 
 ## 6.3 — When the failure is "quality dropped"
 
-Why this matters: a server that is down pages you. A model that got slightly worse does not. This section is the procedure for the second kind of incident, It also shows why each field you recorded in Phase 5B is needed.
+Why this matters: a server that is down pages you. A model that got slightly worse does not. This section is the procedure for the second kind of incident. It also shows why each field you recorded in Phase 5B is needed.
 
 ### It is still an incident, by the standard definition
 
-The standard postmortem triggers include "user-visible downtime **or degradation** beyond a certain threshold" and "a monitoring failure", which usually means someone outside the team noticed first. A quality drop fits both. The threshold is the quality indicator from section 5.4.
+The Google SRE book lists postmortem triggers. They include "user-visible downtime **or degradation** beyond a certain threshold". They also include "a monitoring failure", which usually means someone outside the team noticed first. A quality drop fits both. The threshold is the quality indicator from section 5.4.
 
 So the answer to "is this worth an incident?" is not a feeling. It is whether the quality indicator is burning its budget.
 
-The same source gives three reasons to declare an incident early: a second team must help, customers can see it, or it is still unsolved after an hour of focused work. It also says to declare early and often. A declared incident that turns out small costs a short meeting. An undeclared one has no commander, no single operator, and no timeline. That cost is inferred from the roles below, not measured.
+The same source gives three reasons to declare an incident. A second team must help. Customers can see it. Or it is still unsolved after an hour of focused work. It also says to declare early and often. A declared incident that turns out small costs a short meeting. An undeclared one has no commander, no single operator, and no timeline. That cost is inferred from the roles below, not measured.
 
 ### The roles do not change
 
@@ -82,13 +82,13 @@ python phase06_design/incident_drill.py --scenario infra
 python phase06_design/incident_drill.py --scenario noise
 ```
 
-Each scenario changes one thing and the drill names it. The `infra` scenario changes nothing recorded and still drops quality, and the drill says so: the drop is real and no recorded axis explains it. The `noise` scenario changes nothing and the drill declines to open an incident.
+Each scenario changes one thing and the drill names it. The `infra` scenario changes no recorded field and still drops quality. The drill reports that the drop is real and that no recorded axis explains it. The `noise` scenario changes nothing and the drill declines to open an incident.
 
 ### The mistake in my first version, and why it matters to you
 
 My first triage checked step 1, the overall pass rate, and only then looked for causes. I seeded an 18-point quality drop on the support route after a prompt change, from 88% to 70%. The drill found it in **1 of 20 runs** at 1,000 records.
 
-The reason is arithmetic. That route carried a quarter of the traffic, so the average diluted an 18-point drop to about 4 points, which is inside the noise. With the default seed, the changed slice on its own was 3.5 standard errors below the baseline.
+The reason is arithmetic. That route carried a quarter of the traffic. So the average diluted an 18-point drop to about 4 points, which is inside the noise. With the default seed, the changed slice on its own was 3.5 standard errors below the baseline.
 
 ```
   overall pass rate    89.0% -> 87.8%     z = 0.6   looks fine
@@ -109,7 +109,7 @@ def two_proportion_z(p1: float, n1: int, p2: float, n2: int) -> float:
 
 `se` is the standard error: how much the difference would move by chance alone. The result is the difference measured in standard errors. The drill treats 3.0 or more as real. A smaller sample gives a larger `se`, which is why the diluted 4-point drop on 400 records looked like noise.
 
-The fixed version tests every new field value directly, whatever the average says. It finds that regression in **17 of 20** runs at the same sample size, with **0 of 20** false suspects on pure noise.
+The fixed version tests every new field value directly, whatever the average says. At the same sample size, it finds that regression in **17 of 20** runs. On pure noise, it names a false suspect in **0 of 20** runs.
 
 ```python
 # WRONG: gate everything on the overall average. A regression confined to
@@ -126,7 +126,7 @@ for axis in AXES:
                 suspects.append((axis, value))
 ```
 
-This is the same lesson as the prompt-regression study cited in Phase 5B: model updates helped some prompts and hurt others. An average hides exactly that.
+The prompt-regression study in Phase 5B shows the same lesson. Model updates helped some prompts and hurt others. An average hides exactly that.
 
 ### Rolling back a prompt or a model
 
@@ -135,7 +135,7 @@ The published guidance with the most concrete numbers is the AWS Well-Architecte
 - **Target time to restore: under five minutes** for a behavioural change.
 - **Exercise the rollback quarterly.** A rollback nobody has run is a plan, not a capability.
 - **Start a new version at 5 to 10% of traffic.**
-- **Roll back to a known-good baseline, not to the previous version.** The previous version may have shipped an hour ago and never been proven stable.
+- **Roll back to a known-good baseline, not to the previous version.** The previous version may be an hour old, and it was never proven stable.
 - And the anti-pattern it names: treating prompt changes as low-risk because they are not code changes.
 
 **Know how long your rollback actually takes to reach clients.** The Langfuse prompt client serves the version labelled `production`. It caches that version for 60 seconds by default, then refreshes it in the background. So moving the label back reaches a running client after roughly one cache period. That figure is inferred from the documented defaults, not measured. Time it once on your own system.
@@ -158,7 +158,7 @@ The published guidance with the most concrete numbers is the AWS Well-Architecte
 
 The diagram is an example of the documented behaviour, not a recording. Your run record from Phase 5B shows the real switch, because every call records its prompt version and host.
 
-**And compare against a control group, not against yesterday.** The standard canary guidance warns that time is one of the biggest sources of change in observed metrics. Traffic mix changes by hour and by day, and quality indicators move with it. A before-and-after comparison can show a regression that is really a change in who was asking.
+**And compare against a control group, not against yesterday.** The Google SRE workbook's canary chapter warns that time is one of the biggest causes of change in metrics. Traffic mix changes by hour and by day. Quality indicators move with it. A before-and-after comparison can show a regression that is really a change in who was asking.
 
 ```
   BEFORE/AFTER (misleading)       │ CONTROL GROUP (what to do)
@@ -174,7 +174,7 @@ The diagram is an example of the documented behaviour, not a recording. Your run
   support questions               │ versions, and the split shows it
 ```
 
-The numbers in that diagram are an example. The method is the one from the canary guidance: split live traffic at the same time, and compare the two groups.
+The numbers in that diagram are an example. The method comes from the canary chapter. Split live traffic at the same time, and compare the two groups.
 
 ### What a quality postmortem needs that an outage postmortem does not
 
@@ -184,11 +184,11 @@ The standard template has the usual sections: summary, impact, root causes, trig
 2. **Which attribution axis moved**, or an explicit statement that none did.
 3. **Why detection took as long as it did.** For quality incidents this is usually the most important section. Two published postmortems in Phase 5B both said their existing evaluations did not catch the problem.
 
-Keep it blameless. That means focusing on contributing causes without blaming a person, and assuming everyone acted in good faith on the information they had. Review every postmortem. An unreviewed postmortem changes nothing.
+Keep it blameless. That means you look for contributing causes, not for a person to blame. You assume everyone acted in good faith on the information they had. Review every postmortem. An unreviewed postmortem changes nothing.
 
-**One honest gap.** The research found no published, step-by-step runbook for an LLM quality incident from a primary source. The Coalition for Secure AI incident response framework lists "model drift" as one incident type and says to roll back to a prior model and add temporary guardrails, without a procedure. The NIST AI Risk Management Framework playbook describes a duty to disengage a system that exceeds risk thresholds, without numbers. The procedure above is assembled from general practice plus the Phase 5 evidence, and it should be read that way.
+**One honest gap.** The research found no published, step-by-step runbook for an LLM quality incident from a primary source. The Coalition for Secure AI incident response framework lists "model drift" as one incident type. It says to roll back to a prior model and add temporary guardrails. It gives no procedure. The NIST AI Risk Management Framework playbook describes a duty to disengage a system that exceeds its risk thresholds. It gives no numbers. The procedure above combines general practice with the Phase 5 evidence. Read it that way.
 
-**The sentence to remember:** a quality incident is found by testing what changed, slice by slice, because the average is where a slice regression hides.
+**The sentence to remember:** find a quality incident by testing what changed, slice by slice. The average hides a slice regression.
 
 **The trap:** gating the investigation on the overall pass rate. A real regression on a quarter of traffic can look like noise in the average.
 
@@ -204,14 +204,14 @@ Why this matters: every number you produced in this course only matters if other
 
 Two primary descriptions agree on the shape.
 
-A former Google engineering director's first-hand account describes design docs with five sections: context and scope, goals and non-goals, the design, **alternatives considered**, and cross-cutting concerns. A larger project runs roughly 10 to 20 pages. A small change needs a 1 to 3 page version. It also says when not to write one: when the solution is obvious and there are no trade-offs to discuss. This is one engineer's account, not official company policy.
+Malte Ubl, a former Google engineering director, describes design docs with five sections. They are context and scope, goals and non-goals, the design, **alternatives considered**, and cross-cutting concerns. A larger project runs roughly 10 to 20 pages. A small change needs a 1 to 3 page version. It also says when not to write one: when the solution is obvious and there are no trade-offs to discuss. This is one engineer's account, not official company policy.
 
-The original Architecture Decision Record, from 2011, is shorter and records one decision: a title, the context, the decision written as "We will ...", a status, and the consequences, positive and negative. Records are numbered and never renumbered, and a replaced decision is kept and marked superseded rather than deleted.
+Michael Nygard's Architecture Decision Record, from 2011, is shorter. It records one decision in five parts: a title, the context, the decision written as "We will ...", a status, and the consequences. Consequences include positive and negative ones. Records are numbered and never renumbered. A replaced decision is kept and marked superseded. It is never deleted.
 
 Two definitions from those sources are worth using exactly:
 
 - A **non-goal** is something that could reasonably be a goal and is deliberately not. "The system should not crash" is not a non-goal. It is a negated goal.
-- The **alternatives considered** section is about "the trade-offs that each respective design makes and how those trade-offs led to the decision". An option listed without its trade-off tells a reviewer nothing.
+- The **alternatives considered** section covers "the trade-offs that each respective design makes and how those trade-offs led to the decision". An option listed without its trade-off tells a reviewer nothing.
 
 A decision record for the fleet in section 6.1 looks like this. It uses the five parts in order:
 
@@ -248,7 +248,7 @@ code/phase06_design/design_doc_template.md
 
 ### The part a generic template does not have
 
-Section 5 of that template is a table with one row per concern this course taught, each pointing back to the phase that shows how to fill it in. It is the course, turned into a review checklist:
+Section 5 of that template is a table with one row for each concern this course taught. Each row names the phase that shows how to fill it in. It is the course, turned into a review checklist:
 
 ```
 ┌────────────────────────────────────────────┬───────┐
@@ -331,7 +331,7 @@ A pre-mortem is a short exercise that asks the team to explain a failure that ha
 4. Go round the room, one reason at a time, starting with the project lead, until every reason is recorded.
 5. Afterwards, the lead reviews the list and strengthens the plan.
 
-The article cites 1989 research reporting that imagining an outcome has already happened increased the ability to identify reasons for it by **30%**. State that number carefully. One published summary of the underlying study notes it measured the **number** of reasons generated, not whether they were correct. I could not read the original paper to confirm, so treat the 30% as "more reasons", not "more correct reasons".
+The article cites 1989 research on imagining that an outcome has already happened. That research reported a **30%** increase in the ability to identify reasons for the outcome. State that number carefully. One published summary of the underlying study notes it measured the **number** of reasons generated, not whether they were correct. The original paper was not read for this course. So treat the 30% as "more reasons", not "more correct reasons".
 
 Step 3, writing alone, is the part that makes it work. Discussion first lets the most senior voice set the list.
 
@@ -346,7 +346,7 @@ The course template has a pre-mortem table. For an LLM system, start it with the
 
 ### A worked defence, with numbers from the course
 
-Scenario, used only to set realistic numbers: a support assistant, 22.8 requests per second at peak, streaming responses, several business customers on one deployment. The scripts produced every figure below.
+The scenario only sets realistic numbers. It is a support assistant with 22.8 requests per second at peak. It streams responses and serves several business customers on one deployment. The scripts produced every figure below.
 
 ```
 concern                    answer                                  from
@@ -372,11 +372,11 @@ quality                    indicator on a judged sample; slice     incident_dril
                            tests on every new prompt version
 ```
 
-Notice what that table does. Every row is a claim with a number, and every number names the tool that produced it. A reviewer can disagree with an assumption, such as the scale-up time, and you can rerun the tool with their number in front of them. That is the difference between defending a design and defending a preference.
+Notice what that table does. Every row is a claim with a number, and every number names the tool that produced it. A reviewer can disagree with an assumption, such as the scale-up time. You can then rerun the tool with their number in front of them. That is the difference between defending a design and defending a preference.
 
 **Say the trade-off out loud.** The fleet above runs at 48% utilisation at peak. That is a deliberate cost, paid for latency and for surviving a failure. Section 4.6 showed what low utilisation does to cost per token. A reviewer who spots it should hear that you spotted it first.
 
-**The sentence to remember:** in a design review, every claim carries a number and every number names its source, so a disagreement becomes a rerun instead of an argument.
+**The sentence to remember:** in a design review, every claim carries a number, and every number names its source. A disagreement then becomes a rerun, not an argument.
 
 **The trap:** an alternatives section that lists options without their trade-offs. Reviewers read that section first, and "we considered X" without "and gave up Y" tells them nothing.
 
@@ -401,7 +401,7 @@ E9 to E12 run offline. E13 and E14 are written exercises with no code.
 
 - [ ] **E11 (break-it, offline).** Hide a regression inside the average.
   - Run: `python phase06_design/incident_drill.py --scenario prompt --records 1000`
-  - Expected: the overall z-score is about 0.6, which looks healthy, and the drill still reports a regression because the changed slice is tested on its own.
+  - Expected: the overall z-score is about 0.6, which looks healthy. The drill still reports a regression, because it tests the changed slice on its own.
   - Teaches: the average is where a slice regression hides.
 
 - [ ] **E12 (offline).** The two answers nobody likes.
@@ -417,7 +417,13 @@ E9 to E12 run offline. E13 and E14 are written exercises with no code.
 
 - [ ] **E14 (written).** Run a pre-mortem alone.
   - Assume the design from E13 has failed badly six months from now. Spend five minutes writing, alone, every reason it failed.
-  - Then compare your list against the failure modes this course demonstrated: a cache that stops hitting, a retry storm, a silently swapped model, a quantized model that got longer, one tenant starving the others, a fallback that never ran.
+  - Then compare your list with the failure modes this course showed:
+    - a prefix cache that stops hitting
+    - a retry storm
+    - a silently swapped model
+    - a quantized model that produces longer outputs
+    - one tenant starving the others
+    - a fallback that never ran
   - Teaches: the course is a list of failures you can now name in advance.
 
 ---
@@ -426,7 +432,7 @@ E9 to E12 run offline. E13 and E14 are written exercises with no code.
 
 This course has no anchor repository, so these questions point at the course's own code. Questions 3 and 4 work on any repository you own.
 
-1. Open `code/phase06_design/incident_drill.py:99`. This is `triage`. It asks "did a recorded field take a new value, and is that slice worse" before it looks at the overall pass rate.
+1. Open `code/phase06_design/incident_drill.py:99`. This is `triage`. It first asks two questions. Did a recorded field take a new value? Is that slice worse? Only then does it look at the overall pass rate.
    Read the docstring at lines 101 to 114. What did the first version do, and how often did it miss the regression?
    Then find the line that sets `out["hidden"]`. In words, what does `hidden` mean?
 
@@ -454,24 +460,24 @@ This course has no anchor repository, so these questions point at the course's o
 
 5. **The alternatives section.** A reviewer reads your design document and says: "You considered a hosted API and rejected it. Why?" Your document says only "cost". Rewrite that row so it states what you gave up. Use the numbers from section 6.4's worked defence.
 
-6. **The 48% question.** A reviewer points out that your planned fleet runs at 48% utilisation at peak, and calls it waste. Defend or change the plan. Show the arithmetic that produced each replica. Then name one measured number that, if it improved, would let you remove a replica.
+6. **The 48% question.** A reviewer says your planned fleet runs at 48% utilisation at peak. They call it waste. Defend or change the plan. Show the arithmetic that produced each replica. Then name one measured number that, if it improved, would let you remove a replica.
 
 7. **The pre-mortem.** Run a pre-mortem on the design from question 6. List three failure reasons. For each, name the phase of this course that showed it, and the metric that would detect it first.
 
 <details>
 <summary>Answer sketches</summary>
 
-1. First, test whether the drop is real. Two points on a weekly rate may be noise, so compute the z-score as the drill does. Then slice by every new value of every recorded field, whatever the average says. Test the prompt version first. You cannot rule out the **model** scenario. Without the response model, a provider-side model change looks like the **infra** scenario: a real drop that no recorded field explains. Add the field today, so the next incident is diagnosable.
+1. First, test whether the drop is real. Two points on a weekly rate may be noise, so compute the z-score as the drill does. Then slice by every new value of every recorded field, whatever the average says. Test the prompt version first. You cannot rule out the **model** scenario. Without the response model, a provider-side model change looks like the **infra** scenario. You see a real drop that no recorded field explains. Add the field today, so the next incident is diagnosable.
 
 2. Declare it. The standard triggers include user-visible degradation and a monitoring failure. A quality drop is user-visible degradation. When unsure between two severities, treat it as the higher one. Declaring early costs little. Declaring late loses the timeline.
 
-3. The most likely cause is the label cache. The prompt client caches the label lookup, with a 60-second default in the Langfuse client, and each process may refresh at a different time. Other clients may cache longer or be configured differently. Confirm it by checking the prompt version recorded on each run, grouped by host and time. The version should switch host by host. If some hosts still serve v7 after the cache time, check for a hard-coded fallback or a baked-in prompt file.
+3. The most likely cause is the label cache. The prompt client caches the label lookup. The Langfuse client's default is 60 seconds. Each process may refresh at a different time. Other clients may cache longer or be configured differently. Confirm it by checking the prompt version recorded on each run, grouped by host and time. The version should switch host by host. If some hosts still serve v7 after the cache time, check for a hard-coded fallback or a baked-in prompt file.
 
 4. The route is a place. It is where the damage shows, and it is not the cause. The cause is the corpus change. Rolling back the route removes a feature and leaves the bad corpus in place for every other route. Instead, roll back the corpus version. Then compare retrieval results for the same queries on the two versions to find what changed.
 
-5. Example: "Hosted API: rejected. It would cost about $X per month at our measured volume, against $15,286 for the fleet. We give up zero operations work and the provider's scaling. We accept running 6 GPUs, a ~5-minute cold start, and owning quality incidents on the serving axis." A row that says only "cost" gives a reviewer nothing to check.
+5. Example: "Hosted API: rejected. It would cost about $X per month at our measured volume, against $15,286 for the fleet. By rejecting it, we give up two things: a service with no operations work, and the provider's scaling. We accept 6 GPUs to run and a cold start of about 5 minutes. We also own quality incidents on the serving axis." A row that says only "cost" gives a reviewer nothing to check.
 
-6. Today's peak needs 4 replicas to meet the 250ms mean queue-wait target. 25% growth still fits in 4. N+1 makes it 5. A measured cold start of about 5 minutes, with demand rising 1.5 rps per minute, means 8 rps of rise before a new replica is ready. That needs 1 standing replica, which makes 6. Each replica has a named reason. The number that would remove a replica is the cold start. At 60 seconds, the tool gives 5 replicas and $12,739 per month.
+6. Today's peak needs 4 replicas to meet the 250ms mean queue-wait target. 25% growth still fits in 4. N+1 makes it 5. A cold start takes about 5 minutes, and demand can rise 1.5 rps per minute. So demand can rise 8 rps before a new replica is ready. That needs 1 standing replica, which makes 6. Each replica has a named reason. The number that would remove a replica is the cold start. At 60 seconds, the tool gives 5 replicas and $12,739 per month.
 
 7. Example answers. First, the prefix cache stops hitting after a prompt change. Phase 3A showed it, and the cached-token ratio detects it first. Second, a retry storm during a provider brownout. Phase 5A showed it, and the requests-per-call ratio detects it. Third, one tenant floods the queue. Section 6.2 showed it, and the per-tenant p99 wait detects it. Others are valid if they name a phase and a metric.
 
@@ -578,4 +584,4 @@ PRE-MORTEM
 
 ---
 
-This is the last phase of Module 1. You can now take an LLM feature from a single call, through the engine, caching, serving, the client and its telemetry, to a fleet plan you can defend in a review.
+This is the last phase of Module 1. You can now follow an LLM feature from a single call to a fleet plan. The path runs through the engine, caching, serving, and the client and its telemetry. You can defend the result in a design review.

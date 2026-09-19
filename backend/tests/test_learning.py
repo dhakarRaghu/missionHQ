@@ -1825,3 +1825,28 @@ def test_a_missing_curriculum_file_is_not_an_error() -> None:
 
     assert curriculum._parse("# nothing here\n", 0.0) == ()
     assert curriculum._parse("| 1 | Model | X | unknown | a.md | 7 |\n", 1.0) == ()
+
+
+def test_an_agents_own_memory_block_is_trimmed_instead_of_refused() -> None:
+    """Seven refusals in one evening, each an agent missing its cap by a few
+    characters and trying again. Its own block loses its oldest lines."""
+    from hq import memory
+
+    body = "---\ncreated: 2026-09-19\n---\n# hunter\n" + "\n".join(
+        f"- fact {i} " + "x" * 40 for i in range(60))
+    trimmed, dropped = memory.trim_to_cap("memory/agents/hunter.md", body)
+    assert dropped > 0 and len(trimmed) <= memory.block_cap("memory/agents/hunter.md")
+    assert "# hunter" in trimmed and "fact 59" in trimmed and "fact 0 " not in trimmed
+    # A shared block is a judgement call, so it is still refused, not cut.
+    assert memory.trim_to_cap("memory/active_projects.md", body)[1] == 0
+    assert memory.trim_to_cap("memory/agents/hunter.md", "# hunter\nshort\n")[1] == 0
+
+
+def test_repo_files_name_the_tool_that_reads_them() -> None:
+    """Four failed vault reads in one run, all for files that live in the repo."""
+    from hq.tools.vault_tools import _missing_note
+
+    assert "read_lesson" in _missing_note("learning/lessons/2026-09-19-x.md")
+    assert "read_course_source" in _missing_note("learning/study-material/k/x.md")
+    assert "brief" in _missing_note("learning/sources.md")
+    assert "memory_search" in _missing_note("daily/2026-09-19.md")

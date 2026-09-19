@@ -37,16 +37,37 @@ def _folder_entries(path: str) -> list[str]:
     return sorted(p.name for p in folder.iterdir() if not p.name.startswith("."))
 
 
+# His own files live in the repo, not the vault, and agents keep looking for
+# them here: learning/sources.md, learning/lessons/*.md (2026-09-17, four
+# failed reads in one run). Name the tool that does reach them.
+_REPO_PATHS = {
+    "learning/lessons": "lessons are read with read_lesson; list_lessons gives the paths",
+    "learning/courses": "course specs are read with read_course_spec",
+    "learning/study-material": "course sources are read with read_course_source",
+    "learning/sources.md": "the roster is not readable by a tool; the part you need"
+                           " arrives inside your brief",
+    "learning/path.md": "his path arrives inside your brief, not through the vault",
+}
+
+
+def _missing_note(path: str) -> str:
+    clean = path.strip().lstrip("./")
+    for prefix, hint in _REPO_PATHS.items():
+        if clean.startswith(prefix):
+            return f"{path!r} is a repo file, not a vault note: {hint}"
+    return (
+        f"no note at {path!r}; use memory_search to find the right path, or create"
+        " the note with vault_write if it is meant to be new"
+    )
+
+
 @hq_tool(action=ActionClass.READ, trust=Trust.VAULT)
 async def vault_read(ctx: RunContext[HQDeps], path: str) -> str:
     """Read a markdown note from the vault by relative path (a file, not a folder)."""
     try:
         return await asyncio.to_thread(memory.read, path)
     except FileNotFoundError:
-        raise ModelRetry(
-            f"no note at {path!r}; use memory_search to find the right path, or create"
-            " the note with vault_write if it is meant to be new"
-        ) from None
+        raise ModelRetry(_missing_note(path)) from None
     except IsADirectoryError:
         try:
             entries = await asyncio.to_thread(_folder_entries, path)
@@ -95,8 +116,9 @@ async def vault_list(ctx: RunContext[HQDeps], folder: str = "", since_days: int 
     try:
         return await asyncio.to_thread(_list_notes, folder, max(0, int(since_days)))
     except FileNotFoundError:
-        raise ModelRetry(f"no folder {folder!r} in the vault; call vault_list with folder=''"
-                         " to see the top level") from None
+        raise ModelRetry(_missing_note(folder) if folder.strip().lstrip('./').startswith('learning')
+                         else f"no folder {folder!r} in the vault; call vault_list with"
+                              " folder='' to see the top level") from None
     except NotADirectoryError:
         raise ModelRetry(f"{folder!r} is a file, not a folder; use vault_read for it") from None
     except PermissionError as exc:
@@ -153,6 +175,12 @@ async def vault_write(ctx: RunContext[HQDeps], path: str, content: str) -> str:
         # Same gates as memory.write_sync, run early so the refusal reaches the
         # agent as a ModelRetry with the current file in hand.
         existing = await asyncio.to_thread(_existing, rel)
+        content, dropped = memory.trim_to_cap(rel, content)
+        if dropped:
+            warnings.append(
+                f"over its cap, so the {dropped} oldest line(s) were dropped; write the"
+                " block shorter next time rather than relying on this"
+            )
         problem = memory.write_problem(rel, content, actor=ctx.deps.agent, existing=existing)
         if problem:
             raise ModelRetry(problem)

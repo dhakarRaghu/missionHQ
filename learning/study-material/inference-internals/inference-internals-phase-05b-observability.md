@@ -1,21 +1,26 @@
 # Phase 5B — Measuring it, promising it, and degrading well
 
-Part A kept the client from making things worse. This part is about knowing whether anything is wrong at all.
+Part A stopped the client from making an outage worse. This part is about knowing whether anything is wrong at all.
 
-That is harder for an LLM feature than for an ordinary service, for one reason worth stating before any of the detail. An ordinary service is up or down. An LLM feature can be **up, fast, and wrong**, and every dashboard you already have will be green through it.
+That is harder for an LLM feature than for an ordinary service. An ordinary service is up or down. An LLM feature can be **up, fast, and wrong**, and every dashboard you have stays green.
 
-This part also pays four debts. Phase 1 promised a telemetry schema, Phase 2 promised the stream-freeze metric, Phase 4 promised the operating-point signals, and Phase 0 promised that the numbers would eventually become an alert.
+This part also delivers what earlier phases asked for:
+
+- Phase 1 section 1.6 drafted a target schema for what to log per model call.
+- Phase 2 section 2.4 asked you to record inter-token gaps, because an average hides a frozen stream.
+- Phase 4 section 4.3 defined the operating point: peak throughput and the TTFT p99 at that load.
+- Phase 0 said that Phase 5 covers operations.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  5.4  SLOs                     — four indicators, error budgets, burn    │
-│  5.5  The run record           — what to store, under which names       │
-│  5.6  Fallbacks                — the pattern you will reach for, and    │
+│  5.5  The run record           — what to store, under which names        │
+│  5.6  Fallbacks                — the pattern you will reach for, and     │
 │                                  usually should not                      │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-Part A is a prerequisite. Six of the seven exercises run offline.
+Part A is a prerequisite, because this part reads the records that the part A client writes. Seven of the eight exercises run offline.
 
 Time: 2 to 3 hours.
 
@@ -23,13 +28,15 @@ Time: 2 to 3 hours.
 
 ## 5.4 — SLOs for a thing that can be up, fast, and wrong
 
-Why this matters: every phase so far produced numbers. This section turns them into a promise you can be held to, and an alert that fires at the right time rather than every time.
+Why this matters: every phase so far produced numbers. This section turns them into a promise, and into an alert that fires at the right time.
+
+An SLI, or service level indicator, is a measured ratio of good events to all events. An SLO, or service level objective, is the target for that ratio.
 
 ### The framework already has a slot for quality
 
-Standard site-reliability practice defines several indicator types, and one of them is **quality**, defined as the proportion of responses served in an undegraded state. There is also a **correctness** indicator: was the right answer returned.
+The Google SRE Workbook defines several SLI types. One is **quality**: the proportion of responses served in an undegraded state. Another is **correctness**: whether the right answer was returned.
 
-That matters because an LLM feature has a failure mode ordinary services do not. It can be up, fast, and wrong. A truncated answer is a 200 OK. A silently downgraded fallback model is a 200 OK. Your uptime dashboard is green through both.
+An LLM feature needs these types. A truncated answer returns 200 OK. A fallback to a weaker model also returns 200 OK. Your uptime dashboard stays green through both.
 
 So Phase 5 uses four indicators, and `slo_report.py` computes all four:
 
@@ -48,37 +55,41 @@ So Phase 5 uses four indicators, and `slo_report.py` computes all four:
 
 Run it:
 
-```
+```bash
 python phase05_operations/slo_report.py --demo
 ```
 
+Output from a run on 2026-09-17:
+
 ```
-┌────────────────────────┬─────────┬─────────┬─────────┬──────────────────┐
-│ indicator              │ target  │ actual  │ verdict │ budget used      │
-├────────────────────────┼─────────┼─────────┼─────────┼──────────────────┤
-│ availability           │ 99.50%  │ 99.30%  │  FAIL   │   140% ########## │
-│ TTFT <= 1000ms         │ 95.00%  │ 99.60%  │  PASS   │     8%            │
-│ no freeze > 500ms      │ 99.00%  │ 89.93%  │  FAIL   │  1007% ########## │
-│ answer completed       │ 99.00%  │ 98.19%  │  FAIL   │   181% ########## │
-└────────────────────────┴─────────┴─────────┴─────────┴──────────────────┘
+┌────────────────────────┬─────────┬─────────┬─────────┬───────────────────┐
+│ indicator              │ target  │ actual  │ verdict │ budget used       │
+├────────────────────────┼─────────┼─────────┼─────────┼───────────────────┤
+│ availability           │  99.50% │  99.30% │  FAIL   │   140% ########## │
+│ TTFT <= 1000ms         │  95.00% │  99.60% │  PASS   │     8%            │
+│ no freeze > 500ms      │  99.00% │  89.93% │  FAIL   │  1007% ########## │
+│ answer completed       │  99.00% │  98.19% │  FAIL   │   181% ########## │
+└────────────────────────┴─────────┴─────────┴─────────┴───────────────────┘
 ```
 
-The demo contains one deliberate incident: a stretch where the stream freezes. Read the TTFT row. It **passes at 99.6%**. The incident is invisible there and barely dents availability, and it is a ten-times budget overrun on the indicator built to catch it.
+The demo ledger has 2,000 records and one deliberate incident, a stretch where the stream freezes. The TTFT row **passes at 99.6%**, so the incident is invisible there. On the freeze indicator, it uses ten times the budget.
+
+The incident does not change availability. Availability fails for another reason. The demo adds a random 0.4% error rate to every record, at `slo_report.py:78`, against a 99.5% target.
 
 ### Do not set the target to 100%
 
-The published reasons are worth repeating because someone in the room will ask:
+The Google SRE Workbook gives four reasons:
 
-- Users cannot experience 100% anyway, because their own network and device fail.
-- Each extra nine costs more while the value to the user approaches zero. One source estimates an incremental reliability improvement can cost **100 times** the previous increment.
-- The largest source of outages is change, so a 100% target means never shipping.
-- A 100% target leaves no budget, which means you can only ever be reactive.
+- Users cannot experience 100%, because their own network and device fail.
+- Each extra nine costs more, and its value to users approaches zero. One source estimates that each step can cost **100 times** the step before it.
+- Most outages come from change. A 100% target means you never ship.
+- A 100% target leaves no budget, so you can only react.
 
-The error budget is simply 100% minus your target, and it is permission to spend. At 99.9% over 30 days you may be bad for about 43 minutes.
+The error budget is 100% minus your target. It is the failure you are allowed. At 99.9% over 30 days, that is about 43 minutes.
 
 ### Use several percentiles, not one
 
-The established pattern is a ladder, and it transfers directly to TTFT:
+The Google SRE Book uses a ladder of percentiles. It applies to TTFT directly:
 
 ```
   90% of requests under X
@@ -86,15 +97,13 @@ The established pattern is a ladder, and it transfers directly to TTFT:
   99.9% of requests under 100X
 ```
 
-A single p95 target hides the shape of the tail. A ladder says what the tail is allowed to look like.
+A single p95 target hides the shape of the tail. A ladder states what the tail may look like.
 
-**Pair every latency number with a token count.** One provider's own latency guidance is blunt about it:
+**Pair every latency number with a token count.** Microsoft's Azure OpenAI latency guide says so. It uses TTLT, time to last token, for total response time:
 
-> A 5-second total time that generates 2,000 tokens is very different from a 5-second total time that generates 50 tokens. Latency without token context isn't actionable.
+> A 5-second TTLT that generates 2,000 tokens is very different from a 5-second TTLT that generates 50 tokens. Latency without token context isn't actionable.
 
-And the corollary, from the same page: a rise in total latency is often **fully explained** by longer outputs, not by a slower system. Check the token counts before you declare a latency regression. Your run record has both.
-
-The decomposition they publish is the one Phase 1 taught you:
+The same page says a rise in total latency is often **fully explained** by longer outputs, not a slower system. Check the token counts before you declare a regression. Your run record has both. The page uses the decomposition from Phase 1:
 
 ```
   total = TTFT + (time between tokens × tokens generated)
@@ -102,7 +111,7 @@ The decomposition they publish is the one Phase 1 taught you:
 
 ### Burn-rate alerting, with the published numbers
 
-An SLO that only reports monthly is a report, not an alert. Burn rate is how fast you are consuming the budget relative to the period.
+A monthly SLO report is not an alert. The burn rate is how fast you use the budget, relative to the period. At burn rate 1, the budget lasts exactly the period.
 
 ```
   burn 1     the budget lasts exactly the 30-day window
@@ -110,7 +119,26 @@ An SLO that only reports monthly is a report, not an alert. Burn rate is how fas
   burn 1000  it is gone in 43 minutes
 ```
 
-The standard recipe uses two windows at once. The long window decides severity; the short window confirms the problem is still happening, so a spike that already ended does not page anyone.
+The burn-rate code, from `burn_lines` at `slo_report.py:342-353`, with indentation removed. `rs` is the list of records for one table:
+
+```python
+for r in evaluate(rs, args):
+    allowed = 1 - r["target"]
+    actual_bad = 1 - (r["good"] / r["total"] if r["total"] else 1)
+    if allowed <= 0:
+        continue
+    burn = actual_bad / allowed
+    if burn <= 1:
+        print(f"  {r['name']:<22} burn {burn:>5.2f}x  budget lasts the period")
+    else:
+        frac = 1 / burn
+        print(f"  {r['name']:<22} burn {burn:>5.2f}x  budget gone after "
+              f"{frac:.0%} of the period")
+```
+
+In the demo, the freeze indicator prints `burn 10.07x  budget gone after 10% of the period`.
+
+The Google SRE Workbook recipe uses two windows. The long window decides the severity. The short window checks that the problem is still happening, so an ended spike pages nobody.
 
 ```
 ┌──────────┬──────────────┬───────────────┬───────────┬─────────────────────┐
@@ -122,34 +150,34 @@ The standard recipe uses two windows at once. The long window decides severity; 
 └──────────┴──────────────┴───────────────┴───────────┴─────────────────────┘
 ```
 
-Those figures are for a 99.9% target over 30 days. The sizing rule is that the short window is **one twelfth** of the long window.
+These figures are for 99.9% over 30 days. The short window is **one twelfth** of the long one. Check row one: 14.4 × 1 hour ÷ 720 hours = 2%.
 
-`slo_report.py --window-minutes` gives you the two-window view. In the demo, the freeze indicator fails over the whole period and **passes** over the last 300 minutes, because the incident had already ended. That is the difference between a page and a post-incident note.
+`slo_report.py --window-minutes` adds a table for the most recent window. In the demo, the freeze indicator fails over the whole period. It **passes** over the last 300 minutes, because the incident had ended. That is the difference between a page and a review note. The script prints one burn block for each table. The window block uses only the window's records. There, the freeze burn is `0.17x`. Over the whole period it is `10.07x`.
 
 ### Putting a quality score in the quality slot
 
-This is where LLM practice is actually heading, and one observability product already ships it: an indicator whose good event is **an evaluation score reaching a threshold**, sitting next to availability and latency, alerted with the same 14.4, 6 and 1 burn tiers.
+Pydantic Logfire already ships this. Its SLI counts a good event when **an evaluation score reaches a threshold**. It sits next to availability and latency, with the same 14.4, 6 and 1 burn tiers.
 
-The design detail worth copying: the indicator is not the mean score. It is the **proportion of records that clear a threshold**. A continuous score has no error budget. A good-event ratio does.
+Copy one detail. The indicator is not the mean score. It is the **proportion of records that reach a threshold**. A continuous score has no error budget. A ratio of good events has one.
 
-**Two limits you must state before anyone promises a number.**
+**Two limits apply before anyone promises a number.**
 
-**A judge cannot support a very tight quality SLO.** The best-known study of model-as-judge reports about **85%** agreement with human experts, against **81%** agreement between two humans. A judge that disagrees with people roughly 15% of the time cannot certify a 99.9% quality target on individual requests. It can support a target on an aggregate rate across many requests, which is a different and achievable claim.
+**A judge cannot support a very tight quality SLO.** A judge is a model that scores another model's output. The best-known study, "Judging LLM-as-a-Judge", reports about **85%** agreement with human experts, and **81%** between two humans. Both numbers leave out ties. With ties counted, the same table gives 66% and 63%. A judge that disagrees with people on 15% or more of cases cannot certify 99.9% on single requests. It can support an aggregate rate across many requests.
 
-**Per-call quality collapses over multi-step tasks.** If each step succeeds independently at 75%, a task needing three consecutive correct steps succeeds about **42%** of the time. Set the SLO on the outcome your user cares about, not on the step.
+**Per-step quality drops fast over multi-step tasks.** Take 75% per independent step. Three correct steps in a row then happen 0.75³ ≈ **42%** of the time. Set the SLO on the outcome the user cares about.
 
 ### The way a latency SLO gets gamed
 
-A 2024 paper points out two ways to improve a naive TTFT and inter-token SLO without helping anyone:
+A 2024 paper on SLOs in LLM serving shows two ways to game a naive TTFT and inter-token SLO:
 
-1. **Delay some tokens deliberately.** Smoothing the stream improves the inter-token measurement.
-2. **Abandon requests that will miss the target.** Dropping the slow ones improves every percentile.
+1. **Delay some tokens on purpose.** A smoother stream improves the inter-token number.
+2. **Drop requests that will miss the target.** Every percentile then improves.
 
-Both make the dashboard better and the product worse. The defence is to keep availability and completeness beside the latency indicators, which is why `slo_report.py` prints four rows rather than one.
+Both improve the dashboard and harm the product. The defence is to report availability and completeness next to latency. So `slo_report.py` prints four rows.
 
-### And faster is not always better
+### Faster is not always better
 
-Here is the result that should change how you set a TTFT target. A 2026 controlled study, 240 participants, varied time to first token at 2, 9 and 20 seconds across two task types.
+A 2026 controlled study, for ACM CHI 2026, set TTFT to 2, 9 or 20 seconds on two task types. The paper reports 240 participants.
 
 ```
   participants who noticed the delay
@@ -163,57 +191,63 @@ Here is the result that should change how you set a TTFT target. A 2026 controll
     20s   higher
 ```
 
-Participants who waited 2 seconds rated the answers **less thoughtful and less useful** than those who waited 9 or 20 seconds. The authors conclude that latency is "a tunable design variable", and flag the obvious ethical problem: deliberately slowing a response to seem more considered is manipulation.
+After a 2-second wait, participants rated answers **less thoughtful and less useful** than after 9 or 20 seconds. The authors call latency "a tunable design variable" with ethical implications. Slowing answers on purpose, to seem careful, manipulates users. This review checked only the abstract. The count and percentages come from the paper body.
 
-Take the engineering lesson and leave the manipulation. Below some point, spending engineering effort on TTFT stops buying user-perceived quality. Find that point for your product instead of assuming lower is always better.
+Use the engineering lesson, and reject the manipulation. Below some point, TTFT work stops improving perceived quality. Find that point for your product.
 
-**Two anchors for the other end.** Human conversation has a modal gap between turns of about **200 milliseconds**, which is the right target for a voice product measuring end of speech to first audio. Adults read continuous prose at roughly **238 words per minute**, which puts a floor on how slowly you can stream text before reading becomes uncomfortable.
+**Two reference points for the other end:**
 
-**No major provider publishes a latency target.** They publish measurement frameworks and decline to guarantee. One provider's status page reports about 99.94% for its APIs over a recent 90-day window, with a disclaimer that the figure aggregates across tiers and models and that your own availability may differ. Treat that as your dependency's floor, not your product's ceiling.
+- In human conversation, the most common gap between turns is about **200 milliseconds**. That is the target for a voice product, from end of speech to first audio.
+- Adults read prose at about **238 words per minute**. A stream much slower than that is uncomfortable to read.
 
-**The sentence to remember:** an LLM feature can be up, fast, and wrong, so an SLO with only availability and latency measures three quarters of nothing.
+**No major provider publishes a latency target.** One provider's status page reports about 99.94% API availability over a recent 90-day window. It says the figure combines tiers and models, and yours may differ. Treat it as the upper limit for your dependency, not as your product's number.
 
-**The trap:** a single monthly SLO report. It tells you that you failed, never that you are failing. Burn rate over two windows is the difference.
+**The sentence to remember:** an LLM feature can be up, fast, and wrong. An SLO with only availability and latency cannot see the wrong answers.
 
-**Try this now:** run `python phase05_operations/slo_report.py --demo --window-minutes 300` and compare the freeze row across the two tables. Then decide which of the two would have paged you.
+**The trap:** a single monthly SLO report. It tells you that you failed, never that you are failing now. Burn rate over two windows fixes that.
+
+**Try this now:** run `python phase05_operations/slo_report.py --demo --window-minutes 300`. Compare the freeze row in the two tables. Decide which table would have paged you.
+
 ---
 
 ## 5.5 — The run record (what to store, under which names)
 
-Why this matters: four earlier phases ended by telling you to record something. This section is the schema, and it pays those debts. It is also where you find out that the standard exists, defines more than you expect, and is ignored by almost every library that claims to implement it.
+Why this matters: four earlier phases told you to record something. This section gives the schema. A standard for it exists, and most libraries do not implement it.
 
-### What the standard actually says
+### What the standard says
 
-The generative-AI semantic conventions define an inference span with 46 attributes. Only **two** are required: the operation name and the provider name. The span is named `{operation} {model}`, for example `chat gpt-4`.
+The OpenTelemetry GenAI semantic conventions name the fields for LLM telemetry. OpenTelemetry is the open standard for traces, metrics and logs. A span is one timed operation in a trace, with attributes.
 
-One rule about span lifetime has a consequence nobody expects:
+The conventions define an inference span with 46 attributes. Only **two** are required: the operation name and the provider name. The span name is `{operation} {model}`, for example `chat gpt-4`.
+
+One rule about span duration matters:
 
 > If a transient issue happened and the request was retried automatically, the corresponding span SHOULD cover the duration of the logical operation with **all retries**.
 
-Combine that with the general rule that errors which were retried and handled should not be recorded, and with your SDK's default of two automatic retries from Phase 5.3, and you get this:
+Add two facts. OpenTelemetry says not to record errors that were retried and handled. Your SDK retries twice by default, as section 5.3 showed.
 
-**By default, your 429s are invisible.** The SDK retries twice inside one span, succeeds on the third attempt, and nothing in your telemetry says the provider ever pushed back. If you need rate-limit visibility, set `max_retries=0` and retry yourself, or instrument the HTTP layer beneath the SDK.
+So **by default, your 429s are invisible.** The SDK retries inside one span and succeeds on the third attempt. Nothing shows that the provider rejected you. For visibility, set `max_retries=0` and retry in your own code, or instrument the HTTP layer below the SDK.
 
-### The naming decision that tells you the spec is serious
+### The naming decision that shows the spec is careful
 
-The spec defines a first-token signal, and the name is the lesson:
+The spec's first-token name teaches the lesson:
 
 ```
   client side   gen_ai.response.time_to_first_chunk       seconds, a double
   server side   gen_ai.server.time_to_first_token
 ```
 
-**Chunk on the client. Token on the server.** A client watching a stream cannot see tokens. It sees chunks, and a chunk may carry several tokens, or none at all. Providers send ping events, empty deltas, and content blocks that open and close with nothing between them. One provider even adds padding to normalise chunk sizes as a side-channel mitigation, so you cannot infer token count from chunk bytes either.
+**The client says chunk. The server says token.** A client watching a stream sees chunks, not tokens. A chunk may carry several tokens, or none. Providers send ping events, empty deltas, and empty content blocks. One provider pads chunks to similar sizes against side-channel attacks. So chunk bytes do not give the token count either.
 
-So a client that reports "time to first token" is claiming to measure something it cannot observe. The spec refuses to make that claim, and `run_recorder.py` now follows it.
+A client that reports "time to first token" claims to measure something it cannot see. The spec avoids that claim, and `run_recorder.py` follows the spec.
 
-I got this wrong in the first version of that file. It invented a name, `app.gen_ai.ttft_ms`, on the assumption that the spec had no latency attribute. The spec has one, it is in seconds rather than milliseconds, and the code and its tests are corrected.
+The first version of `run_recorder.py` got this wrong. It invented `app.gen_ai.ttft_ms`, because the author assumed no spec attribute existed. One exists, in seconds. The code and tests are corrected.
 
-There are matching histograms, `gen_ai.client.operation.time_to_first_chunk` and `gen_ai.client.operation.time_per_output_chunk`, both in seconds. One caution if you adopt the second: its recommended buckets start at 10ms and then double, while real inter-chunk gaps cluster between 10 and 50ms, so nearly everything lands in the first two buckets. Override the boundaries.
+The matching histograms are `gen_ai.client.operation.time_to_first_chunk` and `gen_ai.client.operation.time_per_output_chunk`, in seconds. For the second, the recommended buckets start at 10 ms and double. Real gaps between chunks are mostly 10 to 50 ms, so nearly all samples land in two buckets. Set your own boundaries.
 
 ### The standard is not implemented, and you can check
 
-The specification repository publishes a generated conformance report: 13 real client libraries run against a mock server, with the telemetry captured and validated.
+The specification repository publishes a generated conformance report. It runs 13 real client libraries against a mock server and validates their telemetry.
 
 ```
   gen_ai.operation.name        12-13 of 13 libraries
@@ -224,35 +258,35 @@ The specification repository publishes a generated conformance report: 13 real c
   gen_ai.request.temperature                 one of 13
 ```
 
-This is not "untested". The reference scenario for one provider **does** exercise streaming, with `stream=True` and usage included, and still never sets the first-token attribute. The reference implementation does not follow its own recommendation.
+The reference scenario for one provider **does** stream, with `stream=True` and usage included. It still never sets the first-token attribute. So the reference implementation does not follow its own recommendation.
 
-**So plan to instrument latency yourself.** That is what `run_recorder.py` is.
+**Plan to instrument latency in your own code.** `run_recorder.py` does that.
 
-### Everyone means something different by "inter-token latency"
+### "Inter-token latency" has two meanings
 
-Before you compare any two latency numbers, find out which definition produced them. Reading the benchmark harnesses shipped by the serving engines and the GPU vendor tools, there are two incompatible meanings in circulation, and they share a name.
+Before you compare two latency numbers, find the definition behind each. Serving-engine benchmarks and a GPU vendor's tool use one name for two things:
 
 ```
 ┌────────────────────┬──────────────────────────────────────────────────────┐
 │ definition A       │ the gap between two CHUNKS. One sample per chunk.    │
 │                    │ Its p99 catches a single slow chunk.                 │
-│ definition B       │ (total - ttft) / (tokens - 1). One sample per         │
+│ definition B       │ (total - ttft) / (tokens - 1). One sample per        │
 │                    │ REQUEST, already averaged. Its p99 cannot see a      │
 │                    │ single slow chunk, because the average absorbed it.  │
 └────────────────────┴──────────────────────────────────────────────────────┘
 ```
 
-One serving engine's harness calls definition A "ITL". One GPU vendor's tool calls definition A "ICL" and reserves "ITL" for definition B. That vendor's own documentation states the distinction plainly: streaming chunks can contain multiple tokens, so one metric uses token count and the other uses chunk arrival times.
+One serving engine's benchmark calls definition A "ITL". The GPU vendor's tool calls definition A "ICL" and definition B "ITL". Its documentation explains that chunks can hold several tokens, so one metric counts tokens and the other times chunks.
 
-One serving engine contradicts **itself**: its inter-token metric appends one sample per engine iteration even when an iteration emits several tokens under speculative decoding, while its time-per-output-token metric divides by tokens. On that server the mean of the first does not equal the second.
+One serving engine even disagrees with **itself**. Its inter-token metric adds one sample per engine iteration. Under speculative decoding, one iteration can emit several tokens. Its time-per-output-token metric divides by tokens. So the two means differ on that server.
 
-**Pick one definition, write it down beside the metric, and never compare across tools without checking.** This is why Phase 4 insisted on one client against both servers.
+**Pick one definition, and write it next to the metric.** For this reason, Phase 4 section 4.3 used one client for both servers.
 
-### Recording failures so you can tell them apart later
+### Record failures so you can tell them apart later
 
-The spec defines `error.type` and enumerates exactly one well-known value, `_OTHER`. You must define your own vocabulary, and the common instrumentation fills it with the exception class name rather than anything semantic.
+The spec's `error.type` lists one well-known value, `_OTHER`. You must define your own values. Common instrumentation stores the exception class name, which says little.
 
-Four failures, represented three different ways:
+Four failures appear in three forms:
 
 ```
 ┌──────────────────┬─────────────────────────────────────────────────────────┐
@@ -265,13 +299,33 @@ Four failures, represented three different ways:
 └──────────────────┴─────────────────────────────────────────────────────────┘
 ```
 
-The truncation row is the one that matters most, and `run_recorder.py` asserts it in a test. If you map `finish_reason == "length"` to an error, your error rate counts every long answer as an outage and your real error rate disappears into the noise. Use the status field: completed, incomplete, or failed.
+The truncation row matters most. If you map `finish_reason == "length"` to an error, every long answer counts as an outage, and real errors get lost.
 
-One more rule worth implementing. If a stream ends before a finish reason arrives, the spec says to report `error` **in that position** rather than omitting it. Silence and failure must not look the same.
+```python
+# WRONG: a truncated answer counted as a failure.
+if rec.error_kind or rec.finish_reason == "length":
+    attrs["error.type"] = rec.error_kind
+    attrs["gen_ai.response.status"] = "failed"
+
+# RIGHT: from run_recorder.py:253-259, unchanged.
+if rec.error_kind:
+    attrs["error.type"] = rec.error_kind
+    attrs["gen_ai.response.status"] = "failed"
+elif rec.finish_reason == "length":
+    attrs["gen_ai.response.status"] = "incomplete"
+else:
+    attrs["gen_ai.response.status"] = "completed"
+```
+
+This review ran the WRONG version in a copy on 2026-09-17. The self-test printed `[FAIL] a truncated answer is 'incomplete', not an error` and `1 FAILED`. The `slo_report.py` demo ledger has 14 errors and 36 truncations in 2,000 records. With the same rule, availability drops from 99.30% to 97.50%. The burn against 99.5% rises from 1.40x to 5.00x. E15 repeats the self-test run.
+
+Use the status field: completed, incomplete, or failed.
+
+If a stream ends before a finish reason arrives, the spec says to report `error` **in the finish-reason field**. Silence and failure must look different.
 
 ### Attribution: four axes, and only three have attribute names
 
-When quality drops, the question is always the same. What changed? There are four possible answers and the standard covers three.
+When quality drops, ask what changed. There are four possible answers. The standard names three.
 
 ```
   the MODEL      gen_ai.request.model  AND  gen_ai.response.model
@@ -281,33 +335,37 @@ When quality drops, the question is always the same. What changed? There are fou
   INFRASTRUCTURE
 ```
 
-**Record both model fields and alert when they diverge.** The request field is what you asked for; the response field is what answered. They differ when the provider routes elsewhere, and that divergence is the cheapest silent-change detector you can build. `run_recorder.py` now takes both, and a test asserts they are recorded separately.
+The two prompt attributes are real. They are defined in `model/gen-ai/registry.yaml` at commit `c88d504`, checked on 2026-09-17. `run_recorder.py` does not emit them yet.
 
-**The fourth axis is real, and one provider documents it with unusual honesty.** Pinning a model id does not pin behaviour:
+**Record both model fields, and alert when they differ.** The request field is what you asked for. The response field is what answered. They differ when the provider routes elsewhere. That is the cheapest detector of silent changes. `otel_attributes` takes both, and a test checks them. The ledger record itself stores only the requested model.
+
+**Anthropic documents the fourth axis.** Pinning a model ID does not pin behaviour:
 
 > Model weights are fixed for a given ID, but the serving infrastructure around the model can change over time. If you notice unexpected behavioral differences on a previously stable model ID, an infrastructure update is the most likely cause.
 
-Phase 5.6 cited a postmortem where exactly that happened: three infrastructure bugs degraded output for weeks with no model, prompt, or data change.
+Section 5.6 cites a postmortem where this happened. Three infrastructure bugs degraded output for weeks, with no model, prompt, or data change.
 
-**There is no attribute for which corpus version your retrieval returned.** The spec has a data-source identifier, not a version. If your knowledge base changes, you must invent the key yourself. Do it before you need it.
+**No attribute records the corpus version your retrieval used.** The spec has a data-source identifier, not a version. Invent the key before you need it.
 
 ### Your noise floor
 
-Before attributing any change, subtract the noise. A 2025 investigation ran 1,000 completions at **temperature 0** on a shared endpoint and got **80 unique completions**, with divergence first appearing around the 103rd token. The cause is that batch size varies with load and the kernels are not batch-invariant.
+Measure the variation that happens with no change. In 2025, Thinking Machines Lab sent one prompt 1,000 times at **temperature 0** to a shared endpoint. Each completion had 1,000 tokens. It got **80 unique completions**. The batch size changes with load, and the GPU kernels are not batch-invariant. A batch-invariant kernel gives the same result at any batch size.
 
-So roughly 8% of your completions can differ from the most common one with nothing changed at all. Any quality alert that fires below that threshold is firing on physics.
+This does not mean that 8% of answers differ. The most common completion appeared only **78 times**, so 922 of 1,000 differed from it. All were identical for 102 tokens. At token 103, 992 went one way and 8 another.
 
-And on sample size: to detect a 3 percentage-point difference at 95% confidence with 80% power, published arithmetic puts the requirement near **1,000 independent questions**. A 50-item eval set cannot see a 3-point regression.
+So exact-text comparison of long outputs flags almost every run. A quality alert needs a metric that tolerates this. Measure your floor: send one input many times, and score each output with your quality metric.
+
+For sample size, "Adding Error Bars to Evals" gives the arithmetic. Detecting a 3 percentage-point difference at 95% confidence and 80% power takes about **1,000 independent questions**. A 50-item set cannot see a 3-point regression.
 
 ### What to record, and what it costs
 
-The spec gives three patterns for prompt and completion content, and is explicit about which belongs where:
+The spec gives three options for prompt and completion content:
 
 1. **Do not record content.** The default.
-2. **Record it on span attributes.** Suited to pre-production.
-3. **Store content externally and record a reference.** Recommended for production.
+2. **Record content on span attributes.** For pre-production.
+3. **Store content outside the trace, and record a reference.** Recommended for production.
 
-I measured the difference on realistic prose, encoded as the wire format, gzipped, averaged over five seeds:
+The author measured span sizes on realistic prose, in the wire format, gzipped, averaged over five seeds. The script is not in `code/`, so this review could not re-run it.
 
 ```
 ┌──────────────────────┬──────────────────┬──────────────────────────────┐
@@ -319,19 +377,19 @@ I measured the difference on realistic prose, encoded as the wire format, gzippe
 └──────────────────────┴──────────────────┴──────────────────────────────┘
 ```
 
-**Metadata cost is flat at roughly 1,450 uncompressed bytes per span regardless of prompt size.** The span shape does not grow. Only content does, and for a retrieval-sized prompt it costs 430 times more.
+**Metadata stays near 1,450 uncompressed bytes per span at every prompt size.** Only content grows. For a retrieval-sized prompt, it makes the span 430 times larger.
 
-At ten requests per second, that is about 2.8 GB a month for metadata against 1,222 GB with content.
+At ten requests per second, a month has 25,920,000 spans. For the 30,000-token row, that is about 2.8 GB of metadata, or about 1,222 GB with content.
 
-**A trap that follows from those sizes.** The default collector receive limit is 4 MiB per request and the default export batch is 512 spans. At 4,000 input tokens with content, 512 spans is roughly 11 MB, which exceeds the limit. Turning on content capture with default batch settings silently fails to export on any retrieval-sized workload. Lower the batch size or raise the limit.
+**These sizes break export.** The default OpenTelemetry Collector limit is 4 MiB per request, and the default export batch is 512 spans. At 4,000 input tokens with content, 512 spans are about 11 MB. With default batch settings, content capture fails to export on any retrieval-sized workload, and no error appears. Lower the batch size, or raise the limit.
 
-**How much bigger is an LLM span?** Two unrelated codebases, a vendor blog and an open-source tracing project, independently arrive at roughly **50 KB per LLM span** as a working figure. A conventional tracing project documents roughly **500 bytes** for an ordinary span. That is two orders of magnitude.
+**How much larger is an LLM span?** Two unrelated sources, a vendor blog and an open-source tracing project, use about **50 KB** per LLM span. A conventional tracing project documents about **500 bytes** per ordinary span. That is a factor of 100.
 
-One vendor prices the difference on a single page, at the same retention window: **$350 per million** LLM spans against **$1.70 per million** ordinary indexed spans. Roughly 206 times, same company, same page. Prompts and completions are a different cost class, and the market has priced it.
+One vendor's pricing page, at one retention period, charges **$350 per million** LLM spans and **$1.70 per million** ordinary indexed spans. That is about 206 times more.
 
-### What to sample, and the trap in how
+### What to sample, and the sampling trap
 
-The only published head-sampling recommendation I could find is straightforward:
+Head sampling decides whether to keep a trace when it starts. Tail sampling decides after it ends, so it can keep all errors. The only published head-sampling recommendation found:
 
 ```
   development and staging          keep everything
@@ -340,23 +398,21 @@ The only published head-sampling recommendation I could find is straightforward:
                                    collector for errors and slow requests
 ```
 
-Two rules go with it.
+**Sample the spans, and keep the metrics complete.** One vendor documents that its token and cost metrics use 100% of traffic, even with sampling. The sizes above show why this works. Metadata stays near 1,450 bytes per span, so counters and histograms are cheap to keep whole.
 
-**Sample the spans, keep the metrics whole.** One vendor's sampling is explicitly documented as not affecting token and cost metrics, which stay based on 100% of traffic. My measurements say why that split works: metadata is flat at about 1,450 bytes per span no matter how large the prompt is, so counters and latency histograms are cheap enough to keep complete while you sample the expensive content.
+**Use parent-based ratio sampling, never plain ratio sampling.** The plain sampler decides per span. It splits a multi-span agent trace into disconnected pieces.
 
-**Use parent-based ratio sampling, never bare ratio sampling.** With the plain ratio sampler, each span is sampled independently, which shreds a multi-span agent trace into disconnected fragments. An agent loop is exactly the shape that breaks.
-
-And the sentence to quote when someone objects to sampling at all:
+When someone objects to sampling, quote this:
 
 > Sampling 20% of traces doesn't mean you only see 20% of failures. It means you see a statistically representative sample of your application's behaviour.
 
-Note what no tool ships: **a default sample rate for LLM traces**. Every platform I checked defaults to keeping everything and leaves the rate to you. That is a decision delegated, not a decision made.
+No tool ships **a default sample rate for LLM traces**. Every platform checked keeps everything by default. The rate is your decision.
 
-**And the gap you will hit.** The spec recommends storing content externally and recording a reference, and the section describing how to record that reference is, at the commit I read, literally marked `TODO`. There is no standard attribute for the pointer. Invent one, namespaced, and write down that you did.
+**One gap remains.** The spec recommends an external reference for content. At the commit the author read, the section on recording that reference was marked `TODO`. Invent a namespaced attribute, and write down that you did.
 
 ### The minimum useful record
 
-Everything above reduces to this. `run_recorder.py` writes it, `slo_report.py` reads it.
+`run_recorder.py` writes most of this record, and `slo_report.py` reads it. Its ledger has no prompt name, prompt version, or answering model yet. Add them in your own recorder.
 
 ```
   identity     model requested, model that answered, provider, route,
@@ -369,40 +425,51 @@ Everything above reduces to this. `run_recorder.py` writes it, `slo_report.py` r
   derived      cache hit rate, stored rather than computed at query time
 ```
 
-One production write-up gives the best reason for the outcome fields, and it is broader than it first appears: record all errors, **not just when the call failed, but when its result was invalid and caused an error downstream**. An LLM call that returns unparseable JSON is a success at the HTTP layer and a failure at the product layer. Only your record can tell those apart.
+A Honeycomb write-up gives the reason for the outcome fields. Record all errors, **not just when the call failed, but when its result was invalid and caused an error downstream**. A call that returns JSON you cannot parse succeeds at the HTTP layer and fails at the product layer. Only your record shows that.
 
-**The sentence to remember:** the client sees chunks, the server sees tokens, and any metric that confuses the two is comparing numbers that were never the same quantity.
+**The sentence to remember:** the client sees chunks, and the server sees tokens. A metric that mixes them compares different quantities.
 
-**The trap:** mapping a finish reason of "length" to an error. Truncation is a completed request with an incomplete status, and treating it as an outage buries your real error rate.
+**The trap:** mapping a finish reason of "length" to an error. Truncation is a completed request with an incomplete status. Counting it as an outage hides your real error rate.
 
-**Try this now:** run `python phase05_operations/run_recorder.py --self-test` and read the check named "first-token uses the SPEC name, not an invented one". That test exists because the first version of this file invented one.
+**Try this now:** run the self-test. Read the check "first-token uses the SPEC name, not an invented one". It exists because the first version invented a name.
+
+```bash
+python phase05_operations/run_recorder.py --self-test
+```
+
 ---
 
 ## 5.6 — Fallbacks (the pattern you will reach for, and usually should not)
 
-Why this matters: when the provider fails, everyone's instinct is the same. Send it somewhere else. That instinct has a well-documented failure history, and the LLM version is worse than the general case because the fallback can succeed and still be wrong.
+Why this matters: when the provider fails, most engineers want to send the request elsewhere. That idea has a long record of failures. On an LLM, the fallback can also succeed with a wrong answer.
 
-### Start with the counter-argument
+### Start with the argument against
 
-A large cloud engineering organisation publishes a piece arguing against fallback specifically. It is worth reading before you write any, and its central story is from around 2001.
+The Amazon Builders' Library article "Avoiding fallback in distributed systems" argues against fallback. Its main story is from 2001.
 
-Their retail site cached shipping speeds on each web server, and fell back to the database when the cache failed. One day the caches all failed at about the same time. Every web server went to the database directly, the database locked up, and:
+Amazon's retail website cached shipping speeds on each web server. When the cache failed, a server used the database instead. One day, all caches failed at about the same time. Every web server called the database, the database locked up, and:
 
-> The fallback turned a partial website outage (not being able to display shipping speeds) into a full-site outage (no pages loaded at all) and took down the entire fulfillment network in the back end.
+> The fallback turned a partial website outage (not being able to display shipping speeds) into a full-site outage (no pages loaded at all) and took down the entire Amazon fulfillment network in the back end.
 
-Their diagnosis is one sentence long and it generalises:
+Their diagnosis applies widely:
 
 > If hitting the database directly was more reliable than going through the cache, why bother with the cache in the first place?
 
-Their five objections, condensed: fallback paths are harder to test, can themselves fail, often make the outage worse, are frequently not worth the risk, and carry latent bugs that surface years later under an unlikely coincidence.
+The article gives five objections:
 
-**The test that makes a fallback trustworthy** is the useful part:
+1. Fallback is harder to test.
+2. The fallback can fail too.
+3. It often makes the outage worse.
+4. It is often not worth the risk.
+5. It hides bugs that appear years later.
+
+**The useful part is the test that makes a fallback safe:**
 
 > A service must run both the fallback and the non-fallback logic continuously. It must not merely run the fallback case but also treat it as an equally valid source of data.
 
-If your fallback path only executes during an incident, it is not a fallback. It is an untested branch that runs for the first time on your worst day.
+A fallback that runs only during incidents is untested code. It runs for the first time on your worst day.
 
-### Failover is not fallback, and that distinction saves you
+### Failover is not fallback
 
 ```
 ┌─────────────────┬──────────────────────────────────────────────────────┐
@@ -414,23 +481,23 @@ If your fallback path only executes during an incident, it is not a fallback. It
 └─────────────────┴──────────────────────────────────────────────────────┘
 ```
 
-Routing to a second deployment of the same model is failover. Routing to a cheaper model, a cached answer, or a retrieval-only path is fallback. The first is a configuration change. The second is a second product that you now maintain and rarely exercise.
+A second deployment of the same model is failover, a configuration change. A cheaper model, a cached answer, or a retrieval-only path is fallback. That is a second product you must maintain, and it rarely runs.
 
-There is a narrow, bounded form of fallback that is defensible: serving the last known good value from the **same** mechanism when it errors. That is not switching mechanisms, and it is bounded by how stale you allow the value to be.
+One narrow fallback is defensible: serve the last known good value from the **same** mechanism when it fails. The allowed staleness sets the limit.
 
 ### The LLM version has a failure mode the general case does not
 
-A general fallback either works or errors. An LLM fallback can return a confident, fluent, wrong answer, and nothing in your monitoring turns red.
+A general fallback works or returns an error. An LLM fallback can return a confident, fluent, wrong answer, and no monitor turns red.
 
-One vendor's semantic-cache documentation states the risk more plainly than any third-party article:
+Microsoft's documentation for the Azure API Management semantic cache states the risk. A semantic cache returns a stored answer for a similar question:
 
 > Because semantic caching returns responses based on similarity (not exact match), it can surface responses that are incorrect, outdated, or unsafe for the current request.
 
-Its own guidance: start the similarity threshold at **0.05**, and note that a threshold above **0.2** risks mismatches. Also, a semantic cache without a per-user or per-group key is a cross-tenant data leak, since one user's answer can be served to another.
+Its guidance: start the score threshold at **0.05**. Above **0.2**, cache mismatches become likely. Without a per-user or per-group key, the cache can serve one user's answer to another.
 
 ### The evidence that degraded output is real and hard to detect
 
-In September 2025 a major provider published a postmortem on three overlapping infrastructure bugs that degraded output quality. Not availability. Output.
+In September 2025, Anthropic published a postmortem on three overlapping infrastructure bugs. They degraded output quality, not availability.
 
 ```
   a routing error sent some requests to servers configured for a
@@ -441,43 +508,43 @@ In September 2025 a major provider published a postmortem on three overlapping i
                                   25 Aug - 12 Sep 2025
 ```
 
-At the worst hour, **16%** of one model's requests were affected. Two sentences from that postmortem belong on a wall:
+At the worst hour, **16%** of Sonnet 4 requests were affected. Two quotes from the postmortem:
 
 > We never reduce model quality due to demand, time of day, or server load.
 
 > The evaluations we ran simply didn't capture the degradation users were reporting, in part because Claude often recovers well from isolated mistakes.
 
-That second one is the whole argument for section 5.4's quality indicator. The provider's own evaluation suite missed a real, weeks-long quality regression. Yours will too, unless quality is an indicator with a budget rather than a number someone checks occasionally.
+It also says Anthropic relied too heavily on noisy evaluations. So the provider's own suite missed a regression that lasted weeks. That is the reason for the quality indicator in section 5.4. Your suite will miss one too, unless quality has a budget.
 
 ### Cross-provider failover is not a configuration change
 
-Four things break when you send the same prompt to a different provider.
+Four things break when the same prompt goes to another provider.
 
-**1. The prompt is a different prompt.** A study of meaning-preserving format changes, things like separators and casing, measured differences of **up to 76 accuracy points** on one model. More importantly for failover, it found that format performance correlates only weakly between models, and that the relative ordering of two formats is preserved across models only about **57%** of the time. A prompt tuned on provider A carries no guarantee on provider B.
+**1. The prompt changes meaning.** A study of meaning-preserving format changes measured up to **76 accuracy points** of difference on one model. Format performance correlates weakly between models. Two formats keep their order across models only about **57%** of the time.
 
-**2. The token count changes, so your cost model and your context headroom are both wrong.** One provider's own documentation states that its newer models' tokenizer produces about **30% more tokens for the same text** than its older ones. That is inside one provider. Across providers the tokenizer is entirely different. Their recommended method is the only reliable one: count the same request twice, once against each model, and compare.
+**2. The token count changes.** Your cost model and context headroom are then wrong. Anthropic states that its newer tokenizer produces about **30% more tokens for the same text** than its older one. Across providers, tokenizers differ entirely. The reliable method: count the same request against each model, and compare.
 
-**3. The output contract differs.** Tool schemas use different field names, one provider returns parsed arguments while another returns a JSON string you must parse, and recursive schemas are supported by one and rejected with a 400 by another. Even the hidden system-prompt overhead for tool use varies from about 286 to 804 tokens across models of a single provider.
+**3. The output contract changes.** Tool schemas use different field names. One provider returns parsed arguments, another a JSON string. One supports recursive schemas, and another rejects them with a 400. Hidden tool-use prompt overhead ranges from about 286 to 804 tokens across one provider's models.
 
-**4. Forcing a format changes accuracy, in a direction you must measure.** The same study set from Phase 2 is worth recalling here: constraining output helped classification tasks and hurt reasoning tasks. If provider A gives you JSON through a tool call and provider B through a JSON mode, you have changed the contract as well as the model.
+**4. Forcing a format changes accuracy.** Phase 2 section 2.5 showed constraints helping classification and hurting reasoning. So a tool call on one provider and a JSON mode on another changes the contract too.
 
-### If you build one anyway, build these four things
+### If you build a fallback anyway, build these four things
 
-**Split the fallback by error class.** A context-window overflow needs a larger-context model. A content-policy refusal needs a different policy, or no fallback at all. A 429 needs a different deployment. One production gateway models exactly this, with separate fallback chains per error type. A single catch-all chain sends a context overflow to a model with the same limit.
+**Split the fallback by error class.** A context overflow needs a larger-context model. A content-policy refusal needs a different policy, or no fallback. A 429 needs another deployment. One production gateway has a separate fallback chain per error type. A single chain sends a context overflow to a model with the same limit.
 
-**Never catch every exception.** One popular framework's fallback helper defaults to handling `Exception`, which means a bug in your own parsing code silently triggers a fallback. That is precisely the latent-bug failure the cloud article warns about. Name the exceptions you mean.
+**Never catch every exception.** One popular framework's fallback helper handles `Exception` by default. Then a bug in your parsing code starts a fallback silently. Name the exceptions you mean.
 
-**Make the degraded path visible in the response.** One gateway returns a header saying which step answered: the primary, or fallback number one. Without something equivalent you cannot measure how often you serve degraded output, which means you cannot put it in section 5.4's quality indicator. Your run record already has a `model` field. Populate it with the model that actually answered, not the one you asked for.
+**Show the degraded path in the response.** One gateway returns a header naming the step that answered. Without that, you cannot measure degraded output or put it in the section 5.4 quality indicator. Fill the record's `model` field with the model that answered.
 
-**Know that your circuit breakers do not agree with each other.** One vendor documents it plainly: breaker state is approximate because gateway instances do not synchronise. N replicas means N independent breakers, each seeing a fraction of the traffic and each tripping on its own evidence. A published comparison found that independent per-client breakers trip at roughly half the rate you would predict from the global failure rate.
+**Your circuit breakers do not agree.** One vendor documents that breaker state is approximate, because gateway instances do not synchronise. N replicas are N breakers, each with part of the traffic. Marc Brooker found that independent breakers trip at about half the rate the global failure rate predicts.
 
-### The honest decision table
+### The decision table
 
 ```
 ┌──────────────────────────┬────────────────────────────────────────────┐
 │ situation                │ what to do                                 │
 ├──────────────────────────┼────────────────────────────────────────────┤
-│ one deployment is down   │ FAILOVER to another deployment of the same  │
+│ one deployment is down   │ FAILOVER to another deployment of the same │
 │                          │ model. Safe, same code path.               │
 │ the provider is down     │ Fail the request, or serve a bounded stale │
 │                          │ answer from the same mechanism, and say so │
@@ -485,266 +552,271 @@ Four things break when you send the same prompt to a different provider.
 │ context overflow         │ Compact. Phase 2 section 2.6. Not a        │
 │                          │ different model.                           │
 │ budget exceeded          │ Degrade deliberately and log it loudly.    │
-│                          │ Phase 3B.                                  │
-│ you want a cheaper model │ That is routing, not fallback. Phase 3B,   │
-│                          │ and it needs the control group.            │
+│                          │ Phase 3 section 3.5.                       │
+│ you want a cheaper model │ That is routing, not fallback. Phase 3     │
+│                          │ section 3.4, with its control group.       │
 └──────────────────────────┴────────────────────────────────────────────┘
 ```
 
-Most rows are not fallback. That is the point.
+Most rows are not fallback.
 
-**The sentence to remember:** failover keeps the mechanism and changes the instance, fallback changes the mechanism, and only the second one has a history of turning a partial outage into a total one.
+**The sentence to remember:** failover changes the instance, and fallback changes the mechanism. Only fallback has a record of turning a partial outage into a total one.
 
-**The trap:** a fallback path that only runs during incidents. It is untested code executing for the first time under your worst conditions, and on an LLM it can succeed and still be wrong.
+**The trap:** a fallback path that runs only during incidents. It is untested code running first in your worst conditions. On an LLM, it can also succeed and be wrong.
 
-**Try this now:** find any fallback in your own code. Answer two questions. Does it run continuously against real traffic, or only on failure? And can you tell from a stored record which path answered?
+**Try this now:** find a fallback in your own code. Does it run all the time against real traffic, or only on failure? Can a stored record show which path answered?
+
 ---
 
 ## 🧪 Hands-on lab — part B
 
-Six of seven exercises are offline. Only E13 needs a key.
+Seven of the eight exercises are offline. Only E13 needs a key.
+
+**Live-run status:** every offline command below was run on 2026-09-17, and the Expected lines match. No API key was available, so E13 was not run.
 
 - [ ] **E8 (offline).** See what an average hides.
   - Run: `python phase05_operations/run_recorder.py --demo --role cache_demo`
-  - Expected: ITL p50 about 24ms, max gap 900ms, and a note saying the worst gap is about 38x the median.
-  - Teaches: the freeze is invisible in TTFT, in total latency, and in any mean.
+  - Expected: `ITL  p50    24ms  p99    900ms  MAX GAP    900ms`, and a note that the worst gap is 37x the median.
+  - Teaches: TTFT, total latency and any mean all hide the freeze.
 
-- [ ] **E9 (offline).** Find the incident three indicators miss.
+- [ ] **E9 (offline).** Find the incident that TTFT misses.
   - Run: `python phase05_operations/slo_report.py --demo`
-  - Expected: TTFT **passes** at 99.60% while the freeze indicator fails at 89.93% with a burn rate above 10.
-  - Teaches: availability and latency measure three quarters of nothing on an LLM feature.
+  - Expected: TTFT **passes** at 99.60%. The freeze indicator fails at 89.93%, with `burn 10.07x`.
+  - Teaches: availability and latency alone cannot see a frozen stream.
 
-- [ ] **E10 (offline).** Two windows, two different answers.
+- [ ] **E10 (offline).** Two windows, two answers.
   - Run: `python phase05_operations/slo_report.py --demo --window-minutes 300`
-  - Expected: the freeze indicator fails over the whole period and **passes** over the last 300 minutes, because the incident had already ended.
-  - Teaches: the long window sets severity, the short window says whether it is still happening. That difference is a page versus a note.
+  - Expected: the freeze indicator fails over the whole period. It **passes** at 99.83% over the last 300 minutes, 601 records, because the incident had ended.
+  - Expected: the block `BURN RATE, LAST 300 MINUTES (601 records)` shows `burn  0.17x` for the freeze indicator. The whole-period block shows `burn 10.07x`.
+  - Teaches: the long window sets severity. The short window shows whether it is still happening.
 
-- [ ] **E11 (offline).** Do the burn-rate arithmetic yourself.
-  - For a 99.9% target over 30 days, compute the burn rate implied by a 1% error rate. Then compute how long the budget lasts at that rate.
-  - Check your answer against the table in section 5.4, and against the script's own burn output.
-  - Teaches: burn rate is a ratio, not a mystery, and it turns a monthly report into an alert.
+- [ ] **E11 (offline).** Do the burn-rate arithmetic.
+  - For 99.9% over 30 days, compute the burn rate of a 1% error rate, and how long the budget lasts.
+  - Check against the section 5.4 table and the formula at `slo_report.py:347`.
+  - Expected: 1% ÷ 0.1% = burn 10. The budget lasts 30 ÷ 10 = 3 days.
+  - Teaches: burn rate is a ratio that turns a report into an alert.
 
 - [ ] **E12 (offline).** Read the naming decision.
-  - Open `otel_attributes` in `run_recorder.py`. Find the comment explaining chunk against token.
-  - Then run the self-test and find the check "first-token uses the SPEC name, not an invented one". That test exists because the first version of this file invented one.
+  - Open `otel_attributes` at `run_recorder.py:200`, and read the docstring on chunk and token.
+  - Run the self-test, and find "first-token uses the SPEC name, not an invented one".
   - Answer: why can a client not honestly report time to first **token**?
-  - Teaches: a chunk may carry several tokens or none, so the two quantities were never the same.
+  - Teaches: a chunk may carry several tokens or none.
 
 - [ ] **E13 (UNVERIFIED against a live provider).** Record a real call.
   - Run: `python phase05_operations/run_recorder.py --model <your-model> --role cheap --ledger runs.jsonl`
   - Then: `python phase05_operations/slo_report.py --ledger runs.jsonl`
-  - Expected: one JSON object per call, and an SLO table computed from your own traffic rather than a demo.
+  - Expected: one JSON object per call, and an SLO table from your own traffic.
   - Costs at most: about $0.01.
-  - Teaches: the ledger is the deliverable. Everything else reads it.
+  - Teaches: the ledger is the deliverable.
 
-- [ ] **E14 (offline).** Price your own telemetry before you turn it on.
-  - Take your median prompt and completion sizes. Using the table in section 5.5, estimate bytes per span with content and without.
-  - Multiply by your request rate to get a monthly figure. Then compare against the flat metadata cost of about 1,450 bytes per span.
-  - Teaches: metadata is flat regardless of prompt size; only content grows, and for retrieval-sized prompts it costs hundreds of times more.
+- [ ] **E14 (offline).** Price your telemetry before you turn it on.
+  - Use your median prompt and completion sizes and the section 5.5 table to estimate bytes per span, with and without content.
+  - Multiply by your request rate for a monthly figure. Compare with the flat 1,450 bytes of metadata.
+  - Teaches: only content grows, and for retrieval-sized prompts it costs hundreds of times more.
+
+- [ ] **E15 (break-it, offline).** Count truncation as an error, and watch the test catch it.
+  - Name a copy next to the original, so its imports work: `B=phase05_operations/rr_broken.py`
+  - Make the WRONG version from section 5.5: `sed 's/    if rec.error_kind:$/    if rec.error_kind or rec.finish_reason == "length":/' phase05_operations/run_recorder.py > $B`
+  - Run: `python $B --self-test`
+  - Expected: `[FAIL] a truncated answer is 'incomplete', not an error`, then `1 FAILED`, exit code 1. The other 16 checks pass.
+  - Clean up: `rm $B`
+  - Teaches: on the demo ledger, this one line would drop availability from 99.30% to 97.50% with no new failures.
+
 ---
 
 ## 🔍 Check it yourself
 
-1. Open `otel_attributes` in `run_recorder.py`. Two keys use an `app.` prefix. Name both, explain why each one is not on a standard name, and say what would break if you had used an unprefixed `gen_ai.` name instead.
-2. In the same function, find the branch handling `finish_reason == "length"`. State what it sets and what it deliberately does **not** set, and describe the metric that would be wrong if you removed that branch.
-3. In `slo_report.py`, find `evaluate`. Three of the four indicators compute their denominator from `served` rather than from all rows. Explain why, and name the indicator that does not.
-4. In your own telemetry: find where an LLM call is recorded. Does it store the model you **requested**, the model that **answered**, or only one of them? If only one, work out what silent change you currently cannot detect.
+1. In `otel_attributes` in `run_recorder.py`, two keys use an `app.` prefix, at lines 266 and 267. Name both. Explain why neither has a standard name, and what could break with an unprefixed `gen_ai.` name.
+2. In the same function, find the `finish_reason == "length"` branch at line 256. State what it sets, and what it does **not** set. Name the metric that would be wrong without it.
+3. In `slo_report.py`, find `evaluate` at line 94. Three indicators take their denominator from `served`, not from all rows. Explain why, and name the indicator that uses all rows.
+4. In your own telemetry, does an LLM call store the model you **requested**, the model that **answered**, or one of them? If one, which silent change can you not detect?
 
 ---
 
 ## ✅ Checkpoint 5B — answer in your own words
 
-1. Show the math. Your quality SLO is 99% over 30 days, measured as the proportion of answers that clear a judge threshold. In the last hour you measured 4% below threshold. (a) Compute the burn rate. (b) State how long the budget lasts at that rate. (c) Using the published table, say whether this should page someone, and what the confirming short window would be.
+1. Show the arithmetic. Your quality SLO is 99% over 30 days, counting answers that reach a judge threshold. In the last hour, 4% were below it. (a) Compute the burn rate. (b) How long does the budget last? (c) Using the published table, should this page someone? Name the confirming short window.
 
-2. A colleague proposes: "Our quality SLO is 99.9% of answers rated good by our judge." Give two independent reasons that target cannot be supported, using section 5.4. One reason is about the judge, one is about the task shape.
+2. A colleague proposes: "Our quality SLO is 99.9% of answers that our judge rates good." Give two reasons from section 5.4 why that cannot hold. One is about the judge, and one is about task shape.
 
-3. This is broken. Your dashboard shows availability at 99.9%, TTFT p95 well inside target, and users are complaining that answers are worse this week. Nothing deployed. (a) Name the fourth attribution axis that could explain this. (b) Name the two telemetry fields whose divergence would confirm it. (c) State the noise floor you must clear before declaring a regression, and where that number comes from. (d) Say why your existing eval suite may not catch it, citing what a provider said about its own suite.
+3. This is broken. Availability is 99.9%, and TTFT p95 is well inside target. Users say answers got worse this week. Nothing was deployed. (a) Name the fourth attribution axis. (b) Name the two fields whose difference would confirm it. (c) Using the temperature-0 study, explain how you set a noise floor. (d) Say why your eval suite may miss this, citing a provider's statement about its own suite.
 
-4. Show the math. Your median request is 4,000 input and 500 output tokens, and you serve 10 requests per second. (a) Using section 5.5, estimate the monthly telemetry volume with content capture on and off. (b) State the ratio. (c) Your collector accepts 4 MiB per request and batches 512 spans. State whether that works with content on, and what you would change.
+4. Show the arithmetic. Your median request is 4,000 input and 500 output tokens, at 10 requests per second. (a) Use section 5.5 to estimate monthly telemetry volume, with content capture on and off. (b) State the ratio. (c) Your collector accepts 4 MiB per request and batches 512 spans. Does that work with content on? What would you change?
 
-5. Design it. You must alert on silent quality regressions. Write the design. Cover: the indicator and how a continuous score becomes a good-event ratio, the two windows and burn rates, the noise floor you subtract, the minimum size of your labelled set and why, and the one thing you will record so that a firing alert can be attributed rather than merely observed.
+5. Design it. You must alert on silent quality regressions. Cover five points:
+   - the indicator, and how a continuous score becomes a ratio of good events
+   - the two windows and burn rates
+   - how you measure the noise floor
+   - the minimum labelled-set size, and why
+   - what you record so a firing alert can be attributed
 
-6. A colleague says: "We will fall back to a cheaper model when the primary fails, so we are covered." Give three objections from section 5.6. One is about testing, one is about what a failed fallback looks like on an LLM specifically, and one is about the default behaviour of a popular fallback helper.
+6. A colleague says: "We will fall back to a cheaper model when the primary fails. So we are covered." Give three objections from section 5.6. Cover testing, how a failed LLM fallback looks, and a popular helper's default.
 
 <details>
 <summary>Answer sketches — write yours first, then compare</summary>
 
-1. (a) The budget is 1%. A 4% bad rate is a burn rate of 4. (b) At burn 4 the 30-day budget lasts 30/4, about 7.5 days. (c) The published page thresholds are 14.4 and 6. A burn of 4 clears neither, so this is a ticket rather than a page; the ticket tier uses a 3-day long window confirmed by a 6-hour short window. If the rate rose to 6% it would cross the 6x page threshold on the 6-hour window, confirmed over 30 minutes.
+1. (a) The budget is 1%, so the burn is 4% ÷ 1% = 4. (b) 30 ÷ 4 = 7.5 days. (c) The page thresholds are 14.4 and 6. A burn of 4 is below both, so it is a ticket: a 3-day window confirmed over 6 hours. A 6% bad rate would give burn 6, the 6-hour page, confirmed over 30 minutes.
 
-2. First, the judge. The best-known study puts model-judge agreement with human experts at about 85%, against 81% agreement between two humans. An instrument that disagrees with people roughly 15% of the time cannot certify 99.9% on individual requests. Second, the task shape. If the user's task needs several steps, per-call quality compounds: at 75% per step, three consecutive steps succeed about 42% of the time. Set the target on the outcome the user experiences, and as an aggregate rate rather than a per-request guarantee.
+2. First, the judge agrees with human experts about 85% of the time, and two humans agree 81%, with ties left out. With ties, the figures are 66% and 63%. A judge that disagrees with people on 15% or more of cases cannot certify 99.9% per request. Second, per-step quality multiplies over steps. At 75% per step, three steps succeed about 42% of the time. Set an aggregate target on the outcome the user sees.
 
-3. (a) The serving infrastructure. Model weights are fixed for a given id, but routing, classifiers and sampling logic around the model can change. (b) `gen_ai.request.model` against `gen_ai.response.model`. Divergence means the provider answered with something other than what you asked for. (c) About 8%. A study ran 1,000 completions at temperature 0 on a shared endpoint and got 80 unique completions, because batch size varies with load and the kernels are not batch-invariant. (d) A provider published a postmortem on three infrastructure bugs that degraded output for weeks and said plainly that its own evaluations did not capture the degradation users reported, partly because the model recovers well from isolated mistakes and the evaluations were noisy.
+3. (a) The serving infrastructure. Weights are fixed for an ID, but the router, classifiers and sampling logic can change. (b) `gen_ai.request.model` and `gen_ai.response.model`. A difference means another model answered. (c) One prompt sent 1,000 times at temperature 0 gave 80 unique completions. The most common appeared only 78 times. The causes are load-dependent batch sizes and kernels that are not batch-invariant. So exact text is useless as a floor. Send one input many times, score each output with your metric, and use that spread. (d) Anthropic's postmortem said its evaluations missed what users reported. One reason: the model recovers well from isolated mistakes. It also said it relied too heavily on noisy evaluations.
 
-4. (a) At 4,000 in and 500 out, roughly 109 bytes per span compressed without content and about 6,932 with. At 10 requests per second that is about 2.8 GB a month against about 179 GB. (b) Roughly 64 times. (c) It does not work. Uncompressed, that span is about 21 KB, so 512 of them is about 11 MB against a 4 MiB limit, and exports fail silently. Lower the batch size to under 200, or raise the receive limit, or move content to external storage and record a reference.
+4. (a) About 109 compressed bytes per span without content, and 6,932 with it. A month at 10 requests per second has 25,920,000 spans. That is about 2.8 GB without content and about 180 GB with it. (b) About 64 times. (c) No. One uncompressed span is about 21 KB, so 512 spans are about 11 MB, above 4 MiB. Export fails silently. Lower the batch below 200, raise the limit, or store content outside the trace.
 
-5. The indicator is the proportion of sampled records whose evaluation score clears a stated threshold, not the mean score, because a continuous score has no error budget and a ratio does. Alert on two windows: a fast burn of 14.4 over one hour confirmed over five minutes to page, and a slow burn of 1 over three days confirmed over six hours to file a ticket. Subtract the roughly 8% same-input variation before treating a change as real. The labelled set needs roughly 1,000 independent items to detect a 3 percentage-point difference at 95% confidence with 80% power, so a 50-item set cannot see a small regression. Record the prompt name and version alongside the requested and answering model, so that a firing alert can be attributed to a prompt change, a model swap, or neither.
+5. The indicator is the proportion of sampled records whose score reaches a threshold. Use a ratio, not the mean, because only a ratio has an error budget. Page on burn 14.4 over one hour, confirmed over five minutes. Ticket on burn 1 over three days, confirmed over six hours. Measure the noise floor first: send the same inputs many times, unchanged, and record the score spread. The labelled set needs about 1,000 independent items for 3 points at 95% confidence and 80% power. 50 items are not enough. Record the prompt name and version, and both model fields. Then an alert points to a prompt change, a model change, or neither.
 
-6. First, a fallback path that only runs during incidents is untested code executing for the first time under your worst conditions; the published rule is that both paths must run continuously against real traffic. Second, on an LLM a fallback can succeed and still be wrong, returning a confident, fluent, incorrect answer with nothing in monitoring turning red, which is why a semantic cache vendor warns its own feature can surface responses that are incorrect, outdated or unsafe. Third, a popular fallback helper defaults to catching `Exception`, so a bug in your own parsing code silently triggers the fallback rather than surfacing as an error.
+6. First, a fallback that runs only during incidents is untested code on your worst day. Both paths must run all the time against real traffic. Second, an LLM fallback can succeed with a fluent, wrong answer, and no monitor turns red. A semantic-cache vendor warns its feature can return incorrect, outdated or unsafe responses. Third, a popular helper catches `Exception` by default, so your own parsing bug silently starts the fallback.
 
 </details>
+
 ---
 
 ## References & Further Learning
 
-Part A carries the retry, rate-limit and timeout references. This document carries SLOs, telemetry and fallback. All checked 2026-09-14.
+Part A holds the references for retries, rate limits and timeouts. This part holds SLOs, telemetry and fallback. All URLs were checked on 2026-09-14. This review fetched every URL again on 2026-09-17. One returned 404 and was replaced by its new location, which returned 200.
 
 ### SLOs and alerting
 
-**Alerting on SLOs** — Google SRE Workbook, chapter 5. https://sre.google/workbook/alerting-on-slos/
-The origin of the burn-rate numbers every observability product copies. Read table 5-8 first, then table 5-4, and skip the five approaches that exist to motivate the sixth.
-The recommended parameters for a 99.9% target over 30 days: page at burn **14.4** over a 1-hour window confirmed over 5 minutes, page at **6** over 6 hours confirmed over 30 minutes, ticket at **1** over 3 days confirmed over 6 hours. The sizing rule is that the short window is **one twelfth** of the long one.
+- **Alerting on SLOs, Google SRE Workbook, chapter 5** — https://sre.google/workbook/alerting-on-slos/
+  Focus on: table 5-8, then table 5-4. Skip the five approaches that only lead to the sixth. The source of the 14.4, 6 and 1 tiers and the one-twelfth rule.
 
-**Implementing SLOs** — Google SRE Workbook, chapter 2. https://sre.google/workbook/implementing-slos/
-The only place in the canon that names **Quality** as an indicator type, defined as the proportion of responses served in an undegraded state. That is the slot an LLM quality metric goes into. It also gives the four reasons a 100% target is wrong, which you will need in the room.
+- **Implementing SLOs, Google SRE Workbook, chapter 2** — https://sre.google/workbook/implementing-slos/
+  Focus on: the SLI types, including **Quality**, and the reasons against a 100% target.
 
-**Service Level Objectives** — Google SRE Book, chapter 4. https://sre.google/sre-book/service-level-objectives/
-Read "Indicators in Practice" for the multi-percentile pattern, 90% under X, 99% under 10X, 99.9% under 100X. It transfers directly to time to first token, and it is better than a single p95 because it says what the tail is allowed to look like.
+- **Service Level Objectives, Google SRE Book, chapter 4** — https://sre.google/sre-book/service-level-objectives/
+  Focus on: "Indicators in Practice", for the percentile ladder.
 
-**A product shipping an eval-score SLI** — https://pydantic.dev/docs/logfire/observe/service-levels/
-Worth reading as evidence of where practice is going: an indicator whose good event is an evaluation score reaching a threshold, sitting beside availability and latency, alerted on the same 14.4, 6 and 1 tiers. The design detail to copy is that the indicator is a **proportion clearing a threshold**, not a mean score.
+- **Set reliability targets for services and large language model providers, Pydantic Logfire documentation** — https://pydantic.dev/docs/logfire/observe/service-levels/
+  Focus on: the "AI quality (eval score)" SLI and its three burn tiers.
 
-**Judging LLM-as-a-Judge** — https://arxiv.org/abs/2306.05685
-Read before you put a number on a judge-based SLO. Model-judge agreement with human experts is about **85%**, against **81%** between two humans, and that 85% figure is for a setup that excludes ties; including them it falls to the mid sixties. It also documents position, verbosity and self-preference bias.
-The consequence: a judge cannot certify a very tight per-request quality target. It can support an aggregate rate.
+- **Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena, Zheng et al., 2023** — https://arxiv.org/abs/2306.05685
+  Focus on: the agreement tables. The 85% excludes ties. With ties, agreement falls to the mid sixties. It also documents position, verbosity and self-preference bias.
 
-**Measuring latency** — https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/latency
-The best published statement of how to measure, and the decomposition Phase 1 taught: total equals time to first token plus time between tokens multiplied by tokens generated. Its operational rule is the one to quote: always pair a latency metric with a token count, because a rise in total latency is often fully explained by longer output rather than a slower system.
-Verified absence: it states no absolute millisecond target. No major provider publishes a latency SLO.
+- **Azure OpenAI in Microsoft Foundry Models performance and latency, Microsoft Learn** — https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/latency
+  Focus on: the TTLT formula and the token-count rule. It states no millisecond target. No major provider publishes a latency SLO.
 
-**Revisiting Service Level Objectives and System Level Metrics in LLM Serving** — https://arxiv.org/abs/2410.14257
-Read it for the two ways a naive latency SLO is gamed: deliberately delaying tokens smooths the inter-token metric, and abandoning requests that will miss the target improves every percentile. Both improve the dashboard and hurt the product.
+- **Revisiting Service Level Objectives and System Level Metrics in Large Language Model Serving, 2024** — https://arxiv.org/abs/2410.14257
+  Focus on: the two ways to game a naive latency SLO.
 
-**The Impact of Response Latency and Task Type on Human-LLM Interaction** — https://arxiv.org/abs/2604.06183
-The result that should change your TTFT target. 240 participants, time to first token at 2, 9 and 20 seconds. Participants who waited 2 seconds rated the answers **less thoughtful and less useful** than those who waited longer. The authors frame latency as a tunable design variable and flag the ethics of exploiting that. Take the engineering lesson, leave the manipulation.
+- **The Impact of Response Latency and Task Type on Human-LLM Interaction, ACM CHI 2026** — https://arxiv.org/abs/2604.06183
+  Focus on: the 2, 9 and 20 second results and the ethics discussion. A new paper. This review checked only the abstract.
 
-**The classic thresholds and the two anchors.** 0.1 seconds feels instantaneous, 1 second keeps a train of thought, 10 seconds is the limit of attention: https://www.nngroup.com/articles/response-times-3-important-limits/, and cite the original, Miller 1968, not the popular restatement. For voice, human conversation has a modal gap between turns of about **200 milliseconds** (Levinson 2016, *Trends in Cognitive Sciences*). For text, adults read prose at roughly **238 words per minute** (Brysbaert 2019, a meta-analysis of 190 studies), which floors how slowly you can stream.
+- **Response Time Limits, Jakob Nielsen, Nielsen Norman Group** — https://www.nngroup.com/articles/response-times-3-important-limits/
+  Focus on: 0.1 s feels instant, 1 s keeps a train of thought, 10 s is the limit of attention. Cite the original, Miller 1968. The 200 ms turn gap is from Levinson 2016, *Trends in Cognitive Sciences*. The 238 words per minute is from Brysbaert 2019, a meta-analysis of 190 studies.
 
 ### Telemetry
 
-**The GenAI semantic conventions** — https://github.com/open-telemetry/semantic-conventions-genai
-Read the YAML models rather than the generated Markdown, and cite a commit, because there is no released version and every attribute is development stability.
-What to take: only two attributes are required; the span is named `{operation} {model}`; the span covers **all retries**, which is why your 429s are invisible by default; and the client-side latency attribute is `gen_ai.response.time_to_first_chunk`, in **seconds**.
-The naming decision is the lesson. Client side says chunk, server side says token, because a client cannot see tokens.
+- **OpenTelemetry GenAI semantic conventions** — https://github.com/open-telemetry/semantic-conventions-genai
+  Focus on: the YAML models, not the generated Markdown. Cite a commit, because nothing is released and every attribute is development stability. Also read `reference/reports/inference-span.md`, the conformance report with **zero of 13** for the first-token attribute.
 
-**The conformance report in the same repository** — `reference/reports/inference-span.md`
-The most useful file in the repo, because it is generated by running 13 real client libraries against a mock server. Token counts and finish reasons appear in 12 or 13 of 13. The first-token attribute appears in **zero of 13**, including in a scenario that does exercise streaming. Plan to instrument latency yourself.
+- **Model IDs and versioning, Anthropic documentation** — https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions
+  Focus on: "Model weights versus serving infrastructure". The old URL, `https://platform.claude.com/docs/en/build-with-claude/model-ids-and-versions`, returned 404 on 2026-09-17.
 
-**Model identifiers and versions** — https://platform.claude.com/docs/en/build-with-claude/model-ids-and-versions
-The most honest provider statement I found, and the reason for the fourth attribution axis: weights are fixed for a given id, but the serving infrastructure around the model can change, and an unexplained behaviour change on a stable id is most likely an infrastructure update.
+- **A postmortem of three recent issues, Anthropic, September 2025** — https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues
+  Focus on: the timeline, and why detection took so long.
 
-**A postmortem where quality dropped with no model change** — https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues
-Three overlapping infrastructure bugs degraded output for weeks. At the worst hour, 16% of one model's requests were affected. The sentence that justifies a quality indicator: their own evaluations did not capture the degradation users were reporting.
+- **Defeating Nondeterminism in LLM Inference, Thinking Machines Lab, 2025** — https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/
+  Focus on: the 1,000-completion experiment and its counts.
 
-**Defeating Nondeterminism in LLM Inference** — https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/
-Your noise floor. 1,000 completions at temperature 0 produced **80 unique completions**, because batch size varies with load and the kernels are not batch-invariant. Subtract this before attributing any change.
+- **Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations, 2024** — https://arxiv.org/abs/2411.00640
+  Focus on: the sample-size arithmetic. It also warns that changing temperature during an evaluation can triple the score variance.
 
-**Adding Error Bars to Evals** — https://arxiv.org/abs/2411.00640
-How many labelled items you need: roughly **1,000** to detect 3 percentage points at 95% confidence with 80% power. Also warns that changing temperature mid-evaluation can triple the variance of your score.
-
-**A production field list with reasons** — https://www.honeycomb.io/blog/improving-llms-production-observability
-The only engineering post I found that shows the attribute-setting code and gives a reason per field. The reason worth copying: record all errors, not just when the call failed, but when its result was invalid and caused an error downstream.
+- **Improving LLMs in Production With Observability, Honeycomb** — https://www.honeycomb.io/blog/improving-llms-production-observability
+  Focus on: the attribute-setting code, with a reason per field.
 
 ### Fallbacks
 
-**Avoiding fallback in distributed systems** — Amazon Builders' Library.
-Read it before writing any fallback. Its 2001 incident is the canonical story: a cache that fell back to the database took the whole site down when all caches failed at once. Its diagnosis generalises in one sentence, and its test is the useful part: both the fallback and the non-fallback path must run continuously against real traffic, or the fallback is untested code that runs for the first time during an incident.
-Access note: the canonical URL redirects to a JavaScript site that serves no article text. Read it in a browser.
+- **Avoiding fallback in distributed systems, Amazon Builders' Library** — https://web.archive.org/web/20250119023338/https://aws.amazon.com/builders-library/avoiding-fallback-in-distributed-systems/
+  Focus on: the 2001 incident and the section on testing fallback. The three quotes in section 5.6 match this archived copy, checked on 2026-09-17. The original URL now redirects to builder.aws.com.
 
-**A vendor warning about its own feature** — https://learn.microsoft.com/en-us/azure/api-management/azure-openai-semantic-cache-lookup-policy
-The strongest published statement that an AI fallback can be worse than an error: a semantic cache returns responses by similarity, so it can surface responses that are incorrect, outdated or unsafe. Its own guidance is to start the threshold at 0.05 and treat above 0.2 as risking mismatches, and to key the cache per user or group unless you want a cross-tenant leak.
+- **Azure API Management policy reference, llm-semantic-cache-lookup, Microsoft Learn** — https://learn.microsoft.com/en-us/azure/api-management/azure-openai-semantic-cache-lookup-policy
+  Focus on: the warning note, the 0.05 and 0.2 thresholds, and `vary-by` for per-user keys.
 
-**Quantifying sensitivity to spurious features in prompt design** — https://arxiv.org/abs/2310.11324
-Why cross-provider failover is not a configuration change. Meaning-preserving format changes produced differences of **up to 76 accuracy points** on one model, and the relative ordering of two formats is preserved across models only about 57% of the time.
+- **Quantifying Language Models' Sensitivity to Spurious Features in Prompt Design, Sclar et al., 2023** — https://arxiv.org/abs/2310.11324
+  Focus on: the 76-point spread, and the 57% rate at which format order holds across models.
 
-**Token counting** — https://platform.claude.com/docs/en/build-with-claude/token-counting
-The concrete version of the same problem. One provider's newer models produce about **30% more tokens for the same text** than its older ones. That is inside one provider; across providers the tokenizer is entirely different. Their recommended method is the only reliable one: count the same request twice and compare.
+- **Token counting, Anthropic documentation** — https://platform.claude.com/docs/en/build-with-claude/token-counting
+  Focus on: the note on 30% more tokens, and counting one request against each model.
 
 ---
 
 ## Cheatsheet — part B
 
 ```
-FOUR INDICATORS (availability + latency measures 3/4 of nothing)
+FOUR INDICATORS (availability + latency cannot see wrong or frozen answers)
   availability   the call returned
   TTFT           first token inside target
-  smoothness     no gap above target      <- the Phase 2 freeze
-  completeness   finish_reason != "length" <- a 200 OK every dashboard counts
-                                              as a success
-  demo result: TTFT PASSES at 99.6% while the freeze SLO fails at 89.9%
+  smoothness     no gap above target       <- the Phase 2 freeze
+  completeness   finish_reason != "length" <- a 200 OK that dashboards count
+  demo: TTFT PASSES 99.6%, freeze FAILS 89.93% (burn 10.07x)
+        availability fails from a separate 0.4% background error rate
 
 ERROR BUDGET AND BURN
-  budget = 100% - target. At 99.9%/30d you may be bad ~43 minutes.
-  burn 1 -> lasts 30 days | burn 10 -> 3 days | burn 1000 -> 43 minutes
+  budget = 100% - target      99.9%/30d -> ~43 minutes
+  burn = bad rate / budget    burn 1 -> 30 days | 10 -> 3 days | 1000 -> 43 min
   page    burn 14.4  over 1h   confirmed over 5m    (2% of budget)
   page    burn  6    over 6h   confirmed over 30m   (5%)
   ticket  burn  1    over 3d   confirmed over 6h    (10%)
   short window = 1/12 of the long window
-  latency SLO pattern: 90% < X | 99% < 10X | 99.9% < 100X
-  ALWAYS PAIR LATENCY WITH A TOKEN COUNT. A latency rise is often just
-    longer output.  total = TTFT + (time per token x tokens)
+  latency ladder: 90% < X | 99% < 10X | 99.9% < 100X
+  PAIR LATENCY WITH TOKENS.  total = TTFT + (time per token x tokens)
 
 QUALITY AS AN SLI
-  good event = proportion of records CLEARING a threshold, never the mean
-  judge ceiling: ~85% agreement with humans (81% human-to-human)
-    -> a judge cannot certify 99.9% per request. Aggregate rates only.
-  pass^k: 75% per step -> ~42% over three steps
-  noise floor: ~8% of completions differ at temperature 0 on a shared
-    endpoint (1000 runs -> 80 unique). Subtract before attributing.
-  sample size: ~1000 items to detect 3 percentage points at 80% power
-  a latency SLO is GAMEABLE: delay tokens to smooth ITL, drop slow requests
-    to improve every percentile. Keep completeness beside it.
-  and faster is not always better: at 2s TTFT users rated answers LESS
-    thoughtful than at 9s or 20s (n=240)
+  good event = record REACHES a threshold, never the mean score
+  judge: ~85% agreement, ties excluded (66% with ties) -> aggregate only
+  0.75^3 = ~42% for three steps at 75%
+  noise: 1000 runs at temp 0 -> 80 unique, most common only 78x
+    -> exact text is useless. Measure your floor with your own metric.
+  ~1000 items to detect 3 points at 95% confidence, 80% power
+  gaming: delay tokens, drop slow requests. Keep completeness beside latency.
+  2s TTFT rated LESS thoughtful than 9s or 20s (n=240)
 
 TELEMETRY NAMES
-  CLIENT says CHUNK. SERVER says TOKEN. A chunk may carry many tokens or none.
-    gen_ai.response.time_to_first_chunk     SECONDS, a double
+  CLIENT says CHUNK. SERVER says TOKEN.
+    gen_ai.response.time_to_first_chunk     SECONDS
     gen_ai.client.operation.time_per_output_chunk
     gen_ai.server.time_to_first_token
-  only TWO attributes are Required: operation.name, provider.name
-  span name: "{operation} {model}"
-  the span covers ALL RETRIES -> your 429s are INVISIBLE by default
-  13 of 13 reference libraries emit ZERO time_to_first_chunk. Instrument it.
-  "ITL" means two different things across tools. Write down which you mean.
+  required: operation.name, provider.name   span name "{operation} {model}"
+  span covers ALL RETRIES -> 429s INVISIBLE by default
+  0 of 13 reference libraries emit time_to_first_chunk
+  "ITL" has two meanings across tools. Write down yours.
 
 RECORDING FAILURES
-  timeout       error.type + status Error
-  429           usually invisible (retried inside the span)
-  truncation    NOT an error. finish_reasons ["length"], status "incomplete"
-  content filter  ASYMMETRIC: filtered PROMPT = 400, filtered OUTPUT = 200
-  stream ended early -> record "error" IN the finish_reasons position
+  timeout         error.type + status Error
+  429             usually invisible (retried inside the span)
+  truncation      NOT an error: finish_reasons ["length"], status "incomplete"
+                  as an error on the demo: availability 99.30% -> 97.50%
+  content filter  PROMPT = 400, OUTPUT = 200 with a finish reason
+  stream ended early -> "error" in the finish_reasons position
 
-ATTRIBUTION, four axes
-  model     gen_ai.request.model AND gen_ai.response.model  <- alert on divergence
-  prompt    gen_ai.prompt.name AND .version
-  data      NO ATTRIBUTE EXISTS. Invent one.
-  serving   NO ATTRIBUTE EXISTS. Pinning a model id does NOT pin behaviour.
+ATTRIBUTION
+  model     gen_ai.request.model vs gen_ai.response.model  <- alert on diff
+  prompt    gen_ai.prompt.name + .version
+  data      NO ATTRIBUTE. Invent one.
+  serving   NO ATTRIBUTE. A pinned model id does NOT pin behaviour.
 
-TELEMETRY COST (measured, gzipped, per span)
-  500/150    metadata 107 B   with content 1,210 B    (11x)
-  4k/500     metadata 109 B   with content 6,932 B    (64x)
+TELEMETRY COST (author's measurement, gzipped, per span)
+  500/150    metadata 107 B   with content  1,210 B   (11x)
+  4k/500     metadata 109 B   with content  6,932 B   (64x)
   30k/1k     metadata 110 B   with content 47,156 B  (430x)
-  metadata is FLAT ~1,450 B raw regardless of prompt size
-  one vendor prices LLM spans at $350/M against $1.70/M for ordinary spans
-  4 MiB collector limit x 512-span default batch FAILS with content on
-  sample the SPANS, keep the METRICS at 100%
-  use parentbased_traceidratio, never bare traceidratio (it shreds traces)
+  metadata FLAT ~1,450 B raw.  10 rps = 25.92M spans/month
+  one vendor: LLM spans $350/M vs ordinary spans $1.70/M
+  4 MiB collector limit x 512-span batch FAILS with content on
+  sample SPANS, keep METRICS at 100%; parentbased_traceidratio only
 
 FALLBACK
-  retry    = same call, same mechanism
-  failover = same mechanism, different instance      USUALLY SAFE
-  fallback = DIFFERENT mechanism                     the one with the history
-  the test: does the fallback path run CONTINUOUSLY against real traffic?
-  on an LLM a fallback can SUCCEED AND STILL BE WRONG
-  split fallback by ERROR CLASS; never catch bare Exception
-  record WHICH path answered, or you cannot measure degraded output
-  cross-provider is not a config change: format changes move accuracy up to
-    76 points, and one provider's newer tokenizer is ~30% more tokens
+  retry = same call | failover = same mechanism, other instance (SAFE)
+  fallback = DIFFERENT mechanism (the one with the history)
+  test: does the fallback run CONTINUOUSLY on real traffic?
+  an LLM fallback can SUCCEED AND BE WRONG
+  split by ERROR CLASS; never catch bare Exception; record WHICH path answered
+  cross-provider: format moves accuracy up to 76 points; tokenizer +30%
 
 THE COMMANDS
-  run_recorder.py --demo --role cache_demo    see the freeze, offline
-  run_recorder.py --model X --ledger runs.jsonl   record real calls
+  run_recorder.py --demo --role cache_demo    the freeze, offline
+  run_recorder.py --self-test                 19 checks, offline
+  run_recorder.py --model X --ledger runs.jsonl   real calls
   slo_report.py --demo                        four indicators, offline
-  slo_report.py --demo --window-minutes 300   the two-window view
+  slo_report.py --demo --window-minutes 300   two windows
   slo_report.py --ledger runs.jsonl           your own traffic
 ```
