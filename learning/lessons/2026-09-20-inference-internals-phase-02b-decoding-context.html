@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decoding and context — the stream freeze, the schema, and the 400</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+.addition{margin:1.8rem 0;padding:1rem 1.1rem 1rem 1.2rem;border-radius:12px;
+  border:1px solid var(--line);border-left:4px solid var(--violet);background:var(--violet-soft)}
+.addition::before{display:block;font-size:.7rem;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--violet);margin-bottom:.3rem;content:"Added · deeper"}
+.addition[data-kind=update]::before{content:"Added · what changed since"}
+.addition[data-kind=correction]{border-left-color:var(--bad);background:var(--bad-soft)}
+.addition[data-kind=correction]::before{content:"Correction";color:var(--bad)}
+.addition[data-kind=incident]{border-left-color:var(--warn);background:var(--warn-soft)}
+.addition[data-kind=incident]::before{content:"Production incident";color:var(--warn)}
+.addition[data-kind=practice]{border-left-color:var(--ok);background:var(--ok-soft)}
+.addition[data-kind=practice]::before{content:"Added · practice";color:var(--ok)}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Inference Internals · Phase 2B</div><h1>Decoding and context — the stream freeze, the schema, and the 400</h1><p class="subtitle">Why does a stream freeze mid-sentence, why does a strict schema change the answer, and how do you stop a long run dying on a 400?</p></header>
+<p class="why">Phase 2B: Decoding and context. The stream freeze, the schema, and the 400. Inference Internals, following Phase 2A. Three client-visible failures, one mechanism each. A stream that stops mid-sentence. A strict schema that changes the answer. A long agent run that dies on a 400.</p>
+
+<p>Part A showed how the server shares one GPU between many requests. Part B covers three problems that you see from the client side. A stream can freeze in the middle of a sentence. A strict JSON schema can change answer quality. A long agent run can fail with a 400 error.</p>
+
+<p>Part A is a prerequisite. Section 2.4 builds on the scheduler loop and the token budget from section 2.1. Section 2.6 orders the prompt zones with the prefix rule from section 2.3. This part does not explain those ideas again.</p>
+
+<p>This part pays two debts from Phase 1:</p>
+<ul>
+<li>Phase 1 exercise E7 overflowed the context window on purpose and got a 400 back. Section 2.6 builds the compaction trigger that prevents it.</li>
+<li>Phase 1 exercise E11 truncated a JSON answer and said that constrained decoding exists. Section 2.5 teaches constrained decoding and measures its cost.</li>
+</ul>
+
+<pre class="ascii">┌──────────────────────────────────────────────────────────────────────────┐
+│  2.4  Chunked prefill.         The trade between TTFT and TPOT,          │
+│                                and the stream freeze                     │
+│  2.5  Constrained decoding.    Token masking, and the constraint tax     │
+│  2.6  Context budget and       The trigger that prevents Phase 1 E7,     │
+│       compaction               and the backstop that catches it          │
+└──────────────────────────────────────────────────────────────────────────┘</pre>
+
+<p>Time: 1.5 to 2 hours. Three commands in this part need no API key and no GPU: <code>batching_sim.py</code>, <code>structured_lab.py --self-test</code>, and <code>compactor.py --simulate</code>. The live <code>structured_lab.py</code> runs need <code>export OPENAI_API_KEY=sk-...</code>. You can also use any OpenAI-compatible endpoint through <code>--base-url</code> and <code>--key-env</code>.</p>
+
+<p>Setup: use the same <code>code</code> directory and install step as part A.</p>
+
+<div class="callout note"><p>This enhanced page carries what later verification found after the original was written. Each addition sits in the section it belongs to, in a labelled box. The kinds are update, correction, incident, and deeper. The two biggest corrections: the full vLLM v0.29.0 token-budget defaults table in <a href="#s24">section 2.4</a>, and the OpenAI first-request schema-latency claim in <a href="#s25">section 2.5</a>, which the phase states but current documentation contradicts.</p></div>
+
+<h2 id="s24"><span class="num">2.4</span> Chunked prefill: the trade between TTFT and TPOT</h2>
+
+<p class="why">Why this matters: section 2.1 left one number without an explanation. Continuous batching produced a 764ms worst gap between two tokens of one answer. Your user sees that gap as a frozen stream. This section explains the cause and the fix.</p>
+
+<p>Go back to the scheduler loop. One iteration runs one forward pass. That pass can do prefill work, decode work, or both. Now a new request arrives with a 24,000-token prompt.</p>
+
+<p>Without chunking, the server has two bad choices:</p>
+<ol>
+<li>Run the whole 24,000-token prefill in one iteration. Every decoding request in the batch gets no token during that iteration.</li>
+<li>Wait until the running decodes finish. The new request then gets a very long TTFT.</li>
+</ol>
+
+<pre class="ascii">NO CHUNKING: one large prefill stops every stream in the batch (example)
+
+  iteration:      1      2      3           4           5      6
+  prefill  :      -      -      -    [24,000 tokens]    -      -
+  decode   :   A B C  A B C  A B C        none       A B C  A B C
+  duration :    18ms   18ms   18ms        720ms       18ms   18ms
+                                       ▲
+                          A, B and C all freeze for 720ms here</pre>
+
+<p>Chunked prefill splits that prompt. Each iteration takes one slice of the prefill plus all the decodes. Both share one token budget. In vLLM that budget is <code>max_num_batched_tokens</code>.</p>
+
+<pre class="ascii">CHUNKED PREFILL: the same work, spread across iterations (example)
+
+  iteration:    1        2        3        4        5        6
+  prefill  :    -     2,045    2,045    2,045    2,045    2,045   ... (12 total)
+  decode   : A B C    A B C    A B C    A B C    A B C    A B C
+  duration : 18ms      80ms     80ms     80ms     80ms     80ms
+                       ▲
+         the new request's TTFT gets a little worse, and no stream freezes</pre>
+
+<p>The durations come from the simulator's cost model in <code>batching_sim.py:49</code>, which part A section 2.1 shows. Three decodes cost 18 + 0.12 × 3 = 18.4ms. A 24,000-token prefill costs 24,000 × 0.03 = 720ms. A 2,045-token slice plus three decodes costs 61.4 + 18.4 = 79.8ms. The prompt needs 24,000 / 2,045 = 11.7 slices, so 12 iterations.</p>
+
+<p>The budget is shared. With <code>max_num_batched_tokens=2048</code> and 3 decoding requests, the iteration spends 3 tokens on decode. It spends up to 2,045 on prefill. The simulator reserves the decode tokens first. <code>batching_sim.py:122</code> computes <code>room = max(token_budget - len(decoding) - prefill_tokens, 0)</code>. Without chunking, <code>batching_sim.py:128</code> sets <code>decoding = []</code>, so no decode runs in that pass.</p>
+
+<aside class="addition" data-kind="deeper">
+<p><strong>Why decode-first is the paper's order too.</strong> The Sarathi-Serve stall-free batching algorithm fills a batch in a fixed order. Running decodes first, then partial prefills, then new requests, all within the token budget. That is the same order as <code>batching_sim.py:122</code>. The course simulator is faithful to the published algorithm here. Verified at <a href="https://ar5iv.labs.arxiv.org/html/2403.02310">ar5iv.labs.arxiv.org/html/2403.02310</a>, sections 3.1 and 4.1.</p>
+</aside>
+
+<p>Run the comparison with a larger prompt:</p>
+
+<pre><code data-lang="bash">python phase02_internals/batching_sim.py --long-prompt 48000 --rate 10 --requests 60</code></pre>
+
+<p>Output on the author's machine, repeated on 2026-09-17 with the same result:</p>
+
+<pre class="ascii">│ policy     │ mean TTFT │ p99 TTFT  │ mean TPOT │ worst gap  │ throughput │
+│ static     │    8690ms │   14526ms │    19.5ms │       20ms │   2.7 rq/s │
+│ continuous │    3028ms │    7140ms │    25.5ms │     1460ms │   3.8 rq/s │
+│ chunked    │    3140ms │    7242ms │    24.9ms │       81ms │   3.8 rq/s │</pre>
+
+<p>Chunked prefill adds 3,140 - 3,028 = 112ms to mean TTFT. In return, the worst gap between two tokens falls from 1,460ms to 81ms. That is 18x smaller, and it is the number your users feel during a stream.</p>
+
+<p>The Sarathi-Serve paper measured this effect on real hardware. It mixed a prefill into a decode batch without chunking. Time between tokens rose by up to 28.3x compared with a decode-only batch. That is the freeze, measured on GPUs rather than simulated. The conditions matter. 28.3x is an upper figure, from the paper's Figure 9. One plot is Mistral-7B on one A100 at a token budget of 256. The other is LLaMA2-70B on four A100s at a budget of 512.</p>
+
+<aside class="addition" data-kind="correction">
+<p><strong>Correction, small but real.</strong> The original quotes the Sarathi-Serve number as "rose 28.3x". The paper says an increase of <em>up to</em> 28.3x, and only under the conditions above. The same paper's abstract reports serving capacity gains of 2.6x for Mistral-7B on one A100 and up to 3.7x for Yi-34B on two A100s, against vLLM. The original's further claim of "up to 6.3x for LLaMA2-70B on eight A40s, against Orca" sits in a part of the paper that could not be fetched. It is <strong>not verified</strong>. Source: <a href="https://ar5iv.labs.arxiv.org/html/2403.02310">ar5iv.labs.arxiv.org/html/2403.02310</a>.</p>
+</aside>
+
+<p>Chunking also has a cost, and the same paper measures it. At a 512-token budget, it found about 25% overhead on Yi-34B. Splitting a prefill repeats work at the chunk boundaries. So the setting has a lower limit. Below that limit, you pay for smoothness with throughput.</p>
+
+<p>This is a real trade. The right direction depends on your product:</p>
+
+<pre class="ascii">┌──────────────────────────┬─────────────────────────┬───────────────────────┐
+│                          │ larger token budget     │ smaller token budget  │
+├──────────────────────────┼─────────────────────────┼───────────────────────┤
+│ TTFT for long prompts    │ better                  │ worse                 │
+│ inter-token smoothness   │ worse                   │ better                │
+│ good for                 │ batch jobs, summarising │ chat, voice, streaming│
+│ vLLM setting             │ max_num_batched_tokens  │ same setting, lower   │
+└──────────────────────────┴─────────────────────────┴───────────────────────┘</pre>
+
+<p>The simulator shows the same trade in numbers. These runs use the default workload and change only <code>--token-budget</code>. Pick a budget and watch the two numbers move in opposite directions (measured with <code>batching_sim.py</code>, 40 requests, 6/s):</p>
+
+<figure class="diagram">
+<div id="s24-btns">
+<button class="s24-b" data-b="0">512</button>
+<button class="s24-b" data-b="1">2048</button>
+<button class="s24-b" data-b="2">8192</button>
+<button class="s24-b" data-b="3">none</button>
+</div>
+<svg viewBox="0 0 560 230" role="img" aria-label="Worst gap and mean TTFT by token budget">
+<text x="20" y="18" fill="currentColor">worst inter-token gap (ms)</text>
+<g id="s24-gapbars"></g>
+<text x="300" y="18" fill="currentColor">mean TTFT (ms)</text>
+<g id="s24-ttftbars"></g>
+<line id="s24-hl" x1="10" x2="550" y1="200" y2="200" stroke="currentColor" stroke-width="0" opacity="0.2"/>
+<text id="s24-hllabel" x="10" y="216" fill="currentColor" font-size="11"></text>
+</svg>
+<figcaption>Measured values from batching_sim.py, chunked row, 40 requests at 6/s. The "none" row is the continuous policy with no chunking.</figcaption>
+</figure>
+<p id="s24-note">Select a token budget above.</p>
+<script>
+(function(){
+var data=[
+{budget:"512",gap:35,ttft:1094},
+{budget:"2048",gap:81,ttft:925},
+{budget:"8192",gap:265,ttft:908},
+{budget:"none",gap:764,ttft:867}];
+var gapG=document.getElementById("s24-gapbars");
+var ttftG=document.getElementById("s24-ttftbars");
+function bar(g,x,y,w,label,color){
+var r=document.createElementNS("http://www.w3.org/2000/svg","rect");
+r.setAttribute("x",x);r.setAttribute("y",y);r.setAttribute("width",w);r.setAttribute("height",22);
+r.setAttribute("fill",color);g.appendChild(r);
+var t=document.createElementNS("http://www.w3.org/2000/svg","text");
+t.setAttribute("x",x+w+6);t.setAttribute("y",y+16);t.setAttribute("fill","currentColor");
+t.textContent=label;g.appendChild(t);}
+data.forEach(function(d,i){
+var y=30+i*40;
+bar(gapG,20,y,Math.max(d.gap/764*200,2),d.gap+"ms","#e8590c");
+bar(ttftG,300,y,d.ttft/1094*220,d.ttft+"ms","#1971c2");});
+var note=document.getElementById("s24-note");
+var hl=document.getElementById("s24-hl");
+var lbl=document.getElementById("s24-hllabel");
+var msgs=[
+"budget 512: gap 35ms but TTFT 1,094ms. Smooth streams, slow first token.",
+"budget 2048: gap 81ms, TTFT 925ms. The default-shaped middle.",
+"budget 8192: gap 265ms, TTFT 908ms. Better TTFT, the freeze is back.",
+"no chunking: gap 764ms. Mean TTFT is the BEST here. Averages hide the freeze."];
+document.querySelectorAll(".s24-b").forEach(function(btn){
+btn.addEventListener("click",function(){
+var i=+btn.getAttribute("data-b");
+hl.setAttribute("y1",46+i*40);hl.setAttribute("y2",46+i*40);hl.setAttribute("stroke-width",28);
+lbl.textContent="token budget = "+data[i].budget;
+note.textContent=msgs[i];});});
+})();
+</script>
+
+<aside class="addition" data-kind="deeper">
+<p><strong>Why a chunk piggybacks at all.</strong> Sarathi-Serve's Figure 4 shows prefill throughput starts saturating at around a 512-token sequence. Linear layers are over 80% of runtime even at high sequence lengths. Decode steps leave that compute idle. A prefill chunk of roughly 512 tokens adds almost nothing to the iteration's wall time. That is why the 512-budget row above keeps TTFT near one second instead of collapsing. The paper's median prompt sizes in its workloads: 1,730 tokens (sharegpt4) and 7,059 tokens (arxiv-summarization). Verified in §3.1 and §4.1 at <a href="https://ar5iv.labs.arxiv.org/html/2403.02310">ar5iv.labs.arxiv.org/html/2403.02310</a>.</p>
+</aside>
+
+<p>Carry one correction into Phase 4. <code>max_num_batched_tokens</code> has no single default in vLLM 0.29.0. The server picks it at startup, in <code>get_batch_defaults()</code> in <code>vllm/engine/arg_utils.py</code>. The choice depends on the GPU class. It also depends on whether you run the offline <code>LLM</code> class or the API server. This was checked against the v0.29.0 source tree. The full verified table:</p>
+
+<pre class="ascii">get_batch_defaults() at vllm v0.29.0: max_num_batched_tokens at startup
+
+┌──────────────────────────────┬─────────────────┬──────────────────┐
+│ GPU                          │ offline LLM     │ API server       │
+├──────────────────────────────┼─────────────────┼──────────────────┤
+│ B200/B300 (>=160GB)          │ 16,384          │ 16,384           │
+│ H100/H200 (>=70GB, not A100) │ 16,384          │  8,192           │
+│ everything else, incl. A100  │  8,192          │  2,048           │
+└──────────────────────────────┴─────────────────┴──────────────────┘
+  max_num_seqs: 1024 in the first two rows, 256 in the last.
+  The A100 is excluded by an explicit device-name check:
+  "Setting large max_num_batched_tokens for A100 reduces throughput,
+   see PR #17885."
+  performance_mode == "throughput" doubles both settings when you set neither.</pre>
+
+<aside class="addition" data-kind="correction">
+<p><strong>Correction: the original's default table is API-server-only.</strong> The original says: "On an H100 through the API server, the value is 8,192. On most other GPUs, including the A100, it is 2,048." True for the API server. But the offline <code>LLM</code> class on an A100 gets <strong>8,192</strong>, not 2,048. On B200/B300 even the API server gets 16,384. If you run the offline class and see a token budget of 8,192 on your A100, nothing is misconfigured. The constant <code>DEFAULT_MAX_NUM_BATCHED_TOKENS</code> (2048) exists, per its own docstring, "mainly for convenience when testing". Also <code>enable_chunked_prefill = True</code>, checked in <code>vllm/config/scheduler.py</code>. Sources: <a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/engine/arg_utils.py">arg_utils.py</a> and <a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/config/scheduler.py">scheduler.py</a> at tag v0.29.0.</p>
+</aside>
+
+<aside class="addition" data-kind="update">
+<p><strong>New at v0.29.0: a gap cause that is not prefill.</strong> <code>stream_interval: int = 1</code> controls how many tokens the server buffers before it streams them. A value of 1 makes streaming smoother. A larger value such as 10 reduces host overhead but sends tokens in bursts. If you self-host vLLM and add the max inter-token gap metric this section recommends, some of your gaps will come from this setting, not from a prefill stall. Check <code>stream_interval</code> before you blame the scheduler. Verified in <code>vllm/config/scheduler.py</code> at v0.29.0.</p>
+</aside>
+
+<aside class="addition" data-kind="deeper">
+<p><strong>The queue side of the same file.</strong> Three more v0.29.0 scheduler settings belong in your head next to <code>max_num_batched_tokens</code>. <code>max_num_queued_reqs</code> and <code>max_num_queued_tokens</code> (default None) cap the waiting queue. Overflow rejects with <strong>HTTP 503</strong>. So a 503 from a self-hosted vLLM is that valve, not a provider outage. <code>max_num_queued_tokens</code> is documented in source as a TTFT QoS valve (<code>target_TTFT * prefill_throughput</code>). It has a conservative-counting caveat. A partially-prefilled request counts its full prompt length until it starts producing tokens. <code>scheduler_reserve_full_isl = True</code> checks that the full input fits in the KV cache before admitting a request. That prevents over-admission and KV cache thrashing with chunked prefill, and connects back to part A's preemption section. Finally <code>verify_max_model_len</code> raises a <code>ValueError</code> if <code>max_num_batched_tokens &lt; max_model_len</code> while chunked prefill is disabled. That is the exact error for the classic budget-smaller-than-prompt misconfiguration. All verified in the v0.29.0 source tree.</p>
+</aside>
+
+<p><strong>What this means on a hosted API.</strong> You cannot set <code>max_num_batched_tokens</code> on another company's server. You still see the effect, and you can act on it in two ways:</p>
+
+<ol>
+<li>Record inter-token gaps, not only TTFT and total time. An average does not show a frozen stream.</li>
+<li>Keep your own prompts smaller. Your large prefill freezes other users' streams. On a single-tenant deployment, it freezes your own.</li>
+</ol>
+
+<div class="keypoints">
+<p class="remember"><strong>The sentence to remember:</strong> prefill and decode share the same forward pass. A long prompt either waits or freezes the other streams. Chunking decides which.</p>
+<p class="trap"><strong>The trap:</strong> teams measure TTFT and total latency and call the stream healthy. Neither number shows an 800ms freeze in the middle of an answer. Add a maximum inter-token gap metric before you promise a streaming experience. And if you self-host, check <code>stream_interval</code> first. Not every gap is prefill.</p>
+<p class="try"><strong>Try this now:</strong> run <code>python phase02_internals/batching_sim.py --token-budget 512</code> and then <code>--token-budget 8192</code>. In the <code>chunked</code> row, mean TTFT and worst gap move in opposite directions. Expect 1,094ms and 35ms at 512, and 908ms and 265ms at 8,192.</p>
+</div>
+
+<h2 id="s25"><span class="num">2.5</span> Constrained decoding and the constraint tax</h2>
+
+<p class="why">Why this matters: in Phase 1 exercise E11, a truncated JSON answer broke your parser. The lesson there was <code>finish_reason</code>. This section covers the other half. A prompt that asks for JSON is a request, not a guarantee. Constrained decoding makes it a guarantee. It also has a cost, and most teams never measure it.</p>
+
+<h3>How the server enforces a schema</h3>
+
+<p>Decoding picks one token at a time. Before each pick, the model gives a score to every token in the vocabulary. These scores are called logits. Sampling then chooses one token.</p>
+
+<p>Constrained decoding adds a step between those two. It finds every token that would break the schema. It sets the score of each of those tokens to negative infinity. Those tokens then have zero probability. The model can only choose a legal next token.</p>
+
+<pre class="ascii">ONE DECODE STEP, WITH AND WITHOUT A GRAMMAR MASK (example scores)
+
+  model logits        mask (from the schema)      masked logits
+  ┌──────────────┐    ┌──────────────────┐        ┌──────────────┐
+  │ "Sure"  4.1  │    │ illegal here  ✗  │   →    │ "Sure"  -inf │
+  │ "{"     3.8  │    │ legal         ✓  │   →    │ "{"      3.8 │  ← chosen
+  │ "Here"  3.5  │    │ illegal here  ✗  │   →    │ "Here"  -inf │
+  │ "["     2.9  │    │ illegal here  ✗  │   →    │ "["     -inf │
+  └──────────────┘    └──────────────────┘        └──────────────┘
+
+  The state machine now moves to "expecting a key or }". The next step gets a
+  different mask. Prose can never appear, because prose tokens are never legal.</pre>
+
+<p>Step through it. The schema here is the ticket classifier from the lab. It has a <code>category</code> from a fixed list, then a <code>priority</code>. Click next to see how the mask changes at every decode step (example scores, not measured):</p>
+
+<figure class="diagram">
+<svg id="s25-svg" viewBox="0 0 560 190" role="img" aria-label="Grammar mask per decode step"></svg>
+<figcaption>The mask is recomputed per step from the state machine. Example scores, illustration not measured.</figcaption>
+</figure>
+<div>
+<button id="s25-prev">Prev</button>
+<button id="s25-next">Next</button>
+</div>
+<p id="s25-note"></p>
+<script>
+(function(){
+var steps=[
+{state:'start: expecting "{"',toks:[["Sure",4.1,0],["{",3.8,1],["Here",3.5,0],["[",2.9,0]],note:"Step 1: only an opening brace is legal. All prose tokens go to -inf."},
+{state:'after "{": expecting a key',toks:[["} ",2.5,0],['"cat',4.6,1],['"pri',4.2,1],["the",3.1,0]],note:'Step 2: the schema says category comes first, so only the start of that key is legal. Key order comes from the schema.'},
+{state:'after "category": expecting enum value',toks:[['"bill',3.9,1],['"bug',4.4,1],['"how_',3.6,1],["free",4.8,0]],note:"Step 3: only the enum prefixes survive. The highest logit (free) is masked out."},
+{state:'object complete: stop',toks:[[".|",2.2,0],["END",5.0,1],["more",3.3,0],["{",2.7,0]],note:"Step 4: the mask allows only the end token. Note: the mask does not choose WHEN to stop before this. max_tokens can cut earlier."}];
+var idx=0;
+var svg=document.getElementById("s25-svg");
+var noteP=document.getElementById("s25-note");
+function render(){
+while(svg.firstChild)svg.removeChild(svg.firstChild);
+var s=steps[idx];
+var NS="http://www.w3.org/2000/svg";
+var t=document.createElementNS(NS,"text");
+t.setAttribute("x",10);t.setAttribute("y",22);t.setAttribute("fill","currentColor");
+t.setAttribute("font-weight","bold");t.textContent="state machine: "+s.state;svg.appendChild(t);
+var h1=document.createElementNS(NS,"text");h1.setAttribute("x",10);h1.setAttribute("y",48);h1.setAttribute("fill","currentColor");h1.textContent="model logits";svg.appendChild(h1);
+var h2=document.createElementNS(NS,"text");h2.setAttribute("x",330);h2.setAttribute("y",48);h2.setAttribute("fill","currentColor");h2.textContent="after mask";svg.appendChild(h2);
+s.toks.forEach(function(tk,i){
+var y=72+i*28;
+var a=document.createElementNS(NS,"text");
+a.setAttribute("x",10);a.setAttribute("y",y);a.setAttribute("fill","currentColor");
+a.textContent='"'+tk[0]+'"  '+tk[1].toFixed(1);svg.appendChild(a);
+var m=document.createElementNS(NS,"text");
+m.setAttribute("x",200);m.setAttribute("y",y);m.setAttribute("fill",tk[2]?"#2f9e44":"#e03131");
+m.textContent=tk[2]?"legal":"illegal";svg.appendChild(m);
+var b=document.createElementNS(NS,"text");
+b.setAttribute("x",330);b.setAttribute("y",y);b.setAttribute("fill","currentColor");
+b.textContent=tk[2]?tk[1].toFixed(1):"-inf";svg.appendChild(b);});
+noteP.textContent=s.note;
+document.getElementById("s25-prev").disabled=idx===0;
+document.getElementById("s25-next").disabled=idx===steps.length-1;}
+document.getElementById("s25-prev").addEventListener("click",function(){if(idx>0){idx--;render();}});
+document.getElementById("s25-next").addEventListener("click",function(){if(idx<steps.length-1){idx++;render();}});
+render();
+})();
+</script>
+
+<p>The mask comes from a state machine. The engine builds it from your schema in three steps:</p>
+<ol>
+<li>It reads your JSON Schema or grammar.</li>
+<li>It builds the states.</li>
+<li>For each state, it computes which vocabulary tokens are legal.</li>
+</ol>
+
+<p>Three libraries do this work today: Outlines, XGrammar, and llguidance. vLLM and SGLang use them inside.</p>
+
+<p>Building the state machine takes time, and the time depends on the library. JSONSchemaBench measured median grammar compilation time on the same schemas:</p>
+
+<ul>
+<li>Guidance: about 0.01s.</li>
+<li>XGrammar: 0.11s to 0.30s.</li>
+<li>Outlines: clearly higher. It converts the JSON Schema into a regular expression first.</li>
+</ul>
+
+<aside class="addition" data-kind="deeper">
+<p><strong>"Clearly higher" has a number, and it is big.</strong> JSONSchemaBench Table 2 (llama.cpp backend) puts Outlines at a <strong>3.48 to 8.05 second</strong> median grammar compilation time. Guidance sits at 0.00-0.01s and Llamacpp at 0.05-0.06s. The paper adds a worse case. JSON Schema features like <code>minItems</code>, <code>maxItems</code>, <code>enum</code>, and arrays are supported by Outlines but "often take 40 seconds to 10 minutes" to compile. That is up to roughly 70x between Outlines and XGrammar medians. So a silent backend fallback (vLLM auto: XGrammar → Guidance → Outlines) is not only a compatibility event. It can be a 10x latency change on your first request. Verified at <a href="https://ar5iv.labs.arxiv.org/html/2501.10868">ar5iv.labs.arxiv.org/html/2501.10868</a>, Tables 2 and 3.</p>
+</aside>
+
+<p>XGrammar runs its compilation at the same time as the prefill, so you often do not see the delay.</p>
+
+<aside class="addition" data-kind="deeper">
+<p><strong>Why XGrammar is fast.</strong> Its authors report that more than 99% of tokens are typically context-independent. Their mask is therefore precomputed once, into an adaptive token mask cache. The result: up to 3.5x faster mask generation on JSON schema and up to 10x on context-free grammars. The comparison set was Outlines v0.1.3, llama-cpp b3998 and lm-format-enforcer v0.10.9, on Llama-3-8B and 3.1-8B. End-to-end they report up to 14x on JSON and 80x on CFGs on an H100. Vendor numbers with stated conditions, so treat them as direction, not as a budget line. Source: <a href="https://blog.mlc.ai/2024/11/22/achieving-efficient-flexible-portable-structured-generation-with-xgrammar">blog.mlc.ai</a>.</p>
+</aside>
+
+<p>On a hosted API, the compile is the provider's problem, but the first-request latency can still be yours. The current OpenAI structured outputs page states: "the first request you make with any schema will have additional latency as our API processes the schema, but subsequent requests with the same schema will not have additional latency." It gives no time limit. So measure your own provider. Count the first call of each new schema separately. Page checked on 2026-09-19.</p>
+
+<aside class="addition" data-kind="correction">
+<p><strong>Correction.</strong> The original says the first-request schema delay "applies to fine-tuned models". It quotes the page as saying "Other models do not have this limitation." The current page contains neither that sentence nor any fine-tuned carve-out for latency. The fine-tuned distinction on the page is about <em>keyword support</em>, not latency. Consequence for you: the first-request delay applies to every model on the current page. So E8 and E9 below may well show a first-call penalty on any current model. Do not expect a gap near zero as the documented behaviour. Source: <a href="https://developers.openai.com/api/docs/guides/structured-outputs.md">developers.openai.com/api/docs/guides/structured-outputs.md</a>, full page fetched 2026-09-19.</p>
+</aside>
+
+<h3>The three levels, and what each one promises</h3>
+
+<pre class="ascii">┌────────────────────┬───────────────────┬──────────────────┬─────────────────┐
+│                    │ prompt only       │ json_object      │ json_schema     │
+│                    │                   │                  │ strict: true    │
+├────────────────────┼───────────────────┼──────────────────┼─────────────────┤
+│ valid JSON         │ not guaranteed    │ guaranteed       │ guaranteed      │
+│ correct keys       │ not guaranteed    │ NOT guaranteed   │ guaranteed      │
+│ values within enum │ not guaranteed    │ not guaranteed   │ guaranteed      │
+│ prose wrapping     │ happens           │ cannot happen    │ cannot happen   │
+│ first-call cost    │ normal            │ normal           │ engine compiles │
+│                    │                   │                  │ the grammar     │
+│ can still truncate │ yes               │ yes              │ yes             │
+└────────────────────┴───────────────────┴──────────────────┴─────────────────┘</pre>
+
+<p>Read the last row twice. A schema controls which tokens are legal. It does not control when generation stops. Suppose <code>max_tokens</code> runs out in the middle of an object. You get a truncated document. It still follows the schema's shape, and it still cannot be parsed. Only <code>finish_reason</code> tells you this happened. Phase 1 E11 is that failure, and strict mode does not remove it.</p>
+
+<aside class="addition" data-kind="correction">
+<p><strong>"Guaranteed" needs a footnote on self-hosted engines.</strong> The table's guarantee holds for hosted strict APIs. JSONSchemaBench measured correctness, not only shape. On the JSON Schema Test Suite (Table 6), <strong>XGrammar was under-constrained in 38 of 45 failure categories</strong>. It allowed invalid instances through. Guidance had 1 failure category, Outlines 8, Llamacpp 7. The paper says XGrammar "shows the highest number of under-constrained failures, indicating a trade-off favoring permissiveness". vLLM 0.29.0's default <code>auto</code> path tries XGrammar first. So on a self-hosted engine the shape guarantee is engine-dependent. The fastest engine is the most permissive. Validate output on your side when it matters. Verified at <a href="https://ar5iv.labs.arxiv.org/html/2501.10868">ar5iv.labs.arxiv.org/html/2501.10868</a>.</p>
+</aside>
+
+<h3>The constraint tax</h3>
+
+<p>Forcing a schema can change the quality of the answer, not only its shape. Researchers disagreed about this for two years. A 2026 paper explains the disagreement.</p>
+
+<p><strong>The original claim.</strong> A 2024 EMNLP paper, "Let Me Speak Freely?", reported large drops on reasoning tasks:</p>
+<ul>
+<li>On GSM8K, claude-3-haiku scored 86.99 in plain JSON mode. It scored 23.44 with a schema constraint.</li>
+<li>gpt-3.5-turbo fell from 74.70 to 49.25.</li>
+</ul>
+
+<p>Two details matter. First, the standard deviations were very large: 22.9 and 12.0 across 9 prompts. Second, the paper's own appendix shows constraints helping classification tasks. On DDXPlus, gemini went from 41.6 to 60.3. claude-3-haiku went from 33.8 to 52.0.</p>
+
+<p><strong>The rebuttal.</strong> The authors of Outlines ran the same model and tasks again. They measured the opposite:</p>
+<ul>
+<li>GSM8K: 0.77 unstructured and 0.78 structured.</li>
+<li>Last Letter: 0.73 and 0.77.</li>
+</ul>
+
+<p>They also raised an objection. The original paper never confirmed that a provider's JSON mode uses grammar-constrained decoding. The paper says only that it "is assumed". A third benchmark, JSONSchemaBench, also measured small gains.</p>
+
+<p><strong>The 2026 answer.</strong> A paper called "The Format Tax" tested 6 open-weight and 4 closed-weight models. It used 4 formats and 4 tasks. It separated the two possible causes of the drop:</p>
+
+<ul>
+<li>Asking for a format in the prompt cost 3.9 points on average.</li>
+<li>Adding grammar-constrained decoding on top cost 1.6 points on average.</li>
+<li>39 result cells had a statistically significant effect. In 36 of them, the effect was already present from the prompt alone. Only 3 cells showed a drop from constrained decoding alone.</li>
+</ul>
+
+<p>So the tax is real. The decoder causes the smaller part of it.</p>
+
+<pre class="ascii">WHERE THE FORMAT TAX COMES FROM (The Format Tax, average points lost)
+
+  format request in the prompt    ████████████████████████████████████████  3.9
+  constrained decoding on top     ████████████████                          1.6</pre>
+
+<p>Two more results from the same paper are useful to you:</p>
+
+<ul>
+<li>Three newer closed-weight models showed changes near zero or above zero without constrained decoding. They were claude-haiku-4.5, grok-4.1-fast, and gpt-5.4-nano. claude-haiku-4.5 scored +1.2 and grok-4.1-fast scored +2.5 against their own free-form baseline. The older gpt-5-nano still lost 5.2 points without constrained decoding and 8.0 points with it. Small open models lost 5 to 9 points. So any claim that "structured output costs X percent" is wrong unless it names the model.</li>
+<li>Constrained decoding raised format validity from 55.7% to 92.2%. Accuracy moved from 57.3% to 55.7%. The free-form baseline was 61.5%. The paper's summary: "higher compliance does not translate into better reasoning". Quote checked on 2026-09-17.</li>
+</ul>
+
+<aside class="addition" data-kind="deeper">
+<p><strong>Constrained decoding can also be faster per token.</strong> JSONSchemaBench Table 2 shows Guidance at 6.4-9.5ms time per output token. The unconstrained model sat at 15.3-16.2ms, at batch size 1 on an A100-80GB with Llama-3.1-8B-Instruct. The paper's intro claims constrained decoding can speed up generation by 50%. The mechanism is guidance-acceleration step skipping. At low batch sizes a schema can therefore be a latency win. The model wastes no tokens on prose. The quality tax and the latency effect are separate measurements. Verified at <a href="https://ar5iv.labs.arxiv.org/html/2501.10868">ar5iv.labs.arxiv.org/html/2501.10868</a>.</p>
+</aside>
+
+<p><strong>The scoring warning.</strong> Every group in this debate hit the same problem: the parser changes the score.</p>
+
+<ul>
+<li>Tam et al. used a model to parse answers. Their own table shows the parser choice moving a score by up to 42 points.</li>
+<li>The Format Tax authors switched from a rule-based extractor to a model judge. Their average MATH-500 tax fell from 10.1 points to 6.6 points. So about a third of the measured tax came from scoring.</li>
+</ul>
+
+<p>When you measure your own tax, fix the parser first and report it with the result. A number without its parser tells you nothing.</p>
+
+<p>So measure it. <code>structured_lab.py</code> sends the same 12 labeled tickets through all three modes:</p>
+
+<pre><code data-lang="bash">python phase02_internals/structured_lab.py --self-test     # no key needed
+export OPENAI_API_KEY=sk-...
+python phase02_internals/structured_lab.py --model gpt-4.1-mini --role cheap</code></pre>
+
+<p>The script reports six values per mode: accuracy, parse failures, output tokens, mean latency, first-call latency, and cost. The accuracy gap between <code>prompt</code> and <code>strict</code> is your constraint tax on this task. The gap can be negative. A negative gap means the schema helped.</p>
+
+<p>Then test the standard fix:</p>
+
+<pre><code data-lang="bash">python phase02_internals/structured_lab.py --model gpt-4.1-mini --role cheap --reasoning-field</code></pre>
+
+<p>This flag adds one free-text field to the schema, before the constrained fields. From <code>structured_lab.py:90</code>, docstring shortened, logic unchanged:</p>
+
+<pre><code data-lang="python">def schema(with_reasoning: bool) -> dict:
+    """JSON Schema for strict mode.
+
+    The reasoning field is FIRST on purpose. Decoding is left to right, so a
+    field can only influence fields that come after it.
+    """
+    props: dict = {}
+    if with_reasoning:
+        props["reasoning"] = {"type": "string",
+                              "description": "one short sentence of justification"}
+    props["category"] = {"type": "string", "enum": CATEGORIES}
+    props["priority"] = {"type": "string", "enum": PRIORITIES}
+    return {
+        "type": "object",
+        "properties": props,
+        "required": list(props),
+        "additionalProperties": False,
+    }</code></pre>
+
+<p>The property order is the point. OpenAI's structured outputs page states that outputs follow the key order of the schema. If <code>reasoning</code> comes last, it changes nothing, because the answer is already chosen. This schema rule has a mechanical reason and direct evidence:</p>
+
+<ul>
+<li>Tam et al. found that 100% of gpt-3.5-turbo JSON-mode answers put the answer key before the reason key. That turns step-by-step reasoning into a direct answer.</li>
+<li>JSONSchemaBench used the opposite order. It measured constrained decoding matching or beating unconstrained decoding on the same three tasks. Concretely, on GSM8K with the reasoning-first structure: the unconstrained model scored 80.1%, against 83.7% with XGrammar and 83.8% with Guidance (Table 8).</li>
+</ul>
+
+<p>The Format Tax also measured two other fixes:</p>
+
+<pre class="ascii">┌────────────────────────────┬──────────────┬───────────────┬────────────────┐
+│ mitigation                 │ improved     │ made worse    │ average gain   │
+├────────────────────────────┼──────────────┼───────────────┼────────────────┤
+│ two calls: answer freely,  │ 42 of 72     │ 2 of 72 (3%)  │ +6.8 points    │
+│ then reformat              │              │               │                │
+│ thinking enabled before    │ 43 of 72     │ 11 of 72 (15%)│ +9.2 points    │
+│ the structured answer      │              │               │                │
+└────────────────────────────┴──────────────┴───────────────┴────────────────┘</pre>
+
+<p>Two calls is the safer choice. It costs one extra request. Thinking gives a larger gain on maths and does not help on writing. Neither fix is free. Measure before you pick one.</p>
+
+<p><strong>Three schema rules to get right on day one.</strong></p>
+
+<ol>
+<li>Every property must appear in <code>required</code>.</li>
+<li><code>additionalProperties</code> must be <code>false</code>.</li>
+<li>To make a field optional, use a union with null, such as <code>"type": ["string", "null"]</code>. Do not leave the key out of <code>required</code>.</li>
+</ol>
+
+<aside class="addition" data-kind="deeper">
+<p><strong>The size limits are also day-one material.</strong> The current OpenAI page carries hard bounds the phase did not list:</p>
+<ul>
+<li>The root must be an object. No <code>anyOf</code> at the root, so Zod discriminated unions at the top level will not work.</li>
+<li>At most 5,000 object properties in total.</li>
+<li>At most 10 nesting levels.</li>
+<li>At most 120,000 characters across all names and enum/const values.</li>
+<li>At most 1,000 enum values. An enum set over 250 values has a 15,000-character limit.</li>
+</ul>
+<p>Design a large schema before you read these and you will meet them as API errors. Verified at <a href="https://developers.openai.com/api/docs/guides/structured-outputs.md">developers.openai.com/api/docs/guides/structured-outputs.md</a>.</p>
+</aside>
+
+<p>The list of unsupported JSON Schema keywords has become shorter. Check the current page, not an older blog post. As of September 2026, OpenAI's page lists some keywords as supported for normal models only. They are <code>pattern</code>, <code>format</code>, <code>multipleOf</code>, <code>minimum</code>, <code>maximum</code>, <code>minItems</code>, and <code>maxItems</code>. Fine-tuned models do not support them yet. These keywords are unsupported for all models: <code>allOf</code>, <code>not</code>, <code>dependentRequired</code>, <code>dependentSchemas</code>, <code>if</code>, <code>then</code>, <code>else</code>. Some other keywords do not appear on the page, so their status is not documented. Test such a keyword before you depend on it.</p>
+
+<p><strong>When you serve the model yourself, the engine picks a backend.</strong> Phase 4A section 4.2 covers this. The behaviour matters now because it changes both errors and latency:</p>
+
+<ul>
+<li>vLLM 0.29.0 defaults to <code>auto</code>. It checks your schema against XGrammar first. If a keyword is unsupported, it falls back to Guidance, then to Outlines.</li>
+<li>If you pin one backend instead, the same unsupported keyword becomes an error.</li>
+<li>SGLang 0.5.19 defaults to XGrammar. It has no per-schema fallback.</li>
+</ul>
+
+<p>The compile times quoted above differ by an order of magnitude between these backends. So a silent backend switch is also a latency change. Per the correctness finding above, it can also relax your schema.</p>
+
+<div class="keypoints">
+<p class="remember"><strong>The sentence to remember:</strong> constrained decoding masks illegal tokens at every step. The shape is guaranteed. The stopping point is not. The effect on quality is yours to measure.</p>
+<p class="trap"><strong>The trap:</strong> an older article may tell you that the first-request schema cost applies only to fine-tuned models. On the current OpenAI page the delay applies to any model. Measure it. Still define schemas once, at import time. A self-hosted engine does pay that cost for each distinct schema.</p>
+<p class="try"><strong>Try this now:</strong> run <code>python phase02_internals/structured_lab.py --model gpt-4.1-mini --modes strict --repeat 3</code>. Compare the <code>first call</code> column with the <code>mean lat</code> column. A large gap means your provider compiles each new schema. Record which result you got, with the date.</p>
+</div>
+
+<h2 id="s26"><span class="num">2.6</span> The context budget and the compaction trigger</h2>
+
+<p class="why">Why this matters: Phase 1 exercise E7 sent a prompt that was too large and got a 400 back. That exercise promised the fix in this section. The fix is more than a try and except block.</p>
+
+<p>The context window is the maximum number of tokens the model accepts in one call. Compaction replaces old conversation turns with a shorter summary, so the prompt fits again.</p>
+
+<h3>First, why a bigger window does not solve this</h3>
+
+<p>You might think a one million token window ends the problem. It does not. There are three separate reasons, and each one has evidence.</p>
+
+<p><strong>Reason 1: accuracy falls as input grows.</strong> Chroma's context rot study tested 18 models. They came from the Claude, GPT, Gemini, and Qwen families. It ran simple retrieval tasks at many input lengths. Performance fell as length grew, in every family. The study also ran a LongMemEval test. Every model scored higher on a focused input of about 300 tokens. The full input had about 113,000 tokens and contained the same answer.</p>
+
+<p><strong>Reason 2: position inside the window matters.</strong> The Lost in the Middle study moved the needed document to different positions. It measured accuracy at each position. With 20 documents, GPT-3.5-Turbo scored 75.8% when the answer was first. It scored 53.8% when the answer was in the middle. With no documents at all, it scored 56.1%. So the middle score was lower than the score with no documents. The models are from 2023. Treat the numbers as the shape of the effect, not as current values.</p>
+
+<aside class="addition" data-kind="deeper">
+<p><strong>Two qualifications on those numbers, both verified.</strong> First, the 75.8% and 53.8% values are read from the paper's Figure 5 chart. The prose confirms a drop of more than 20% and a mid-context score below the 56.1% closed-book baseline. Second, a result the phase misses. The extended-context variants (GPT-3.5-Turbo-16K, Claude-1.3-100K) performed nearly identically to their short-window counterparts within the shorter window. In the paper's words, "extended-context models are not necessarily better at using their input context". A bigger window buys you capacity, not attention. Verified at <a href="https://ar5iv.labs.arxiv.org/html/2307.03172">ar5iv.labs.arxiv.org/html/2307.03172</a>.</p>
+</aside>
+
+<p><strong>Reason 3: a full large window is expensive.</strong> Cost grows with every input token. A 400,000-token prompt on every step of a 50-step loop is 20 million input tokens. The <code>deep</code> role in <code>prices.yaml</code> is gpt-4.1 at $2.00 per million input tokens. So one conversation costs 20 × $2.00 = $40.</p>
+
+<p>So a larger prompt costs more for every extra token, and each extra token helps less.</p>
+
+<h3>The budget: zones with caps</h3>
+
+<p>A context window has a fixed size, and several sources write into it. Without caps, the largest source takes the space. The largest source is usually a tool that returned a large result. So split the window into zones, and give each zone a cap.</p>
+
+<pre class="ascii">┌──────────────────────────────────────────────────────────────────┐
+│ CONTEXT BUDGET for a 32,000-token window (example caps)          │
+├──────────────────┬───────────┬───────────────────────────────────┤
+│ zone             │ cap       │ rule                              │
+├──────────────────┼───────────┼───────────────────────────────────┤
+│ system           │   1,000   │ never changes; first in prompt    │
+│ tools            │   6,000   │ changes on deploy only            │
+│ carry-over       │   2,000   │ written by compaction             │
+│ history          │  10,000   │ oldest turns leave first          │
+│ retrieval/tools  │   6,000   │ truncate results, keep pointers   │
+│ headroom for the │   7,000   │ the reply needs room, and so does │
+│ answer           │           │ the summarising call              │
+└──────────────────┴───────────┴───────────────────────────────────┘</pre>
+
+<p>People forget the last row most often. If you fill the window to the limit, the summarising call cannot run either. That call is the one that would fix the problem.</p>
+
+<h3>The trigger: compact early, at a threshold you chose</h3>
+
+<p>Do not wait for the error. Count the tokens before every call. Compact when the total passes a threshold that you set.</p>
+
+<p>Shipped products set thresholds well below the window:</p>
+
+<ul>
+<li>Anthropic's context editing tool clears old tool results at a default trigger of 100,000 input tokens. It keeps the last 3 tool uses.</li>
+<li>Anthropic's server-side compaction feature defaults to a trigger of 150,000 input tokens. It rejects values below 50,000.</li>
+<li>Claude Code compacts at about 967,000 tokens on models with a one million token window. On other models it compacts at the 200,000 limit. (The 967,000 figure was not re-verified in the latest source check. See Things I could not verify.)</li>
+</ul>
+
+<p>All three use the same pattern: a fixed number, chosen in advance, below the limit.</p>
+
+<p>A newer idea is worth knowing. The Self-Compacting Language Model Agents paper argues that a token threshold can fire at a bad moment. For example, it can fire in the middle of a derivation. The paper lets the model decide instead, with a rubric. Compact when a sub-task ends. Never compact mid-derivation or while stuck. Reported results:</p>
+
+<ul>
+<li>Up to 18.1 points higher on math benchmarks.</li>
+<li>5 to 9 points higher on agentic search.</li>
+<li>30 to 70 percent lower cost per question.</li>
+</ul>
+
+<p>Treat this as a likely future direction. Start with a threshold, because a threshold is simple and you can test it.</p>
+
+<p>This is how the course's <code>compactor.py</code> behaves with its default threshold of 60% of a 32,000-token window. Toggle between the two policies to see the two endings:</p>
+
+<figure class="diagram">
+<div>
+<button id="s26-on">with trigger (default 60%)</button>
+<button id="s26-off">no compaction</button>
+</div>
+<svg id="s26-svg" viewBox="0 0 640 260" role="img" aria-label="Prompt tokens per turn, with and without a compaction trigger"></svg>
+<figcaption>Shape from compactor.py --simulate runs. Turns 25 (19,409 → 2,270) and 42 (32,635, STOP) are the measured values. The growth between turns is interpolated.</figcaption>
+</figure>
+<p id="s26-note"></p>
+<script>
+(function(){
+var NS="http://www.w3.org/2000/svg";
+var svg=document.getElementById("s26-svg");
+var note=document.getElementById("s26-note");
+var W=600,H=210,OX=30,OY=230,TURNS=60,MAXT=34000;
+function sx(t){return OX+t/TURNS*W;}
+function sy(v){return OY-v/MAXT*H;}
+function line(x1,y1,x2,y2,c,w){var l=document.createElementNS(NS,"line");
+l.setAttribute("x1",x1);l.setAttribute("y1",y1);l.setAttribute("x2",x2);l.setAttribute("y2",y2);
+l.setAttribute("stroke",c);l.setAttribute("stroke-width",w||1);svg.appendChild(l);}
+function txt(x,y,s,c,fs){var t=document.createElementNS(NS,"text");
+t.setAttribute("x",x);t.setAttribute("y",y);t.setAttribute("fill",c||"currentColor");
+if(fs)t.setAttribute("font-size",fs);t.textContent=s;svg.appendChild(t);}
+function render(trigger){
+while(svg.firstChild)svg.removeChild(svg.firstChild);
+line(OX,sy(32000),OX+W,sy(32000),"#e03131",1);txt(OX+W-150,sy(32000)-5,"window 32,000","#e03131","11");
+if(trigger){line(OX,sy(19200),OX+W,sy(19200),"#f08c00",1);txt(OX+W-165,sy(19200)-5,"trigger 19,200","#f08c00","11");}
+var pts=[];var g=780;var base=0;var stop=null;
+for(var t=1;t<=TURNS;t++){var v=base+g*t;
+if(trigger&&v>19200){base-=v-2270;v=2270;}
+if(!trigger&&v>32000){stop={t:t,v:v};break;}
+pts.push([t,v]);}
+if(stop)pts.push([stop.t,32635]);
+var d="";
+pts.forEach(function(p,i){d+=(i?"L":"M")+sx(p[0])+","+sy(p[1]);});
+var pl=document.createElementNS(NS,"path");
+pl.setAttribute("d",d);pl.setAttribute("fill","none");pl.setAttribute("stroke","#1971c2");pl.setAttribute("stroke-width",2);
+svg.appendChild(pl);
+txt(OX,20,"prompt tokens per turn",null,"11");txt(OX+W-40,OY+18,"turn",null,"11");
+if(trigger){note.textContent="Trigger at 60%. Turn 25 hits 19,409, compacts to 2,270 (45 messages summarised, 4 kept), and the run survives to turn 60.";}
+else{note.textContent="No compaction: the line crosses the window at turn 42 with 32,635 tokens. STOP. This is Phase 1 exercise E7.";}}
+document.getElementById("s26-on").addEventListener("click",function(){render(true);});
+document.getElementById("s26-off").addEventListener("click",function(){render(false);});
+render(true);
+})();
+</script>
+
+<p>The trigger fires at turn 25. The run was repeated on 2026-09-17 with the same result:</p>
+
+<pre><code data-lang="bash">python phase02_internals/compactor.py --simulate --turns 40</code></pre>
+
+<pre class="ascii">  24 │     18,631 │
+  25 │     19,409 │ trigger fired
+    COMPACTED (threshold): 19,409 -&gt; 2,270 tokens, 45 turns summarised, 4 kept verbatim
+  25 │      2,270 │</pre>
+
+<p>The trigger is at 32,000 × 0.60 = 19,200 tokens. Turn 25 is the first turn above it. Note one detail of the output. The script counts every history message as one "turn". Each loop turn adds a user message and an assistant reply. So at loop turn 25, the history holds 24 × 2 + 1 = 49 messages. 45 are summarised, and 4 are kept.</p>
+
+<h3>What to keep, and the number that shows why</h3>
+
+<p>A summary keeps what the summariser found interesting. That is where it fails. A later turn cannot recreate three kinds of facts: decisions, constraints, and open items.</p>
+
+<p>Constraints are the most dangerous to lose. The "Governance Decay" paper shows why. It built a benchmark called ConstraintRot and ran 1,323 episodes across seven model families. Each episode stated policy constraints in the context. A program graded the tool calls, not a model. The results:</p>
+
+<ul>
+<li>With the policy fully visible, the violation rate was 0%.</li>
+<li>After compaction, it rose to 30%, and reached 59% for some models.</li>
+<li>When the constraint survived the summary, violations stayed at 0%. When the summary dropped it, violations were 38%.</li>
+<li>The paper's fix, Constraint Pinning, keeps constraints out of the lossy summary. It brought violations back to 0%.</li>
+</ul>
+
+<p>Treat that as an engineering rule. Do not let a language model decide whether your safety rule is worth keeping. Copy constraints across the compaction boundary as literal text.</p>
+
+<aside class="addition" data-kind="deeper">
+<p><strong>Compaction is also an attack surface.</strong> The same Governance Decay paper documents a Compaction-Eviction Attack. Adversarial content placed in the context biases the summariser into dropping a legitimate policy. The paper reports that optimized injections defeat every evaluated model. So compaction is not only lossy. A prompt-injection payload near the summarisation boundary can actively evict your safety rule. If your system has guardrail rules, this phase's copy rule gets a security reading. Constraints must cross the boundary as literal text that never passes through the summariser, because the summariser can be manipulated. Verified at the abstract level, <a href="https://arxiv.org/abs/2606.22528">arxiv.org/abs/2606.22528</a>.</p>
+</aside>
+
+<pre class="ascii">COMPACTION BOUNDARY: what crosses it (compactor.py --simulate, loop turn 25)
+
+  BEFORE (19,409 tokens)                AFTER (2,270 tokens)
+  ┌─────────────────────────┐           ┌─────────────────────────┐
+  │ system                  │──verbatim→│ system                  │
+  │ tools                   │──verbatim→│ tools                   │
+  │ message 1  ─┐           │           │ [COMPACTED]             │
+  │ message 2   │           │           │  Summary: ...           │
+  │  ...        ├ summarised┼──────────→│  Decisions: ...         │
+  │ message 44  │           │           │  Constraints: COPIED    │
+  │ message 45 ─┘           │           │  Open items: ...        │
+  │ message 46 ─┐           │           │ message 46              │
+  │ message 47  ├ kept      ┼──verbatim→│ message 47              │
+  │ message 48  │           │           │ message 48              │
+  │ message 49 ─┘           │           │ message 49              │
+  └─────────────────────────┘           └─────────────────────────┘</pre>
+
+<aside class="addition" data-kind="incident">
+<p><strong>This failure ships in a product you may use.</strong> Claude Code's <code>/compact</code> loses project instructions. In <a href="https://github.com/anthropics/claude-code/issues/24460">anthropics/claude-code#24460</a> (opened 2026-02-09, closed as not planned): after <code>/compact</code>, CLAUDE.md contents get summarised along with everything else and can be lost. That includes commit conventions, push procedures and security rules. Symptom first: the agent stops following project rules mid-session. Wrong first theory: the model got lazy, or the context overflowed. The signal: the failure coincides with a compaction boundary, which Claude Code prints. The reporter's fix is exactly this phase's rule. Treat CLAUDE.md as a system-level invariant and re-inject it verbatim after compaction. The reported workaround is to manually say "read CLAUDE.md" after each <code>/compact</code>. A second issue, #19471, reports the same loss. Both were closed without a product fix. The mitigation is on the user.</p>
+</aside>
+
+<h3>The backstop: catch the 400, compact, retry once</h3>
+
+<p>The trigger can still be wrong. A tool can return far more than you expected. So keep a second layer, and make it log loudly.</p>
+
+<div class="compare">
+<div class="wrong">
+<pre><code data-lang="python"># WRONG: the classic retry. It resends the SAME oversized prompt.
+# The provider rejects it again, in about the same time, for the same reason.
+for attempt in range(3):
+    try:
+        return client.chat.completions.create(model=m, messages=msgs)
+    except Exception:
+        time.sleep(2 ** attempt)        # waiting changes nothing here</code></pre>
+</div>
+<div class="right">
+<pre><code data-lang="python"># RIGHT: change the input, then retry exactly once.
+try:
+    return client.chat.completions.create(model=m, messages=msgs)
+except Exception as e:
+    if not is_context_overflow(e):
+        raise
+    log.error("compaction trigger missed; backstop fired")   # this is a bug report
+    msgs = compact(msgs)                                     # the input changed
+    return client.chat.completions.create(model=m, messages=msgs)</code></pre>
+</div>
+</div>
+
+<p>This pair is a short illustration. The shipped version of the RIGHT pattern is in <code>compactor.py:660</code> to <code>compactor.py:671</code>. Phase 1 E7 describes the wrong version's result: a fast 400 rejection that a blind retry cannot fix.</p>
+
+<p>Detect the error by its machine-readable fields, not by its wording. The stable parts are:</p>
+
+<ul>
+<li>HTTP status 400.</li>
+<li>An error <code>type</code> of <code>invalid_request_error</code>.</li>
+<li>An error <code>code</code> of <code>context_length_exceeded</code>.</li>
+</ul>
+
+<p>OpenAI's public error-codes page does not list this error at all. So any exact message text you hardcode today can change without notice. <code>is_context_overflow</code> at <code>compactor.py:227</code> shows the order of checks. It checks the status first, then the code, then the error type, and the message text last. A 429 or a 5xx is never an overflow, even when its text looks like one. Anthropic's context-windows page says an oversized input returns a 400 <code>invalid_request_error</code> with the text "prompt is too long" and no error code. Checked on 2026-09-17. The function matches that by type and text.</p>
+
+<aside class="addition" data-kind="correction">
+<p><strong>Small correction to that last claim.</strong> "Anthropic sends no error code" holds for the context-overflow case as far as was checked. But it is no longer a blanket statement. Anthropic documents the 400 code <code>compaction_block_misplaced</code> for misuse of its on-demand compaction block (next box). The context-overflow error shape itself was not re-checked in the 2026-09-19 source pass. Source: <a href="https://platform.claude.com/docs/en/build-with-claude/compaction">platform.claude.com/docs/en/build-with-claude/compaction</a>.</p>
+</aside>
+
+<p>Now run the same loop without the trigger:</p>
+
+<pre><code data-lang="bash">python phase02_internals/compactor.py --simulate --turns 60 --no-compaction</code></pre>
+
+<pre class="ascii">  41 │     31,857 │
+  42 │     32,635 │ STOP: prompt exceeds the window. This is the E7 failure.</pre>
+
+<p>Turn 42 is where the Phase 1 exercise ended. With the trigger on, the run never reaches that point.</p>
+
+<aside class="addition" data-kind="update">
+<p><strong>The API now implements the boundary pattern for you.</strong> Anthropic added an on-demand compaction mode (beta header <code>compact-2026-09-04</code>). You send <code>compaction: {type: "summarize"}</code> and get back a single signed compaction block with <code>stop_reason: "compaction"</code> and no reply. You keep that block intact and send it <em>first</em> on every later request. Leaving summarized messages in front of it is a 400 <code>compaction_block_misplaced</code>. The <code>pause_after_compaction</code> option returns <code>stop_reason "compaction"</code> so the client can insert blocks before the conversation resumes. That is the API-level version of "copy constraints across the boundary". The pause point is where you re-inject them. You can also replace the default summarisation prompt with <code>instructions</code>.</p>
+<p>Limits, all verified in the same page:</p>
+<ul>
+<li>The request's own model does the summarising. There is no cheaper summariser model.</li>
+<li>Images, documents, container uploads and fetched URLs are lost once summarized. They must be re-uploaded.</li>
+<li>With tools defined, the model may call a tool during summarisation. That produces a compaction block with <code>content: null</code>. The docs recommend instructions that forbid it.</li>
+<li>On-demand compaction is Claude-API only. It cannot be combined with <code>context_management</code> on the same request.</li>
+<li>Client-side SDK compaction is deprecated and removed in the Python SDK v1.0.</li>
+</ul>
+<p>Source: <a href="https://platform.claude.com/docs/en/build-with-claude/compaction">platform.claude.com/docs/en/build-with-claude/compaction</a>.</p>
+</aside>
+
+<aside class="addition" data-kind="incident">
+<p><strong>The trigger can also fire too early, for a strange reason.</strong> A documented limitation of Anthropic's context editing: server-side tools such as web search inflate <code>cache_read_input_tokens</code> across internal calls. The SDK then overestimates the context length and triggers premature compaction. So if your agent compacts "early" and you cannot explain it, check whether a server-side tool is inflating the cache-read counter your threshold reads. Verified at <a href="https://platform.claude.com/docs/en/build-with-claude/context-editing">platform.claude.com/docs/en/build-with-claude/context-editing</a>. A second documented detail: tool-result clearing invalidates cached prompt prefixes. Clearing saves context but costs cache hits. Phase 3A covers caching; hold the connection until then.</p>
+</aside>
+
+<h3>The known limits of compaction</h3>
+
+<p>Compaction is not a solved problem. Be careful with any source that says it is.</p>
+
+<ul>
+<li><strong>Compaction can lower accuracy.</strong> The Slipstream paper describes a validation gap. The compactor must shorten the context without knowing what the agent will need later. The paper validates candidate summaries outside the main request path. It reports up to 8.8 percentage points of accuracy recovered, and up to 39.7% lower end-to-end latency.</li>
+<li><strong>Repeated compaction makes runs less stable.</strong> TRACE, an August 2026 study from the University of Virginia and Nokia, used the AppWorld benchmark. It found that compression weakens the effect of recent turns. The agent then hits more blocked actions and repeats more work. Results also vary more between runs.</li>
+<li><strong>Long tasks fail for reasons beyond token count.</strong> A study of 10,664 trajectories across nine models measured this. Task success fell with the number of steps, not with the context length. A smaller context window made success fall faster, not slower. Reliability per step rises with model size, but it stays below 1. So a long enough task fails anyway.</li>
+<li><strong>Compaction is billed.</strong> Anthropic's compaction feature runs as a separate sampling iteration. Its tokens are not included in the top-level usage counts. You must add up <code>usage.iterations</code> to see the real total. Your own summarising call has the same property. It is a second call, and your cost meter must count it.</li>
+</ul>
+
+<div class="keypoints">
+<p class="remember"><strong>The sentence to remember:</strong> compact at a threshold you chose. Copy constraints across the boundary as literal text. Treat a 400 as a bug in your trigger, not as a normal event.</p>
+<p class="trap"><strong>The trap:</strong> anything a summary drops is gone for good. When the summary drops a policy constraint, measured violations jump from 0% to 38%. Decide what to copy word for word before you decide what to summarise.</p>
+<p class="try"><strong>Try this now:</strong> run <code>python phase02_internals/compactor.py --simulate --turns 12 --inject-overflow 5</code> and read the backstop lines. Then open <code>compactor.py:670</code>. Confirm that <code>cm.compact</code> changes the input before the retry on line 671.</p>
+</div>
+
+<h2 id="lab"><span class="num">🧪</span> Hands-on lab — part B</h2>
+
+<p>Setup: <code>cd ~/Desktop/project/code/study-material/inference-internals/code &amp;&amp; pip install -e .</code></p>
+
+<p>Three of these six exercises need no API key and no GPU. They are marked "offline". The rest need <code>export OPENAI_API_KEY=sk-...</code> or another OpenAI-compatible endpoint through <code>--base-url</code> and <code>--key-env</code>.</p>
+
+<p><strong>Run status:</strong> every offline command below was run on 2026-09-17, and the output matched the numbers printed here. The API-calling commands were not run against OpenAI, because no API key was available on this machine on 2026-09-12. The command flags were checked against the shipped scripts. So E8, E9, and E10 are marked UNVERIFIED against a live provider. Run them and record what you see.</p>
+
+<p><strong>Exercise numbers:</strong> part B holds E4 and E8 to E12. The numbers are the same as in the original single Phase 2 document, because other phases cite them. <strong>E1</strong>, <strong>E2</strong>, <strong>E3</strong>, <strong>E5</strong>, <strong>E6</strong>, and <strong>E7</strong> are in part A.</p>
+
+<p>Record every number. Phase 5B uses your gap measurements.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E4. Find the token budget trade.</b> <span class="tag">offline</span></label>
+<ul>
+<li>Run: <code>python phase02_internals/batching_sim.py --token-budget 512</code> then <code>python phase02_internals/batching_sim.py --token-budget 8192</code>.</li>
+<li>Expected, in the <code>chunked</code> row: mean TTFT 1,094ms and worst gap 35ms at 512. Mean TTFT 908ms and worst gap 265ms at 8,192. The two numbers move in opposite directions.</li>
+<li>Then read the limit of the model. The simulator does not model chunking overhead. Sarathi-Serve measured about 25% overhead at a 512-token budget on Yi-34B. A very small budget has a real throughput cost.</li>
+<li>When you later self-host (Phase 4A), remember the corrected defaults from 2.4. On an A100 the offline vLLM <code>LLM</code> class defaults to <code>max_num_batched_tokens=8,192</code>. The API server on the same GPU defaults to 2,048. Same GPU, two different trades, chosen for you at startup.</li>
+<li>Teaches: <code>max_num_batched_tokens</code> is a product decision. Chat and batch jobs want opposite settings.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E8. Measure the constraint tax on a real task.</b> <span class="tag">live, UNVERIFIED against a live provider</span></label>
+<ul>
+<li>Run offline first: <code>python phase02_internals/structured_lab.py --self-test</code>. Confirm that all six parser cases pass and the last line is "all self-tests passed".</li>
+<li>Then run: <code>python phase02_internals/structured_lab.py --model gpt-4.1-mini --role cheap</code></li>
+<li>Expected: <code>prompt</code> mode records at least one parse failure across 12 tickets. <code>json</code> and <code>strict</code> record zero. The accuracy column shows your tax. The tax can be positive or negative.</li>
+<li>Costs at most: about $0.02 for all three modes.</li>
+<li>Teaches: the shape guarantee and the quality question are two different things.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E9. Test the reasoning field.</b> <span class="tag">live, UNVERIFIED against a live provider</span></label>
+<ul>
+<li>Run: <code>python phase02_internals/structured_lab.py --model gpt-4.1-mini --role cheap --reasoning-field</code></li>
+<li>Expected: output tokens, cost, and latency rise. Accuracy may or may not rise. Compare with E8, and decide whether the trade is worth it on this task.</li>
+<li>Note on the <code>first call</code> column in E8 and E9. Per the corrected OpenAI documentation in 2.5, the first request with a new schema carries extra latency for <em>any</em> current model, not only fine-tuned ones. A visible first-call gap would now match the documentation. Measure it and record the date.</li>
+<li>Teaches: a free-text field before the constrained fields is a change you can measure.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E10. Truncate an answer that follows the schema.</b> <span class="tag">break-it; live, UNVERIFIED against a live provider</span></label>
+<ul>
+<li>Run: <code>python phase02_internals/structured_lab.py --model gpt-4.1-mini --role cheap --modes strict --reasoning-field --max-tokens 15</code></li>
+<li>Expected: the <code>truncated</code> column fills up. Parse failures appear, even though every answer followed the schema until it stopped.</li>
+<li>Teaches: a strict schema guarantees legal tokens, never a complete answer. <code>finish_reason</code> is still required, as Phase 1 E11 said.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E11. Watch the compaction trigger fire.</b> <span class="tag">offline</span></label>
+<ul>
+<li>Run: <code>python phase02_internals/compactor.py --simulate --turns 40</code></li>
+<li>Expected: the prompt grows to 19,409 tokens and the trigger fires at turn 25. The prompt drops to 2,270 tokens. The script reports 45 turns summarised and 4 kept verbatim.</li>
+<li>Then run it with <code>--trigger-ratio 0.3</code>. Expected: the trigger moves to 9,600 tokens and fires three times, at turns 13, 23, and 33.</li>
+<li>Then run it with <code>--keep-last 10</code>. Expected: one compaction at turn 25, down to 4,604 tokens, with 10 kept verbatim.</li>
+<li>Teaches: the trigger is a number you choose. The token counts show the effect of that choice.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E12. Reproduce Phase 1 E7, then catch it.</b> <span class="tag">break-it; offline</span></label>
+<ul>
+<li>Run: <code>python phase02_internals/compactor.py --simulate --turns 60 --no-compaction</code></li>
+<li>Expected: the run stops at turn 42 with 32,635 tokens and the line "STOP: prompt exceeds the window. This is the E7 failure."</li>
+<li>Then run: <code>python phase02_internals/compactor.py --simulate --turns 12 --inject-overflow 5</code></li>
+<li>Expected: call 5 fails with a context-length error. The backstop compacts from 3,849 to 2,270 tokens, one retry succeeds, and the run continues. The summary line reports <code>backstops: 1</code>. The next line tells you to lower <code>--trigger-ratio</code>.</li>
+<li>Teaches: the trigger is the fix. The backstop is the second layer. A backstop that fires is a bug report.</li>
+</ul></li>
+</ul>
+
+<h2 id="check"><span class="num">🔍</span> Check it yourself — questions against the course code</h2>
+
+<p>This course has no anchor repository. These questions use the exercise code you now have. The last question works on any repository.</p>
+
+<ol>
+<li>Open <code>code/phase02_internals/compactor.py:142</code>. This is <code>ContextManager.render</code>. It joins the zones in a fixed order. Explain why moving <code>self.carry.render()</code> above the tools block would raise your bill. Use section 2.3 from part A. Then open <code>CarryOver</code> at line 98. Find the one field that the ConstraintRot results say must never depend on the summariser.</li>
+<li>Open <code>code/phase02_internals/compactor.py:227</code>. This is <code>is_context_overflow</code>. List the checks in order. Then find the first <code>return False</code>. Explain what the function returns for a 500 error whose message contains "maximum context length". Say why that answer is safe for a retry loop.</li>
+<li>Open <code>code/phase02_internals/batching_sim.py:122</code>. In chunked mode, <code>room</code> subtracts <code>len(decoding)</code> before any prefill is taken. Suppose the prefill took the budget first, and the decodes got what was left. Predict what happens to the worst gap. Explain which user sees the difference. (Cross-check: Sarathi-Serve's Algorithm 3 reserves decodes first too. The course code and the published algorithm agree on this ordering.)</li>
+<li>In any service you own that calls a model, run <code>grep -rn "max_tokens\|finish_reason\|response_format" &lt;your repo&gt;/</code>. For every call that sets <code>response_format</code> but never reads <code>finish_reason</code>, write down what happens when the answer is cut off.</li>
+</ol>
+
+<h2 id="checkpoint"><span class="num">✅</span> Checkpoint 2B: answer in your own words</h2>
+
+<ol>
+<li><strong>This is broken.</strong> Your streaming support answers look fine on the dashboard. Median TTFT is 600ms and median total time is 4.2s. Users report that the text "stops for a second" in the middle. Nothing in your metrics shows it. (a) Name the server behaviour from section 2.4 that causes this. (b) Name the one metric you must add. (c) Your provider will not change its token budget for you. Name two things you can still change.</li>
+<li><strong>Walk through what happens, and show the arithmetic.</strong> A server uses the cost model from <code>batching_sim.py</code>. Three requests are decoding. A 24,000-token prompt arrives. The token budget is 2,048. (a) How long do the three streams freeze without chunking? (b) With chunking, how many tokens of prefill fit in each iteration, and how many iterations does the prompt need? (c) How long is each chunked iteration?</li>
+<li><strong>This is broken.</strong> Your classification service returns valid JSON that matches the schema on every call. <code>finish_reason</code> is <code>stop</code>. But accuracy dropped 9 points after you enabled strict mode last week. (a) Give the most likely cause from section 2.5. (b) Describe the exact schema change you would test, including its place in the property order. (c) Name the measurement that would settle it. Say why one run is not enough.</li>
+<li><strong>Given these constraints, design</strong> the context strategy. Your agent runs 200 tool-calling steps over several hours. A policy rule says it must never issue a refund above 200 EUR. Cover the trigger, the text you copy word for word, the summary, what you drop, and cost records. Use the ConstraintRot numbers to justify one choice.</li>
+<li><strong>A colleague says:</strong> "Compaction fixed our long-running agent. We compact at 60%, and tasks now finish." Give the counter-argument from the 2026 research in section 2.6. Name the finding about step count and context length. Say what you would measure to tell the two explanations apart.</li>
+</ol>
+
+<details class="answer">
+<summary>Answer sketch: question 1</summary>
+<p>(a) Another request's long prefill ran in one iteration without chunking. Every decoding request got no token during that pass. (b) The maximum inter-token gap per response, recorded while the stream runs. Median TTFT and total latency cannot show a freeze. (c) Shorten your own prompts, so your prefills are small. Move long-context work to a separate endpoint or a batch path. Then it does not share a batch with interactive traffic. A fallback provider for interactive traffic is a third option.</p>
+</details>
+
+<details class="answer">
+<summary>Answer sketch: question 2</summary>
+<p>(a) The prefill-only pass costs 24,000 × 0.03 = 720ms. The three streams get no token for that pass. With the decode passes on each side, the measured worst gap in the default run is 764ms. (b) The budget reserves 3 tokens for the decodes, so 2,048 - 3 = 2,045 prefill tokens fit per iteration. 24,000 / 2,045 = 11.7, so the prompt needs 12 iterations. (c) 2,045 × 0.03 + 18 + 0.12 × 3 = 61.4 + 18.4 = 79.8ms. The streams now pause about 80ms per token instead of 720ms once. The measured worst gap is 81ms, because the real batch holds more decodes.</p>
+</details>
+
+<details class="answer">
+<summary>Answer sketch: question 3</summary>
+<p>(a) The schema forces the label early. The model chooses a label with no room to reason in text first. (b) Add a <code>reasoning</code> string field as the first property, before the constrained fields. Add it to <code>required</code>, and keep <code>additionalProperties: false</code>. A <code>reasoning</code> field placed last changes nothing, because decoding runs left to right. (c) Run the same labeled set through both schemas with <code>structured_lab.py</code>. Fix and report the parser. One run is not enough, because sampling varies between runs. A 9-point gap can appear by chance on 12 items. Use <code>--repeat</code> and compare across runs before you trust the number. The .txt rebuttal showed the parser alone moving a score from 0.35 to 0.61 on the same task. The parser is part of the measurement.</p>
+</details>
+
+<details class="answer">
+<summary>Answer sketch: question 4</summary>
+<p>Trigger at a fixed token threshold well below the window, for example 50% to 60%, checked before every call. Copy word for word: the refund limit rule, every other policy constraint, and the last few turns. Summarise: earlier conversation, into decisions, constraints, and open items. Drop: full tool results, replaced by pointers such as an order id you can fetch again. Justification: ConstraintRot measured 0% violations when the constraint survived compaction, and 38% when it was dropped. So the refund rule must never depend on a summariser's choice. Cost records: the summarising call is a second billed call, so add it to the same run record. Anthropic's compaction feature leaves those tokens out of top-level usage. A simple meter will count too little.</p>
+</details>
+
+<details class="answer">
+<summary>Answer sketch: question 5</summary>
+<p>The 2026 study of 10,664 trajectories found that task success falls with the number of steps, not with context length. A smaller context window made the fall steeper, with a logit slope of -0.69 against -0.44. So the win may come from lower cost or from chance, not from fixing the decline. To separate the explanations, run two tests. Hold the step count fixed and vary the context length. Then hold the context length fixed and vary the step count. Measure task success in each. If success follows the step count in both tests, compaction was not the cause.</p>
+</details>
+
+<h2 id="references"><span class="num">Refs</span> References and further learning</h2>
+
+<p>Every link below was fetched and checked on 2026-09-12. Four pages were fetched again on 2026-09-17 and returned 200: the vLLM tuning guide, Let Me Speak Freely, The Format Tax, and the OpenAI guide. The enhancement pass on 2026-09-19 and 2026-09-20 re-opened more: the Sarathi-Serve paper, the vLLM source tree at tag v0.29.0, the OpenAI structured outputs guide, both Anthropic doc pages, JSONSchemaBench, the XGrammar blog, and the three 2026 compaction papers. Read the first group before the lab.</p>
+
+<h3>Read before the lab</h3>
+
+<ul class="sources">
+<li><strong>Taming Throughput-Latency Tradeoff in LLM Inference with Sarathi-Serve, Agrawal et al., OSDI 2024</strong>. <a href="https://arxiv.org/abs/2403.02310">arxiv.org/abs/2403.02310</a>. Readable version: <a href="https://ar5iv.labs.arxiv.org/html/2403.02310">ar5iv.labs.arxiv.org/html/2403.02310</a><br>
+Why: the source of section 2.4.<br>
+Focus: section 3 for why a long prefill raises inter-token latency. Section 4 for chunked prefills and the token budget. Section 5.4.1 with Figure 14 for the overhead.<br>
+Numbers: without chunking, hybrid batches raised time between tokens by up to 28.3x (Mistral-7B, one A100, budget 256; LLaMA2-70B, four A100s, budget 512; Figure 9, verified in the enhancement pass). Capacity rose 2.6x for Mistral-7B on one A100 and up to 3.7x for Yi-34B on two A100s, against vLLM (abstract, verified). The original also lists "up to 6.3x for LLaMA2-70B on eight A40s, against Orca" and budget guidance of "512 for a strict latency target, 2048 for a relaxed one". Those come from sections 5.1 and 4.3, which the enhancement pass could not reach past the HTML truncation. Both are <strong>not verified</strong>. The OSDI'24 PDF would settle them.<br>
+When: before the lab.</li>
+
+<li><strong>vLLM optimization and tuning guide, official documentation</strong>. <a href="https://docs.vllm.ai/en/latest/configuration/optimization.html">docs.vllm.ai/en/latest/configuration/optimization.html</a><br>
+Focus: the chunked prefill part. Smaller <code>max_num_batched_tokens</code> values such as 2048 "achieve better ITL because there are fewer prefills slowing down decodes". Higher values "achieve better time to first token". Quotes checked on 2026-09-17.<br>
+Defaults confirmed against the v0.29.0 source tree: <code>enable_chunked_prefill</code> is <code>True</code>, and <code>max_num_batched_tokens</code> is chosen at startup from the GPU class (full table in section 2.4).<br>
+When: before the lab.</li>
+
+<li><strong>vLLM source at tag v0.29.0</strong> (added by the enhancement pass). <a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/engine/arg_utils.py">vllm/engine/arg_utils.py</a> and <a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/config/scheduler.py">vllm/config/scheduler.py</a><br>
+Why: defaults are checked in the source tree, not the docs. <code>get_batch_defaults()</code> is the primary source for every default in section 2.4, including the A100 exclusion (PR #17885), <code>stream_interval</code>, the queue valves and <code>scheduler_reserve_full_isl</code>.<br>
+When: when you self-host in Phase 4A.</li>
+
+<li><strong>Efficient Guided Generation for Large Language Models, Willard and Louf, the Outlines paper</strong>. <a href="https://arxiv.org/abs/2307.09702">arxiv.org/abs/2307.09702</a><br>
+Why: the mechanism in section 2.5.<br>
+Focus: section 2.2 for the mask formula. Section 3 for the index that maps each state machine state to its legal tokens. That index keeps the mask cost about constant per step.<br>
+Note: the timing comparison in section 3.2 is one plot from one timing run, and the authors hedge it themselves. Do not quote a speedup from it.<br>
+When: before E8.</li>
+
+<li><strong>The Format Tax, Lee, D'Antoni, Berg-Kirkpatrick, April 2026</strong>. <a href="https://arxiv.org/abs/2604.03616">arxiv.org/abs/2604.03616</a><br>
+Why: settles the debate in section 2.5 by separating the prompt cost from the decoder cost.<br>
+Focus: section 4.2 for the split, section 4.3 with Table 5 for the two fixes.<br>
+Note: this is a preprint with no peer-review venue found. The abstract was verified in the enhancement pass: 6 open-weight and 4 API models, 4 formats, the dominant cost from the format-requesting prompt, decoupling recovering most accuracy, recent closed-weight models showing little or no tax. The specific body numbers (3.9 and 1.6 points, 55.7% to 92.2% validity, +6.8 and +9.2 fixes) were not re-read in the body this pass. The phase re-checked them on 2026-09-17. Weigh with that in mind.<br>
+When: before E8.</li>
+
+<li><strong>Governance Decay: How Context Compaction Silently Erases Safety Constraints in Long-Horizon LLM Agents, June 2026</strong>. <a href="https://arxiv.org/abs/2606.22528">arxiv.org/abs/2606.22528</a><br>
+Why: the strongest number in section 2.6, and the reason the <code>constraints</code> list exists in <code>compactor.py</code>.<br>
+Focus: the violation rates before and after compaction, Constraint Pinning, and the Compaction-Eviction Attack added in the enhancement pass.<br>
+Numbers: 1,323 episodes across seven model families. Verified at abstract level on 2026-09-19.<br>
+When: before E11.</li>
+
+<li><strong>Context editing and compaction reference, Anthropic platform documentation</strong>. <a href="https://platform.claude.com/docs/en/build-with-claude/context-editing">platform.claude.com/docs/en/build-with-claude/context-editing</a>. Second page: <a href="https://platform.claude.com/docs/en/build-with-claude/compaction">platform.claude.com/docs/en/build-with-claude/compaction</a><br>
+Focus: the default triggers quoted in section 2.6. Context editing: 100,000 input tokens keeping 3 tool uses. Server-side compaction: 150,000 with a 50,000 minimum. Both verified 2026-09-19. Also the on-demand compaction mode, <code>pause_after_compaction</code>, the <code>compaction_block_misplaced</code> error, and the premature-compaction limitation with server-side tools. Two billing details: clearing tool results invalidates cached prompt prefixes, and compaction tokens are billed but not in the top-level usage counts (sum <code>usage.iterations</code>).<br>
+When: when you implement the backstop.</li>
+</ul>
+
+<h3>Constrained decoding</h3>
+
+<ul class="sources">
+<li><strong>XGrammar blog and paper, MLC</strong>. <a href="https://blog.mlc.ai/2024/11/22/achieving-efficient-flexible-portable-structured-generation-with-xgrammar">blog.mlc.ai/2024/11/22/...</a>. Paper: <a href="https://arxiv.org/abs/2411.15100">arxiv.org/abs/2411.15100</a><br>
+Focus: the split between context-independent tokens, computed in advance, and context-dependent tokens. More than 99% of tokens are usually context-independent. Up to 3.5x faster mask generation on JSON schema and up to 10x on context-free grammars. Comparison set: Outlines v0.1.3, llama-cpp b3998 and lm-format-enforcer v0.10.9, on Llama-3-8B and 3.1-8B. End-to-end up to 14x (JSON) and 80x (CFG) on an H100. Vendor numbers, conditions verified in the enhancement pass.<br>
+When: after the lab.</li>
+
+<li><strong>XGrammar-2, MLC</strong>. <a href="https://blog.mlc.ai/2026/05/04/xgrammar-2-fast-customizable-structured-generation">blog.mlc.ai/2026/05/04/...</a>. Paper: <a href="https://arxiv.org/abs/2601.04426">arxiv.org/abs/2601.04426</a><br>
+Focus: Structural Tag, a current approach to the constraint tax. The model writes free text. A trigger token turns on the constrained region. vLLM exposes it as <code>structural_tag</code>. The blog reports compilation on complex JSON schemas dropping from 534ms to 5.37ms. No accuracy measurement is published for Structural Tag yet. Treat it as an engineering fix, not as proven quality.<br>
+When: when you hit the tax.</li>
+
+<li><strong>JSONSchemaBench</strong>. <a href="https://arxiv.org/abs/2501.10868">arxiv.org/abs/2501.10868</a>. Readable version: <a href="https://ar5iv.labs.arxiv.org/html/2501.10868">ar5iv.labs.arxiv.org/html/2501.10868</a><br>
+Focus: Table 3 for the compile times used in section 2.5, Table 2 for the Outlines 3.48-8.05s medians and the TPOT speedup, Table 6 for XGrammar's 38 under-constrained failure categories, and Table 8 for accuracy. Its setup puts the reasoning field before the answer field. Under that ordering, constrained decoding matched or beat unconstrained decoding.<br>
+When: after E8.</li>
+
+<li><strong>Let Me Speak Freely?, Tam et al., EMNLP 2024 Industry Track</strong>. <a href="https://arxiv.org/abs/2408.02442">arxiv.org/abs/2408.02442</a><br>
+Focus: Table 1, Table 7, and Table 8. Table 8 shows constraints helping classification, although the abstract does not say so. Read section 2 for the words "is assumed", about whether JSON mode uses constrained decoding. The rebuttals attack that weakness. Quote checked on 2026-09-17.<br>
+When: after the lab.</li>
+
+<li><strong>Say What You Mean: A Response to "Let Me Speak Freely", .txt, the Outlines authors</strong>. <a href="https://blog.dottxt.ai/say-what-you-mean.html">blog.dottxt.ai/say-what-you-mean.html</a><br>
+Focus: the parser numbers. The same task scores 0.35 with a strict regular expression parser and 0.61 with a flexible one. The post also re-runs the original tests on the same model. (The 0.35/0.61 numbers were not re-opened in the enhancement pass.)<br>
+When: after E8.</li>
+
+<li><strong>OpenAI Structured Outputs guide, official documentation</strong>. <a href="https://developers.openai.com/api/docs/guides/structured-outputs">developers.openai.com/api/docs/guides/structured-outputs</a><br>
+Focus: the "Supported schemas" section, before you design a schema. Now includes the size limits (root must be an object, 5,000 properties, 10 nesting levels, 120,000 characters, 1,000 enum values) and the first-request-latency note for all models, both verified 2026-09-19. The page also states that outputs follow the key order of the schema. The old platform.openai.com URL now redirects here.<br>
+When: before designing any schema.</li>
+</ul>
+
+<h3>Context management</h3>
+
+<ul class="sources">
+<li><strong>Effective context engineering for AI agents, Anthropic, 29 September 2025</strong>. <a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">anthropic.com/engineering/effective-context-engineering-for-ai-agents</a><br>
+Focus: the compaction section and the structured note-taking section. It names what to keep: architectural decisions, unresolved bugs, and implementation details.<br>
+Note: it gives no numeric threshold. Do not repeat a threshold and credit it to this page.<br>
+When: after E11.</li>
+
+<li><strong>Context Rot: How Increasing Input Tokens Impacts LLM Performance, Chroma Research, 14 July 2025</strong>. <a href="https://www.trychroma.com/research/context-rot">trychroma.com/research/context-rot</a><br>
+Focus: the LongMemEval section. It compares a focused input of about 300 tokens with a full input of about 113,000 tokens. The study covers 18 models from the Claude, GPT, Gemini, and Qwen families.<br>
+Note: the page shows the accuracy curves as charts and gives no accuracy percentage at a specific token count. The often-repeated "30% drop" figure does not appear on the page. Do not quote it.<br>
+When: after the lab.</li>
+
+<li><strong>Lost in the Middle: How Language Models Use Long Contexts, Liu et al., TACL 2024</strong>. <a href="https://arxiv.org/abs/2307.03172">arxiv.org/abs/2307.03172</a>. Readable version: <a href="https://ar5iv.labs.arxiv.org/html/2307.03172">ar5iv.labs.arxiv.org/html/2307.03172</a><br>
+Focus: Figure 5, the curve of accuracy against position that section 2.6 quotes. The models are old. The shape of the curve still applies. Also: extended-context variants perform nearly identically to short-window counterparts within the shorter window (verified in the enhancement pass).<br>
+When: after E11.</li>
+
+<li><strong>Slipstream: Trajectory-Grounded Compaction Validation for Long-Horizon Agents, May 2026</strong>. <a href="https://arxiv.org/abs/2605.08580">arxiv.org/abs/2605.08580</a><br>
+Focus: the validation gap, and the two results quoted in section 2.6.<br>
+When: when your compactor ships.</li>
+
+<li><strong>TRACE: Toward Reliable Context Compression for Long-Horizon Agents, August 2026</strong>. <a href="https://arxiv.org/abs/2608.06503">arxiv.org/abs/2608.06503</a><br>
+Focus: Figure 4, blocked and repeated actions after a compaction boundary.<br>
+When: when you compact repeatedly.</li>
+
+<li><strong>Self-Compacting Language Model Agents, June 2026</strong>. <a href="https://arxiv.org/abs/2606.23525">arxiv.org/abs/2606.23525</a><br>
+Focus: the rubric that decides when to compact. The counter-argument to token thresholds. Section 2.6 quotes its results.<br>
+When: after your threshold is stable.</li>
+
+<li><strong>How Fast Do Agents Rot?, August 2026</strong>. <a href="https://arxiv.org/abs/2609.01660">arxiv.org/abs/2609.01660</a><br>
+Focus: success falls with step count, not with context length. A smaller context made the fall steeper, with a logit slope of -0.69 against -0.44.<br>
+Scope: 10,664 trajectories and nine models.<br>
+When: when someone credits compaction for a reliability win.</li>
+
+<li><strong>Claude Code loses project instructions after /compact</strong> (added by the enhancement pass). <a href="https://github.com/anthropics/claude-code/issues/24460">anthropics/claude-code#24460</a><br>
+Why: the phase's "copy constraints across the boundary as literal text" rule, discovered independently by users as a production failure. CLAUDE.md contents are summarised away. The issue asks for the file to be re-injected after compaction. It was closed as not planned, so the fix is on the user.<br>
+When: when you design your constraint copy step.</li>
+</ul>
+
+<h2 id="unverified">Things I could not verify</h2>
+
+<p>Taken from the enhancement pass's source dig, 2026-09-19 and 2026-09-20. None of these are stated as fact on this page. Where the phase leans on one, it is flagged in place:</p>
+
+<ol>
+<li>Sarathi-Serve "up to 6.3x for LLaMA2-70B on eight A40s, against Orca". Section 5.1 lay past the fetch truncation; the abstract lists only 2.6x/3.7x/5.6x. The OSDI'24 PDF would settle it.</li>
+<li>Sarathi-Serve "about 25% overhead at a 512-token budget on Yi-34B" (§5.4.1, Figure 14). Same truncation. The phase states it; it stands on the phase's own reading, not on the dig's.</li>
+<li>Sarathi-Serve token-budget guidance "512 for a strict latency target, 2048 for a relaxed one" (§4.3). Same truncation.</li>
+<li>The Format Tax body numbers (3.9/1.6 points, 55.7% to 92.2% validity, +6.8/+9.2 fixes). Abstract verified, body not re-read. The phase re-checked its quotes on 2026-09-17.</li>
+<li>Whether OpenAI's error-codes page genuinely omits <code>context_length_exceeded</code>. That page was never fetched in the dig.</li>
+<li>Anthropic's context-overflow error shape (400, "prompt is too long", no code). The phase checked it 2026-09-17; the dig did not re-open the context-windows page. The documented <code>compaction_block_misplaced</code> code shows Anthropic does emit error codes in at least one nearby case.</li>
+<li>The .txt rebuttal parser numbers (0.35 vs 0.61). The blog was not re-fetched this run.</li>
+<li>Claude Code compacting "at about 967,000 tokens" on one-million-window models. No source opened.</li>
+<li>The exact Lost in the Middle 75.8% and 53.8% values. Figure 5 chart readings; the prose confirms only the greater-than-20% drop and the below-closed-book mid-context score (56.1%).</li>
+<li>All <code>batching_sim.py</code>, <code>structured_lab.py</code> and <code>compactor.py</code> outputs. The dig could not execute code; the phase's 2026-09-17 re-runs are the only evidence.</li>
+<li>vLLM's structured-outputs <code>auto</code> fallback order and SGLang 0.5.19 defaults. Deferred to Phase 4A by the phase; not re-checked at the tag this run.</li>
+<li>Chroma context-rot, Self-Compacting Agents, Slipstream, TRACE, and "How Fast Do Agents Rot?" numbers. Not re-opened this run; the phase's 2026-09-17 checks stand unverified by the dig.</li>
+</ol>
+
+<h2 id="cheatsheet"><span class="num">📋</span> Cheatsheet — part B</h2>
+
+<pre class="cheatsheet">CHUNKED PREFILL
+  no chunking : one big prefill freezes every stream in the batch
+  chunking    : prefill shares max_num_batched_tokens with the decodes
+                decodes are reserved first: 2048 - 3 decodes = 2045 prefill
+  smaller budget → better inter-token smoothness, worse TTFT
+  larger budget  → better TTFT, worse smoothness
+  measured (batching_sim, chunked row): budget 512 → gap 35ms, TTFT 1094ms
+                                        budget 2048 → gap 81ms, TTFT 925ms
+                                        budget 8192 → gap 265ms, TTFT 908ms
+  48k prompt: chunking +112ms mean TTFT, worst gap 1460ms → 81ms
+  vLLM 0.29.0 get_batch_defaults(), max_num_batched_tokens:
+    API server: 2048 (most GPUs incl. A100) / 8192 (H100-H200) / 16384 (B200+)
+    offline LLM class: 8192 (most) / 16384 (H100+, B200+)
+    A100 excluded from big budgets by device name (PR #17885)
+    performance_mode=throughput doubles both when you set neither
+  gaps that are NOT prefill: stream_interval > 1 buffers tokens (v0.29.0)
+  queue overflow on self-host = HTTP 503 (max_num_queued_reqs/tokens)
+  measure MAX INTER-TOKEN GAP; TTFT and total latency cannot see a freeze
+
+CONSTRAINED DECODING
+  mask illegal tokens each step → shape guaranteed, stopping NOT guaranteed
+  prompt only → no guarantee | json_object → valid JSON
+  json_schema + strict → schema obeyed (hosted). Self-hosted: engine-dependent;
+    XGrammar under-constrains in 38/45 JSON Schema Test Suite categories
+  finish_reason still required: a truncated answer is a parse failure
+  schema rules: every key in required, additionalProperties false,
+    optional = union with null, root must be an object,
+    max 5000 props / 10 levels / 120k chars / 1000 enums
+  compile medians (JSONSchemaBench): Guidance ~0.01s, XGrammar 0.11-0.30s,
+    Outlines 3.48-8.05s (some keywords: 40s-10min)
+  first call with ANY new schema carries extra latency (OpenAI, all models)
+  THE TAX: format request in prompt ≈ -3.9 pts, the decoder ≈ -1.6 pts
+  reasoning field goes FIRST, or it does nothing
+  fixes: two calls (+6.8 avg, worsens 3%), thinking (+9.2 avg, worsens 15%)
+  report every tax number with its model and its parser
+
+CONTEXT BUDGET AND COMPACTION
+  zones with caps + headroom for the reply AND for the summarising call
+  TRIGGER on a token threshold you chose, before the call
+    compactor.py: 0.60 x 32,000 = 19,200 → fires at turn 25
+    shipped: context editing 100k (keep 3 tool uses),
+             compaction API 150k (min 50k)
+  COPY WORD FOR WORD: constraints. 0% violations when kept, 38% when dropped
+  constraint drops can be attacked: Compaction-Eviction Attack beats
+    every evaluated model (in-context injection biases the summariser)
+  SUMMARISE: decisions, open items.   DROP: tool results, keep pointers
+  BACKSTOP: HTTP 400 + code context_length_exceeded → compact → retry ONCE
+    never match on message text; never resend the same prompt unchanged
+  server-side tools can inflate cache_read_input_tokens → premature compaction
+  compaction is billed: your summarising call is a second call
+    (provider: sum usage.iterations, top-level counts exclude it)
+  400k-token prompt x 50 steps x $2.00/M (gpt-4.1) = $40 per conversation
+
+THE COMMANDS (all offline except the live structured_lab run)
+  batching_sim.py --token-budget N          structured_lab.py --self-test
+  compactor.py --simulate --turns 40        compactor.py ... --no-compaction
+  compactor.py --simulate --turns 12 --inject-overflow 5</pre>
+
+<h2 id="posts">Two things you could post</h2>
+
+<ul>
+<li><strong>"Our streaming metrics were all green and users still saw the text freeze."</strong> The claim: median TTFT and total latency are structurally blind to a mid-stream stall. One un-chunked 48k prefill froze every stream for 1.4s while the dashboard stayed green. His rather than a rehash because he adds his own max-inter-token-gap measurement from his own client code. Plus the v0.29.0 wrinkle: some gaps are the server's stream_interval, not prefill at all.</li>
+<li><strong>"The schema wasn't the problem; the prompt was."</strong> The claim: the structured-outputs accuracy drop is mostly the format request itself (-3.9 pts) not constrained decoding (-1.6). The fix is one reasoning field placed first, not a model upgrade. His because he runs an eval pipeline and can publish his own prompt-vs-strict delta on 12 real tickets, with the parser fixed and named.</li>
+</ul>
+
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+</body>
+</html>

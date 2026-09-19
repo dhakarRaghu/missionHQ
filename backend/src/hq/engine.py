@@ -290,6 +290,7 @@ async def dispatch(
 
 _COURSE_STAGES = frozenset({
     learning.COURSE_STAGE, learning.COURSE_WRITTEN_STAGE, learning.COURSE_REVIEW_STAGE,
+    learning.CLAIMS_STAGE,
 })
 
 
