@@ -672,9 +672,10 @@ async def write_lesson(
         gap = page_coverage(source, html, note)
         if gap:
             raise ModelRetry(
-                f"the enhanced page is not complete: {gap}. Fix those parts with"
-                " write_lesson_part (read_course_source gives each section), then"
-                " call write_lesson again"
+                f"the enhanced page is not complete: {gap}."
+                " Rewrite ONLY the parts this names, with write_lesson_part and the"
+                " same part numbers; every other part is saved and stays as it is."
+                " Then call write_lesson again."
             )
     broken = page_script_problems(html) if html.strip() else ""
     if broken:
@@ -1210,7 +1211,12 @@ def page_script_problems(page_html: str) -> str:
 ARTICLE_MIN_WORDS = 1_800
 ARTICLE_MAX_WORDS = 2_600
 PAGE_FLOOR = 0.95          # an enhanced page never teaches less than the source
-PAGE_CEILING = 1.3         # and adds at most a third again
+# No ceiling on length: "this should be according to value it gives".
+# A long page is fine when every paragraph earns its place. What is not fine
+# is length made of the same point explained again, so that is what is
+# measured: near-repeats inside the page, and the share spent on summaries.
+REPEAT_SHARE = 0.06        # sentences that say what an earlier one already said
+REPEAT_OVERLAP = 0.45      # five-word runs shared, for two sentences to count as one
 # He may rewrite freely, on one condition: "rewriting is fine for any, the
 # language simpler for me to understand". So the check is not whether his
 # sentences survive. It is whether a rewritten page reads more easily than
@@ -1283,6 +1289,28 @@ def _sentences_kept(source: str, page_html: str) -> tuple[int, int]:
     return kept, len(originals)
 
 
+def repeated_sentences(page_html: str) -> list[tuple[str, str]]:
+    """Pairs where a later sentence says what an earlier one already said.
+
+    Not string equality: the same point, reworded, is the thing he objects
+    to. "Repeated means do not increase the size by just explaining it again
+    and again."
+    """
+    sentences = _sentences(_page_text(page_html))
+    seen: list[tuple[set[tuple[str, ...]], str]] = []
+    pairs: list[tuple[str, str]] = []
+    for sentence in sentences:
+        marks = _shingles(sentence)
+        if not marks:
+            continue
+        for earlier_marks, earlier in seen:
+            if len(marks & earlier_marks) / len(marks) > REPEAT_OVERLAP:
+                pairs.append((earlier, sentence))
+                break
+        seen.append((marks, sentence))
+    return pairs
+
+
 def _restatement_words(page_html: str) -> int:
     """Words spent saying a point a second time, in the kit's summary blocks."""
     return sum(_visible_words(block) for block in _RESTATEMENT_RE.findall(page_html))
@@ -1294,8 +1322,8 @@ def page_coverage(source: str, page_html: str, note: str = "") -> str:
     Measured checks only, because a same-model reviewer passes what reads
     well. The enhanced page must keep:
 
-    * every numbered section ("3.1", "3.2"), and a length inside the band:
-      never less than the source, and at most a third again;
+    * every numbered section ("3.1", "3.2"), and never less than the source's
+      words. There is no upper limit: length follows what the page adds;
     * the facts when it rewrites, and simpler sentences than his when it
       rewrites most of a section;
     * one restatement per concept, not three;
@@ -1325,13 +1353,6 @@ def page_coverage(source: str, page_html: str, note: str = "") -> str:
             f"the page carries {have} words against {source_words} in the source;"
             f" an enhanced version never teaches less (floor {int(source_words * PAGE_FLOOR)})"
         )
-    elif measurable and have > int(source_words * PAGE_CEILING):
-        problems.append(
-            f"the page carries {have} words against {source_words} in the source"
-            f" ({have / max(source_words, 1):.1f}x, ceiling {int(source_words * PAGE_CEILING)})."
-            " Cut restatement, not teaching: say each point once, and add only"
-            " what the source does not have"
-        )
 
     if measurable:
         # Simpler, always. He reads English as a second language, and the
@@ -1360,6 +1381,17 @@ def page_coverage(source: str, page_html: str, note: str = "") -> str:
                 + ". A number is a fact: keep it, or say in a correction box why it"
                 " changed"
             )
+
+    repeats = repeated_sentences(page_html) if measurable else []
+    sentence_count = len(_sentences(_page_text(page_html))) or 1
+    if len(repeats) / sentence_count > REPEAT_SHARE:
+        shown = "; ".join(f"“{a[:60]}…” then “{b[:60]}…”" for a, b in repeats[:3])
+        problems.append(
+            f"{len(repeats)} of {sentence_count} sentences repeat a point an"
+            f" earlier one already made ({len(repeats) / sentence_count:.0%}):"
+            f" {shown}. Length is fine when every paragraph earns it; saying the"
+            " same thing twice is not"
+        )
 
     said_again = _restatement_words(page_html) if measurable else 0
     if measurable and have and said_again / have > RESTATEMENT_SHARE:

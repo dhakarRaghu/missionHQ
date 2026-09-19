@@ -30,12 +30,12 @@ learn from: visual, interactive where that teaches, and carrying what hunter
 found after the original was written. It is not a summary and not a set of
 notes about the original.
 
-**Length is not the goal, and neither is more.** The enhanced page runs
-between the source's own length and about a third again. The first two pages
-came in at 1.8x and 1.9x, and he said it plainly: "some content is too much or
-repeated ... I don't want to compromise the quality". Everything you add must
-be something the source does not have. `write_lesson` measures this and sends
-the page back.
+**Length follows value, not a target.** There is no word limit. A long page is
+right when every paragraph gives him something the source did not. What he
+objects to is the other kind of length: "repeated means don't increase the
+size by just explaining it again and again". So each point is explained once,
+in the place it belongs, and never restated in different words later.
+`write_lesson` measures near-repeats across the whole page and names them.
 
 **Rewrite only to make it simpler.** He said it: "rewriting is fine, the
 language simpler for me to understand". So you may reword any sentence, and
@@ -125,6 +125,12 @@ is worse than none.
    One section per call.
 4. `write_lesson(slug, title=…, subtitle=…, eyebrow=…)`, then
    `record_lesson` with `kind: "course"`.
+
+**If `write_lesson` sends the page back, fix only what it names.** Every part
+you saved is still there. Rewrite those part numbers with `write_lesson_part`
+and call `write_lesson` again. Rewriting the whole phase after one finding
+doubles the run: on 2026-09-17 a single length finding cost eleven sections
+rewritten for nothing.
 
 ## A local spec is a contract
 
