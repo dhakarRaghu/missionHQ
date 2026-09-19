@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scheduling and Memory</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+.addition{margin:1.8rem 0;padding:1rem 1.1rem 1rem 1.2rem;border-radius:12px;
+  border:1px solid var(--line);border-left:4px solid var(--violet);background:var(--violet-soft)}
+.addition::before{display:block;font-size:.7rem;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--violet);margin-bottom:.3rem;content:"Added · deeper"}
+.addition[data-kind=update]::before{content:"Added · what changed since"}
+.addition[data-kind=correction]{border-left-color:var(--bad);background:var(--bad-soft)}
+.addition[data-kind=correction]::before{content:"Correction";color:var(--bad)}
+.addition[data-kind=incident]{border-left-color:var(--warn);background:var(--warn-soft)}
+.addition[data-kind=incident]::before{content:"Production incident";color:var(--warn)}
+.addition[data-kind=practice]{border-left-color:var(--ok);background:var(--ok-soft)}
+.addition[data-kind=practice]::before{content:"Added · practice";color:var(--ok)}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Inference Internals · Phase 2A</div><h1>Scheduling and Memory</h1><p class="subtitle">How the server shares one GPU between strangers</p></header>
+<p class="why">Your TTFT tripled at 3pm and your prompt did not change. You open your own logs. Your code sent the same bytes, at the same rate, with the same key. The provider returned the same answer, three times slower. Nothing on your side explains it. The explanation is not on your side. It is inside the server. It sits in the requests that arrived at the same second as yours.</p>
+
+<p>Phase 1 looked at one request on its own. You measured its TTFT, its TPOT, and its bill. TTFT is the time to first token. TPOT is the time per output token after the first. That model is correct, but it is not complete. A real inference server never runs one request. It runs a loop over a batch. Your request shares a GPU with requests from other people.</p>
+
+<p>This phase opens that loop. After it, you can answer questions that Phase 1 could not:</p>
+
+<ul>
+<li>Why did my TTFT triple at 3pm when my prompt did not change?</li>
+<li>Why does the same prompt cost 4x less on the second call? How do I make that happen every time?</li>
+<li>Why did the stream freeze for 800ms in the middle of a sentence?</li>
+<li>Why did my strict JSON schema make the answers worse?</li>
+<li>My agent failed with a 400 after 40 turns. What is the correct fix? Why is a retry not the fix?</li>
+</ul>
+
+<p>Phase 2 is split into two documents. It covers six topics. One document would be too long to study in one sitting. This is part A. It answers the first two questions. Part B answers the last three.</p>
+
+<pre class="ascii">┌──────────────────────────────────────────────────────────────────────────┐
+│ PART A, this document                                                    │
+│  2.1  The scheduler loop        — continuous batching, and why your      │
+│                                   latency depends on other requests      │
+│  2.2  The paged KV cache        — why the server fits 18x more requests  │
+│  2.3  Prefix caching inside     — the radix tree, block granularity,     │
+│       the server                  eviction, and what your layout costs   │
+│                                                                          │
+│ PART B, the next document                                                │
+│  2.4  Chunked prefill           — the trade between TTFT and TPOT        │
+│  2.5  Constrained decoding      — token masking, and the constraint tax  │
+│  2.6  Context budget and        — the trigger that prevents Phase 1 E7,  │
+│       compaction                  and the backstop that catches it       │
+└──────────────────────────────────────────────────────────────────────────┘</pre>
+
+<h2>What this part teaches, and what it defers</h2>
+
+<p>This part introduces five things for the first time. The scheduler loop, and static versus continuous batching. PagedAttention and its block tables. Preemption and the RECOMPUTE recovery mode. The server side of prefix caching. That means block hashing, the radix tree, and LRU eviction. And the capacity arithmetic. It tells you how many requests one GPU can hold.</p>
+
+<p>This part also explains a result you already have. Phase 1 exercise E6 measured it. One changed character early in the prompt ends the cache hit. Section 2.3 shows the mechanism behind that result.</p>
+
+<p>Three topics are named here and taught in part B. They are chunked prefill in 2.4, constrained decoding in 2.5, and the context budget in 2.6. Where part A needs one of them, it says so and stops. Provider-side caching details belong to Phase 3A section 3.2. One example is how long a provider holds your cached prefix. This part mentions them in one clause and moves on.</p>
+
+<p>Time: 1.5 to 2 hours. All three scripts in this part run with no API key and no GPU. Only exercise E7 calls a live API.</p>
+
+<p>Setup once:</p>
+
+<pre><code data-lang="bash">cd ~/Desktop/project/code/study-material/inference-internals/code
+pip install -e .       # or: uv sync</code></pre>
+
+<p>The scripts for this part are <code>batching_sim.py</code>, <code>paging_lab.py</code>, and <code>prefix_cache_sim.py</code>. They need no key. Exercise E7 needs <code>export OPENAI_API_KEY=sk-...</code>. You can also use any OpenAI-compatible endpoint. Pass it through <code>--base-url</code> and <code>--key-env</code>.</p>
+<h2><span class="num">2.1</span> The scheduler loop (your latency depends on other requests)</h2>
+
+<p class="why">You cannot explain a latency spike until you know what the server does between your requests. The server runs a loop, and your request is one row inside it.</p>
+
+<p>vLLM, SGLang, TensorRT-LLM, and hosted providers all run this loop. The names differ between them. The steps are the same. Three terms first:</p>
+
+<ul>
+<li><strong>Prefill</strong> is the pass that reads your whole prompt. It produces the first token.</li>
+<li><strong>Decode</strong> is each later pass. Each decode pass produces one more token.</li>
+<li><strong>A forward pass</strong> is one run of the model over a set of tokens.</li>
+</ul>
+
+<pre class="ascii">┌──────────────────────────────────────────────────────────────────────┐
+│  ONE SCHEDULER ITERATION                                             │
+│                                                                      │
+│  1. look at the waiting queue and the running set                    │
+│  2. pick work that fits a token budget and a memory budget           │
+│  3. run ONE forward pass over all of it together                     │
+│  4. every decoding request gets exactly ONE new token                │
+│  5. finished requests leave; freed memory returns to the pool        │
+│  6. go to step 1                                                     │
+└──────────────────────────────────────────────────────────────────────┘</pre>
+
+<p>Step 4 surprises most people. One iteration produces one token per request. The batch size does not change this. So a batch of 40 requests produces 40 tokens. That takes about the time one request takes for 1 token.</p>
+
+<p>The reason is what a decode step does. It reads all the model weights from GPU memory once. Then it does a small amount of arithmetic per sequence. The memory read takes most of the time. One more sequence adds only a little arithmetic.</p>
+
+<p>The simulator in this part uses that fact as its cost model. From <code>batching_sim.py:49</code> and <code>batching_sim.py:73</code>, comments shortened, logic unchanged:</p>
+
+<pre><code data-lang="python">BASE_DECODE_MS = 18.0        # one decode iteration with a batch of 1
+PER_SEQ_DECODE_MS = 0.12     # extra cost per additional sequence in the batch
+# Prefill is compute-bound: about 33,000 tokens per second in this model.
+MS_PER_PREFILL_TOKEN = 0.03
+
+def iteration_cost_ms(prefill_tokens: int, decode_seqs: int) -> float:
+    """Time for one forward pass over this mixed batch."""
+    cost = prefill_tokens * MS_PER_PREFILL_TOKEN
+    if decode_seqs:
+        cost += BASE_DECODE_MS + PER_SEQ_DECODE_MS * decode_seqs
+    return cost</code></pre>
+
+<p>With these constants, a batch of 16 decoding requests costs 18.0 + 0.12 × 16 = 19.92ms per iteration. A batch of 1 costs 18.12ms. Sixteen times the tokens cost 10% more time. The file says it is a teaching model. The shape of its results matches real servers. Its absolute numbers do not match any specific GPU.</p>
+
+<h3>Static batching was the old way</h3>
+
+<p>The server collected N requests and ran them together. It admitted no new request until the last one in the batch finished.</p>
+
+<pre class="ascii">STATIC BATCHING — the slowest request holds the whole batch (example timings)
+
+  slot 1  ████████████░░░░░░░░░░░░░░░░░░░   done at t=1.2s, then idle
+  slot 2  ████████████████████████░░░░░░░   done at t=2.4s, then idle
+  slot 3  ██████████████████████████████░   done at t=3.1s
+  slot 4  ██████░░░░░░░░░░░░░░░░░░░░░░░░░   done at t=0.6s, then idle
+          └──────────── new requests wait here ─────────────┘
+          t=0                                            t=3.1s
+  ░ = a slot that holds GPU memory and produces nothing</pre>
+
+<h3>Continuous batching is the current way</h3>
+
+<p>The scheduler admits new work on every iteration. A finished request leaves at once. A waiting request takes its slot on the next step.</p>
+
+<pre class="ascii">CONTINUOUS BATCHING — a freed slot is refilled on the next iteration (example)
+
+  slot 1  ████████████▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓   req A done → req E starts
+  slot 2  ████████████████████████▓▓▓▓▓▓▓   req B done → req F starts
+  slot 3  ██████████████████████████████▓   req C running
+  slot 4  ██████▓▓▓▓▓▓▓▓████████████████▓   req D done → G → H
+          t=0                                            t=3.1s
+  no ░ anywhere: no slot sits idle while requests wait</pre>
+
+<p>This method is called iteration-level scheduling. The Orca paper introduced it in 2022. Serving engines adopted it after that.</p>
+
+<figure class="diagram">
+<svg id="s21-svg" viewBox="0 0 640 240" role="img" aria-label="Static versus continuous batching slot timeline">
+  <text x="10" y="18" fill="currentColor" font-size="13" id="s21-title"></text>
+  <g id="s21-slots"></g>
+  <text x="330" y="230" fill="currentColor" font-size="11" text-anchor="middle">t=0 ───────────────────────── t=3.1s</text>
+</svg>
+<div>
+  <button type="button" id="s21-static">Static batching</button>
+  <button type="button" id="s21-cont">Continuous batching</button>
+  <label>arrivals/s
+    <input type="range" id="s21-rate" min="6" max="12" step="6" value="6">
+    <span id="s21-rateval">6</span>
+  </label>
+</div>
+<p id="s21-note"></p>
+<figcaption>Blue is work, grey is idle memory, green is a slot refilled. The slot drawing is an illustration, not measured. The numbers under the controls are the simulator's measured runs.</figcaption>
+</figure>
+<script>
+(function(){
+  var T=3.1, X0=110, W=500, H=34, GAP=8;
+  var NS="http://www.w3.org/2000/svg";
+  var slots=[1.2,2.4,3.1,0.6];
+  var data={
+    "static":{6:"mean TTFT 5,357ms at 6/s (measured). At 12/s it rises to 6,551ms. The grey spans hold GPU memory and produce nothing.",
+              12:"mean TTFT 6,551ms at 12/s (measured). New requests wait for the last slot to finish. Doubling arrivals stretches the wait."},
+    "cont":{6:"mean TTFT 867ms at 6/s, throughput 3.6 req/s, worst gap 764ms (measured). Each green segment is a refill on the next iteration.",
+            12:"mean TTFT 1,674ms at 12/s, worst gap still 764ms (measured). Same prompts, only the arrival rate changed. This is the 3pm spike."}
+  };
+  var mode="static";
+  function seg(x,y,w,h,fill){var r=document.createElementNS(NS,"rect");
+    r.setAttribute("x",x);r.setAttribute("y",y);r.setAttribute("width",w);r.setAttribute("height",h);
+    r.setAttribute("fill",fill);r.setAttribute("rx",3);
+    document.getElementById("s21-slots").appendChild(r);}
+  function draw(){
+    var g=document.getElementById("s21-slots");while(g.firstChild)g.removeChild(g.firstChild);
+    document.getElementById("s21-title").textContent=mode==="static"?"STATIC — slowest request holds the batch":"CONTINUOUS — freed slot refills on the next iteration";
+    for(var i=0;i<4;i++){
+      var y=34+i*(H+GAP), t=document.createElementNS(NS,"text");
+      t.setAttribute("x",10);t.setAttribute("y",y+22);t.setAttribute("fill","currentColor");t.setAttribute("font-size","12");
+      t.textContent="slot "+(i+1);g.appendChild(t);
+      var doneW=(slots[i]/T)*W, rest=W-doneW;
+      seg(X0,y,doneW,H,"#4f7dd0");
+      if(rest>0)seg(X0+doneW,y,rest,H,mode==="static"?"#9aa4b2":"#3fae6a");
+    }
+    var rate=document.getElementById("s21-rate").value;
+    document.getElementById("s21-rateval").textContent=rate;
+    document.getElementById("s21-note").textContent=data[mode][rate];
+  }
+  document.getElementById("s21-static").onclick=function(){mode="static";draw();};
+  document.getElementById("s21-cont").onclick=function(){mode="cont";draw();};
+  document.getElementById("s21-rate").oninput=draw;
+  draw();
+})();
+</script>
+
+<p>The grey spans in the static run are the whole problem. A slot is GPU memory plus a place in the batch. In static batching, a finished request releases neither. It waits for the last request to finish. In continuous batching it releases both on the next iteration.</p>
+
+<h3>Measure it yourself</h3>
+
+<p><code>batching_sim.py</code> simulates this loop. Run it:</p>
+
+<pre><code data-lang="bash">python phase02_internals/batching_sim.py</code></pre>
+
+<p>Output on the author's machine, 40 requests at 6 arrivals per second. The run was repeated on 2026-09-17 with the same result:</p>
+
+<pre class="ascii">┌────────────┬───────────┬───────────┬───────────┬────────────┬────────────┐
+│ policy     │ mean TTFT │ p99 TTFT  │ mean TPOT │ worst gap  │ throughput │
+├────────────┼───────────┼───────────┼───────────┼────────────┼────────────┤
+│ static     │    5357ms │    9215ms │    19.4ms │       20ms │   2.3 rq/s │
+│ continuous │     867ms │    2649ms │    25.4ms │      764ms │   3.6 rq/s │
+│ chunked    │     925ms │    2701ms │    25.5ms │       81ms │   3.5 rq/s │
+└────────────┴───────────┴───────────┴───────────┴────────────┴────────────┘</pre>
+
+<p>p99 TTFT is the value that 99% of requests stay at or below. Throughput is finished requests per second.</p>
+
+<p>Read the first two rows now. The <code>chunked</code> row belongs to section 2.4 in part B. The numbers show three effects:</p>
+
+<ol>
+<li>Mean TTFT fell from 5,357ms to 867ms. That is 6.2 times better.</li>
+<li>Throughput rose from 2.3 to 3.6 requests per second. That is 57% more.</li>
+<li>Mean TPOT rose from 19.4ms to 25.4ms. A fuller batch decodes each token a little slower.</li>
+</ol>
+
+<p>The third effect is not a bug. You traded a slower token for a 6x better TTFT.</p>
+
+<p>Now look at the <code>worst gap</code> column. Continuous batching shows 764ms. That is the longest pause between two tokens of one answer. Section 2.4 explains the cause.</p>
+
+<div class="bars">
+<div class="bar" style="--v:100" data-label="static mean TTFT" data-value="5,357 ms"></div>
+<div class="bar" style="--v:16" data-label="continuous mean TTFT" data-value="867 ms"></div>
+</div>
+
+<h3>What you control</h3>
+
+<p>You do not control the provider's scheduler. You control four inputs to it:</p>
+
+<pre class="ascii">┌────────────────────────┬──────────────────────────────────────────────┐
+│ Your input             │ What it does to the batch                    │
+├────────────────────────┼──────────────────────────────────────────────┤
+│ prompt length          │ a long prefill uses the token budget and     │
+│                        │ delays every decoding request in the batch   │
+│ output length          │ a long generation holds a slot and its KV    │
+│                        │ memory for the whole time                    │
+│ arrival pattern        │ 50 requests at once wait in a queue;         │
+│                        │ 50 spread out do not                         │
+│ prefix reuse           │ a cached prefix skips prefill, so it does    │
+│                        │ not compete for the token budget             │
+└────────────────────────┴──────────────────────────────────────────────┘</pre>
+
+<p>The arrival pattern is the input you feel most. Run the same workload at 12 arrivals per second instead of 6. Continuous batching mean TTFT rises from 867ms to 1,674ms. Static rises from 5,357ms to 6,551ms. The worst gap stays at 764ms. The prompts did not change. Only the arrival rate changed. This is the answer to "why did my TTFT triple at 3pm".</p>
+
+<aside class="addition" data-kind="update">
+<p><strong>What changed since this phase was written: the server can now shed load.</strong> vLLM v0.29.0, released 2026-09-09, is the current release. It added two admission flags. They are <code>--max-num-queued-reqs</code> and <code>--max-num-queued-tokens</code> (pull request #49445). When the queue limit is hit, a new request is rejected with HTTP 503. It no longer queues forever. The docstring calls this a TTFT quality-of-service valve. Set it near target TTFT times prefill throughput. This is verified from <code>vllm/config/scheduler.py</code> at tag v0.29.0.</p>
+<p>The same config file adds two more defaults. <code>scheduler_reserve_full_isl: bool = True</code> checks that the full prompt fits before admission. That prevents over-admission and KV cache thrashing. And <code>watermark</code>, default 0.0, keeps headroom. The headroom helps avoid frequent KV eviction and repeated preemption. The scheduling <code>policy</code> is still <code>fcfs</code>. <code>priority</code> is the only alternative. Both verified at v0.29.0.</p>
+<p>One more thing to know when you read older material. Model Runner V2 became the default for all models in v0.29.0. MRV1 is deprecated, with removal targeted at v0.32. Old blog posts describe the V0 engine. That engine no longer exists. The teaching model in this section is unaffected.</p>
+<p>Why this matters for you. The retry trap below is the client side of a queue that grows without bound. The 503 flags are the server side of the same fix. If you self-host, serve a 503 and let the client back off. That beats a silent queue. Source: <a href="https://github.com/vllm-project/vllm/releases">vLLM releases</a> and <a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/config/scheduler.py">vllm/config/scheduler.py at v0.29.0</a> (verified 2026-09-19).</p>
+</aside>
+
+<div class="keypoints">
+<p class="remember"><strong>The sentence to remember:</strong> one scheduler iteration gives every running request one token. Throughput comes from batch size. Latency comes from what else is in the batch.</p>
+<p class="trap"><strong>The trap:</strong> you will try to fix a TTFT spike with retries. A retry adds one more request to the same queue. Under load, the queue gets longer and the spike gets worse. Phase 0 Story 2 describes this mistake. Phase 5 section 5.3 measures it.</p>
+<p class="try"><strong>Try this now:</strong> run <code>python phase02_internals/batching_sim.py --rate 12</code>. Compare it with the default run. Expect mean TTFT for continuous batching to move from 867ms to 1,674ms. The worst gap stays at 764ms.</p>
+</div>
+
+<p>Continuous batching fills slots. But a slot is only half the resource. The other half is the KV cache memory behind it. Section 2.2 shows that memory, not slots, runs out first.</p>
+<h2><span class="num">2.2</span> The paged KV cache (why the server fits 18x more requests)</h2>
+
+<p class="why">Phase 1 showed that the KV cache costs bytes per token. That explains memory use. It does not explain how many requests run at once. This section explains that number, which is called concurrency. Concurrency decides how long requests wait in the queue.</p>
+
+<p>The KV cache holds the key and value vectors of every token the model has seen. The model reads them on every decode step, so they must stay in GPU memory.</p>
+
+<p>Start with the simple allocator, because it shows the problem. The server admits a request. It does not know how long the answer will be. So it reserves memory for the worst case. The worst case is <code>max_model_len</code>, the longest sequence the server accepts.</p>
+
+<pre class="ascii">CONTIGUOUS RESERVATION — one 32,768-token reservation per request
+
+  request A  ┌──────────────────────────────────────────────┐
+             │██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│  4.00 GB held
+             └──────────────────────────────────────────────┘
+              ↑ 1,800 tokens used      ↑ 30,968 tokens wasted
+
+  56 GB KV pool ÷ 4.00 GB = 14 concurrent requests, and 52.9 GB idle</pre>
+
+<p>PagedAttention fixes this with an idea from operating system virtual memory. The KV cache of one sequence does not need one continuous region. The server does four things:</p>
+
+<ol>
+<li>It splits the KV cache into fixed-size blocks.</li>
+<li>It allocates a block only when the sequence needs it.</li>
+<li>It keeps a block table for each sequence.</li>
+<li>The block table maps each logical position to a physical block.</li>
+</ol>
+
+<pre class="ascii">PAGED BLOCKS — 16 tokens per block, allocated on demand (block ids are examples)
+
+  request A block table:  [ #91 ][ #14 ][ #55 ][ #7 ] ... 113 blocks
+                             │      │      │     │
+  physical KV pool  ┌────┬────┬────┬────┬────┬────┬────┬────┬────┐
+                    │ #7 │#14 │ .. │#55 │ .. │#91 │ .. │free│free│
+                    └────┴────┴────┴────┴────┴────┴────┴────┴────┘
+  blocks need not be adjacent, and nothing is reserved for the future</pre>
+
+<p>The arithmetic is two short functions. From <code>paging_lab.py:46</code> and <code>paging_lab.py:67</code>, copied as shipped:</p>
+
+<pre><code data-lang="python">def kv_bytes_per_token(layers: int, kv_heads: int, head_dim: int, dtype: str) -> int:
+    """2 (K and V) x kv_heads x head_dim values per layer, per token."""
+    return 2 * kv_heads * head_dim * BYTES_PER_VALUE[dtype] * layers
+
+
+def blocks_for(tokens: int, block_size: int) -> int:
+    """Ceiling division. A request holding 1 token still holds a whole block."""
+    return -(-tokens // block_size)</code></pre>
+
+<p>For llama-3-8b in fp16: 2 × 8 KV heads × 128 × 2 bytes × 32 layers = 131,072 bytes. That is 128 KB per token.</p>
+
+<p>Run the full comparison:</p>
+
+<pre><code data-lang="bash">python phase02_internals/paging_lab.py</code></pre>
+
+<p>Output for llama-3-8b on one 80GB GPU. The run was repeated on 2026-09-17 with the same result:</p>
+
+<pre class="ascii">┌────────────────────────┬────────────────────┬────────────────────┐
+│                        │ contiguous         │ paged              │
+├────────────────────────┼────────────────────┼────────────────────┤
+│ reserved per request   │         32,768 tok │          1,808 tok │
+│ bytes per request      │            4.00 GB │            0.22 GB │
+│ concurrent requests    │                 14 │                253 │
+│ memory actually used   │             3.1 GB │            55.6 GB │
+│ memory wasted          │            52.9 GB │             0.2 GB │
+└────────────────────────┴────────────────────┴────────────────────┘
+
+paging admits 18.1x more concurrent requests here.
+internal waste per request under paging: 8 tokens</pre>
+
+<p>Paging admits 18.1x more concurrent requests on the same hardware. The model did not change. The GPU did not change. That result is why PagedAttention became the default in serving engines.</p>
+
+<p>The PagedAttention paper measured the same problem in real systems. In those systems, only 20.4% to 38.2% of KV cache memory held real token state. Reserved slots and fragmentation used the rest. The vLLM authors state in their talk that paging cut that waste to about 4%. The Anyscale team's benchmark post independently writes "under 4%". No written measurement method was found. Treat the exact figure as the authors' claim.</p>
+
+<figure class="diagram">
+<svg id="s22-svg" viewBox="0 0 640 170" role="img" aria-label="Concurrent requests under contiguous and paged allocation">
+  <g id="s22-bars"></g>
+</svg>
+<div>
+  <label>tokens held per request <input type="range" id="s22-tok" min="200" max="1800" step="50" value="1800"> <span id="s22-tokval">1800</span></label>
+  <label>shared prefix tokens <input type="range" id="s22-share" min="0" max="1800" step="50" value="0"> <span id="s22-shareval">0</span></label>
+</div>
+<p id="s22-note"></p>
+<figcaption>Computed with the phase's own constants. The pool is 56 GB, which is 28,672 blocks of 16 tokens at 128 KB per token. The contiguous row reserves 32,768 tokens per request. Move the sliders and you are running the arithmetic in paging_lab.py.</figcaption>
+</figure>
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg", POOL=28672;
+  function bar(y,label,val,max,fill){
+    var g=document.getElementById("s22-bars");
+    var t=document.createElementNS(NS,"text");
+    t.setAttribute("x",10);t.setAttribute("y",y+16);t.setAttribute("fill","currentColor");t.setAttribute("font-size","12");
+    t.textContent=label;g.appendChild(t);
+    var w=Math.max(2,(val/max)*380);
+    var r=document.createElementNS(NS,"rect");
+    r.setAttribute("x",180);r.setAttribute("y",y);r.setAttribute("width",w);r.setAttribute("height",22);r.setAttribute("rx",3);r.setAttribute("fill",fill);g.appendChild(r);
+    var v=document.createElementNS(NS,"text");
+    v.setAttribute("x",186+w);v.setAttribute("y",y+16);v.setAttribute("fill","currentColor");v.setAttribute("font-size","12");
+    v.textContent=val.toLocaleString();g.appendChild(v);
+  }
+  function ceil(a,b){return Math.ceil(a/b);}
+  function draw(){
+    var g=document.getElementById("s22-bars");while(g.firstChild)g.removeChild(g.firstChild);
+    var tok=+document.getElementById("s22-tok").value;
+    var share=Math.min(+document.getElementById("s22-share").value,tok);
+    document.getElementById("s22-tokval").textContent=tok;
+    document.getElementById("s22-shareval").textContent=share;
+    var contiguous=14;
+    var paged=Math.floor(POOL/ceil(tok,16));
+    var shared=Math.floor((POOL-ceil(share,16))/ceil(tok-share,16));
+    var max=Math.max(contiguous,paged,shared);
+    bar(20,"contiguous",contiguous,max,"#9aa4b2");
+    bar(60,"paged",paged,max,"#4f7dd0");
+    bar(100,"paged + shared",shared,max,"#3fae6a");
+    document.getElementById("s22-note").textContent="tokens/request "+tok+", shared prefix "+share+
+      ": paged fits "+paged+" requests ("+(paged/contiguous).toFixed(1)+"x contiguous)"+
+      (share>0?", and "+shared+" with the shared prefix stored once ("+(shared/paged).toFixed(2)+"x plain paged).":".");
+  }
+  document.getElementById("s22-tok").oninput=draw;
+  document.getElementById("s22-share").oninput=draw;
+  draw();
+})();
+</script>
+
+<p>Set the sliders to 1,800 tokens held and 0 shared. You get the table's 253. Then set shared prefix to 1,200. You get the 752 from the sharing run below. The point is that concurrency is arithmetic you can do before you buy hardware.</p>
+
+<h3>Three facts to remember</h3>
+
+<ol>
+<li><strong>Block size sets the remaining waste.</strong> A request that holds 1,800 tokens needs 113 blocks of 16 tokens. That is 1,808 token slots. The 8 unused slots are internal fragmentation. This is the only waste that paging leaves. With <code>--block-size 32</code>, the waste grows to 24 tokens per request and concurrency drops from 253 to 251.</li>
+<li><strong>Identical blocks can be shared.</strong> Two requests with the same first 1,200 tokens can point at the same physical blocks. The server stores that prefix once. Section 2.3 covers this.</li>
+<li><strong>When blocks run out, the server does not return an error.</strong> The scheduler preempts instead. It frees a running sequence's blocks and puts the request back in the queue. The request resumes later. The server must then redo the prefill it threw away. You see a sudden pause in a request that had already started.</li>
+</ol>
+
+<aside class="addition" data-kind="deeper">
+<p><strong>One level below, from the PagedAttention paper.</strong> The paper's Figure 2 splits the old waste into three kinds. Reserved slots are the 30,968 unused tokens in the drawing above. Internal fragmentation is the partial last block. External fragmentation is free memory split into pieces too small to use. Paging removes the third kind by construction. Every block is the same 16-token size, so any free block fits any request. That is why this design needs no compaction pass.</p>
+<p>The paper's section 4.5 also names the scheduler rules this phase leaves implicit. Scheduling is first-come-first-served. When preemption is needed, the latest-arrived requests go first. All of a sequence's blocks are freed together. Beam search groups are scheduled as a gang. Recovery has two modes: swap the KV blocks to CPU RAM, or recompute them. The timeline below shows recompute, which is what vLLM's <code>PreemptionMode.RECOMPUTE</code> does. One more mechanism name worth knowing is copy-on-write. Parallel sampling and beam search share blocks through reference counts. A write to a shared block copies it first, so two candidates never see each other's tokens. Verified against the paper text, 2026-09-19.</p>
+<p>The byte-precise version of the capacity knob also exists. <code>vllm/config/cache.py</code> at v0.29.0 exposes <code>kv_cache_memory_bytes</code>. It sets the KV pool size directly in bytes, and it ignores <code>gpu_memory_utilization</code>. Verified from source.</p>
+</aside>
+
+<p>Sharing changes the capacity number a lot. Run <code>paging_lab.py --shared-prefix 1200</code>:</p>
+
+<pre class="ascii">CONCURRENT REQUESTS on one 80GB GPU, llama-3-8b, 1,800 tokens held per request
+  shared prefix = the same first 1,200 tokens in every request
+
+  contiguous             █                                    14
+  paged                  ███████████                         253
+  paged, shared prefix   ██████████████████████████████████  752
+                         0                                   752
+
+  shared blocks stored once: 75      private blocks per request: 38</pre>
+
+<p>Here is the arithmetic. The 56 GB pool holds 28,672 blocks of 16 tokens at 128 KB per token. Each request needs ceil(600 / 16) = 38 private blocks. So (28,672 - 75) / 38 = 752 requests. That is 2.97x more than paging without sharing.</p>
+
+<h3>Preemption looks like this in time</h3>
+
+<ol class="timeline">
+<li><time>t=0.0s</time> request R decoding normally, 40 blocks held</li>
+<li><time>t=1.2s</time> a burst arrives; the block pool runs out</li>
+<li><time>t=1.2s</time> scheduler preempts R: its 40 blocks are freed</li>
+<li><time>t=1.2s</time> R goes back to the WAITING queue; tokens already sent stay sent</li>
+<li><time>t=2.9s</time> blocks free up; R is admitted again</li>
+<li><time>t=2.9s</time> R's prompt is prefilled AGAIN; the first prefill was thrown away</li>
+<li><time>t=3.1s</time> R resumes streaming</li>
+</ol>
+
+<p>What the user saw: the answer stopped for 1.9 seconds, then continued. What your logs saw: nothing, unless you record inter-token gaps.</p>
+
+<aside class="addition" data-kind="incident">
+<p><strong>Where this breaks in production: preemption-recompute thrash.</strong> The Denpex failure encyclopedia documents this failure pattern for vLLM. Admission and capacity are governed by different limits. <code>max_num_seqs</code> sets how many sequences run. The KV pool size sets how many fit. If the first limit is looser than the second, the scheduler over-admits. Running sequences get preempted with <code>PreemptionMode.RECOMPUTE</code>. They lose their decode progress, re-prefill, and recreate the memory pressure that evicted them. Throughput collapses while GPU utilisation stays high. That is the worst combination, because the dashboard looks healthy.</p>
+<p>The signature is a WARNING log line naming <code>PreemptionMode.RECOMPUTE</code>. The second signal is a steadily rising <code>vllm:num_preemptions_total</code> Prometheus counter. No error is ever raised. The documented fix is to <em>lower</em> <code>--max-num-seqs</code>, not to raise <code>gpu_memory_utilization</code>. A bigger pool only moves the threshold. It can also turn preemption into a hard out-of-memory error. To confirm you have this: halve concurrency and watch throughput go up.</p>
+<p>One caveat, stated plainly. This is a vendor encyclopedia, and it gates remediation detail behind a signup. The mechanism is consistent with the v0.29.0 scheduler source. The parameter names check out. The exact log line and counter names were not grep-checked against the source tree. Treat those two strings as the vendor's spelling, and verify them on your own server. Source: <a href="https://denpex.com/failures/vllm-preemption-recompute-thrash">denpex.com/failures/vllm-preemption-recompute-thrash</a> (read 2026-09-19).</p>
+</aside>
+
+<aside class="addition" data-kind="update">
+<p><strong>The default value has a rot history, and it matters when you read tutorials.</strong> <code>gpu_memory_utilization</code> is 0.92 by default at vLLM 0.29.0, verified in <code>vllm/config/cache.py</code> at that tag. It was 0.95 originally. It was lowered to 0.9 in September 2023, recorded in <a href="https://github.com/vllm-project/vllm/issues/1018">vLLM issue #1018</a>. When it moved from 0.9 to 0.92 is not pinned to a release. The move was not found in the release notes checked on 2026-09-19. Older material, including a vendor post from July 2026, still says 0.90. Any tutorial quoting 0.90 as the current default is stale.</p>
+</aside>
+
+<div class="keypoints">
+<p class="remember"><strong>The sentence to remember:</strong> paging reserves only the memory a request needs now, not the most it could need. That change makes high concurrency possible.</p>
+<p class="trap"><strong>The trap:</strong> <code>gpu_memory_utilization</code> looks like a safety setting. It works as a capacity setting. vLLM 0.29.0 sets it to 0.92 by default. Lowering it to 0.70 on an 80GB GPU removes 17.6 GB from the KV pool. For llama-3-8b, concurrency then falls from 260 to 181 requests. That is 30% of your capacity. The lab script defaults to 0.90 to keep the arithmetic round. Pass <code>--gpu-util 0.92</code> to match vLLM.</p>
+<p class="try"><strong>Try this now:</strong> run <code>python phase02_internals/paging_lab.py --model llama-3-70b --gpu-gb 80</code> and read the error. Then run it with <code>--gpu-gb 320</code> for a four-GPU node. At 1,808 tokens held per request, the 70B node admits 268 requests. The 8B model admits 253 on one GPU. The 70B model needs four times the GPU memory to reach that number.</p>
+</div>
+
+<p>Paging tells you how many requests fit. Sharing tells you that some of them are cheaper than others. Section 2.3 shows how the server finds that two prompts share a prefix, and what destroys that sharing.</p>
+<h2><span class="num">2.3</span> Prefix caching inside the server (the radix tree and the eviction that ends it)</h2>
+
+<p class="why">Phase 1 exercise E6 showed that one changed character early in the prompt ends the cache hit. You measured the effect there. This section shows the mechanism. The mechanism tells you exactly where the cache stops matching.</p>
+
+<p>A prefix is the start of a prompt. Section 2.2 said identical blocks can be shared. The server needs a fast way to find them. It keeps a tree keyed by the token sequence. SGLang calls its version RadixAttention. vLLM calls its version automatic prefix caching. The structure is the same.</p>
+
+<pre class="ascii">THE PREFIX TREE — three requests that share a system prompt
+
+                    [ root ]
+                       │
+          ┌────────────┴─────────────┐
+          │  blocks 0..74            │   ← 1,200-token system prompt
+          │  "you are a support..."  │      stored ONCE, shared by all
+          └────────────┬─────────────┘
+              ┌────────┼────────┐
+              │        │        │
+        ┌─────┴───┐ ┌──┴────┐ ┌─┴──────┐
+        │ user A  │ │user B │ │ user C │  ← private blocks, one set each
+        │ history │ │history│ │history │
+        └─────────┘ └───────┘ └────────┘
+
+  A new request walks down from the root. It reuses every node it matches.
+  It stops at the first block that differs. Everything below that is a miss.</pre>
+
+<p>The matching rule has three parts. Teams lose money on each part:</p>
+
+<ol>
+<li><strong>Matching starts at token 0 and moves forward.</strong> There is no match that starts in the middle. A change at position 10 ends the match for positions 10 to the end.</li>
+<li><strong>Matching happens in whole blocks.</strong> Take a 16-token block and a prefix of 1,210 tokens. Only 75 full blocks are shared, which is 1,200 tokens. The last 10 tokens sit in a partial block. The server cannot share them.</li>
+<li><strong>Entries leave the cache.</strong> The tree has a fixed size. When it is full, the least recently used blocks leave first. This rule is called LRU. Hosted providers also remove entries after a time limit. The limit is commonly a few minutes without use. Phase 3A section 3.2 gives the provider details.</li>
+</ol>
+
+<p>The simulator implements all three parts in one method. From <code>prefix_cache_sim.py:67</code>, docstring shortened, logic unchanged:</p>
+
+<pre><code data-lang="python">def lookup_and_fill(self, tokens: list[str]) -> int:
+    """Return how many TOKENS of this prompt were already cached."""
+    hit_blocks = 0
+    chain: tuple = ()
+    n_blocks = len(tokens) // self.block_size  # partial tail block is never cached
+    still_hitting = True
+    for b in range(n_blocks):
+        block = tuple(tokens[b * self.block_size:(b + 1) * self.block_size])
+        chain = chain + (hash(block),)
+        self.clock += 1
+        if still_hitting and chain in self.store:
+            self.store[chain] = self.clock
+            hit_blocks += 1
+        else:
+            still_hitting = False
+            self.store[chain] = self.clock
+            self._evict_if_needed()
+    return hit_blocks * self.block_size</code></pre>
+
+<p>The key is <code>chain</code>, not <code>block</code>. Each key includes the hashes of every earlier block. So an identical block after a difference has a different key. vLLM builds its block hash the same way. Its design document says so.</p>
+
+<figure class="diagram">
+<svg id="s23-svg" viewBox="0 0 640 150" role="img" aria-label="Where the prefix match stops when one block changes">
+  <text x="10" y="16" fill="currentColor" font-size="12">one prompt as 75 blocks of 16 tokens; one block carries a changing timestamp</text>
+  <g id="s23-blocks"></g>
+  <text x="10" y="120" fill="#3fae6a" font-size="11">green: matched blocks, KV reused</text>
+  <text x="250" y="120" fill="#c05050" font-size="11">red: the changing block</text>
+  <text x="430" y="120" fill="currentColor" font-size="11">grey: miss, prefilled again</text>
+  <text x="10" y="140" fill="currentColor" font-size="11">a match cannot restart after a miss: the hash chain includes every earlier block</text>
+</svg>
+<input type="range" id="s23-pos" min="0" max="74" value="0" style="width:100%">
+<p id="s23-note"></p>
+<figcaption>Move the timestamp's position. The hit rate is the matched share. That is exactly the simulator's rule 1 running on a 1,200-token prompt. The drawing is an illustration of the mechanism. The measured values are in the table below.</figcaption>
+</figure>
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg", N=75, CW=8;
+  function draw(){
+    var g=document.getElementById("s23-blocks");while(g.firstChild)g.removeChild(g.firstChild);
+    var pos=+document.getElementById("s23-pos").value;
+    for(var i=0;i<N;i++){
+      var r=document.createElementNS(NS,"rect");
+      r.setAttribute("x",10+i*CW);r.setAttribute("y",30);r.setAttribute("width",CW-1);r.setAttribute("height",44);
+      r.setAttribute("fill",i<pos?"#3fae6a":(i===pos?"#c05050":"#9aa4b2"));
+      g.appendChild(r);
+    }
+    var hit=(pos/N*100).toFixed(1);
+    document.getElementById("s23-note").textContent="Timestamp in block "+pos+" of "+N+
+      ": match reaches block "+pos+", hit rate = "+hit+"%. "+
+      (pos===0?"Timestamp first: 0.0% hit, the volatile-first layout below.":
+       pos>=74?"Timestamp last: nearly everything matches, the stable-first layout.":"Every block after the change is re-prefilled.");
+  }
+  document.getElementById("s23-pos").oninput=draw;
+  draw();
+})();
+</script>
+
+<h3>Measure the layout cost</h3>
+
+<p><code>prefix_cache_sim.py</code> builds this tree for an agent loop. It tests two layouts that hold the same information:</p>
+
+<pre><code data-lang="bash">python phase02_internals/prefix_cache_sim.py</code></pre>
+
+<pre class="ascii">┌────────────────┬──────────┬─────────────┬─────────────┬──────────┬───────────┐
+│ layout         │ requests │ input toks  │ cached toks │ hit rate │ cost      │
+├────────────────┼──────────┼─────────────┼─────────────┼──────────┼───────────┤
+│ volatile-first │       30 │     148,560 │           0 │     0.0% │ $  0.0594 │
+│ stable-first   │       30 │     148,560 │     136,656 │    92.0% │ $  0.0184 │
+└────────────────┴──────────┴─────────────┴─────────────┴──────────┴───────────┘
+
+stable-first costs 3.22x less on input for the same information.</pre>
+
+<p>The script prices tokens with <code>gpt-4.1-mini</code> at $0.40 per million input tokens. It prices cached tokens at 0.25x. Both layouts send the same tokens and the same information. The price differs by 3.22x. The only change is the order of the parts of the prompt.</p>
+
+<p>Here is the wrong layout and the right one, as code:</p>
+
+<pre><code data-lang="python"># WRONG: the timestamp is in the system message, so byte ~40 changes every call.
+# Every later token is a cache miss. Hit rate measured by the simulator: 0.0%.
+messages = [
+    {"role": "system", "content":
+        f"Current time: {datetime.now().isoformat()}\n"      # <-- volatile, position 0
+        f"{SYSTEM_PROMPT}\n{TOOL_SCHEMAS}"},                 # <-- stable, after it
+    *history,
+]
+
+# RIGHT: stable content first, volatile content last.
+# Everything above the timestamp matches from token 0 on every call.
+messages = [
+    {"role": "system", "content": f"{SYSTEM_PROMPT}\n{TOOL_SCHEMAS}"},
+    *history,
+    {"role": "user", "content":
+        f"{user_text}\n\n[context] Current time: {datetime.now().isoformat()}"},
+]</code></pre>
+
+<p>The wrong version fails without a sign. There is no error and no warning. Your bill is 3x higher and your TTFT is worse. Nothing in your logs says why.</p>
+
+<pre class="ascii">WHERE THE MATCH STOPS — same content, two orders
+
+  volatile-first   [time][system prompt ......][tools ......][history ...]
+                    ▲
+                    differs on every call: 0 blocks match
+
+  stable-first     [system prompt ......][tools ......][history ...][time]
+                    ─────────────── matches ──────────────────────►  ▲
+                                                           differs here only</pre>
+
+<aside class="addition" data-kind="deeper">
+<p><strong>One level below, from the vLLM design document at tag v0.29.0</strong> (<a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/docs/design/prefix_caching.md">docs/design/prefix_caching.md</a>, verified 2026-09-19):</p>
+<ul>
+<li>The hash of a block is <code>hash(parent_hash, block_tokens, extra_hashes)</code>. The extras include LoRA adapter ids, hashes of multi-modal inputs, and cache salts. The <code>parent_hash</code> term is why a match cannot restart in the middle of a prompt.</li>
+<li>The document's Note 1 says, in its words, "we only cache full blocks". That is the phase's rule 2, in the server's own design doc.</li>
+<li>Before v0.11, the hash key was not collision-free. A collision in a multi-tenant server can expose one tenant's cached KV to another tenant. <code>sha256</code> became the default at v0.11. The doc warns that <code>xxhash</code> carries that leak risk. The prefix hash is a security boundary, not just a dictionary key.</li>
+<li>Eviction detail: freed blocks enter the free queue in reverse order. So the most specific blocks leave first. Eviction pops the LRU head.</li>
+<li><code>cache_salt</code> is a per-request field. It salts the hash of the first block. Two tenants with byte-identical prompts then cannot share cached KV. It is the self-hosted counterpart of per-organization caches at hosted providers. It also defends against timing attacks that probe whether a prompt is cached.</li>
+<li>The hard block rule is softening. v0.28.0 shipped partial-tail prefix reuse with fine-grained matching (pull request #50507). It also added a <code>prefix_match_unit</code> that can match below the physical block size. Storage is still whole blocks at v0.29.0. Read rule 2 as "whole blocks today, finer matching arriving", not as an eternal law.</li>
+</ul>
+</aside>
+
+<h3>What eviction does to a good layout</h3>
+
+<p>A correct layout still loses its hits when the cache fills. First run a bigger workload with no size limit: <code>--users 5 --steps 12</code>. Stable-first then hits 93.5%. Now give the cache only 500 blocks:</p>
+
+<pre><code data-lang="bash">python phase02_internals/prefix_cache_sim.py --capacity-blocks 500 --users 5 --steps 12</code></pre>
+
+<p>The stable-first hit rate falls from 93.5% to 68.8%. The simulator reports 5,615 evictions. Your prompt did not change. Other conversations filled the cache. At <code>--capacity-blocks 200</code>, the hit rate falls to 0.0%.</p>
+
+<div class="bars">
+<div class="bar" style="--v:94" data-label="no block limit" data-value="93.5%"></div>
+<div class="bar" style="--v:69" data-label="500 blocks" data-value="68.8%"></div>
+<div class="bar" style="--v:1" data-label="200 blocks" data-value="0.0%"></div>
+</div>
+
+<p>Real deployments report a similar range. The SGLang paper measured hit rates on Chatbot Arena traffic. It found 52.4% for LLaVA-Next-34B and 74.1% for Vicuna-33B. Across its benchmarks the range was 50% to 99%. A hit rate near 100% comes from a synthetic test. Production traffic rarely shows it.</p>
+
+<aside class="addition" data-kind="incident">
+<p><strong>It happened in production, in Go, two days before this page was written.</strong> A developer ran a coding agent through a Bifrost gateway and vLLM 0.28.0. He measured his prefix-cached share rising from 55% to 95%. Average wait for the first word fell from 26 to 28 seconds to 7.3 seconds. The worst wait fell from 514 seconds to 54 seconds. These are his own measurements on his stack. The model was Qwen3.8-27B on two RTX 3090s.</p>
+<p>The biggest cache-breaker was not his prompt design. The mcp-go library decodes tool schemas into Go maps. Go map iteration order is randomized. The gateway re-serialized the maps in whatever order they came out. So the tool schema bytes shuffled on every process start. The schemas sit at the top of the prompt. One shuffle invalidated everything after them. That is rule 1, in production. A single template workaround, <code>tojson(sort_keys=True)</code>, moved the cached share from 78% to 95%. Fixes landed upstream as bifrost#7170 and mcp-go#984. If you build agents in Go, sort your keys. Do it before you serialize anything that goes into a prompt.</p>
+<p>Two more facts from the same incident. First, block granularity is model-dependent. That hybrid linear-attention model caches in 2,048-token blocks, not 16. CPU KV offloading was nearly useless there. About 40 GB was copied out and about 250 MB restored in an hour. Hybrid-state boundaries rarely align. Second, his measurement recipe. Hit <em>rate</em> is <code>prompt_tokens_cached_total</code> divided by <code>prompt_tokens_total</code>, not a raw hit count. You find a miss cause by diffing two consecutive tokenized prompts to the first differing token. Do it on an idle server, before you blame eviction. Read this as a verified page read of a first-person post. One deployment, one model. Source: <a href="https://doug.sh/posts/vllm-kv-cache-agents/">doug.sh — Keeping vLLM's Prefix Cache Warm Between Agent Turns</a> (read 2026-09-19).</p>
+</aside>
+
+<div class="keypoints">
+<p class="remember"><strong>The sentence to remember:</strong> the cache matches whole blocks from token 0 forward. Put what never changes first. Put what changes on every call last.</p>
+<p class="trap"><strong>The trap:</strong> a cache hit is never guaranteed. Do not build a cost model that assumes one. Model both the cached and the uncached price, and alert on the hit rate. Phase 3A adds the cached input price to <code>prices.yaml</code>, so your cost meter can do this arithmetic.</p>
+<p class="try"><strong>Try this now:</strong> run <code>python phase02_internals/prefix_cache_sim.py --block-size 64</code> and compare it with the default block size of 16. Expect the stable-first hit rate to fall from 92.0% to 91.5%, and the saving from 3.22x to 3.19x. Larger blocks share less at the edge of a prefix.</p>
+</div>
+
+<p>You now have all three pieces. The loop decides whose token comes next. The memory decides how many requests fit. The tree decides whose prompt is free to recompute. The lab runs all three simulators in sequence.</p>
+<h2>The lab: hands-on, part A</h2>
+
+<p>Setup: <code>cd ~/Desktop/project/code/study-material/inference-internals/code && pip install -e .</code></p>
+
+<p>Five of these six exercises need no API key and no GPU. They are simulations and arithmetic, and they are marked "offline". E7 needs <code>export OPENAI_API_KEY=sk-...</code> or another OpenAI-compatible endpoint through <code>--base-url</code> and <code>--key-env</code>.</p>
+
+<p><strong>Run status:</strong> every offline command below was run on 2026-09-17, and the output matched the numbers printed here. E7 calls a live API. It was not run, because no API key was available on this machine on 2026-09-12. The command flags were checked against the shipped scripts.</p>
+
+<p><strong>Exercise numbers:</strong> part A holds E1, E2, E3, E5, E6, and E7. The numbers are the same as in the original single Phase 2 document, because other phases cite them. <strong>E4</strong> teaches section 2.4, so it is in part B.</p>
+
+<p>Record every number. Phase 3A uses your cache hit rate.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1</b> <span class="tag">offline</span></label> Measure what paging buys.
+  <pre><code data-lang="bash">python phase02_internals/paging_lab.py</code></pre>
+  <p>Expected: contiguous admits 14 concurrent requests and paged admits 253. The tool prints "paging admits 18.1x more concurrent requests here." Internal waste is 8 tokens per request.</p>
+  <p>If the numbers differ: you changed <code>--avg-tokens</code> or <code>--block-size</code>. Both change the result. That is the point of the flags.</p>
+  <p>Teaches: concurrency is a memory allocation question, not a model question.</p>
+</li>
+<li><label><input type="checkbox"> <b>E2</b> <span class="tag">break · offline</span></label> Find the model that does not fit.
+  <pre><code data-lang="bash">python phase02_internals/paging_lab.py --model llama-3-70b --gpu-gb 80</code></pre>
+  <p>Expected: the script exits with code 1 and prints <code>weights (140 GB) do not fit in 80.0 GB x 0.9</code>. The same line then tells you to use a bigger GPU or a smaller model.</p>
+  <p>Then run:</p>
+  <pre><code data-lang="bash">python phase02_internals/paging_lab.py --model llama-3-70b --gpu-gb 320 --avg-tokens 6000</code></pre>
+  <p>Expected: it fits. The KV pool is 148.0 GB, and the paged column admits 80 concurrent requests. The 8B model admits 253 in E1.</p>
+  <p>Teaches: weights use the same memory as the KV cache. A bigger model has less room for KV, and each token costs more KV. For the 70B model, each token costs 320 KB instead of 128 KB.</p>
+</li>
+<li><label><input type="checkbox"> <b>E3</b> <span class="tag">offline</span></label> Compare static and continuous batching.
+  <pre><code data-lang="bash">python phase02_internals/batching_sim.py</code></pre>
+  <p>Expected: mean TTFT is 5,357ms for static and 867ms for continuous. Throughput is 2.3 and 3.6 requests per second. Mean TPOT is 19.4ms and 25.4ms.</p>
+  <p>Teaches: iteration-level scheduling gives up a little speed per token. In return it gives a large gain in TTFT and throughput.</p>
+</li>
+<li><label><input type="checkbox"> <b>E5</b> <span class="tag">offline</span></label> Price two prompt layouts that hold the same information.
+  <pre><code data-lang="bash">python phase02_internals/prefix_cache_sim.py</code></pre>
+  <p>Expected: volatile-first hits 0.0% and stable-first hits 92.0%. Stable-first costs 3.22x less.</p>
+  <p>Teaches: prompt order is a pricing decision.</p>
+</li>
+<li><label><input type="checkbox"> <b>E6</b> <span class="tag">break · offline</span></label> Make a correct layout lose its cache hits.
+  <pre><code data-lang="bash">python phase02_internals/prefix_cache_sim.py --capacity-blocks 500 --users 5 --steps 12</code></pre>
+  <p>Expected: the stable-first hit rate is 68.8%. The same workload with no size limit hits 93.5%. The tool reports 5,615 evictions for stable-first.</p>
+  <p>Then run it with <code>--capacity-blocks 200</code>. Expected: both layouts hit 0.0%, with 19,465 evictions each.</p>
+  <p>Teaches: your hit rate depends on other tenants. Never model cost as if a hit is guaranteed.</p>
+</li>
+<li><label><input type="checkbox"> <b>E7</b> <span class="tag">live · UNVERIFIED</span></label> Watch concurrency from the client side.
+  <pre><code data-lang="bash">for i in 1 2 3 4 5 6 7 8; do python phase01_lifecycle/ttft_meter.py --model gpt-4.1-mini --role cheap --runs 1 & done; wait</code></pre>
+  <p>Run from the <code>code</code> directory. Expected: the TTFT spread across the eight runs is wider than in Phase 1 E4. In E4 the runs were sequential. You may also see a 429 rate-limit error. That error is also part of the lesson.</p>
+  <p>If every run is identical: your account's rate limit is high, and eight requests are small for the provider. Raise the loop to 32.</p>
+  <p>Costs at most: about $0.05. This exercise is UNVERIFIED against a live provider: it was never run against one, and that label stays until someone runs it.</p>
+  <p>Teaches: on a shared endpoint you can observe queueing. You cannot control it.</p>
+</li>
+</ul>
+<h2>Check it yourself: questions against the course code</h2>
+
+<p>This course has no anchor repository. These questions use the exercise code you now have. The last question works on any repository.</p>
+
+<ol>
+<li>Open <code>code/phase02_internals/prefix_cache_sim.py:86</code>. This line sets <code>still_hitting = False</code> inside <code>PrefixCache.lookup_and_fill</code>. Explain in one sentence why the method never returns to the hitting state after this line. Name the real rule from section 2.3 that this reproduces.</li>
+<li>Open <code>code/phase02_internals/batching_sim.py:49</code>. Three cost constants sit above the <code>Req</code> class: <code>BASE_DECODE_MS</code>, <code>PER_SEQ_DECODE_MS</code>, and <code>MS_PER_PREFILL_TOKEN</code>. They are the only physics in the file. <code>iteration_cost_ms</code> at line 73 is the one function that uses them. <code>PER_SEQ_DECODE_MS</code> is 0.12 and <code>BASE_DECODE_MS</code> is 18.0. Explain what physical fact that 150x gap represents. Predict what happens to the gap between static and continuous batching if you set <code>PER_SEQ_DECODE_MS</code> to 5.0. Then test it on a copy of the file.</li>
+<li>Open <code>code/phase02_internals/paging_lab.py:282</code>. The shared prefix uses floor division: <code>args.shared_prefix // args.block_size</code>. The private part uses <code>blocks_for</code> at line 67, which rounds up. Explain why the two directions differ. Use the 1,210-token example from section 2.3.</li>
+<li>In any agent repository you own, find where the model messages are built. Find the first point where anything depends on the time, the request, or the user. Everything after that point is a cache miss on every call. If you find nothing volatile in the first 1,000 tokens, record that. It is a pass, and you should confirm it rather than assume it.</li>
+</ol>
+
+<h2>In Mission HQ</h2>
+
+<p>The same three mechanisms exist in this repository, with different names. Open these files and answer one question each.</p>
+
+<ol>
+<li><code>backend/src/hq/runner.py</code> has <code>flush_outbox_step</code>. It is Mission HQ's version of a scheduler iteration: one step, a bounded batch of work, then the next tick. Find where the batch of outbox rows is picked. What is the equivalent of the vLLM token budget here? What happens to the rows that do not fit in one step?</li>
+<li><code>backend/src/hq/board.py</code> holds the tickets state machine. It decides which work an agent picks up next. vLLM's default policy is first-come-first-served. What field or ordering makes that choice here? Is there anything that works like v0.29.0's <code>priority</code> policy?</li>
+<li><code>backend/src/hq/channels/telegram.py</code> has <code>drain_outbox</code>, which retries failed deliveries. Compare that with the retry trap in section 2.1. When do these retries behave like a client retrying a 503 during a TTFT spike? Is there anything here that acts like <code>--max-num-queued-reqs</code>?</li>
+</ol>
+<h2>Checkpoint 2A: answer in your own words</h2>
+
+<ol>
+<li><strong>Show the arithmetic.</strong> You run llama-3-8b on one 80GB GPU at <code>gpu_memory_utilization=0.90</code>. The weights take 16GB. The KV cache costs 128 KB per token. Your requests hold 1,800 tokens on average. (a) How many requests fit at once under paged allocation with a 16-token block? (b) Your platform team wants to lower utilisation to 0.70 for safety. How many requests fit then? (c) What percentage of capacity does that decision cost?</li>
+<li><strong>A colleague says:</strong> "We moved the timestamp out of the system prompt. Our cache hit rate is now fixed. So we can bill customers at the cached price." Argue against this with two separate reasons from section 2.3. One reason is about the block rule. The other is about eviction. Use the numbers from <code>prefix_cache_sim.py</code>.</li>
+<li><strong>This is broken.</strong> Your chat service shows mean TTFT of 870ms in the morning and about 1,700ms at 3pm. The prompts are the same. Mean TPOT barely moves. Your team plans to add a retry when TTFT passes 1,500ms. (a) What is the likely cause? (b) How do you check it with the simulator and with your own metrics? (c) Why does the retry make it worse?</li>
+<li><strong>Walk through what happens</strong> in this case. Request R is decoding and holds 40 blocks. A burst of new requests uses up the block pool. List each step the scheduler takes. Say what the user sees, and what your logs show if you record only TTFT and total latency.</li>
+<li><strong>Given these constraints, design</strong> the memory plan. One 80GB GPU runs llama-3-8b at 0.90 utilisation. Every request starts with the same 1,200-token system prompt and holds 1,800 tokens in total. Prefix caching is on. How many requests fit at once? Show the block arithmetic. A deploy then adds a 10-token date line to the top of the system prompt. What happens to the count?</li>
+<li><strong>A colleague says:</strong> "Continuous batching makes every token slower. So it is worse for streaming." Argue for or against, with the numbers from E3.</li>
+</ol>
+
+<details class="answer">
+<summary>Answer sketches — write yours first, then compare</summary>
+
+<p>1. (a) Usable memory is 80 × 0.90 = 72GB. The KV pool is 72 - 16 = 56GB. A 1,800-token request holds ceil(1800 / 16) = 113 blocks, which is 1,808 token slots. That is 1,808 × 128 KB = 0.2207 GB. 56 / 0.2207 = 253 requests. (b) At 0.70: 80 × 0.70 = 56GB usable. Minus 16GB of weights, the pool is 40GB. 40 / 0.2207 = 181 requests. (c) (253 - 181) / 253 = 28.5% of capacity lost. Check both with <code>paging_lab.py --gpu-util 0.70</code>.</p>
+
+<p>2. First, the cache matches whole blocks from token 0. With 16-token blocks, a 1,210-token prefix shares only 1,200 tokens. Any volatile content later in the prompt still ends the match for everything after it. Second, entries leave the cache when other tenants need the memory. Hosted providers also remove them after a few minutes without use. In the simulator, the same good layout fell from 93.5% to 68.8% with 500 blocks. With 200 blocks it fell to 0.0%. The hit rate is a measured rate, not a guarantee. Billing that assumes a hit will collect too little.</p>
+
+<p>3. (a) More requests arrive at 3pm. They wait in the queue and share the batch, so TTFT rises while TPOT stays about the same. (b) In <code>batching_sim.py</code>, raise <code>--rate</code> from 6 to 12. Continuous mean TTFT moves from 867ms to 1,674ms, about 1.9x, with the same prompts. In production, plot TTFT against requests per second or queue depth. (c) A retry adds one more request to the same queue. Each retry makes the queue longer, so TTFT rises further. Phase 0 Story 2 describes this.</p>
+
+<p>4. The pool runs out. The scheduler preempts R and frees its 40 blocks. R goes back to the waiting queue. The tokens already sent stay with the user. When blocks free up, R is admitted again and its prompt is prefilled again. Then R resumes streaming. In the example timeline, the user sees the answer stop for 1.9 seconds. TTFT and total latency do not show the pause as a pause. Only an inter-token gap metric shows it. In production, the thrash loop in the 2.2 incident box is this same failure repeating. The observable there is a rising <code>vllm:num_preemptions_total</code> counter. No error is raised.</p>
+
+<p>5. The pool is 56GB. One block costs 16 × 128 KB = 2,048 KB. So the pool holds 56 × 1024 × 1024 / 2048 = 28,672 blocks. The shared prefix is 1,200 / 16 = 75 blocks, stored once. Each request needs ceil((1800 - 1200) / 16) = ceil(37.5) = 38 private blocks. (28,672 - 75) / 38 = 752 requests. <code>paging_lab.py --shared-prefix 1200</code> prints the same 752. The date line at the top changes the first block once a day. Within one day, the count stays near 752, because all requests still share the same first blocks. When the date changes, every new request misses the whole prefix. The old blocks stay in memory until eviction removes them, so capacity drops for a while. Put the date at the end instead.</p>
+
+<p>6. Argue for continuous batching. Mean TPOT rises from 19.4ms to 25.4ms, which is 31% slower per token. Mean TTFT falls from 5,357ms to 867ms, which is 6.2x faster. Throughput rises from 2.3 to 3.6 requests per second, which is 57% more. A user waits 4.5 seconds less for the first token and pays about 6ms more per token. For a 200-token answer, 6ms × 200 = 1.2 seconds. The trade still favours continuous batching. The colleague is right about one thing: the worst gap of 764ms is real, and section 2.4 addresses it.</p>
+</details>
+<h2>References and further learning</h2>
+
+<p>Every link below was fetched and checked on 2026-09-12, and the list was checked again on 2026-09-19. Where a check found a problem after the original was written, the entry says so. Read the first group before the lab. Read the rest after.</p>
+
+<h3>Read before the lab</h3>
+
+<ul>
+<li><strong>Orca: A Distributed Serving System for Transformer-Based Generative Models, Yu, Jeong, Kim, Kim, Chun, OSDI 2022</strong> — <a href="https://www.usenix.org/conference/osdi22/presentation/yu">usenix.org/conference/osdi22/presentation/yu</a><br>
+Focus on: section 3, which names the two problems. Some requests finish early and some arrive late. Then read section 4.2 and Algorithm 1, which is the scheduler loop in section 2.1.<br>
+The headline number, with conditions: FasterTransformer served 0.185 requests per second at a median normalised latency of 190ms. Orca served 6.81, which is a 36.9x speedup. The test used GPT-3 175B in fp16 on 16 A100 40GB GPUs. Input lengths were drawn uniformly from 32 to 512 tokens. Output lengths were drawn from 1 to 128.<br>
+Also read Figure 10a. There, Orca does not win on a 101B model at low load. The gain comes from scheduling, so it needs load to appear.<br>
+Verification status, 2026-09-19: usenix.org blocks automated fetching and returns 403. Only the 36.9x headline is confirmed, and that through secondary reading notes of the paper. The 0.185 req/s, the 190ms latency, and the Figure 10a claim are not directly verified. The link works in a browser.</li>
+
+<li><strong>How continuous batching enables 23x throughput in LLM inference while reducing p50 latency, Anyscale, 22 June 2023</strong> — <a href="https://www.anyscale.com/blog/continuous-batching-llm-inference">anyscale.com/blog/continuous-batching-llm-inference</a><br>
+Focus on: the three separate steps it measures. They are simple batching, continuous batching, and continuous batching with paged memory.<br>
+Conditions: OPT-13B on one A100 40GB, 1,000 requests, 512 input tokens each. Output lengths followed an exponential distribution.<br>
+Numbers, verified again on 2026-09-19: up to 23x with continuous batching plus paged memory. Up to 8x with continuous batching alone (Ray Serve and TGI). Up to 4x with FasterTransformer. The 23x figure compares against simple static batching, not against a tuned server. Always quote it with that baseline. The same post states PagedAttention cut KV memory waste to under 4%.</li>
+
+<li><strong>Efficient Memory Management for Large Language Model Serving with PagedAttention, Kwon et al., SOSP 2023</strong> — <a href="https://arxiv.org/abs/2309.06180">arxiv.org/abs/2309.06180</a><br>
+Readable version: <a href="https://ar5iv.labs.arxiv.org/html/2309.06180">ar5iv.labs.arxiv.org/html/2309.06180</a>, which was read in full on 2026-09-19.<br>
+Authors: Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, Stoica.<br>
+Focus on: section 3 with Figure 2 for the waste breakdown. Section 4 for the block table. Section 4.4 for sharing and copy-on-write. Section 4.5 for scheduling and the two preemption recovery modes. Section 7.2 for block size. This paper is the source of section 2.2.<br>
+Numbers: only 20.4% to 38.2% of KV cache memory held real token state in the measured systems. The default block size is 16 tokens. The sweep in section 7.2 found that 16 to 128 performed best. Throughput is 1.7x to 2.7x over Orca with an oracle output length. It is 2x to 4x over FasterTransformer and Orca at similar latency.</li>
+
+<li><strong>Fast LLM Serving with vLLM and PagedAttention, Woosuk Kwon and Zhuohan Li, 24 minutes</strong> — <a href="https://www.youtube.com/watch?v=5ZlavKF_98U">youtube.com/watch?v=5ZlavKF_98U</a><br>
+Focus on: 6:11 to 14:41, the clearest explanation of paging and copy-on-write. The authors animate the block table, which the paper cannot do. Watch it before you read the paper.<br>
+Timestamps, taken from the caption track because the video has no chapters:
+  <ul>
+  <li>3:07 what the KV cache is</li>
+  <li>3:52 the memory budget for a 13B model on a 40GB GPU</li>
+  <li>4:40 internal fragmentation</li>
+  <li>5:26 reservation and external fragmentation, with the 20 to 40 percent utilisation figure</li>
+  <li>6:11 the comparison with virtual memory</li>
+  <li>8:30 logical blocks, physical blocks, and the block table</li>
+  <li>10:03 why block size limits the waste</li>
+  <li>10:50 the claim that vLLM wastes about 4%</li>
+  <li>13:54 copy-on-write, step by step</li>
+  <li>20:04 the Chatbot Arena deployment, about 40,000 conversations per day with half the GPUs</li>
+  </ul>
+</li>
+
+<li><strong>vLLM automatic prefix caching design, official design document</strong> — <a href="https://docs.vllm.ai/en/latest/design/prefix_caching.html">docs.vllm.ai/en/latest/design/prefix_caching.html</a><br>
+Focus on: the hash construction. Each block's hash includes the parent block's hash, the block's tokens, and extras such as the LoRA id. That parent chain is why a prefix match cannot restart in the middle.<br>
+Eviction is least recently used. Freed blocks enter the free queue in reverse order. So later blocks leave first, because they are less likely to be reused. The page names <code>--prefix-caching-hash-algo</code>, with <code>sha256</code> as the default. Read it right after exercise E5.<br>
+Verification note, 2026-09-19: the live <code>latest</code> page returned HTTP 429. That is a rate limit, not a 404. The same document was read in the vLLM repository at tag v0.29.0 instead: <a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/docs/design/prefix_caching.md">docs/design/prefix_caching.md at v0.29.0</a>. Prefer the tagged repo path when you cite it. A <code>latest</code> link can drift under you. A tag cannot.</li>
+
+<li><strong>vLLM optimization and tuning guide, official documentation</strong> — <a href="https://docs.vllm.ai/en/latest/configuration/optimization.html">docs.vllm.ai/en/latest/configuration/optimization.html</a><br>
+Focus on: the defaults. Section 2.4 in part B uses the same page for the token budget trade.<br>
+Defaults were confirmed against the v0.29.0 source tree on 2026-09-12, and again on 2026-09-19. The check used the source because the <code>latest</code> docs carry no version number. The docs page itself was also rate limited that day. <code>enable_prefix_caching</code> is <code>True</code>. <code>block_size</code> resolves to 16. <code>gpu_memory_utilization</code> is 0.92. The scheduling policy is <code>fcfs</code>, first come first served. The checked source: <a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/config/cache.py">vllm/config/cache.py at v0.29.0</a> and <a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/config/scheduler.py">vllm/config/scheduler.py at v0.29.0</a>.</li>
+</ul>
+
+<h3>Deep dives</h3>
+
+<ul>
+<li><strong>SGLang: Efficient Execution of Structured Language Model Programs, Zheng et al., NeurIPS 2024</strong> — <a href="https://arxiv.org/abs/2312.07104">arxiv.org/abs/2312.07104</a><br>
+HTML version: <a href="https://arxiv.org/html/2312.07104v2">arxiv.org/html/2312.07104v2</a>, read on 2026-09-19.<br>
+Authors: Zheng, Yin, Xie, Sun, Huang, Yu, Cao, Kozyrakis, Stoica, Gonzalez, Barrett, Sheng.<br>
+Focus on: section 3. It gives the radix tree over token sequences and the cache-aware scheduling rule. It also states that eviction removes the least recently used leaf first. Read it after the PagedAttention paper. The tree is easier to follow once you know block hashing.<br>
+Numbers, verified from the paper body on 2026-09-19: production cache hit rates from Chatbot Arena were 52.4% for LLaVA-Next-34B and 74.1% for Vicuna-33B. Benchmark hit rates ranged from 50% to 99%. Cache-aware scheduling reached about 96% of the best possible hit rate. Throughput was up to 6.4x higher, and latency up to 3.7x lower.</li>
+
+<li><strong>Inside vLLM: Anatomy of a High-Throughput LLM Inference System, Aleksa Gordic, 5 September 2025</strong> — <a href="https://vllm.ai/blog/2025-09-05-anatomy-of-vllm">vllm.ai/blog/2025-09-05-anatomy-of-vllm</a><br>
+Focus on: the engine loop, the scheduler, the free block queue, and the worked hash examples for prefix caching. It connects the papers to the current source code. Read it between the papers and the code exercises.</li>
+
+<li><strong>LLM Inference Performance Engineering: Best Practices, Databricks and the MosaicML team, 12 October 2023</strong> — <a href="https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices">databricks.com/blog/llm-inference-performance-engineering-best-practices</a><br>
+Focus on: the arithmetic for why a bigger batch raises throughput without raising per-token speed.<br>
+Numbers: MPT-7B on one A100 40GB shows 46ms TTFT at 512 input tokens and batch size 1. Llama2-70B on four A100s shows 114ms. Throughput moves from 0.4 to 1.7 requests per second at batch size 1, up to 36.5 at batch size 128. Model bandwidth utilisation at batch size 1 is about 55% to 60%. That is the memory-bound decode fact from Phase 1, measured. These numbers were not re-fetched on 2026-09-19; the phase cites them with their dates.</li>
+
+<li><strong>Optimizing AI Inference at Character.AI, 20 June 2024</strong> — <a href="https://blog.character.ai/optimizing-ai-inference-at-character-ai/">blog.character.ai/optimizing-ai-inference-at-character-ai</a><br>
+Focus on: the scale numbers, not the technique. About 20,000 queries per second. Under one cent per hour of conversation. Serving costs cut at least 33x since launch.<br>
+Note: the deeper technical post it used to link now redirects to the blog index. That post covered multi-query attention and cross-layer KV sharing. Do not cite its numbers from a live link.</li>
+</ul>
+
+<h3>Prefix caching in production</h3>
+
+<ul>
+<li><strong>2x faster inference with KV cache-aware routing, Baseten, 16 March 2026</strong> — <a href="https://www.baseten.co/blog/how-baseten-achieved-2x-faster-inference-with-nvidia-dynamo/">baseten.co/blog/how-baseten-achieved-2x-faster-inference-with-nvidia-dynamo</a><br>
+Focus on: why the load balancer matters. A prefix cache does not help when the load balancer picks the wrong replica. That replica does not hold the prefix. Baseten routes with a radix tree over cached prefixes. Read it after exercise E6.<br>
+Synthetic test: Qwen3 Coder 480B A35B, about 50,000-token inputs, four replicas. Results: 89% cache hit rate, 50% lower TTFT, 34% lower TPOT.<br>
+Shadowed production traffic: 48% lower P95 latency, 49% lower P99, 61% more requests per second.</li>
+
+<li><strong>Predicted-Latency Based Scheduling for LLMs, llm-d project, 13 March 2026</strong> — <a href="https://llm-d.ai/blog/predicted-latency-based-scheduling-for-llms">llm-d.ai/blog/predicted-latency-based-scheduling-for-llms</a><br>
+Focus on: the opposite pressure to the Baseten post. Read them together. It reports KV cache utilisation rising from 30% to over 70%, and uneven queue depths across pods. It says prefix cache hit rates "collapse frequently as traffic patterns shift and cached prefixes get evicted". Quote checked on 2026-09-17.<br>
+Its main point supports exercise E6. Routing for cache reuse concentrates load. Routing for low utilisation spreads it.</li>
+
+<li><strong>Context Engineering for AI Agents: Lessons from Building Manus, 18 July 2025</strong> — <a href="https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus">manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus</a><br>
+Focus on: the timestamp in the system prompt, which it names as a mistake, and the append-only rule for history. This is the practitioner view of section 2.3.<br>
+Its 10x gap between cached and uncached input was Claude Sonnet list pricing in July 2025. Check current prices before you reuse the number.</li>
+
+<li><strong>Keeping vLLM's Prefix Cache Warm Between Agent Turns, doug.sh, around 17 September 2026</strong> — <a href="https://doug.sh/posts/vllm-kv-cache-agents/">doug.sh/posts/vllm-kv-cache-agents</a><br>
+Added 2026-09-19. Focus on: the debug method, not the fixes. Diff the tokenized bytes of two consecutive prompts to the first differing token. Reproduce on an idle server before blaming eviction. Measure hit rate as cached tokens divided by total prompt tokens, not as a count.<br>
+One deployment, one model. Treat the 55% to 95% improvement as what it is: one engineer's measured run, well documented.</li>
+
+<li><strong>vLLM preemption-recompute thrashing, Denpex Failure Encyclopedia</strong> — <a href="https://denpex.com/failures/vllm-preemption-recompute-thrash">denpex.com/failures/vllm-preemption-recompute-thrash</a><br>
+Added 2026-09-19. Focus on: the symptom and the confirm step. High GPU utilisation with collapsing throughput, and a halving test to confirm. Vendor source with gated remediation. The mechanism is consistent with the v0.29.0 scheduler source. Read it next to checkpoint question 4.</li>
+</ul>
+<h2>Cheatsheet, part A</h2>
+
+<pre class="cheatsheet">THE SCHEDULER LOOP
+  one iteration = one forward pass = ONE token for every decoding request
+  static batching     : batch runs to completion; freed slots stay idle
+  continuous batching : a freed slot is refilled next iteration
+  measured (batching_sim, 40 req, 6/s):
+    static      TTFT 5357ms  TPOT 19.4ms  2.3 rq/s
+    continuous  TTFT  867ms  TPOT 25.4ms  3.6 rq/s   worst gap 764ms
+  arrival rate 6/s → 12/s: continuous TTFT 867ms → 1674ms, same prompts
+  your inputs on a hosted API: prompt length, output length,
+    arrival pattern, prefix reuse
+  never answer a TTFT spike with retries: they lengthen the queue
+  v0.29.0 admission valves: --max-num-queued-reqs / --max-num-queued-tokens → HTTP 503
+
+PAGED KV CACHE
+  KV bytes/token = 2 x kv_heads x head_dim x bytes x layers
+    llama-3-8b fp16 → 128 KB/token
+  contiguous : reserve max_model_len per request   → 14 concurrent
+  paged      : ceil(tokens / block) blocks on demand → 253 concurrent
+  paged + 1,200-token shared prefix                 → 752 concurrent
+  waste under paging = unused tail of the last block (8 tokens at 16)
+  out of blocks = PREEMPTION, not an error: prefill is redone later
+  gpu_memory_utilization: capacity setting. vLLM 0.29.0 default 0.92
+    0.92 → 0.70 on 80GB: 260 → 181 requests (-30%)
+  thrash signature: rising vllm:num_preemptions_total + RECOMPUTE warnings,
+    healthy GPU utilisation, collapsing throughput; lower max_num_seqs
+
+PREFIX CACHE
+  key = hash(parent chain + this block's tokens) → prefix-only match
+  match starts at token 0, moves forward, stops at the first difference
+  whole blocks only; a partial tail block is never shared
+    (v0.28.0 adds finer-grained matching below the block; storage still blocks)
+  eviction is LRU, and other tenants share the pool
+  RULE: stable content first, volatile content last
+  measured: same tokens, 0.0% vs 92.0% hit rate, 3.22x cost difference
+  eviction: 93.5% → 68.8% at 500 blocks → 0.0% at 200 blocks
+  production hit rates (SGLang paper): 52.4% and 74.1%
+  cache_salt per request isolates tenants; sha256 default since v0.11 (collisions leak KV)
+
+THE COMMANDS (all offline)
+  paging_lab.py                              → concurrency and waste
+  paging_lab.py --shared-prefix 1200         → what sharing buys
+  batching_sim.py [--rate 12]                → policy comparison
+  prefix_cache_sim.py                        → layout cost
+  prefix_cache_sim.py --capacity-blocks 500 --users 5 --steps 12
+                                             → eviction</pre>
+
+<h2>Things I could not verify</h2>
+
+<ul>
+<li>Orca's exact figures of 0.185 requests per second and 190ms median normalised latency, and the Figure 10a low-load claim. usenix.org blocks automated fetching. Only the 36.9x headline is confirmed, through secondary reading notes of the paper.</li>
+<li>When <code>gpu_memory_utilization</code> moved from 0.9 to 0.92, in which release. The 0.95 to 0.9 move in September 2023 is verified through issue #1018. The later move is not pinned.</li>
+<li>The about-4% waste figure under paging as a written measurement. The vLLM authors state it in their talk and the Anyscale post writes "under 4%", but no measurement method was read.</li>
+<li>The Denpex thrash report's exact log-line spelling and the <code>vllm:num_preemptions_total</code> counter name. The failure mechanism matches the documented vLLM scheduler. The page is a vendor artifact with gated remediation, and the strings were not grep-checked against the source tree.</li>
+<li>The perun.au post's claim of a PagedAttention block-eviction race corrupting continuation tokens during preemption. Single vendor source, no reproduction, no matching vLLM issue found. Do not cite it as real without a second source.</li>
+<li>The Databricks benchmark numbers (55 to 60% model bandwidth utilisation and the throughput table) were not re-fetched this run. The phase cites them with dates.</li>
+<li>The Manus post's 10x cached versus uncached pricing, stated as July 2025 list pricing. Not re-checked. Check current prices before reuse.</li>
+<li>Whether the simulator constants (18ms base decode, 0.12ms per extra sequence, 0.03ms per prefill token) reflect any real GPU. They are a declared teaching model. Only their internal consistency was checked.</li>
+</ul>
+
+<h2>Two things you could post</h2>
+
+<ul>
+<li>"High GPU utilisation hid my inference failure": the claim is that preemption-recompute thrash makes healthy-looking dashboards lie. It is his because the checkpoint arithmetic and the simulator runs are his own, and the fix is counterintuitive. Lower concurrency, and throughput rises.</li>
+<li>"Go map iteration order cost 40% of my prefix cache hits": the doug.sh incident, retold as a warning for Go agent builders. It is his because he builds agents in this stack. The check is one line. Sort keys before serializing anything that lands in a prompt.</li>
+</ul>
+
+<p>Part B covers three topics: chunked prefill and the stream freeze, constrained decoding, and the compaction trigger.</p>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+</body>
+</html>

@@ -672,7 +672,7 @@ async def write_lesson(
         gap = page_coverage(source, html, note)
         if gap:
             raise ModelRetry(
-                f"the enhanced page is not complete: {gap}."
+                f"the page is not ready yet: {gap}."
                 " Rewrite ONLY the parts this names, with write_lesson_part and the"
                 " same part numbers; every other part is saved and stays as it is."
                 " Then call write_lesson again."
