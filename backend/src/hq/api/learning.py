@@ -365,16 +365,21 @@ async def draft_post(lesson_date: str, section: str = "writing", kind: str = "to
 
 
 @router.post("/courses/{course}/phases/{slug}/teach", operation_id="teachPhase")
-async def teach_phase(course: str, slug: str) -> dict:
+async def teach_phase(course: str, slug: str, force: bool = False) -> dict:
     """Study one named phase now, instead of waiting for tonight's run.
 
     Still gated: it will not start while a course lesson sits unread, because
     that is the rule that stops articles piling up.
+
+    `force=true` is the rebuild. He has the page already and wants it written
+    again, usually because the kit or the standard moved under it, so neither
+    the unread gate nor "this phase is taught" applies: both of those exist to
+    stop work piling up on its own, and this is him asking.
     """
     from hq import engine
     from hq.learning_pipeline import course_payload, course_study_brief
 
-    unread = await db.fetchone(
+    unread = None if force else await db.fetchone(
         "SELECT title, review_status FROM hq.lessons WHERE kind = 'course'"
         " AND (read_at IS NULL OR review_status IN ('revise', 'failed'))"
         " ORDER BY lesson_date DESC LIMIT 1",
@@ -386,13 +391,14 @@ async def teach_phase(course: str, slug: str) -> dict:
             str(unread["review_status"]), "is still unread — mark it read first")
         return {"started": False, "reason": f"{unread['title']} {why}"}
 
+    wanted = ("pending", "taught") if force else ("pending",)
     phase = await db.fetchone(
         "SELECT slug, course, title, summary, url, source FROM hq.course_phases"
-        " WHERE slug = %s AND course = %s AND status = 'pending'",
-        (slug, course),
+        " WHERE slug = %s AND course = %s AND status = ANY(%s)",
+        (slug, course, list(wanted)),
     )
     if not phase:
-        raise HTTPException(404, f"no pending phase {slug!r} in {course!r}")
+        raise HTTPException(404, f"no {' or '.join(wanted)} phase {slug!r} in {course!r}")
     if phase["source"] == "local":
         return {"started": False, "reason": (
             "this phase is planned, not published. Generate it with Claude"

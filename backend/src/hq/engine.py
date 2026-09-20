@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -46,6 +47,8 @@ from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, scan
 # Doubled 2026-09-10 alongside high reasoning effort and tripled call caps: a
 # run that thinks harder and calls more tools needs the wall clock to match, or
 # the cap becomes the new failure mode. _cap_overrunning_tasks keys off this.
+log = logging.getLogger(__name__)
+
 TASK_TIMEOUT_S = 40 * 60   # a cron/board run may not exceed 40 minutes
 # Building a course page is a different shape of work: a dozen sections, each
 # a model call of a minute or two, plus a check and a fix round. The 40-minute
@@ -758,6 +761,28 @@ async def _close_stale_finds() -> None:
                        payload={"count": len(rows), "older_than_days": days})
 
 
+async def _release_workflow(task_id: str) -> None:
+    """Cancel the workflow behind a task the board has given up on.
+
+    A queue holds one worker slot per running workflow, and a workflow whose
+    process died stays PENDING for ever. On 2026-09-20 two of them sat on the
+    `courses` lane, so a claims check that was correctly ENQUEUED waited seven
+    hours behind work that had already been marked blocked. Marking the board
+    is not enough: the lane only frees when DBOS is told the workflow is over.
+    """
+    row = await db.fetchone(
+        "SELECT wf_id FROM hq.runs WHERE task_id = %s ORDER BY started_at DESC LIMIT 1",
+        (task_id,),
+    )
+    wf_id = (row or {}).get("wf_id")
+    if not wf_id:
+        return
+    try:
+        await DBOS.cancel_workflow_async(wf_id)
+    except Exception as exc:  # noqa: BLE001 — a workflow that already ended is fine
+        log.warning("could not cancel workflow %s for task %s: %s", wf_id, task_id, exc)
+
+
 async def _cap_overrunning_tasks() -> None:
     """Block any task that has been running far longer than the task timeout.
 
@@ -765,13 +790,21 @@ async def _cap_overrunning_tasks() -> None:
     laptop sleeps mid-run, no timer advances, so a run started at 08:22 was
     still "running" hours later. This is the backstop that closes the task on
     the next tick after the machine wakes, so the board never shows work that
-    is not happening. It marks the task, not the workflow: DBOS owns the
-    workflow's own lifecycle.
+    is not happening, and it cancels the workflow with it so the lane the
+    workflow was holding goes back to the queue.
+
+    The allowance follows the lane. A task row is only touched when its status
+    changes, so "no progress" here means "started this long ago", and a course
+    phase is allowed 100 minutes by SetWorkflowTimeout. Measuring it against
+    the 40-minute task cap meant the watchdog could kill a course run that was
+    still writing, 20 minutes inside its own limit. Each lane gets its own cap
+    plus the same doubling.
     """
     stale = await db.fetch(
         "SELECT id::text FROM hq.tasks WHERE status = 'running'"
-        " AND updated_at < now() - make_interval(secs => %s)",
-        (TASK_TIMEOUT_S * 2,),
+        " AND updated_at < now() - make_interval(secs => CASE"
+        "   WHEN payload ->> 'stage' = ANY(%s) THEN %s ELSE %s END)",
+        (sorted(_COURSE_STAGES), COURSE_TIMEOUT_S * 2, TASK_TIMEOUT_S * 2),
     )
     # A run row whose workflow died without closing it stays open for ever, so
     # the Runs page shows work that stopped hours ago and `hq.cli health`
@@ -779,15 +812,18 @@ async def _cap_overrunning_tasks() -> None:
     # cancelled workflow that could not run its own bookkeeping, one from a
     # process that went away. Close them on the same tick that closes tasks.
     orphans = await db.fetch(
-        "UPDATE hq.runs SET outcome = 'abandoned', ended_at = now()"
-        " WHERE ended_at IS NULL AND started_at < now() - make_interval(secs => %s)"
-        " RETURNING id::text",
-        (TASK_TIMEOUT_S * 2,),
+        "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now()"
+        " FROM hq.tasks t WHERE t.id = r.task_id AND r.ended_at IS NULL"
+        " AND r.started_at < now() - make_interval(secs => CASE"
+        "   WHEN t.payload ->> 'stage' = ANY(%s) THEN %s ELSE %s END)"
+        " RETURNING r.id::text",
+        (sorted(_COURSE_STAGES), COURSE_TIMEOUT_S * 2, TASK_TIMEOUT_S * 2),
     )
     if orphans:
         await obs.emit("runs.abandoned", payload={"count": len(orphans)})
 
     for row in stale:
+        await _release_workflow(row["id"])
         await board.apply(
             row["id"],
             "timed_out",
@@ -795,7 +831,8 @@ async def _cap_overrunning_tasks() -> None:
             data={
                 "reason": (
                     "no progress for over "
-                    f"{TASK_TIMEOUT_S * 2 // 60} minutes: either a model "
+                    f"{COURSE_TIMEOUT_S * 2 // 60} minutes on a course lane, "
+                    f"{TASK_TIMEOUT_S * 2 // 60} elsewhere: either a model "
                     "request kept hitting its time limit and was retried "
                     "(DBOSStepTimeoutError in data/logs/backend.log), or the "
                     "host was asleep mid-run"
@@ -821,6 +858,7 @@ async def reap() -> None:
         " AND updated_at < now() - interval '2 hours'"
     )
     for row in stale:
+        await _release_workflow(row["id"])
         await board.apply(row["id"], "reaped", status="blocked",
                           data={"reason": "stale running task at boot"})
     # A queued workflow that never started carries the code version it was
@@ -835,6 +873,20 @@ async def reap() -> None:
         " AND workflow_uuid LIKE 'task-%%'",
         (DBOS.application_version, DBOS.application_version),
     )
+    # The same jam, but from before this fix existed: a workflow still PENDING
+    # for a task the board has already blocked or failed. Nothing will ever
+    # finish it, and until it is cancelled it holds its queue's worker slot.
+    for row in await db.fetch(
+        "SELECT r.wf_id FROM dbos.workflow_status w"
+        " JOIN hq.runs r ON r.wf_id = w.workflow_uuid"
+        " JOIN hq.tasks t ON t.id = r.task_id"
+        " WHERE w.status = 'PENDING' AND t.status IN ('blocked', 'failed', 'done')"
+    ):
+        try:
+            await DBOS.cancel_workflow_async(row["wf_id"])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not release stuck workflow %s: %s", row["wf_id"], exc)
+
     # A crash between create_task and enqueue leaves a task in backlog forever.
     # Re-enqueue is safe: the workflow id is derived from the task id.
     #
@@ -1246,6 +1298,33 @@ async def _mark_review_failed_step(slug: str) -> None:
 
 
 @DBOS.step()
+async def _flag_unverified_claims_step(slug: str, failures: list[dict[str, Any]]) -> None:
+    """Put the claims that still do not match their sources on the lesson.
+
+    The rounds are capped so a disagreement between two model runs cannot loop
+    for ever. What the cap must not do is lose the finding: on 2026-09-20 the
+    second check on Phase 2A found two claims that misread their sources, the
+    branch asked the board for done -> blocked, which is not a legal
+    transition, and the note went nowhere. He read the page believing every
+    added fact had been checked. So the finding goes on the lesson he reads,
+    and the Courses gate holds the next phase until he has decided.
+    """
+    notes = "\n".join(
+        f"- {f.get('id', '?')}: {f.get('problem', '')}".strip() + (
+            f"\n  fix: {f['fix']}" if f.get("fix") else "")
+        for f in failures
+    )
+    await db.execute(
+        "UPDATE hq.lessons SET review_status = 'revise',"
+        " review_notes = left(%s, 4000) WHERE id = ("
+        " SELECT id FROM hq.lessons WHERE kind = 'course' AND course_slug = %s"
+        " ORDER BY created_at DESC LIMIT 1)",
+        ((f"{len(failures)} added claim(s) still do not match their sources"
+          f" after a fix round:\n{notes}"), slug),
+    )
+
+
+@DBOS.step()
 async def _learning_requests_step() -> list[str]:
     """What he asked to learn about, for the scan brief."""
     from hq.tools.learning_tools import open_requests
@@ -1294,9 +1373,44 @@ async def _queue_readings_step(urls: list[str]) -> None:
 
 
 @DBOS.step()
-async def _page_additions_step(slug: str) -> list[dict[str, Any]]:
-    """What the newest page for this phase added, with the urls it cites."""
-    from hq.tools.learning_tools import page_additions
+async def _course_shape_step(course: str, slug: str) -> list[dict[str, Any]]:
+    """The phases before and after this one, so the lesson fits the course.
+
+    He asked for it directly: "in the AI mentor those courses are created as
+    part of phases considering other phases, so all the things are properly
+    managed". A lesson that re-teaches the phase before it wastes his evening;
+    one that leans on the phase after it cannot be followed.
+    """
+    rows = await db.fetch(
+        "SELECT slug, phase_order, title, sections FROM hq.course_phases"
+        " WHERE course = %s ORDER BY phase_order, slug", (course,))
+    here = next((i for i, r in enumerate(rows) if r["slug"] == slug), None)
+    if here is None:
+        return []
+    out = []
+    for index, row in enumerate(rows):
+        if index == here:
+            continue
+        label = str(row["slug"]).rpartition("-phase-")[2][:3].strip("-") or str(row["phase_order"])
+        sections = row.get("sections") if index < here else None
+        if isinstance(sections, str):
+            try:
+                sections = json.loads(sections)
+            except ValueError:
+                sections = None
+        out.append({
+            "label": f"phase {label}",
+            "title": str(row["title"])[:90],
+            "when": "before" if index < here else "after",
+            "sections": "; ".join(str(x)[:60] for x in (sections or [])[:8]),
+        })
+    return out
+
+
+@DBOS.step()
+async def _new_claims_step(slug: str) -> list[dict[str, Any]]:
+    """The facts the lesson states that his own phase did not, with their links."""
+    from hq.tools.learning_tools import new_claims, read_course_source_text
 
     row = await db.fetchone(
         "SELECT l.html_path FROM hq.lessons l WHERE l.course_slug = %s AND l.kind = 'course'"
@@ -1307,7 +1421,9 @@ async def _page_additions_step(slug: str) -> list[dict[str, Any]]:
     full = (settings().learning_dir.parent / path).resolve()
     if not full.is_file():
         return []
-    return page_additions(await asyncio.to_thread(full.read_text))
+    page = await asyncio.to_thread(full.read_text)
+    source = await asyncio.to_thread(read_course_source_text, slug)
+    return new_claims(source, page)
 
 
 @DBOS.step()
@@ -1492,6 +1608,8 @@ async def _advance_learning(
             brief=learning.course_lesson_brief(
                 payload, digests,
                 articles=await _phase_articles_step(str(payload.get("slug") or "")),
+                course=await _course_shape_step(str(payload.get("course") or ""),
+                                                str(payload.get("slug") or "")),
             ),
             source="agent",
             parent_task_id=task_id,
@@ -1518,7 +1636,7 @@ async def _advance_learning(
             # opens every url they cite and checks the claim against it.
             if "hunter" not in AGENTS:
                 return None
-            additions = await _page_additions_step(str(payload.get("slug") or ""))
+            additions = await _new_claims_step(str(payload.get("slug") or ""))
             if not additions:
                 return None
             claims = learning.claims_payload(payload, int(payload.get("claims_round") or 0))
@@ -1541,11 +1659,17 @@ async def _advance_learning(
         if not failures:
             return None
         if round_ + 1 >= learning.MAX_CLAIMS_ROUNDS:
+            # No status here: this task is already done, and done -> blocked is
+            # not a legal transition, so asking for one only logged a warning
+            # and lost the finding. The lesson carries it instead.
+            slug = str(payload.get("slug") or "")
+            await _flag_unverified_claims_step(slug, failures)
             await board.apply(
-                task_id, "noted", status="blocked",
-                data={"reason": f"{len(failures)} claim(s) on {payload.get('slug')} still"
-                                " do not match their sources after a fix; the page is on"
-                                " the Courses page and the findings are in this task"},
+                task_id, "noted",
+                data={"reason": f"{len(failures)} claim(s) on {slug} still do not"
+                                " match their sources after a fix. The lesson is marked"
+                                " for revision and the findings are on it",
+                      "claims": failures[:10]},
             )
             return None
         return await dispatch(

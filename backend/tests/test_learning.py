@@ -1990,3 +1990,57 @@ def test_a_figure_can_call_the_kit_helpers_where_it_is_written() -> None:
 
     dead = body.replace("'#s3-kv'", "'#s3-kvcache'")
     assert "s3-kvcache" in page_script_problems(wrap_page(dead, title="Demo"))
+
+
+def test_a_task_the_board_gives_up_on_releases_its_queue_slot() -> None:
+    """A dead workflow used to hold its lane for ever.
+
+    On 2026-09-20 two workflows sat PENDING on the `courses` queue after their
+    processes died. The queue allows one worker, so a claims check that was
+    correctly ENQUEUED waited seven hours behind work the board had already
+    marked blocked. Blocking the task is not enough: DBOS has to be told.
+    """
+    import inspect
+
+    from hq import engine
+
+    watchdog = inspect.getsource(engine._cap_overrunning_tasks)
+    assert "_release_workflow" in watchdog
+    assert watchdog.index("_release_workflow") < watchdog.index('"timed_out"')
+
+    release = inspect.getsource(engine._release_workflow)
+    assert "cancel_workflow_async" in release
+    assert "ORDER BY started_at DESC" in release   # the newest attempt, not the first
+
+    reap = inspect.getsource(engine.reap)
+    assert "_release_workflow" in reap
+    # And the jams that were already there when this shipped.
+    assert "status = 'PENDING'" in reap
+    assert "'blocked', 'failed', 'done'" in reap
+
+
+def test_claims_the_cap_gives_up_on_are_left_on_the_lesson() -> None:
+    """A finding the rounds ran out on must not vanish.
+
+    On 2026-09-20 the second check on Phase 2A found two added claims that
+    misread their sources. The branch asked the board to move a task that was
+    already `done` to `blocked`, which ALLOWED does not permit, so apply()
+    logged a warning and the reason went nowhere. He read the page believing
+    every added fact had been checked.
+    """
+    import inspect
+
+    from hq import board, engine
+
+    # The transition that was being asked for is still not legal, which is why
+    # the branch must not ask for it.
+    assert "blocked" not in board.ALLOWED["done"]
+
+    src = inspect.getsource(engine._advance_learning)
+    capped = src[src.index("MAX_CLAIMS_ROUNDS"):]
+    capped = capped[: capped.index("return await dispatch")]
+    assert "_flag_unverified_claims_step" in capped
+    assert 'status="blocked"' not in capped
+
+    flag = inspect.getsource(engine._flag_unverified_claims_step)
+    assert "review_status = 'revise'" in flag and "review_notes" in flag
