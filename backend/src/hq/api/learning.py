@@ -40,8 +40,13 @@ _HEAD_RE = re.compile(r"<head[^>]*>", re.IGNORECASE)
 _FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
 
 
-def _with_csp(html: str) -> str:
+def harden_page(html: str) -> str:
     """Make one generated page safe to render in the frame.
+
+    Public because the phone reader needs the identical treatment. Its pages
+    are copied to `frontend/public/reader` and served by Vercel with no
+    backend in front of them, so if this ran only here, the one place the
+    hardening was missing would be the one place there is nothing else.
 
     Three things, each learned the hard way on 2026-09-12:
 
@@ -150,7 +155,7 @@ async def get_lesson_page(path: Annotated[str, Query(min_length=1)]) -> dict:
         raise HTTPException(415, "lesson page is not text") from None
     if len(html) > PAGE_MAX_CHARS:
         raise HTTPException(413, "lesson page is too large to render")
-    return {"path": path, "html": _with_csp(html)}
+    return {"path": path, "html": harden_page(html)}
 
 
 @router.get("/note", operation_id="getLessonNote")

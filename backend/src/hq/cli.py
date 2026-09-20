@@ -194,6 +194,26 @@ async def cmd_import_course(topic: str) -> int:
     return 0 if count else 1
 
 
+async def cmd_export_reader() -> int:
+    """Write the phone reader bundle, for him to commit and push.
+
+    The console needs this machine: its backend, its Postgres, its files. The
+    bundle needs none of them, which is the whole point of it.
+    """
+    from hq import db, reader_export
+
+    await db.open_pool()
+    try:
+        made = await reader_export.build()
+        print(f"{made['phases']} phase(s) across {made['courses']} course(s)"
+              f" and {made['articles']} article(s)")
+        print(f"{made['pages']} page(s), {made['bytes'] / 1_000_000:.1f} MB -> {made['dir']}")
+        print("commit frontend/public/reader and push; Vercel serves it at /read")
+        return 0
+    finally:
+        await db.close_pool()
+
+
 async def cmd_board_check() -> int:
     """Event-sourcing audit: derive every task's status from hq.task_events and
     compare with the hq.tasks projection. Read-only."""
@@ -380,6 +400,8 @@ def main() -> None:
         raise SystemExit(asyncio.run(cmd_import_course(args[1])))
     if args[0] == "sync-courses":
         raise SystemExit(asyncio.run(cmd_sync_courses()))
+    if args[0] == "export-reader":
+        raise SystemExit(asyncio.run(cmd_export_reader()))
     if args[0] == "board-check":
         raise SystemExit(asyncio.run(cmd_board_check()))
     if args[0] == "prompt-check" and len(args) == 2:

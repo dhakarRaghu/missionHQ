@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 
-from hq.api.learning import CSP, _with_csp
+from hq.api.learning import CSP, harden_page
 from hq.db import load_migrations
 from hq.learning_pipeline import (
     DEFAULT_TOPICS,
@@ -156,7 +156,7 @@ def test_the_lesson_brief_names_both_files_and_the_skill() -> None:
 def test_a_lesson_page_can_load_nothing_from_the_internet() -> None:
     # Tutor writes this HTML from web-derived digests. It renders in a
     # sandboxed frame, and the document states the same policy itself.
-    html = _with_csp("<html><head><title>x</title></head><body>hi</body></html>")
+    html = harden_page("<html><head><title>x</title></head><body>hi</body></html>")
 
     assert "Content-Security-Policy" in html
     assert html.index("Content-Security-Policy") < html.index("<title>")
@@ -165,7 +165,7 @@ def test_a_lesson_page_can_load_nothing_from_the_internet() -> None:
 
 
 def test_a_page_without_a_head_still_gets_the_policy() -> None:
-    assert _with_csp("<body>no head</body>").startswith("<meta http-equiv=")
+    assert harden_page("<body>no head</body>").startswith("<meta http-equiv=")
 
 
 def test_tutor_may_write_lessons_because_it_cannot_read_the_web() -> None:
@@ -612,19 +612,19 @@ def test_a_source_link_cannot_hijack_the_frame() -> None:
     # He clicked a source inside the lesson and the frame navigated to the live
     # site — the page appeared to be "downloading" whole websites into the
     # console. Nothing was stored; an ordinary link had taken over the frame.
-    from hq.api.learning import _with_csp
+    from hq.api.learning import harden_page
 
-    html = _with_csp('<html><head><title>x</title></head><body><a href="https://e.com">s</a></body></html>')
+    html = harden_page('<html><head><title>x</title></head><body><a href="https://e.com">s</a></body></html>')
 
     assert '<base target="_blank">' in html
     assert html.index("base target") < html.index("<title>")
 
 
 def test_frontmatter_never_reaches_the_rendered_page() -> None:
-    from hq.api.learning import _with_csp
+    from hq.api.learning import harden_page
 
     stamped = "---\ncreated: 2026-09-12\nauthor: tutor\n---\n<!DOCTYPE html>\n<html><head></head><body>hi</body></html>"
-    out = _with_csp(stamped)
+    out = harden_page(stamped)
 
     assert "created: 2026-09-12" not in out
     assert out.startswith("<!DOCTYPE html>")
@@ -2068,3 +2068,58 @@ def test_a_whole_document_from_tutor_is_sent_back() -> None:
     # And the kit itself labels nothing it was given.
     assert "::before" not in lesson_kit.KIT_CSS.split(".addition")[1].split("}")[0]
     assert "Added" not in lesson_kit.KIT_CSS
+
+
+def test_the_phone_bundle_hardens_every_page_it_copies() -> None:
+    """On Vercel there is no endpoint in front of the lesson.
+
+    The console fetches a page through `/api/learning/page`, which injects the
+    content policy and `<base target="_blank">`. The reader fetches a file the
+    export wrote. If the export copied the page untouched, a source link would
+    navigate the frame itself to the live site — the 2026-09-12 bug — and the
+    in-document policy that blocks outside loads would be gone with it.
+    """
+    import inspect
+
+    from hq import reader_export
+    from hq.api.learning import harden_page
+
+    src = inspect.getsource(reader_export.build)
+    assert "harden_page" in src
+    assert "shutil.copyfile" not in src   # a copy skips the hardening
+
+    page = harden_page("<html><head></head><body>x</body></html>")
+    assert 'http-equiv="Content-Security-Policy"' in page
+    assert '<base target="_blank">' in page
+
+
+def test_the_phone_bundle_keeps_a_course_that_is_not_on_his_roster() -> None:
+    """`hq.courses` is his own roster; an imported course has no row in it.
+
+    The first version inner-joined that table, so Kubernetes — taught, and
+    read in the console — was missing from the bundle entirely.
+    """
+    import inspect
+
+    from hq import reader_export
+
+    src = inspect.getsource(reader_export._courses)
+    assert "FROM hq.course_phases p" in src
+    assert "LEFT JOIN hq.courses c" in src
+    assert "NULLS LAST" in src
+    # And nothing written for the agents goes to the phone.
+    assert "description" not in src
+
+
+def test_the_phone_bundle_is_rebuilt_not_merged() -> None:
+    """A lesson rebuilt under a new date must not leave its old file behind.
+
+    The folder is committed and pushed, so anything stale in it ships.
+    """
+    import inspect
+
+    from hq import reader_export
+
+    src = inspect.getsource(reader_export.build)
+    assert "shutil.rmtree" in src
+    assert src.index("rmtree") < src.index("mkdir")

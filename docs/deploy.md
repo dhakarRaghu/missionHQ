@@ -406,3 +406,54 @@ protection is the bearer token.
   not stop `curl` or scripts. The token is the real boundary.
 - If you do not need the console from outside your devices, use Tailscale
   Serve (section 6) instead and leave `CORS_ORIGINS` empty.
+
+## 12. Reading on a phone (Vercel, no backend)
+
+Section 11 puts the whole console online and needs a backend on a VPS to do
+it. This is the smaller thing: read the lessons on a phone, with no backend
+anywhere, because the lessons ship as files.
+
+`/read` is the one route that is not the console. It reads
+`frontend/public/reader/`, which is committed to the repo, so it works while
+the machine that runs the backend is asleep. `providers.tsx` exempts the path
+from the auth guard and from the event stream, both of which would otherwise
+try to reach a backend the phone cannot see.
+
+### The loop
+
+```bash
+uv run python -m hq.cli export-reader   # in backend/, writes frontend/public/reader
+git add frontend/public/reader && git commit && git push
+```
+
+Vercel builds on the push. That is the whole publishing model: write a lesson
+on the machine, export, push, read it on the phone.
+
+The export writes `index.json` (the catalogue) and one file per lesson under
+`lessons/`. It rebuilds the folder every time, so a lesson you deleted or
+rebuilt under a new date does not linger in the copy you push. Each page gets
+the same content policy and `<base target="_blank">` that
+`/api/learning/page` injects for the console, because here there is no
+endpoint to inject them.
+
+### Vercel settings
+
+1. Import the repo. Set **Root Directory** to `frontend`.
+2. Turn on **Deployment Protection** (Settings, Deployment Protection):
+   Vercel Authentication, or Password Protection with a password you keep.
+   Without it the URL is public, and the bundle is your whole library.
+3. Leave `NEXT_PUBLIC_API_BASE` and `BACKEND_ORIGIN` unset. The reader calls
+   no API.
+4. Open `https://<your-project>.vercel.app/read` on the phone and add it to
+   the home screen.
+
+### What the phone cannot do
+
+Everything that writes. There is no Mark as read, no Build enhanced version,
+no board and no chat, because each of those is a request to a machine that is
+not in the picture. The read ticks come from the export and are true as of
+the push. The console on your laptop stays the place that changes anything.
+
+The console routes are deployed too, and behind the same password, but they
+have no backend to talk to and will show their error states. That is expected
+in this mode; use the console locally.

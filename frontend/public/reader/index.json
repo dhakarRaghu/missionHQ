@@ -1,0 +1,109 @@
+{
+  "built_at": "2026-09-20T22:46:57.277821+05:30",
+  "courses": [
+    {
+      "slug": "inference-internals",
+      "title": "Inference and AI platform systems",
+      "phases": [
+        {
+          "slug": "inference-internals-phase-00-frame",
+          "title": "Inference Internals, Phase 0: Frame the problem",
+          "one_liner": "Every LLM request runs through one machine with two opposite physics phases: parallel compute-bound prefill and serial memory-bound decode (about 208 input tokens per decode step on an A100) and that split, not the model, explains TTFT, TPOT, the 5x output price, and why one timestamp line can quintuple a bill.",
+          "minutes": 20,
+          "date": "2026-09-14",
+          "read": true,
+          "file": "2026-09-14-inference-internals-phase-00-frame.html"
+        },
+        {
+          "slug": "inference-internals-phase-01-lifecycle",
+          "title": "Inference Internals \u2014 Phase 1: The Request Lifecycle",
+          "one_liner": "One request end to end: the uneven token exchange rate, queue+prefill inside TTFT, the KV formula that sizes provider capacity, why output tokens cost 3-8x, the determinism myth with its measured proof, and the streaming instrument that lets you verify every claim yourself.",
+          "minutes": 100,
+          "date": "2026-09-17",
+          "read": true,
+          "file": "2026-09-17-inference-internals-phase-01-lifecycle.html"
+        },
+        {
+          "slug": "inference-internals-phase-02a-scheduling-memory",
+          "title": "Scheduling and Memory \u2014 Inference Internals Phase 2A",
+          "one_liner": "How vLLM's scheduler loop, paged KV cache and prefix cache decide your latency, concurrency and bill \u2014 revised: unverifiable Orca Figure 10a claim removed per claims-run c3.",
+          "minutes": 150,
+          "date": "2026-09-20",
+          "read": false,
+          "file": "2026-09-20-inference-internals-phase-02a-scheduling-memory.html"
+        },
+        {
+          "slug": "inference-internals-phase-02b-decoding-context",
+          "title": "Inference Internals \u2014 Phase 2B: Chunked Prefill, Constrained Decoding and Context Budgets",
+          "one_liner": "The stream freeze, the constraint tax and the 400: chunked prefill's TTFT-vs-smoothness trade, what a schema really guarantees, and the compaction trigger plus backstop. Revised run: fixed claim c22 (V6E TPU default overrides only max_num_batched_tokens, 2048 offline / 1024 API server; max_num_seqs stays 256).",
+          "minutes": 150,
+          "date": "2026-09-20",
+          "read": false,
+          "file": "2026-09-20-inference-internals-phase-02b-decoding-context.html"
+        }
+      ]
+    },
+    {
+      "slug": "kubernetes",
+      "title": "Kubernetes",
+      "phases": [
+        {
+          "slug": "kubernetes-phase-00-why-k8s-exists",
+          "title": "Kubernetes Phase 0 \u2014 Why K8s Exists",
+          "one_liner": "Kubernetes in one sentence: a database of desired state plus idle loops that read it, and why that shape, not any feature, is what survives dead nodes and deleted pods.",
+          "minutes": 45,
+          "date": "2026-09-13",
+          "read": true,
+          "file": "2026-09-13-kubernetes-phase-00-why-k8s-exists.html"
+        },
+        {
+          "slug": "kubernetes-phase-01-core-concepts",
+          "title": "Kubernetes Phase 1 \u2014 Core Concepts (Pods to VPC CNI)",
+          "one_liner": "The load-bearing phase: pods, Deployments, probes, Services and the gRPC pinning problem, ConfigMap staleness, storage, and the EKS ENI layer, corrected against the live platform (native gRPC probes, EndpointSlices, unmaintained ingress-nginx).",
+          "minutes": 120,
+          "date": "2026-09-19",
+          "read": false,
+          "file": "2026-09-19-kubernetes-phase-01-core-concepts.html"
+        }
+      ]
+    }
+  ],
+  "articles": [
+    {
+      "title": "The decision before the lifecycle: does cache-aware routing actually pay?",
+      "one_liner": "On agentic traffic (43-turn sessions, 142K tokens in per turn), cache-aware sticky routing beats round-robin 2\u20133\u00d7 where prefill dominates and buys nothing where decode does, and the stickiness limit \u03c4 is derived from one calibration measurement, not tuned.",
+      "topic": "",
+      "kind": "",
+      "date": "2026-09-17",
+      "read": false,
+      "file": "2026-09-17-routing-before-the-lifecycle.html"
+    },
+    {
+      "title": "Why were the dashboards green while the model talked nonsense",
+      "one_liner": "Two real serving failures where throughput stayed green while the model was wrong: an FP8 KV-view bug that dropped GSM8K to 0.0099 and a disaggregated deploy with a 223-second TTFT from queue saturation. Put a correctness gate beside every performance gate, and follow the queue.",
+      "topic": "Inference internals: correctness gates and queue saturation",
+      "kind": "",
+      "date": "2026-09-16",
+      "read": true,
+      "file": "2026-09-16-healthy-throughput-broken-model.html"
+    },
+    {
+      "title": "Measure recall before you buy infrastructure",
+      "one_liner": "Retrieval owns recall and recall is the ceiling, so measure it per segment before buying any infrastructure; once an agent loop retries, persistence masks retriever weakness and you measure end to end instead.",
+      "topic": "Retrieval / RAG evaluation",
+      "kind": "",
+      "date": "2026-09-13",
+      "read": true,
+      "file": "2026-09-13-measure-recall-before-you-buy-infrastructure.html"
+    },
+    {
+      "title": "Throughput is queue design",
+      "one_liner": "At any seam where a fast producer feeds a slow consumer you either buffer or refuse: MySQL buffers into a relay log and vLLM refuses admission without KV blocks, and every knob on top just picks which latency pays.",
+      "topic": "LLM serving internals and MySQL replication: backpressure and admission control",
+      "kind": "",
+      "date": "2026-09-12",
+      "read": true,
+      "file": "2026-09-12-throughput-is-queue-design.html"
+    }
+  ]
+}

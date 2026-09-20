@@ -14,6 +14,11 @@ import { getSseStatus, installSseDefaults, startSse } from "@/lib/sse";
 
 const FALLBACK_POLL_MS = 60_000;
 const LOGIN_PATH = "/login";
+// The phone reader. It is the one route that is not the console: it reads
+// static files under /reader that were committed with the deployment, so
+// there is no backend to stream from and no token to hold. Guarding it would
+// bounce him to a login page for a backend his phone cannot reach.
+const READER_PATH = "/read";
 
 function makeQueryClient() {
   const client = new QueryClient({
@@ -36,13 +41,15 @@ function makeQueryClient() {
 function SseBridge({ client }: { client: QueryClient }) {
   const status = useSseStatus();
   const pathname = usePathname();
-  const onLogin = pathname.startsWith(LOGIN_PATH);
+  const offline =
+    pathname.startsWith(LOGIN_PATH) || pathname.startsWith(READER_PATH);
 
   useEffect(() => {
-    // No stream on the login page: there is no token to send yet.
-    if (onLogin) return;
+    // No stream on the login page: there is no token to send yet. None on the
+    // reader either: it has no backend behind it.
+    if (offline) return;
     return startSse(client);
-  }, [client, onLogin]);
+  }, [client, offline]);
 
   useEffect(() => {
     // Marking queries invalid without a refetch makes every active observer
@@ -63,13 +70,14 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const onLogin = pathname.startsWith(LOGIN_PATH);
+  const onReader = pathname.startsWith(READER_PATH);
   const hasToken = useHasToken();
   // Set only from the probe callback. "unreachable" also counts as open so
   // the console renders its own error states with Retry.
   const [anonymousOpen, setAnonymousOpen] = useState(false);
 
   useEffect(() => {
-    if (onLogin || hasToken) return;
+    if (onLogin || onReader || hasToken) return;
     let active = true;
     void probeAnonymousAccess().then((result) => {
       if (!active) return;
@@ -82,11 +90,12 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, [onLogin, hasToken, pathname, router]);
+  }, [onLogin, onReader, hasToken, pathname, router]);
 
   // Dev mode (relative /api) renders at once, as before. A remote API waits
   // for a token or the probe so no request fires with a missing token.
-  const ready = !hasRemoteApi() || onLogin || hasToken || anonymousOpen;
+  const ready =
+    !hasRemoteApi() || onLogin || onReader || hasToken || anonymousOpen;
   return ready ? children : null;
 }
 

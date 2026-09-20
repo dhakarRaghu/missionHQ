@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Request Lifecycle: tokens, prefill, the KV cache, decode, sampling, and how to measure it all</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Inference Internals · Phase 1</div><h1>The Request Lifecycle: tokens, prefill, the KV cache, decode, sampling, and how to measure it all</h1><p class="subtitle">What actually happens to one request — from text to tokens, prefill to decode — and which of the three numbers on your invoice is yours to move?</p></header>
+
+<p class="why">You read the run log and see "TTFT 2.1s, 34 tok/s, $0.004". Three numbers. Which one did your code cause? Which one belongs to the provider? And which knob do you turn to move each? Right now, most engineers cannot say. This phase is where that changes: after it, no latency number, price sheet, or caching discount will look random again. If you skip it, every later phase becomes a recipe you follow without understanding. That is exactly the failure mode this course exists to remove.</p>
+
+<p>You will also build something real. A typical agent stack records tokens and cost per run. It does not know the TTFT of any run. By the end of the lab, you will have measured TTFT from the outside, with nothing but a streaming client and a clock. In Phase 5 you will wire it into your own run telemetry.</p>
+
+<div class="callout note">Time: 4–6 hours including the lab. The exercises are not optional. The numbers YOU measure are the point.</div>
+
+<h2>What Phase 1 covers, in one diagram</h2>
+
+<figure class="diagram">
+<svg viewBox="0 0 720 210" role="img" aria-label="The path of one request: tokenize, prefill, decode loop, stream out">
+  <rect x="10" y="70" width="110" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="65" y="95" text-anchor="middle" font-size="12" fill="currentColor">Prompt text</text>
+  <text x="65" y="115" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.7">"Summarize this..."</text>
+  <path d="M120 100 L155 100" stroke="currentColor" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <rect x="155" y="70" width="110" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="210" y="95" text-anchor="middle" font-size="12" fill="currentColor">Tokenizer</text>
+  <text x="210" y="115" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.7">1.1 — the billing unit</text>
+  <path d="M265 100 L300 100" stroke="currentColor" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <rect x="300" y="70" width="120" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="360" y="95" text-anchor="middle" font-size="12" fill="currentColor">Prefill, parallel</text>
+  <text x="360" y="115" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.7">1.2 — TTFT is born</text>
+  <path d="M420 100 L455 100" stroke="currentColor" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <rect x="455" y="70" width="140" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="525" y="90" text-anchor="middle" font-size="12" fill="currentColor">Decode, one token</text>
+  <text x="525" y="105" text-anchor="middle" font-size="12" fill="currentColor">per step</text>
+  <text x="525" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.7">1.4 — TPOT lives here</text>
+  <path d="M595 100 L630 100" stroke="currentColor" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <rect x="630" y="70" width="80" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="670" y="95" text-anchor="middle" font-size="12" fill="currentColor">Stream</text>
+  <text x="670" y="115" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.7">1.6</text>
+  <path d="M525 130 L525 165 L360 165 L360 132" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arr1)"/>
+  <text x="442" y="158" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">KV cache (1.3) read at every decode step</text>
+  <rect x="455" y="20" width="140" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <path d="M525 60 L525 68" stroke="currentColor" stroke-width="1.2"/>
+  <text x="525" y="36" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">Sampling (1.5): logits → next token, each step</text>
+  <defs><marker id="arr1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="none" stroke="currentColor" stroke-width="1.2"/></marker></defs>
+</svg>
+<figcaption>One request, end to end. Prefill writes the KV cache once, in parallel. Decode reads it back, one token at a time, and sampling picks each next token. Section numbers on each box.</figcaption>
+</figure>
+
+<pre class="ascii">┌──────────────────────────────────────────────────────────────────────┐
+│  1.1  Tokens            — the billing unit and its uneven economics  │
+│  1.2  Prefill           — your prompt hits the GPU, TTFT is born     │
+│  1.3  The KV cache      — the memory object that explains everything │
+│  1.4  Decode            — one token per step, TPOT, the price gap    │
+│  1.5  Sampling          — temperature, top_p, the determinism myth   │
+│  1.6  Streaming &amp; usage — measuring TTFT/TPOT/cost like an engineer  │
+└──────────────────────────────────────────────────────────────────────┘</pre>
+
+<p>Phase 0 gave you the machine in one diagram and the formula <code>total = TTFT + out × TPOT</code>. This phase opens every one of those boxes and puts the mechanism inside it. It also hands you the instrument: by 1.6 you can split any provider response into TTFT, TPOT and billed tokens yourself, so nothing in a dashboard can lie to you again. The green-dashboards-while-the-model-talks-nonsense incident you read in the MI355X article is what happens on the other side of this line: the throughput numbers were real, and the broken output never made it into them.</p>
+
+<div class="keypoints">
+<p class="remember"><b>The sentence to remember:</b> every request is billed twice — once for the prompt the GPU reads in parallel, and once for each token the GPU writes one step at a time. TTFT, TPOT and $/Mtok are just those two facts, measured.</p>
+<p class="trap"><b>The trap:</b> treating the provider's numbers as opaque facts of nature. Every one of them decomposes, and by 1.6 you will decompose it yourself from the outside.</p>
+<p class="try"><b>Try this now:</b> open your agent's last run log. Find the LLM call. Ask: do you know its TTFT, its TPOT, and its billed input/output split? If the answer is no, the lab at the end of this phase fixes it.</p>
+</div>
+<h2><span class="num">1.1</span> Why does the same text cost different amounts of tokens?</h2>
+
+<p class="why">You know what a token is. Here is the part that costs you money: the tokenizer does not price all text equally. And your agent pays the difference again on every loop step. Not knowing this is how a cost model built on English test data goes wrong by 2–4x when real Hindi traffic arrives.</p>
+
+<h3>Pass 1 — the model: a fixed vocabulary with an uneven exchange rate</h3>
+
+<p>Modern models use BPE tokenizers. BPE means "byte-pair encoding": the tokenizer has a fixed vocabulary of 100k–200k pieces, learned from training data. That data was mostly English and code. So common English words are one token each. Other text breaks into more, smaller pieces. The billing unit is the token, and the exchange rate from your characters to tokens depends on what your text looks like.</p>
+
+<figure class="diagram">
+<svg id="toksegSvg" viewBox="0 0 720 200" role="img" aria-label="Same sentence shape, different token counts"></svg>
+<figcaption>One line per content shape, drawn to scale at the course's chars/token ratios. Each box is one token. Fewer, wider boxes for English; more, narrower boxes for JSON and Hindi. Your exact numbers come from E1.</figcaption>
+</figure>
+
+<div class="compare">
+<div class="wrong"><b>The tidy belief:</b> "characters divided by 4" is a fine token estimate for any text.</div>
+<div class="right"><b>What is true:</b> the 4-per-token rule holds only for English prose. Code, JSON, Indic scripts and pretty-printing all move the rate, and every provider's tokenizer rates them differently.</div>
+</div>
+
+<h3>Pass 2 — the numbers you will measure</h3>
+
+<div class="tabs">
+<div data-tab="Course table">
+<pre class="ascii">┌──────────────────────────┬──────────────┬──────────────────────────────┐
+│ Content shape            │ ~chars/token │ Why                          │
+├──────────────────────────┼──────────────┼──────────────────────────────┤
+│ English prose            │ 4.0–4.5      │ vocabulary optimized for it  │
+│ Python code              │ 3.0–3.5      │ good, but symbols fragment   │
+│ Compact JSON             │ ~2.5–3.5     │ quotes/braces are tokens     │
+│ Pretty-printed JSON      │ ~2.0–3.0     │ every indent costs tokens    │
+│ Hindi / Devanagari       │ ~1.0–2.0     │ underrepresented in vocab    │
+└──────────────────────────┴──────────────┴──────────────────────────────┘
+     (Ratios are what matter — measure your own exact numbers in E1.)</pre>
+</div>
+<div data-tab="Where the money goes">
+<ol class="steps">
+<li><b>Agent history multiplies the cost.</b> Your agent loop re-sends the whole conversation on each step. A tool that returns pretty-printed JSON on step 1 is not billed once. It is billed again on step 2, step 3, every step after. Ten steps later one verbose tool result has been billed ten times.</li>
+<li><b>Multilingual products pay a hidden multiplier.</b> The same support ticket in Hindi can cost 2–4x the tokens of its English translation. If support traffic is half Hindi and you only measured English, your per-conversation cost model is wrong.</li>
+<li><b>Schema design is cost design.</b> Field names in your structured outputs are tokens. <code>"customer_sentiment_classification"</code> costs more than <code>"sentiment"</code>. Across millions of calls, that is a real, recurring price difference.</li>
+</ol>
+</div>
+</div>
+
+<aside class="addition" data-kind="deeper">
+<p><b>Tokenizers differ across providers, with measured numbers.</b> The course says "measure your own" for the table above. The Databricks inference best-practices post — the source this phase later names a must-read — puts numbers on why: for the same text, Llama 2's tokenizer yields 19% more tokens than ChatGPT's (Anyscale's measurement) and ~20% more than GPT-4 (Hugging Face's measurement). So the same prompt fed to two models is not the same bill even before prices come in. Source: <a href="https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices">databricks.com/blog/llm-inference-performance-engineering-best-practices</a> (verified).</p>
+</aside>
+
+<h3>Pass 3 — the failure: the loop-step bill you never see</h3>
+
+<figure class="diagram">
+<svg id="rebillSvg" viewBox="0 0 720 190" role="img" aria-label="How one verbose tool result is re-billed on every agent loop step">
+  <line x1="70" y1="150" x2="700" y2="150" stroke="currentColor" stroke-width="1.2"/>
+  <line x1="70" y1="150" x2="70" y2="14" stroke="currentColor" stroke-width="1.2"/>
+  <text x="62" y="24" text-anchor="end" font-size="10" fill="currentColor" opacity="0.7">10k tokens billed</text>
+  <text x="62" y="86" text-anchor="end" font-size="10" fill="currentColor" opacity="0.7">5k</text>
+  <text x="62" y="152" text-anchor="end" font-size="10" fill="currentColor" opacity="0.7">0</text>
+  <rect id="rebillVerbose" x="150" y="140" width="180" height="10" rx="3" fill="currentColor" opacity="0.9"/>
+  <rect id="rebillCompact" x="380" y="140" width="108" height="10" rx="3" fill="currentColor" opacity="0.35"/>
+  <text x="240" y="172" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.9">solid: pretty JSON, 1000 tok</text>
+  <text x="470" y="172" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.7">pale: compact JSON, 600 tok</text>
+</svg>
+<label style="font-size:12px">Agent loop steps after the tool call: <input id="stepRange" type="range" min="1" max="10" value="1" step="1" style="width:45%;vertical-align:middle"/></label>
+<p id="rebillLabel" style="font-size:13px;margin:6px 0 0">After 1 step: 1,000 tokens billed (compact: 600).</p>
+<figcaption>The tool returned a 1,000-token pretty-printed JSON on step 1. The bar is how many tokens of bill that result has caused. The difference between the two bars is also re-billed every step. Move the slider.</figcaption>
+</figure>
+<script>
+(function(){
+  // figure 1: token segmentation built as markup, ~12px per char
+  var svg=document.getElementById('toksegSvg');
+  function seg(y,label,pieces){
+    var s='<text x="16" y="'+(y-8)+'" font-size="11" fill="currentColor" opacity="0.8">'+label+'</text>';
+    var x=16;
+    pieces.forEach(function(p){
+      s+='<rect x="'+x+'" y="'+y+'" width="'+p[1]+'" height="22" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>';
+      s+='<text x="'+(x+p[1]/2)+'" y="'+(y+15)+'" text-anchor="middle" font-size="10" fill="currentColor">'+p[0]+'</text>';
+      x+=p[1]+3;
+    });
+    s+='<text x="'+(x+8)+'" y="'+(y+16)+'" font-size="11" fill="currentColor" opacity="0.85">= '+pieces.length+' tokens</text>';
+    svg.innerHTML+=s;
+  }
+  seg(50,'English prose, 4.0-4.5 chars/token',
+    [["The",46],[" user",62],[" asked",66],[" for",48],[" a",20],[" refund",78],[".",12]]);
+  seg(115,'Compact JSON, ~2.5-3.5 chars/token',
+    [["{",12],["status:",44],["refund,",40],["amt:",32],["2500,",36],["}",12]]);
+  seg(180,'Hindi, ~1.0-2.0 chars/token (same meaning, more pieces)',
+    [["उप",24],["यो",24],["ग्",14],["ता",24],[" ने",28],[" रि",24],["फ",14],["ंड",24],[" मां",36],["गा",24],["।",12]]);
+  // figure 2: re-billing
+  var scaleV=13,scaleC=13*0.6; // px per 1000 tokens; bar sits at y=150-height
+  function draw(s){
+    var v=1000*s, c=600*s;
+    var hv=v*scaleV/1000, hc=c*scaleC/1000;
+    var b1=document.getElementById('rebillVerbose');
+    b1.setAttribute('height',hv); b1.setAttribute('y',150-hv);
+    var b2=document.getElementById('rebillCompact');
+    b2.setAttribute('height',hc); b2.setAttribute('y',150-hc);
+    document.getElementById('rebillLabel').textContent=
+      'After '+s+' step'+(s>1?'s':'')+': '+v.toLocaleString()+' tokens billed (compact: '+c.toLocaleString()+').';
+  }
+  document.getElementById('stepRange').addEventListener('input',function(e){draw(+e.target.value);});
+  draw(1);
+})();
+</script>
+
+<pre class="ascii">Step 1:   tool result written into history    → billed 1x
+Step 2:   whole history re-sent               → billed 2x
+  ...
+Step 10:  same verbose result still in history → billed 10x
+Fixes: compact the JSON, or summarize the result before storing it.
+Both are application decisions. The provider cannot help you.</pre>
+
+<div class="callout warn">The client's tokenizer is not the invoice. Providers use different tokenizers; Claude's counts differ from OpenAI's for the same text. Client-side counts (tiktoken) are for estimates and budget planning. The server's <code>usage</code> object is the invoice. E3 makes you compare both.</div>
+
+<div class="keypoints">
+<p class="remember"><b>The sentence to remember:</b> you are not billed for text. You are billed for tokens, and the exchange rate depends on what the text looks like.</p>
+<p class="trap"><b>The trap:</b> counting tokens client-side with tiktoken and treating the count as truth. It is an estimate. The invoice is the server usage object.</p>
+<p class="try"><b>Try this now:</b> price the shapes you actually send:</p>
+</div>
+
+<pre><code data-lang="bash">python phase01_lifecycle/tokenize_cost.py --role deep</code></pre>
+<p>It prices real content shapes with the prices in <code>code/prices.yaml</code>. Edit that file to match your real price sheet.</p>
+<h2><span class="num">1.2</span> Where does TTFT come from — and why is the queue invisible inside it?</h2>
+
+<p class="why">Now the request leaves your code. What happens next is the most misunderstood part of LLM latency. If you cannot say what fills the gap between "request sent" and "first token", you will blame the provider for your own prompts and your own prompts for their outages. Both mistakes cost a weekend apiece.</p>
+
+<h3>Pass 1 — the model: one parallel pass writes the receipt for your prompt</h3>
+
+<p>The server processes your ENTIRE prompt in one parallel pass. That pass is called prefill. Every input token goes through every model layer at the same time. This is one huge matrix multiplication, and GPUs are built for it. Prefill is <b>compute-bound</b>: the limit is the GPU's math units. Its memory system keeps up fine.</p>
+
+<pre class="ascii"> Timeline of one request (no caching, simplified):
+
+ t=0ms      HTTP arrives, auth, route to a replica
+ t=5ms      tokenize: text → token ids            ← microseconds, never the issue
+ t=10ms     queue: wait for scheduler slot        ← invisible, varies with load
+ t=60ms     PREFILL starts: all N input tokens through all layers, in parallel
+            ├── every layer computes K,V vectors for every token
+            └── those K,V vectors are WRITTEN to GPU memory  ← the KV cache
+ t=60+X ms  first output token sampled ────────── TTFT ends here
+ then       DECODE: +1 token per step until stop/max_tokens</pre>
+
+<p>Three consequences. You will use all three constantly.</p>
+
+<h3>Pass 2 — the details: TTFT = queue + prefill, and only one half is yours</h3>
+
+<ol class="steps">
+<li><b>TTFT grows with input length.</b> The X in the timeline grows roughly linearly with prompt tokens, until queue noise dominates. A 40k-token agent context has two costs. It costs 40k tokens times the input price. It also costs seconds of TTFT on every single step. So when your agent "feels slow to start responding", check prompt size before you blame the provider.</li>
+<li><b>The queue hides inside TTFT.</b> From the outside, queue time and prefill time are one number. This matters during incidents. If TTFT spikes and your prompt size did not change, the cause is provider-side congestion (the queue), not your prompt. But this diagnosis only works if you measured TTFT separately all along. Total latency cannot separate the two. E5 shows the spread.</li>
+<li><b>Prefill is why input tokens are the cheap ones.</b> The GPU handles thousands of input tokens per second in prefill. It generates only tens of output tokens per second in decode. Look at <code>prices.yaml</code>: <code>gpt-4.1</code> prices output at 4x input ($2.00 / $8.00, OpenAI list as of 2026-09-01). Across providers the ratio runs roughly 3x–8x. The exact number is a pricing decision. The direction comes from the prefill/decode difference. The spread is useful too: if two models solve your task equally well, pick the one with the smaller output multiple for output-heavy work.</li>
+</ol>
+
+<figure class="diagram">
+<svg id="ttftSvg" viewBox="0 0 720 150" role="img" aria-label="TTFT decomposes into queue plus prefill; prefill grows with prompt length">
+  <line x1="60" y1="48" x2="700" y2="48" stroke="currentColor" stroke-width="1" opacity="0.4"/>
+  <rect id="qbar" x="60" y="60" width="120" height="34" rx="4" fill="currentColor" opacity="0.25"/>
+  <rect id="pbar" x="182" y="60" width="200" height="34" rx="4" fill="currentColor" opacity="0.85"/>
+  <text x="60" y="40" font-size="11" fill="currentColor" opacity="0.7">queue (provider's, varies with load)</text>
+  <text id="ppref" x="390" y="40" font-size="11" fill="currentColor" opacity="0.9">prefill ∝ your prompt tokens</text>
+  <text x="60" y="128" font-size="12" fill="currentColor">TTFT = queue + prefill. One number from the outside.</text>
+</svg>
+<label style="font-size:12px">Prompt size: <input id="promptRange" type="range" min="0" max="3" value="0" step="1" style="width:40%;vertical-align:middle"/> <span id="promptSizeLabel" style="font-size:12px">small (500 tokens)</span></label>
+<p id="ttftNote" style="font-size:13px;margin:6px 0 0">Queue unchanged. Prefill grows with the prompt. Your growing history is the slow start.</p>
+<figcaption>The shape of the mechanism, not a measurement. Dark bar: queue, a fixed slice at fixed load. Light bar: prefill, growing with prompt length. E5 measures this with real numbers on a real model.</figcaption>
+</figure>
+
+<script>
+(function(){
+  var sizes=['small (500 tokens)','medium (4k tokens)','large (16k tokens)','agent context (40k tokens)'];
+  function draw(i){
+    var pw=100+133*i; // px, capped to canvas
+    var pb=document.getElementById('pbar');
+    pb.setAttribute('width',pw);
+    document.getElementById('ppref').setAttribute('x',Math.min(182+pw+8,545));
+    document.getElementById('promptSizeLabel').textContent=sizes[i];
+    document.getElementById('ttftNote').textContent =
+      i>=2 ? 'Prompt this large: prefill now dominates TTFT, and you pay it on EVERY agent step.' :
+      i===1 ? 'Prefill is visible inside TTFT now. It still leaves room for queue noise.' :
+              'Queue unchanged. Prefill grows with the prompt. Your growing history is the slow start.';
+  }
+  document.getElementById('promptRange').addEventListener('input',function(e){draw(+e.target.value);});
+  draw(0);
+})();
+</script>
+
+<aside class="addition" data-kind="update">
+<p><b>The example prices named in <code>prices.yaml</code> have left the public sheet.</b> The course pins gpt-4.1 at $2.00 input / $8.00 output per Mtok "as of 2026-09-01". Hunter re-fetched OpenAI's pricing and model-catalog pages on 2026-09-15: neither page carries a gpt-4.1 row any more; they list only newer families. The deprecations page (checked 2026-09-17) shows no shutdown announced for gpt-4.1 or gpt-4.1-mini — only gpt-4.1-nano is deprecated (shutdown 2026-10-23) — so the lab models are probably still served, and the 3x–8x pricing-ratio argument is unaffected. What changed: to get today's <code>deep</code>/<code>cheap</code> numbers for <code>prices.yaml</code>, read them from your dashboard or a live <code>usage</code>-metered call, not the public page. Sources: <a href="https://developers.openai.com/api/docs/pricing">developers.openai.com/api/docs/pricing</a>, <a href="https://developers.openai.com/api/docs/models">/docs/models</a>, <a href="https://developers.openai.com/api/docs/deprecations">/docs/deprecations</a> (pages opened 2026-09-15/17; absence on those pages is the finding).</p>
+</aside>
+
+<h3>Pass 3 — the failure: the session that "gets slower" as it goes</h3>
+
+<p>The failure is a TTFT that creeps upward over a long agent session. Agent frameworks append history silently. Each new step sends a longer prompt, so prefill costs more, so the same provider on the same hardware starts responding later and later. From the operator's seat it looks like "the model is slow today". It is your context growing, not their GPU getting slower. The diagnostic: plot TTFT per step next to input tokens per step. If they grow together, it is you. If TTFT spikes while your input length is flat, it is the provider's queue.</p>
+
+<div class="callout note">Why the queue gets no treatment here: the scheduler, batching and why your TTFT is affected by other people's requests is Phase 2.1's subject. This phase's correct frame is the one above: queue and prefill merge into one number from the outside, and your only separation tool is the flat-vs-growing diagnostic.</div>
+
+<div class="keypoints">
+<p class="remember"><b>The sentence to remember:</b> TTFT = queue + prefill. Prefill is parallel and fast per token. But you pay it on the whole prompt, on every request, unless a cache says otherwise.</p>
+<p class="trap"><b>The trap:</b> saying "the model is slow today" when the real change was your own prompt growing. Agent frameworks append history silently. TTFT that creeps up over a session is usually YOUR context growing, not their GPU getting slower.</p>
+<p class="try"><b>Try this now:</b></p>
+</div>
+
+<pre><code data-lang="bash">python phase01_lifecycle/prefill_scaling.py --model gpt-4.1-mini</code></pre>
+<p>Watch TTFT grow as the script scales the prompt from 500 to 4k to 16k tokens. (Non-reasoning models only. The lab setup section explains why.)</p>
+<h2><span class="num">1.3</span> What is the KV cache, and why does one memory object explain everything?</h2>
+
+<p class="why">This is the center of the whole course. Prompt caching discounts, batch-size limits, provider queueing, GQA, PagedAttention, the cost of long contexts — all of it comes back to this one object. Spend the most time here.</p>
+
+<h3>Pass 1 — the mental model: decode needs the past at every step, so the past is stored</h3>
+
+<p>During prefill, each layer computed two vectors for every token. They are called K (key) and V (value). Decode needs those vectors again at every step, because each new token "attends" over all previous tokens — it reads their K and V to decide what comes next. Without a cache, every decode step would recompute K and V for the whole history. That is O(t²) work per step, and O(n³) for the full generation. The cache brings each step down to O(t). The price of that saving is GPU memory. So the server keeps all K,V vectors in GPU memory. That store is the KV cache. It lives for your request's duration. It grows with every token, input or output.</p>
+
+<pre class="ascii"> GPU memory during your request:
+
+┌──────────────────────────────────────────────────────────────┐
+│  Model weights (shared by ALL requests)          e.g. 16 GB  │
+├──────────────────────────────────────────────────────────────┤
+│  KV cache — request A  (grows every token)  ██████░░         │
+│  KV cache — request B                       ████░░░░         │
+│  KV cache — request C                       ███████░         │
+│  ... as many requests as KV memory allows — THE batch limit  │
+├──────────────────────────────────────────────────────────────┤
+│  Activations / scratch (small)                               │
+└──────────────────────────────────────────────────────────────┘</pre>
+
+<h3>Pass 2 — the math: memorize the formula, not the numbers</h3>
+
+<pre class="ascii">KV bytes per token = 2 × layers × kv_heads × head_dim × bytes_per_value
+                     ▲
+                     └── the 2 is K and V
+
+Llama-3-8B, fp16/bf16:  2 × 32 × 8 × 128 × 2 B  = 128 KB per token
+   → 8k-token context   = 1 GB   of GPU memory, for ONE request
+   → 128k-token context = 16 GB — the whole model's weight budget again</pre>
+
+<p>As code, because you will reuse it in capacity arguments for years:</p>
+
+<pre><code data-lang="python">def kv_bytes_per_token(layers, kv_heads, head_dim, dtype_bytes=2):
+    return 2 * layers * kv_heads * head_dim * dtype_bytes   # 2 = K and V
+
+def max_concurrent(gpu_gb, weights_gb, ctx_tokens, per_tok, util=0.9):
+    free = (gpu_gb * util - weights_gb) * 1024**3           # vLLM-style headroom
+    return int(free // (per_tok * ctx_tokens))
+
+assert kv_bytes_per_token(32, 8, 128) == 131_072            # llama-3-8b: 128 KB</code></pre>
+
+<p>Run <code>python phase01_lifecycle/kv_math.py</code>. It shows why one 80 GB H100 serving Llama-3-8B fits only about 64 concurrent requests at 8k context before headroom (80 − 16 = 64 GB of KV budget, 1 GB per request). Real servers reserve headroom — vLLM v0.29.0 defaults to <code>gpu_memory_utilization=0.92</code>, which computes 80×0.92 − 16 = 57.6 GB, so about 57 requests in practice on that card. That fit number IS the provider's capacity. It IS why they queue you at peak time. It IS what batch APIs sell: leftover slots at off-peak time, hence the ~50% discount.</p>
+
+<aside class="addition" data-kind="correction">
+<p><b>The original text said "vLLM defaults to <code>gpu_memory_utilization=0.9</code>". That is stale.</b> The source file <code>vllm/config/cache.py</code> at tag v0.29.0 declares <code>gpu_memory_utilization: float = Field(default=0.92, gt=0, le=1)</code>. Hunter verified this on 2026-09-15; the sibling Phase 2 of this same course already says 0.92. 0.9 was the long-running historical default. The worked example above has been recomputed at 0.92; the "~57 in practice" number the original reached by extra headroom arithmetic survives unchanged. The <code>util=0.9</code> in the code snippet is kept as the script's own parameter; your exact value comes from the server config you run against. Source: <a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/config/cache.py">vllm/config/cache.py at v0.29.0</a> (verified).</p>
+</aside>
+
+<aside class="addition" data-kind="deeper">
+<p><b>The four numbers in the formula are exact, and the dtype is bf16.</b> The <code>Meta-Llama-3.1-8B</code> config.json (read through the unsloth mirror of Meta's gated repo) lists <code>num_hidden_layers: 32</code>, <code>num_key_value_heads: 8</code>, <code>num_attention_heads: 32</code>, <code>head_dim: 128</code>, <code>vocab_size: 128256</code> — exactly the module's inputs, so the GQA 4x saving follows by arithmetic, not by claim. The course's example calls the dtype fp16; the config's <code>torch_dtype</code> is bfloat16. Both are 2 bytes per value, so the 128 KB/token result is unchanged, but quote bf16 when you write it down. Source: <a href="https://huggingface.co/unsloth/Meta-Llama-3.1-8B/raw/main/config.json">huggingface.co/unsloth/Meta-Llama-3.1-8B/raw/main/config.json</a> (verified).</p>
+</aside>
+
+<p>Notice <code>kv_heads: 8</code> while the model has 32 attention heads. That is GQA (grouped-query attention): four query heads share each KV head, so the cache shrinks 4x. Think about what that means. Model designers changed the attention architecture itself, only to shrink this cache. That is how much it dominates serving cost. (Character.AI went further: multi-query attention plus cross-layer sharing and hybrid local/global attention, for a &gt;20x KV reduction — their own numbers, self-reported — and the reference at the end has the full story.)</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 720 245" role="img" aria-label="KV cache size and concurrency explorer">
+  <line x1="90" y1="200" x2="700" y2="200" stroke="currentColor" stroke-width="1.2"/>
+  <rect x="110" y="20" width="70" height="180" fill="none" stroke="currentColor" stroke-width="1.4" rx="4"/>
+  <text x="145" y="112" text-anchor="middle" font-size="10" fill="currentColor" transform="rotate(-90 145 112)">weights 16 GB</text>
+  <rect id="kvBlock" x="185" y="150" width="200" height="50" fill="currentColor" opacity="0.85"/>
+  <rect x="185" y="20" width="200" height="180" fill="none" stroke="currentColor" stroke-width="1.4" rx="4"/>
+  <text x="285" y="14" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.7">80 GB H100 budget (×0.92 util)</text>
+  <g id="kvTicks"></g>
+  <text id="kvFormula" x="430" y="70" font-size="11" fill="currentColor"></text>
+  <text id="kvBytes" x="430" y="95" font-size="11" fill="currentColor"></text>
+  <text id="kvCtx" x="430" y="120" font-size="11" fill="currentColor"></text>
+  <text id="kvConc" x="430" y="145" font-size="11" fill="currentColor"></text>
+</svg>
+<div style="font-size:12px">
+<label>kv_heads: <input id="kvHeads" type="range" min="1" max="32" value="8" step="1" style="width:180px;vertical-align:middle"/></label>
+&nbsp;<label>context: <input id="kvCtxr" type="range" min="0" max="4" value="0" step="1" style="width:180px;vertical-align:middle"/></label>
+</div>
+<p id="kvLabel" style="font-size:13px;margin:6px 0 0"></p>
+<figcaption>Llama-3-8B, 32 layers, head_dim 128, 2 bytes/value, 80 GB H100 at the vLLM v0.29.0 default 0.92: free KV budget 57.6 GB. Slide kv_heads down (MQA → GQA → full MHA) or context up and watch the fit count move. Arithmetic from the formula above.</figcaption>
+</figure>
+
+<script>
+(function(){
+  var ctxs=[8000,16000,32000,64000,128000];
+  var GPU=80, W=16, UTIL=0.92, LAYERS=32, DIM=128, BYTES=2;
+  var GiB=1024*1024*1024;
+  var ticks=document.getElementById('kvTicks');
+  function draw(){
+    var kh=+document.getElementById('kvHeads').value;
+    var ctx=ctxs[+document.getElementById('kvCtxr').value];
+    var perTok=2*LAYERS*kh*DIM*BYTES; // bytes
+    var perReq=perTok*ctx;
+    var free=(GPU*UTIL-W)*GiB;
+    var conc=Math.max(0,Math.floor(free/perReq));
+    // bar: one request's KV, scaled so 57.6 GB fills 180px
+    var h=Math.min(180, perReq/(57.6*GiB)*180);
+    var b=document.getElementById('kvBlock');
+    b.setAttribute('height',h); b.setAttribute('y',200-h);
+    document.getElementById('kvFormula').textContent=
+      '2 × 32 × '+kh+' × 128 × 2B';
+    document.getElementById('kvBytes').textContent=
+      '= '+(perTok/1024).toFixed(0)+' KB per token';
+    document.getElementById('kvCtx').textContent=
+      '× '+(ctx/1000)+'k context = '+(perReq/GiB).toFixed(perReq<GiB?2:1)+' GB per request';
+    document.getElementById('kvConc').textContent=
+      '→ '+conc+' concurrent requests in 57.6 GB';
+    document.getElementById('kvLabel').textContent =
+      kh===8 ? 'The shipped Llama-3-8B shape: GQA, 8 kv_heads.' :
+      kh===1 ? 'MQA: one KV head shared by all 32 query heads. The cache shrinks 8x; quality falls too.' :
+      kh===32 ? 'Full MHA: every query head owns its KV. 4x the GQA cache; nobody ships this for serving anymore.' :
+      'Between MQA and the full 32: the cache scales linearly with kv_heads.';
+  }
+  document.getElementById('kvHeads').addEventListener('input',draw);
+  document.getElementById('kvCtxr').addEventListener('input',draw);
+  draw();
+})();
+</script>
+
+<h3>Pass 3 — the failure and its most useful consequence: the prefix is the asset</h3>
+
+<p>Attention is causal. That means a token's K and V depend only on the tokens BEFORE it, never after. So if two requests share an identical prompt PREFIX, the K,V vectors for that prefix are identical too. The server can keep the prefix's KV blocks and skip prefill for them completely. That is prompt caching. It also explains the size of the discount (about 90% off cached input): the provider skips real work, not only billing.</p>
+
+<p>But it only works on an EXACT prefix match. One changed byte at position 100 invalidates everything after position 100:</p>
+
+<pre class="ascii"> request 1:  [SYSTEM PROMPT 18k toks][timestamp 14:02][history...]
+ request 2:  [SYSTEM PROMPT 18k toks][timestamp 14:03][history...]
+                                     ▲
+                            divergence here → the 18k tokens BEFORE it hit
+                            cache, everything AFTER re-prefills. Put the
+                            timestamp first instead and you cache nothing.</pre>
+
+<aside class="addition" data-kind="update">
+<p><b>Prompt caching now charges for writes on new models.</b> The course's lab precondition says implicit prefix caching is automatic at ≥1,024-token prefixes with ~128-token block granularity and a 5–10 minute lifetime. Hunter checked the current docs (2026-09-15): the ≥1,024-token minimum holds for GPT-5.6+, the ~5–10 minute lifetime holds, but cache <b>writes are billed at 1.25x input and reads at 0.1x</b> on GPT-5.6+. One write plus one read costs 1.35x of uncached — a one-shot repeated prompt can cost MORE than no cache; savings need repeated reads. The docs no longer state 128-token granularity ("fixed or model-dependent intervals"). And vLLM-side: <code>enable_prefix_caching</code> defaults to <code>True</code> at v0.29.0, so the "providers skip real work" story is the default serving behavior, not an extra. Sources: <a href="https://developers.openai.com/api/docs/guides/prompt-caching">OpenAI prompt caching docs</a>, <a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/config/cache.py">vLLM cache.py v0.29.0</a> (both verified).</p>
+</aside>
+
+<aside class="addition" data-kind="incident">
+<p><b>Anthropic, August–September 2025: the context-window routing error.</b> A routing bug introduced Aug 5 sent Claude Sonnet 4 requests to 1M-context servers when they belonged on the 200K fleet. Initially 0.8% of requests; an Aug 29 load-balancing change pushed it to a 16% peak on Aug 31, and ~30% of Claude Code users saw at least one misrouted message on some day before the Sep 4 first-party/Vertex fix (Bedrock fixed by Sep 18). Read it through 1.3's lens: the same request landed on a differently-provisioned KV pool, and behavior changed invisibly — KV memory setting behavior and quality, not just cost, in production. Standard evals missed it for weeks because "Claude often recovers from isolated mistakes": single scores smooth over exactly this kind of intermittent corruption. Source: <a href="https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues">anthropic.com/engineering/a-postmortem-of-three-recent-issues</a> (verified, 2025-09-17).</p>
+</aside>
+
+<p><b>Three things to internalize:</b></p>
+<ol class="steps">
+<li>KV memory sets concurrency, not compute. This is true for you AND for your provider.</li>
+<li>Every architecture trick you hear about (GQA, MQA, PagedAttention, RadixAttention, sliding windows) is an attack on this one object.</li>
+<li>Cache friendliness is a property of YOUR prompt layout: stable bytes first, changing bytes last. You will use this properly in Phases 2–3.</li>
+</ol>
+
+<div class="keypoints">
+<p class="remember"><b>The sentence to remember:</b> the KV cache is where your prompt physically lives on the GPU. The rent for that memory is what you really pay.</p>
+<p class="trap"><b>The trap:</b> believing "we send the same system prompt every time, so we must get cache hits." Assembly order, injected timestamps, shuffled tool lists, or one dynamic first line silently break prefix identity. Do not assume. Measure — E6 catches this live.</p>
+<p class="try"><b>Verify your understanding:</b> why can the server NOT cache the KV of your prompt's LAST 100 tokens when the first 100 changed? (The answer is in the causality sentence above.)</p>
+</div>
+<h2><span class="num">1.4</span> Why do output tokens cost more, and why can't you make decode faster?</h2>
+
+<p class="why">Prefill ends. The first token streams out. From here, the GPU does a different kind of work, and understanding what kind is the difference between an engineer who tunes latency and one who rewrites prompts hoping for speed.</p>
+
+<h3>Pass 1 — the model: one token per step, and every step re-reads everything</h3>
+
+<p>Decode generates exactly one token per step. Each step does this: run the newest token through all layers, read the ENTIRE KV cache, sample the next token, append its K,V to the cache, repeat. The math per step is small. But every step must read the whole KV cache plus the model weights from GPU memory. Decode is <b>memory-bandwidth-bound</b>: the compute units wait while bytes move.</p>
+
+<pre class="ascii"> PREFILL                              DECODE (per step)
+┌─────────────────────────┐          ┌─────────────────────────┐
+│ 10,000 tokens in ONE    │          │ read weights (16 GB)     │
+│ parallel pass           │          │ read KV cache (growing)  │
+│ GPU compute: ~saturated │          │ compute: very small      │
+│ ~thousands of tok/s     │          │ emit ONE token           │
+└─────────────────────────┘          └─────────────────────────┘
+        compute-bound                     bandwidth-bound
+        input tokens: cheap               output tokens: expensive</pre>
+
+<p>This is the asymmetry from Phase 0, now fully explained:</p>
+
+<ul>
+<li><b>TPOT (time per output token)</b> is set by memory bandwidth and by how many requests share the GPU. Under heavy batching, your tokens stream slower even though your request did not change. TPOT is genuinely the provider's number. You can pick a smaller model. You cannot prompt-engineer faster decode.</li>
+<li><b>The output premium in <code>prices.yaml</code></b> ($2.00 in / $8.00 out on <code>gpt-4.1</code>, 4x, the 2026-09-01 list prices — see the update in 1.2 for what is on the public sheet now) is the market price of this prefill-vs-decode difference.</li>
+<li><b>Output length is a latency tool AND a cost tool.</b> <code>total = TTFT + out_tokens × TPOT</code>. At 25ms TPOT, every 100 output tokens adds 2.5 seconds. So <code>max_tokens</code>, short-output instructions, and structured outputs (which remove filler prose) are latency features as much as cost features.</li>
+</ul>
+
+<h3>Pass 2 — the details: what the serving side measures about itself</h3>
+
+<aside class="addition" data-kind="deeper">
+<p><b>The decode-side efficiency metric has a name: MBU, and it is low at batch size 1.</b> The Databricks serving post (the module's own must-read) defines TTFT and TPOT exactly as this phase does, states plainly that "inference at small batch sizes is memory-bandwidth-bound," gives the same <code>Latency = TTFT + TPOT × tokens</code> formula, and adds one metric the module does not name: <b>Model Bandwidth Utilization (MBU)</b>, the normalized decode-side efficiency metric — ~55–60% in their measurements at batch size 1. Translation for you: a single-stream decode uses roughly half of what the card's memory system could deliver; the unused half is why providers batch your request with strangers' requests, and why your TPOT moves with THEIR load. Source: <a href="https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices">databricks.com/blog/llm-inference-performance-engineering-best-practices</a> (verified).</p>
+</aside>
+
+<aside class="addition" data-kind="incident">
+<p><b>Anthropic, August 2025: a TPU misconfiguration corrupting token generation.</b> On Aug 25 a misconfiguration started producing non-English tokens inside English responses and syntax errors inside code — visible garbage mid-stream on Claude Opus 4.1/4 and Sonnet 4, rolled back Sep 2. Read it through 1.4's lens: the failure lived in the decode path itself — the stream kept flowing at normal speed and normal cost while the tokens were wrong. Latency and throughput instruments were blind to it; only reading the output caught it. (The same failure shape as the MI355X article you read: dashboards green, model talking nonsense.) Source: <a href="https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues">anthropic.com/engineering/a-postmortem-of-three-recent-issues</a> (verified).</p>
+</aside>
+
+<h3>Pass 3 — the 2026 failure you will hit: reasoning tokens, output you pay for but may never see</h3>
+
+<p>Reasoning models think before they answer. Examples: the gpt-5 family and o-series, and "thinking" models like kimi and deepseek-r. The thinking is a hidden chain of internal text, generated before the visible answer. Mechanically it is normal decode: one token per step, KV cache growing, TPOT physics. But it lands on your invoice as <code>completion_tokens</code> you may never see. OpenAI-style reasoning models keep the thinking invisible; <code>usage.completion_tokens_details.reasoning_tokens</code> is the only trace. Thinking models stream it as <code>reasoning_content</code> deltas. Three consequences you must design around:</p>
+
+<ol class="steps">
+<li><b><code>max_tokens</code> caps thinking + answer TOGETHER.</b> A small cap can spend the whole budget on thinking. Then you get an EMPTY answer, and you pay full price for it. The lab's meter warns exactly when this happens.</li>
+<li><b>Cost per VISIBLE token is a multiple of the sticker price.</b> Example: the model burns 900 reasoning tokens to produce a 300-token answer. Your effective output price is 4x the price sheet. So effort and thinking-budget parameters are cost knobs, not quality trivia.</li>
+<li><b>User-perceived TTFT includes the whole thinking phase.</b> The first VISIBLE token arrives only after thinking ends. That can take seconds to minutes. The meter has a separate <code>visible</code> column for this. On non-reasoning models, the two numbers are the same.</li>
+</ol>
+
+<aside class="addition" data-kind="deeper">
+<p><b>A provider states the shared-cap rule in writing.</b> Anthropic's current API reference confirms the module's rule in provider documentation: extended thinking "counts towards your <code>max_tokens</code> limit", and its thinking parameter <code>budget_tokens</code> must be at least 1024 and strictly less than <code>max_tokens</code> — thinking and answer share one cap, enforced API-side. Source: <a href="https://platform.claude.com/docs/en/api/messages.md">platform.claude.com/docs/en/api/messages.md</a> (verified, raw markdown read by hunter).</p>
+</aside>
+
+<figure class="diagram">
+<svg viewBox="0 0 720 140" role="img" aria-label="Effective output price multiplier from reasoning tokens">
+  <line x1="60" y1="110" x2="700" y2="110" stroke="currentColor" stroke-width="1.2"/>
+  <rect id="visBar" x="100" y="50" width="120" height="60" fill="currentColor" opacity="0.85" rx="4"/>
+  <rect id="thinkBar" x="222" y="50" width="1" height="60" fill="currentColor" opacity="0.3" rx="4"/>
+  <text x="160" y="40" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">300 visible tokens</text>
+  <text id="thinkLabel" x="400" y="40" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.7">reasoning: 0</text>
+  <text id="multLabel" x="60" y="132" font-size="12" fill="currentColor"></text>
+</svg>
+<label style="font-size:12px">Reasoning tokens spent: <input id="thinkRange" type="range" min="0" max="3000" value="0" step="100" style="width:45%;vertical-align:middle"/></label>
+<figcaption>The module's worked example with a slider. Visible answer fixed at 300 tokens. The pale bar is hidden decode you also paid for; the line below reports the effective output-price multiplier, (visible + reasoning) / visible.</figcaption>
+</figure>
+
+<script>
+(function(){
+  function draw(){
+    var r=+document.getElementById('thinkRange').value;
+    var w=r/300*120;
+    var b=document.getElementById('thinkBar');
+    b.setAttribute('width',Math.max(1,w));
+    document.getElementById('thinkLabel').textContent='reasoning: '+r.toLocaleString();
+    var mult=(300+r)/300;
+    document.getElementById('multLabel').textContent =
+      r===0 ? 'No thinking: you pay the sticker output price (1x).' :
+      'Effective output price: '+mult.toFixed(1)+'x the sticker price.'+
+      (r>=2400 ? ' At this ratio, effort/thinking-budget knobs are cost controls, not quality trivia.' : '');
+  }
+  document.getElementById('thinkRange').addEventListener('input',draw);
+  draw();
+})();
+</script>
+
+<p>Rule of thumb: use non-reasoning models for tasks that do not need thinking. When you do use a reasoning model, log reasoning tokens as their own column. They are a third token class, not noise.</p>
+
+<div class="keypoints">
+<p class="remember"><b>The sentence to remember:</b> input tokens are processed in parallel. Output tokens are generated one by one. You buy them from two different machines that happen to share a GPU.</p>
+<p><b>Three things to internalize:</b> output tokens are the expensive, slow ones — in dollars AND in seconds, for the same physical reason. TPOT is the number you cannot prompt-engineer; model choice is your only big lever. Output-length discipline (max_tokens, short-output instructions, structured outputs) cuts cost and latency at the same time.</p>
+<p class="trap"><b>The trap:</b> benchmarking two models with one prompt each and comparing total latency. Different answers have different lengths, so total-latency comparisons mean nothing. Compare TTFT and TPOT separately, at a controlled output length. E4 does it properly.</p>
+<p class="try"><b>Try this now:</b></p>
+</div>
+
+<pre><code data-lang="bash">python phase01_lifecycle/ttft_meter.py --model gpt-4.1-mini --role cheap --runs 3</code></pre>
+<p>Your first real TTFT/TPOT/cost measurements, priced from <code>prices.yaml</code>. Keep the output. You will compare providers and models against it for the rest of the course.</p>
+<h2><span class="num">1.5</span> What do temperature and top_p actually do, and why won't temperature=0 reproduce?</h2>
+
+<p class="why">Each decode step ends with a probability score for every token in the vocabulary. These raw scores are called logits. Sampling turns the scores into one chosen token. You control it with parameters you have used but probably never watched work — and one belief about them (that temperature 0 gives you reproducible output) will break your CI suite the week you trust it.</p>
+
+<h3>Pass 1 — the model: three transformations pick one token</h3>
+
+<pre class="ascii"> logits over vocab
+        │
+        ▼
+ temperature T        divide logits by T before softmax
+   T→0   sharpen → argmax ("greedy")        T&gt;1  flatten → riskier picks
+        │
+        ▼
+ top_p (nucleus)      keep the smallest set of tokens whose probability
+                      mass ≥ p; renormalize; sample from that set
+        │
+        ▼
+ one token — appended to KV cache, loop continues</pre>
+
+<p>Definitions for the diagram. Softmax turns logits into probabilities that sum to 1. Argmax picks the single highest-scoring token; that is called greedy sampling. Temperature reshapes the probabilities: low values favor the top token, high values spread the choices. Top_p keeps only the smallest set of top tokens whose combined probability reaches p, then samples inside that set.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 720 190" role="img" aria-label="Softmax distribution over six tokens as temperature changes, with a logit wobble">
+  <line x1="50" y1="150" x2="700" y2="150" stroke="currentColor" stroke-width="1.2"/>
+  <g id="softBars"></g>
+</svg>
+<div style="font-size:12px">
+<label>Temperature: <input id="tempRange" type="range" min="10" max="200" value="100" step="5" style="width:200px;vertical-align:middle"/> <span id="tempLabel">1.00</span></label>
+&nbsp;<button id="wobbleBtn" style="cursor:pointer">wobble the logits ±0.05</button>
+</div>
+<p id="argmaxLabel" style="font-size:13px;margin:6px 0 0"></p>
+<figcaption>Toy logits, six tokens, the top two only 0.04 apart — the shape of a real near-tie. The temperature slider reshapes the distribution (flattens toward "riskier picks" as T grows). The wobble button applies a fresh ±0.05 shift to every logit; softmax is monotone, so the bar argmax is what greedy sampling would pick. Real wobble is far smaller and still flips near-ties at the 6th decimal.</figcaption>
+</figure>
+
+<script>
+(function(){
+  var base=[3.10,3.06,2.20,1.40,0.90,0.40];
+  var names=['the','a','his','its','this','their'];
+  var logits=base.slice();
+  var g=document.getElementById('softBars');
+  function argmax(){var b=0;for(var i=1;i<logits.length;i++){if(logits[i]>logits[b])b=i;}return b;}
+  function draw(note){
+    var T=(+document.getElementById('tempRange').value)/100;
+    document.getElementById('tempLabel').textContent=T.toFixed(2);
+    var m=Math.max.apply(null,logits.map(function(l){return l/T;}));
+    var ex=logits.map(function(l){return Math.exp(l/T-m);});
+    var s=ex.reduce(function(a,b){return a+b;},0);
+    var best=argmax();
+    var out='';
+    for(var i=0;i<logits.length;i++){
+      var p=ex[i]/s, h=p*130;
+      out+='<rect x="'+(70+i*100)+'" y="'+(150-h)+'" width="60" height="'+h+'" rx="3" fill="currentColor" opacity="'+(i===best?'0.9':'0.35')+'"/>';
+      out+='<text x="'+(100+i*100)+'" y="'+(146-h)+'" text-anchor="middle" font-size="10" fill="currentColor">'+(p*100).toFixed(1)+'%</text>';
+      out+='<text x="'+(100+i*100)+'" y="168" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.7">'+names[i]+'</text>';
+    }
+    g.innerHTML=out;
+    document.getElementById('argmaxLabel').textContent = note ||
+      ('Argmax (what greedy picks): '+names[best]+' at T='+T.toFixed(2)+
+       (T<=0.15 ? '. Greedy regime: the top token takes nearly all the mass.' : '.'));
+  }
+  document.getElementById('tempRange').addEventListener('input',function(){draw();});
+  document.getElementById('wobbleBtn').addEventListener('click',function(){
+    logits=base.map(function(l){return l+(Math.random()-0.5)*0.1;});
+    var flipped=argmax()!==0;
+    draw('Wobble applied. Greedy now picks '+names[argmax()]+
+      (flipped ? '. The argmax FLIPPED — and your output diverges from token 1 onward.'
+               : '. Argmax held this time. Keep clicking: a 0.04 gap at the top flips often.'));
+  });
+  draw();
+})();
+</script>
+
+<p>Practical settings, based on use and not guesses: extraction, classification, and structured output want temperature 0–0.2, because you want the most likely answer. Drafting and brainstorming want 0.7–1.0. The combination <code>temperature=0.7, top_p=0.1</code> is effectively greedy with extra steps. Change one knob at a time.</p>
+
+<h3>Pass 2 — the details: the determinism myth, and what actually causes it</h3>
+
+<p><b>Now the myth, because it will break your tests:</b> <code>temperature=0</code> does NOT make outputs reproducible on production APIs. Here is the chain of reasoning. Greedy sampling deterministically picks the argmax — of logits that are not themselves deterministic. Your request runs in a batch with strangers' requests. The batch shape changes how GPU kernels execute, which changes the ORDER of floating-point additions. Float addition is not associative: (a+b)+c can differ from a+(b+c) in the last digits. So logits wobble around the 6th decimal place. Sometimes the top two tokens are close enough that the wobble flips the argmax. One flipped token early in the answer changes everything after it.</p>
+
+<aside class="addition" data-kind="deeper">
+<p><b>The module's chain is right, and the authoritative measurement of it now exists — with one correction to the popular story.</b> Thinking Machines Lab (Horace He, 2025-09-10) tested the hypothesis most people repeat, "concurrency plus atomic adds make GPUs nondeterministic", and found it wrong: a typical LLM forward pass contains no atomic adds, and run-to-run, identical kernels are bitwise deterministic. The real cause is that kernels are not <b>batch-invariant</b>: the reduction order inside RMSNorm, matmul and attention depends on batch size, and server load changes batch size nondeterministically. Measured: 1,000 completions at temperature 0 from Qwen3-235B-A22B-Instruct gave 80 unique outputs, first divergence at token 103. With their batch-invariant kernels (released as <code>thinking-machines-lab/batch-invariant-ops</code>, integrated with vLLM via FlexAttention), all 1,000 were identical — at a cost: 26s vs 55s unoptimized for 1,000 Qwen3-8B sequences, 42s with a better attention kernel. So the module's conclusion stands: you cannot build tests on temp-0 determinism. But determinism is now an engineerable property with a measured price, not an impossibility. E9's "usually ≥2 distinct outputs" expectation also has a public calibration now: 80 in 1,000 on that self-hosted model. No equivalent measurement exists for current OpenAI endpoints. Source: <a href="https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/">thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference</a> (verified).</p>
+</aside>
+
+<p>Two counterarguments you will hear. Both have answers:</p>
+<ul>
+<li>"But OpenAI has <code>seed</code>." The <code>seed</code> parameter plus <code>system_fingerprint</code> promises best-effort determinism only. The fingerprint changes when the backend deployment changes. And batch-shape effects still reorder float additions within one fingerprint. Useful for debugging. Not a guarantee you can build tests on.</li>
+<li>Mixture-of-experts (MoE) models add a second source. An MoE model routes each token to a subset of "expert" sub-networks. Under load, that routing can differ between runs. Then your tokens touch different weights entirely. Several models behind modern APIs are MoE.</li>
+</ul>
+
+<p>One more provider difference: PARAMETER POLICIES. The old rule "Anthropic rejects temperature+top_p together" has tightened: on models released after Claude Opus 4.6, any <code>temperature</code> value other than 1.0 is rejected with a 400 error, <code>top_p</code> is rejected past its 0.99 cutoff, and <code>top_k</code> is rejected entirely. Reasoning models (gpt-5 family, o-series) reject both knobs entirely. A gateway passes these policies through. It does not normalize them. So sampling config must live per-model, never as one global setting.</p>
+
+<aside class="addition" data-kind="correction">
+<p><b>The original said "Anthropic models reject requests that set both <code>temperature</code> and <code>top_p</code>". Current policy is stronger.</b> Anthropic's current API reference (fetched raw): <code>temperature</code> is "Deprecated. Models released after Claude Opus 4.6 do not support setting temperature. A value of 1.0 will be accepted for backwards compatibility, all other values will be rejected with a 400 error." <code>top_p</code> has the same shape (cutoff 0.99), and <code>top_k</code> is rejected entirely. The module's conclusion — per-model sampling config, never one global setting — survives and is reinforced. E8's "Anthropic policy" branch will now fire on ANY non-default single knob on current models, not only on the combination. Source: <a href="https://platform.claude.com/docs/en/api/messages.md">platform.claude.com/docs/en/api/messages.md</a> (verified, 2026-09-15).</p>
+</aside>
+
+<h3>Pass 3 — the failure: the argmax flipped in production, at provider scale</h3>
+
+<aside class="addition" data-kind="incident">
+<p><b>Anthropic, August 25–26 2025: the approximate top-k XLA miscompilation.</b> A sampling-code rewrite triggered a latent XLA:TPU compiler bug. Mixed bf16/fp32 precision under <code>xla_allow_excess_precision</code> made the server disagree with itself about the highest-probability token, and the approximate top-k op sometimes dropped the argmax entirely. This is 1.5's "logits wobble flips the argmax" as a shipped production bug, on a provider's own sampling path. Anthropic's fix tells the same story Thinking Machines tells from the other side: they switched to exact top-k and standardized some ops on fp32, accepting the efficiency cost. And this incident is why Anthropic's own API reference carries the words "even with temperature of 0.0, the results will not be fully deterministic". Source: <a href="https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues">anthropic.com/engineering/a-postmortem-of-three-recent-issues</a> (verified).</p>
+</aside>
+
+<p>Consequences you must design around:</p>
+<ul>
+<li>CI tests that assert exact LLM output will flake. Assert structure and meaning instead: schema-valid, eval score, key facts present.</li>
+<li>"Reproducible runs" come from caching your own outputs. They never come from sampling settings.</li>
+<li>A/B comparisons need more than one run per variant, even at temperature 0.</li>
+</ul>
+
+<div class="keypoints">
+<p class="remember"><b>The sentence to remember:</b> temperature 0 removes the randomness you added. It does not remove the randomness of the machine.</p>
+<p class="trap"><b>The trap:</b> setting temperature globally for an agent. The planner call and the JSON-extraction call in the same loop want different temperatures. Per-call sampling config is the correct granularity. Check what your own runner does in the anchor section.</p>
+<p class="try"><b>Try this now:</b></p>
+</div>
+
+<pre><code data-lang="bash">python phase01_lifecycle/sampling_lab.py --model gpt-4.1-mini --determinism-runs 8</code></pre>
+<h2><span class="num">1.6</span> How do you measure TTFT, TPOT and cost like an engineer?</h2>
+
+<p class="why">Everything before this section is mechanism. This section is the instrument. Without it, every claim in 1.1–1.5 is something you were told; with it, they are things you can check on any provider, tonight, from the outside.</p>
+
+<p>Everything in this phase becomes usable through three plumbing facts.</p>
+
+<h3>Fact 1 — streaming makes TTFT measurable (and makes slow answers feel fast)</h3>
+
+<p>With <code>stream=True</code>, the server sends tokens as decode produces them. The transport is SSE (server-sent events: a long-lived HTTP response that delivers small chunks). Your TTFT instrument is simple. Timestamp the request. Timestamp the first content chunk. Subtract. Then <code>TPOT = (total − TTFT) / (output_tokens − 1)</code>. Streaming also helps the product: 400ms to the first word feels instant, even when the full answer takes 8 seconds. Note the gap in most systems: if your product streams app events but never model tokens, then no number in your system can separate a slow-prefill request from a slow-decode request.</p>
+
+<ol class="timeline">
+<li><time>t=0</time> <code>client...create(..., stream=True, stream_options={"include_usage": True})</code> sent</li>
+<li><time>t=TTFT</time> first content chunk arrives → timestamp it → that is TTFT (queue + prefill, 1.2)</li>
+<li><time>t=...</time> decode chunks stream at TPOT each (1.4)</li>
+<li><time>t=total</time> final chunk: <code>finish_reason</code> + the <code>usage</code> object → the invoice</li>
+</ol>
+
+<h3>Fact 2 — the server's <code>usage</code> object is the invoice; read it from the last chunk</h3>
+
+<p>Pass <code>stream_options={"include_usage": true}</code>. The final chunk then carries <code>prompt_tokens</code> and <code>completion_tokens</code>, measured by the server. That is what you are billed on. Client-side token counting is an estimate. <code>usage</code> is ground truth. Agent frameworks expose this as <code>result.usage()</code> (Pydantic AI) or similar. Check that your cost accounting reads the server's usage, not a client-side estimate. One more thing <code>usage</code> will carry once caching enters (Phase 3): cached-token counts. Your current cost formula ignores them.</p>
+
+<aside class="addition" data-kind="deeper">
+<p><b>Anthropic already splits usage the way Phase 3 will need.</b> Their Messages API returns a usage object with <code>cache_creation_input_tokens</code> and <code>cache_read_input_tokens</code> as separate fields — a three-price schema in the response itself, before your cost formula knows about it. If your logger derives cost from two prices on multi-provider traffic, it is already missing a column. Source: <a href="https://platform.claude.com/docs/en/api/messages.md">platform.claude.com/docs/en/api/messages.md</a> (verified).</p>
+</aside>
+
+<h3>Fact 3 — <code>finish_reason</code> says WHY decode stopped, and <code>"length"</code> is an incident</h3>
+
+<p>Every completion ends with a reason. <code>stop</code> means the model finished, or hit a stop sequence (a string you configured to end generation). <code>length</code> means <code>max_tokens</code> cut the answer off mid-stream. Now think about what <code>length</code> does to a structured-output call: the JSON is truncated, the parse fails, and a naive retry re-pays the entire prompt to fail the same way. Two design rules follow. First, size <code>max_tokens</code> per call site, from the schema's worst case, plus reasoning budget on thinking models (see 1.4). Never use one global constant. Second, log <code>finish_reason</code> on every call. A rising <code>length</code> rate is the earliest warning that your outputs are being silently cut. E11 makes you watch this failure live.</p>
+
+<aside class="addition" data-kind="correction">
+<p><b><code>finish_reason</code> is OpenAI vocabulary. Normalizing on it alone misses Claude-side truncation.</b> Anthropic names the same concepts <code>stop_reason: "max_tokens"</code> (their <code>"length"</code>), and adds <code>"model_context_window_exceeded"</code> — a distinct reason for prompt-context overflow — plus <code>"refusal"</code> and <code>"pause_turn"</code>. If your logger only checks <code>finish_reason == "length"</code>, every Claude truncation and overflow passes as "stopped normally". Normalize the vocabularies at the logging boundary. Source: <a href="https://platform.claude.com/docs/en/api/messages.md">platform.claude.com/docs/en/api/messages.md</a> (verified).</p>
+</aside>
+
+<h3>The whole instrument — wrong way first</h3>
+
+<div class="compare">
+<div class="wrong">
+<p><b>WRONG: non-streaming "latency measurement" + client-side "billing"</b></p>
+<pre><code data-lang="python">t0 = time.perf_counter()
+r = client.chat.completions.create(model=m, messages=msgs)   # no stream
+latency = time.perf_counter() - t0        # ONE number: TTFT+decode fused —
+                                          # you cannot tell prompt problems
+                                          # from provider problems
+tokens = len(tiktoken.get_encoding("o200k_base").encode(text))  # estimate ≠
+cost = tokens * price / 1e6               # invoice; wrong tokenizer for Claude,
+                                          # ignores message framing (and later,
+                                          # cached tokens). Your books drift
+                                          # from the provider's bill.</code></pre>
+</div>
+<div class="right">
+<p><b>RIGHT: stream, split the timings, bill from server usage</b></p>
+<pre><code data-lang="python">t0 = time.perf_counter(); ttft = None
+stream = client.chat.completions.create(
+    model=m, messages=msgs, stream=True,
+    stream_options={"include_usage": True})
+for chunk in stream:
+    if chunk.usage is not None:                      # final bookkeeping chunk
+        usage = chunk.usage                          # ← the invoice
+    elif chunk.choices and chunk.choices[0].delta.content:
+        ttft = ttft or time.perf_counter() - t0      # first visible token
+total = time.perf_counter() - t0
+tpot = (total - ttft) / max(usage.completion_tokens - 1, 1)
+cost = (usage.prompt_tokens * p_in + usage.completion_tokens * p_out) / 1e6</code></pre>
+</div>
+</div>
+
+<div class="callout warn"><b>The trap:</b> some gateways silently drop <code>stream_options.include_usage</code>. Then <code>usage</code> is <code>None</code> at the end of the stream. If your code treats missing usage as zero, every call through that gateway is booked as free. Fail loudly on missing usage. The lab's <code>ttft_meter.py</code> prints a warning and labels its cost a lower bound.</div>
+
+<pre class="ascii"> what to log, per model call (the Phase 5 target schema):
+┌────────────────────────────────────────────────────────────┐
+│ model, ttft_ms, total_ms, tpot_ms,                         │
+│ input_tokens, output_tokens, cached_input_tokens,          │
+│ cost_usd, finish_reason                                    │
+└────────────────────────────────────────────────────────────┘
+ typical stack:    ✓ model  ✓ tokens  ✓ cost   ✗ ttft  ✗ tpot  ✗ cached</pre>
+
+<p>So you can judge your own E4 numbers, here are reference ranges for API models on short prompts (as of 2026-09 — these change; your own measurements always win):</p>
+
+<pre class="ascii">┌───────────────────────────────┬──────────────┬───────────────────────┐
+│ model class                   │ TTFT         │ TPOT                  │
+├───────────────────────────────┼──────────────┼───────────────────────┤
+│ small/cheap ("mini" class)    │ 200-500ms    │ 10-30ms               │
+│ frontier non-reasoning        │ 300-800ms    │ 30-80ms               │
+│ reasoning (to VISIBLE answer) │ 1s-minutes   │ same decode physics   │
+│ self-hosted 8B on one H100    │ 50-200ms     │ 5-15ms (light load)   │
+└───────────────────────────────┴──────────────┴───────────────────────┘
+ Are you 5x outside these ranges? Suspect your measurement method or a
+ queueing incident first, not the hardware.</pre>
+
+<div class="keypoints">
+<p class="remember"><b>The sentence to remember:</b> stream to measure. Let the server's usage object write the invoice, not your tokenizer.</p>
+<p class="trap"><b>The trap:</b> trusting total latency as a metric. It fuses the one number you control (prompt size) with the two you do not (queue, TPOT), so every diagnosis it gives you is a guess.</p>
+<p class="try"><b>In your codebase:</b> before doing the lab, find where your agent stack reads usage after a run completes (Pydantic AI: <code>result.usage()</code>; raw SDK: the response's <code>usage</code>). You are about to measure, from the outside, the two numbers that post-run code can never see.</p>
+</div>
+<h2><span class="num">🧪</span> Hands-on lab — the exercises that teach Phase 1</h2>
+
+<p class="why">The numbers YOU measure are the point of this course. Everything above was the mental model; below is where you make it yours, with roughly $1 of API spend.</p>
+
+<p>Setup once: <code>cd ~/Desktop/project/code/study-material/inference-internals/code &amp;&amp; pip install -e .</code> (or <code>uv sync</code>). API exercises need a key: <code>export OPENAI_API_KEY=sk-...</code> (or any OpenAI-compatible endpoint via <code>--base-url ... --key-env YOUR_VAR</code>).</p>
+
+<div class="callout note"><b>Model reality check (module smoke-tested 2026-09-01):</b> the commands below use <code>gpt-4.1-mini</code>, a cheap NON-reasoning model. That choice is deliberate. Two model families break measurement labs if you substitute them. First, THINKING models (kimi, deepseek-r). They stream <code>reasoning_content</code> tokens before any visible answer, and bill them as completion tokens. The lab's meter handles this: it reports TTFT at the first streamed token of any kind, reports a separate <code>visible</code> time for the first answer token, and warns when <code>max_tokens</code> runs out during reasoning (use <code>--max-tokens 300</code> or more with those models). Second, OpenAI's reasoning models (gpt-5 family, o-series). These are worse for labs: they do NOT stream their reasoning, and they reject <code>max_tokens</code> and sampling parameters outright. The meter falls back automatically and warns. Measure on a non-reasoning model first. Compare thinking models afterward, on purpose.</div>
+
+<aside class="addition" data-kind="update">
+<p><b>Are the lab's models still served? Probably yes — with refreshed prices.</b> Hunter checked 2026-09-15/17: <code>gpt-4.1</code> and <code>gpt-4.1-mini</code> appear nowhere on OpenAI's deprecations page (only <code>gpt-4.1-nano</code> is deprecated, shutdown 2026-10-23 — not a lab model), and OpenAI's own rule is that deprecations are documented on that page with 6 months minimum notice. But the pricing and model-catalog pages no longer list either model, so the exact prices and context limit in <code>prices.yaml</code> and the table below are the last public values (2026-09-01). Before the lab: one API call confirms availability, and read current prices from your dashboard. Sources: <a href="https://developers.openai.com/api/docs/deprecations">deprecations</a>, <a href="https://developers.openai.com/api/docs/pricing">pricing</a>, <a href="https://developers.openai.com/api/docs/models">models</a> (absence on those pages is the finding).</p>
+</aside>
+
+<p>Context limits the lab relies on (as of 2026-09-01 — verify in provider docs when this changes):</p>
+
+<pre class="ascii">┌──────────────────────┬─────────────┬───────────────────────────────┐
+│ model                │ context     │ note                          │
+├──────────────────────┼─────────────┼───────────────────────────────┤
+│ gpt-4.1-mini (OpenAI)│ 1,047,576   │ default lab model: cheap,     │
+│                      │             │ non-reasoning, implicit       │
+│                      │             │ prefix caching (E6)           │
+│ gpt-4.1 (OpenAI)     │ 1,047,576   │ the `deep` role in prices.yaml│
+│ your own models      │ look it up  │ add rows as you adopt them    │
+└──────────────────────┴─────────────┴───────────────────────────────┘</pre>
+
+<p>Every script prints its own tokens, dollars, and latency. Record them — later phases reuse your numbers. Total spend for the whole lab is well under $1. Each exercise lists its own worst case.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1</b> <span class="tag">observe</span></label> Price content shapes with YOUR prices.
+<pre><code data-lang="bash">python phase01_lifecycle/tokenize_cost.py --role default</code></pre>
+<p><b>Expected:</b> table of 5 samples; Devanagari has the worst chars/token; pretty JSON costs ≥1.3x compact JSON. <b>If it fails:</b> the default <code>code/prices.yaml</code> is missing — restore it, or pass <code>--models-yaml</code>. <b>Teaches:</b> tokens are an uneven exchange rate, and you can measure it.</p></li>
+
+<li><label><input type="checkbox"> <b>E2</b> <span class="tag">observe</span></label> Audit an agent repo for the token tax.
+<pre><code data-lang="bash">grep -rn "json.dumps" &lt;your-agent-repo&gt; --include="*.py" | grep -v __pycache__</code></pre>
+<p>Use any agent codebase you own. No repo at hand? Run it on an installed framework, for example your site-packages copy of <code>pydantic_ai</code>. <b>Expected:</b> you can CLASSIFY every hit. A hit is only a problem when its output lands in a prompt. <code>json.dumps(result, indent=2)</code> in a tool-return or memory-write path is the tax: pretty-printing inflates tokens about 1.3–2x. The same call in a DB adapter, wire format, or outbound message costs nothing. Count your dirty hits. <b>Teaches:</b> tokenizer economics is a code-review skill. The audit matters even when it comes back clean.</p></li>
+
+<li><label><input type="checkbox"> <b>E3</b> <span class="tag">observe</span></label> Client estimate vs server invoice.
+<pre><code data-lang="bash">python phase01_lifecycle/ttft_meter.py --model x --count-only   # no API call
+python phase01_lifecycle/ttft_meter.py --model gpt-4.1-mini --role cheap --runs 1</code></pre>
+<p>Then compare the count against <code>in=</code>. <b>Expected:</b> same prompt text, different numbers. The server adds message framing, and non-OpenAI models' tokenizers differ from tiktoken. Close, never equal. <b>Teaches:</b> usage is the invoice; tiktoken is an estimate for budgeting only.</p></li>
+
+<li><label><input type="checkbox"> <b>E4</b> <span class="tag">build</span></label> Establish your TTFT/TPOT baselines.
+<pre><code data-lang="bash">python phase01_lifecycle/ttft_meter.py --model gpt-4.1-mini --role cheap --runs 5</code></pre>
+<p>Then repeat with <code>--model gpt-4.1 --role deep</code> — or any second provider you have, via <code>--base-url</code> — for a two-model comparison. <b>Expected:</b> different TPOT and different prices across models and providers. Save the medians in a file. This is your baseline for the whole course. Costs at most: ~$0.05. <b>Teaches:</b> model choice moves TPOT and price; it moves TTFT far less.</p></li>
+
+<li><label><input type="checkbox"> <b>E5</b> <span class="tag">observe</span></label> Prove TTFT scales with prompt size.
+<pre><code data-lang="bash">python phase01_lifecycle/prefill_scaling.py --model gpt-4.1-mini</code></pre>
+<p><b>Expected:</b> TTFT climbs from hundreds of ms toward seconds as input goes 500 → 16k tokens. Costs at most: ~$0.05/run at cheap-model prices. <b>Teaches:</b> TTFT is mostly your prompt.</p></li>
+
+<li><label><input type="checkbox"> <b>E6</b> <span class="tag">break-it</span></label> Break a warm cache with one changed character — OpenAI models only.
+<p><b>Precondition:</b> implicit prefix caching is OpenAI-style behavior (automatic, ≥1024-token prefix, ~5–10 min lifetime, ~128-token block granularity — verify in the docs, these change; see the price update in 1.3 for what the docs say now). Claude models (native API or through any gateway) do NOT cache implicitly. They need explicit <code>cache_control</code> breakpoints, which is Phase 3's lab. Run this exercise against an OpenAI non-reasoning model, for example gpt-4.1-mini with an OpenAI key.</p>
+<pre><code data-lang="bash">python phase01_lifecycle/prefill_scaling.py --model gpt-4.1-mini --sizes 16000,16000
+python phase01_lifecycle/prefill_scaling.py --model gpt-4.1-mini --sizes 16000,16000 --mutate-at start
+python phase01_lifecycle/prefill_scaling.py --model gpt-4.1-mini --sizes 16000,16000 --mutate-at end</code></pre>
+<p><b>Expected:</b> run 2 TTFT drops vs run 1 (warm cache). <code>--mutate-at start</code> jumps back to cold: one flipped character at byte ~10 invalidated everything after it. <code>--mutate-at end</code> stays near-warm: the prefix up to the mutation still hit. <b>If unclear:</b> your prefix was below the caching minimum, or the cache lifetime expired between runs. Rerun back-to-back at 32k. <b>Teaches:</b> prefix caching is an exact match from byte zero. WHERE a byte changes decides WHAT you pay.</p></li>
+
+<li><label><input type="checkbox"> <b>E7</b> <span class="tag">break-it</span></label> Overflow the context window on purpose.
+<pre><code data-lang="bash">python phase01_lifecycle/prefill_scaling.py --model gpt-4.1-mini --break-it --context-limit 1047576</code></pre>
+<p><b>Expected:</b> a fast 400 rejection, <code>invalid_request_error</code>, with a message naming the limit and your token count. The exact shape is in the script's docstring. Copy the real error into your notes: your agent's compaction trigger in Phase 2 must catch exactly this, and a blind retry would resend the same oversized prompt. Costs at most: $0 on rejection. <b>Warning:</b> if you pass a <code>--context-limit</code> LOWER than the model's real limit, the request fits, is not rejected, and you pay for a giant prefill. The script sends 2x the limit to keep the outcome clear. <b>Teaches:</b> overflow fails fast, costs nothing, and cannot be retried as-is.</p></li>
+
+<li><label><input type="checkbox"> <b>E8</b> <span class="tag">observe</span></label> Watch sampling parameters work — and learn your provider's parameter policy.
+<pre><code data-lang="bash">python phase01_lifecycle/sampling_lab.py --model gpt-4.1-mini</code></pre>
+<p><b>Expected:</b> temp 0 → tight, plausible answer. Temp 1.2 → looser, sometimes worse. top_p 0.1 alone → near-greedy. The final both-knobs combo prints whichever lesson your provider teaches: acceptance (OpenAI-style policy — note it behaved near-greedy, top_p dominated) or a 400 rejection (Anthropic policy, exact error printed; on current models ANY non-default knob rejects — see 1.5). Either way the script continues. Costs at most: ~$0.02. <b>Teaches:</b> knob behavior, plus the fact that sampling policy differs per provider. Config must be per-model. A gateway does not normalize it.</p></li>
+
+<li><label><input type="checkbox"> <b>E9</b> <span class="tag">break-it</span></label> Test the determinism claim with data.
+<pre><code data-lang="bash">python phase01_lifecycle/sampling_lab.py --model gpt-4.1-mini --determinism-runs 10</code></pre>
+<p><b>Expected:</b> usually ≥2 distinct outputs at temperature 0. If all 10 are identical, raise <code>--determinism-runs</code> or <code>--max-tokens</code> until they split. (Published calibration: 80 unique out of 1,000 on a self-hosted Qwen3-235B — see 1.5; no public number exists for current OpenAI endpoints.) Costs at most: ~$0.03. <b>Teaches:</b> never build tests that assert exact LLM bytes.</p></li>
+
+<li><label><input type="checkbox"> <b>E10</b> <span class="tag">build</span></label> The output-length latency lever.
+<pre><code data-lang="bash">python phase01_lifecycle/ttft_meter.py --model gpt-4.1-mini --role cheap --max-tokens 40</code></pre>
+<p>vs <code>--max-tokens 400</code> (3 runs each). <b>Expected:</b> TTFT stays about the same; total time scales roughly linearly with output tokens; your E4 TPOT predicts the difference within ~20%. <b>Teaches:</b> total = TTFT + out×TPOT is a formula you can verify yourself, not trivia.</p></li>
+
+<li><label><input type="checkbox"> <b>E11</b> <span class="tag">break-it</span></label> Truncate a structured output and see the broken result.
+<pre><code data-lang="bash">printf 'Return ONLY a JSON object with keys name, city, bio (a 60-word biography) for a fictional user. No prose.' > /tmp/json_task.txt && python phase01_lifecycle/ttft_meter.py --model gpt-4.1-mini --role cheap --runs 1 --max-tokens 25 --prompt-file /tmp/json_task.txt --show-output</code></pre>
+<p><b>Expected:</b> <code>finish=length</code>, a stderr warning, and printed output that is JSON cut off mid-string — <code>json.loads</code> on it would raise an error. Rerun with <code>--max-tokens 300</code>: <code>finish=stop</code>, complete JSON. Costs at most: ~$0.001. <b>If it fails:</b> the model wrapped the JSON in prose despite the instruction. That is a different failure, and exactly why constrained decoding exists (Phase 2 teaches it). <b>Teaches:</b> <code>finish_reason</code> is the difference between an answer and an incident. Budget <code>max_tokens</code> per schema, and log the reason on every call. (Live-run status: command flags verified against the shipped script; not yet run against OpenAI from this machine — no API key was available on 2026-09-02.)</p></li>
+</ul>
+<h2><span class="num">🏢</span> Codebase anchor — things to check in your repo</h2>
+
+<p class="why">The phase is only internalized when it changes how you read your own code. Four short walks, each pointed at a file you own, then one into Mission HQ itself.</p>
+
+<ol class="steps">
+<li>Open <code>code/prices.yaml</code>. The <code>deep</code> role (<code>gpt-4.1</code>) is priced $2.00 in / $8.00 out (4x, OpenAI list as of 2026-09-01 — refresh from your dashboard before reuse; the public pricing page no longer lists these models, per the update in 1.2). After 1.2 and 1.4, explain that premium in one sentence of physics. Then note which pricing dimension is MISSING from this file's schema entirely. Hint: E6; it arrives with Phase 3, and today the schema cannot even represent it. (One more hint from 1.3's update: current docs already bill cache writes at 1.25x and reads at 0.1x — that is a THREE-price schema, one more column than the Phase 3 preview planned for.) Bonus: swap in the models and prices you actually use now. Every later phase reuses this file.</li>
+<li>Open <code>code/phase01_lifecycle/ttft_meter.py</code>. Find the cost computation in <code>main()</code>: raw token counts × two prices. When your provider starts returning cached-input tokens in <code>usage</code>, that formula silently OVERCHARGES your own accounting: it bills cached tokens at full price. Write the fix's signature now: what third count and third price does it need?</li>
+<li>Open <code>code/phase01_lifecycle/ttft_meter.py</code>, function <code>one_run()</code>. Find where <code>first_any</code> and <code>first_visible</code> are captured. Reading <code>usage</code> after a run completes can never produce these numbers: TTFT exists only at stream time. Now find the exact place in YOUR agent stack where a streaming wrapper or an httpx event hook would have to live to see first-byte time. You implement that in Phase 5.</li>
+<li>In your own agent repo: find where token usage is read after a run, and which numbers get persisted. Draft (on paper only) the schema change from section 1.6's target: which three columns are missing for latency triage, and why is <code>finish_reason</code> worth storing? (When Phase 5 pages you at 2am, "did it stop on max_tokens?" is the first question.)</li>
+</ol>
+
+<aside class="addition" data-kind="practice">
+<p><b>In Mission HQ:</b> open <code>backend/src/hq/obs.py</code> — <code>emit()</code> is the Postgres event log every run writes into. Ask the same question of it that item 4 asks of your agent repo: of 1.6's nine target columns (<code>model, ttft_ms, total_ms, tpot_ms, input_tokens, output_tokens, cached_input_tokens, cost_usd, finish_reason</code>), which does the event schema carry today, and which three are the latency-triage gap? The gap you find there is exactly what Phase 5 closes. (Your own heal/triage runs showed the shape of this for operational signals earlier this week: "configured" and "executed" lived in different places. For model calls, "billed" and "timed" live in different places too.)</p>
+</aside>
+
+<h2><span class="num">✅</span> Checkpoint 1 — answer in your own words</h2>
+
+<p>Write your answers before opening the sketches. Seven scenarios, all answerable from this phase alone.</p>
+
+<ol>
+<li>A <code>deep</code>-role run (<code>gpt-4.1</code>) reports: total 21s, input 42,000 tokens, output 380 tokens. Use YOUR measured TPOT from E4. Estimate how the 21s splits between TTFT and decode. Which side would prompt caching attack, and roughly how much of the 21s is it worth?</li>
+<li>A colleague benchmarks two models with one prompt each and declares one "3x faster" from total latency. List the two methodological errors. Sections 1.4 and 1.5 each contain one.</li>
+<li>Your agent's step latency creeps from 3s to 11s over a 25-step session. Provider status is green. TPOT is stable in your logs. Diagnose: (a) the mechanism, (b) the one-line fix category, (c) which of the three numbers from Phase 0 was the tell.</li>
+<li>Walk the machine: for a 10k-token prompt and a 200-token answer, narrate the request's life through tokenize → queue → prefill → KV cache → decode → sampling → stream. Name the stage where TTFT is decided and the stage where TPOT is decided, and say where the KV cache grows.</li>
+<li>Design under constraints: Verly-style voice support needs the first audio within 800ms. The knowledge context is 30k tokens. Using this phase only (no caching yet), name two levers that could reach the budget and one lever that provably cannot help.</li>
+<li>Show the math: at <code>gpt-4.1-mini</code> prices ($0.40/$1.60 per Mtok), a 10-step agent loop re-sends a growing history. It starts at 3k tokens and grows 1k per step, with 300 output tokens per step. What is the total cost? What fraction is input? Now explain why "output is only 4x input" understated the real bill.</li>
+<li>This is broken: E9 gave a colleague 10 identical outputs out of 10, so they shipped a test asserting exact bytes. It passed for a week, then flaked. Explain in two sentences why the test was always wrong, and what to assert instead.</li>
+</ol>
+
+<details class="answer">
+<summary>Answer sketches — write yours first, then compare</summary>
+<ol>
+<li>At 40ms TPOT (use YOUR E4 number): decode ≈ 380 × 0.04 ≈ 15s. So TTFT ≈ 6s, which is almost all 42k-token prefill plus queue. Caching attacks only the TTFT side: with ~90% of the prefix cached, most of that ~6s and ~90% of input cost disappear. The 15s of decode cannot be cached.</li>
+<li>Error one (1.4): total latency mixes in output length. Different answers have different lengths, so compare TTFT and TPOT separately at a controlled <code>max_tokens</code>. Error two (1.5): one run proves nothing. Sampling and batch noise vary between runs, so compare medians over several runs.</li>
+<li>(a) The agent appends history every step, so prefill grows and TTFT creeps up. (b) Context management: compaction or pruning of history. (c) TTFT was the tell — it rose while TPOT stayed flat. Total latency alone could not have shown which side moved.</li>
+<li>Key beats: tokenize (microseconds, never the issue) → queue (invisible, inside TTFT) → prefill builds KV for all 10k tokens in one parallel pass → first sampled token ends TTFT → 200 decode steps, each reading the whole KV cache and appending one token's K,V → sampling picks each token → chunks stream out. TTFT is decided in queue + prefill. TPOT is decided in decode. The KV cache grows during prefill AND by one token per decode step.</li>
+<li>Two levers that help: (1) shrink the prompt — retrieve less of the 30k into context; (2) control output shape — stream, and produce a short first sentence with a tight <code>max_tokens</code>, so the first audio starts early. One lever that provably cannot help: sampling knobs (temperature, top_p). They act after the logits exist and move neither prefill nor decode speed.</li>
+<li>Input across steps: 3k+4k+...+12k = 75k tokens → 75,000 × $0.40/M = $0.030. Output: 10 × 300 = 3k → 3,000 × $1.60/M = $0.0048. Total ≈ $0.035, and input is ≈ 86% of it. The 4x price ratio hides the volume effect: a loop multiplies input linearly with step count, because history is re-sent every step, while output stays flat. The volume asymmetry beats the price asymmetry.</li>
+<li>Temperature 0 removes sampling randomness, not machine randomness: batch shape changes the float-addition order, logits wobble, and a near-tie argmax eventually flips. Ten identical runs were luck, not a guarantee. Assert structure and meaning (schema-valid, eval score, key facts present), never exact bytes.</li>
+</ol>
+</details>
+<h2>References &amp; Further Learning</h2>
+
+<p>All links verified 2026-09-01 by the original module; hunter re-read the new ones on 2026-09-15/17. The order matters — it follows the phase.</p>
+
+<ul class="sources">
+<li><b>Must-read (paired with this phase)</b>: <a href="https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices">LLM Inference Performance Engineering: Best Practices</a> — Databricks/MosaicML; the post that standardized TTFT/TPOT vocabulary. (30 min)
+<p><b>Why:</b> the vocabulary E4/E10 assume, plus what this phase adds from it: the MBU metric and the 19%/20% tokenizer-difference numbers. <b>Focus:</b> "Important Metrics for LLM Serving" and "Memory Bandwidth is Key". Skim the MPT-era benchmark numbers. <b>When:</b> BEFORE the lab.</p></li>
+<li><a href="https://kipp.ly/transformer-inference-arithmetic/">Transformer Inference Arithmetic</a> — kipply (Carol Chen, later Anthropic). The most-cited first-principles inference-math post; papers cite it. (60–90 min, dense)
+<p><b>Focus:</b> "KV Cache", "Capacity", "Latency Calculations", "Batch Sizes". Skip "Model Parallelism" and the A100-era benchmark constants. <b>When:</b> AFTER the lab, with <code>kv_math.py</code> open — redo its arithmetic with the script. (Hunter did not re-open this one this run; the module's note stands.)</p></li>
+<li><a href="https://www.anyscale.com/blog/continuous-batching-llm-inference">How continuous batching enables 23x throughput</a> — Anyscale (Cade Daniel et al.); the standard batching explainer. (25 min)
+<p><b>Focus:</b> static vs continuous batching sections; skip benchmarks and the Ray tail. <b>When:</b> AFTER this phase, as the bridge into Phase 2.</p></li>
+<li><b>Deep dives (Phase 2 will assume these)</b>:
+<a href="https://arxiv.org/abs/2309.06180">PagedAttention / vLLM paper, SOSP 2023</a> — §2–3 now (decode loop, the 60–80% KV-waste measurement); §4 during Phase 2. Skip kernels (§4.4) and evals.
+<a href="https://www.usenix.org/system/files/osdi22-yu.pdf">Orca, OSDI 2022</a> — invented continuous batching. §1–2 and §4.1–4.2 only ("selective batching" is the part summaries omit).
+<a href="https://jax-ml.github.io/scaling-book/inference/">All About Transformer Inference — How To Scale Your Model, Part 7</a> — Google DeepMind, 2025; the modern successor to kipply with rooflines and worked problems. Do its Worked Problems after E10.</li>
+<li><b>War story (the payoff read)</b>: <a href="https://blog.character.ai/optimizing-ai-inference-at-character-ai-2/">Optimizing AI Inference at Character.AI</a> + <a href="https://blog.character.ai/optimizing-ai-inference-at-character-ai-part-deux-2/">Part Deux</a> — Noam Shazeer's team serving 20k QPS: &gt;20x KV reduction, 95% inter-turn cache hit rate on ~180-message histories, int8, ~33x cost cut since launch — all company self-reported, both links confirmed live by hunter 2026-09-15. (15 min)
+<p><b>When:</b> LAST in this phase. Every section 1.3 concept appears here with production numbers attached.</p></li>
+<li><b>New since the module was written</b>: <a href="https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/">Defeating Nondeterminism in LLM Inference</a> — Thinking Machines Lab (Horace He, 2025-09-10). The measured answer to 1.5's determinism myth: batch-invariance, 80/1000 unique at temperature 0, and the cost of making it go away.
+<p><b>Focus:</b> the batch-invariance explanation and the throughput table. <b>When:</b> right after E9 — it is what your results mean.</p></li>
+<li><b>New since the module was written</b>: <a href="https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues">A postmortem of three recent issues</a> — Anthropic (2025-09-17). Three of this phase's mechanisms failing at provider scale, in August–September 2025: KV-fleet routing (1.3), decode-path corruption (1.4), argmax-dropping sampling code (1.5).
+<p><b>Focus:</b> the detection notes — why standard evals missed all three. <b>When:</b> after the checkpoint, as the "where this breaks in production" read.</p></li>
+<li><b>Official docs to bookmark</b>: <a href="https://platform.claude.com/docs/en/docs/build-with-claude/prompt-caching">Anthropic prompt caching docs</a> — breakpoints, cache lifetimes and pricing (5-min cache: writes 1.25x, 1-hour cache: writes 2x; reads 0.1x), "what invalidates the cache". Skim now (it explains why E6 excludes Claude), work through it in Phase 3. <a href="https://platform.claude.com/docs/en/api/messages.md">Anthropic Messages API reference</a> — the <code>stop_reason</code> vocabulary and the post-Opus-4.6 sampling-knob policy. <a href="https://docs.vllm.ai/en/latest/design/prefix_caching/">vLLM design doc: Automatic Prefix Caching</a> — block hashing and eviction; read in Phase 2/4.</li>
+<li><b>Videos and talks (verified 2026-09-01; watch in this order)</b>:
+<a href="https://www.youtube.com/watch?v=80bIUggRJf4">The KV Cache: Memory Usage in Transformers</a> — Bai Li, Efficient NLP (8:33). The 8-minute visual model of section 1.3. Chapters: 1:15 self-attention review · 4:07 how the KV cache works · 5:55 memory usage example. Watch FIRST, before or right after reading 1.3.
+<a href="https://www.youtube.com/watch?v=hMs8VNRy5Ys">Deep Dive: Optimizing LLM Inference</a> — Julien Simon, ex-Hugging Face (36:11). Watch 01:15–16:17 only for this phase: decoder-only inference (01:15), the KV cache (06:05), continuous batching (11:15). The speculative-decoding half (16:17+) belongs to Phase 4. Watch AFTER the lab, as consolidation.
+<a href="https://www.youtube.com/watch?v=EfM546A79aM">Stanford CS336 Lecture 10: Inference</a> — Percy Liang &amp; Tatsunori Hashimoto (1:25, Spring 2026 edition). Prefill vs decode, arithmetic intensity, KV math, MQA/GQA, TTFT vs throughput. Watch AFTER this phase, before Phase 2; skip the alternative-architectures tail.
+<a href="https://www.youtube.com/watch?v=9ih0EmcXRHE">vLLM: Easy, Fast, and Cheap LLM Serving</a> — Woosuk Kwon, PyTorch Conf 2024 (23:32); pair with the <a href="https://www.youtube.com/watch?v=Tv71-g75OgU">2025 update by Simon Mo</a> (24:47) for chunked prefill and the V1 engine. Park both until Phase 2/4.
+<a href="https://www.youtube.com/watch?v=Ny4xxErgFgQ">Efficient LLM Inference with SGLang</a> — Lianmin Zheng (24:36). The primary-source RadixAttention explanation; the mechanism behind E6's cache behavior. Park until Phase 2.
+<a href="https://www.deeplearning.ai/courses/efficiently-serving-llms">Efficiently Serving LLMs</a> — Travis Addair (Predibase), free DeepLearning.AI short course (~1h). The only resource here where you IMPLEMENT KV caching and continuous batching in notebooks. Optional hands-on companion to Phase 2; skip the multi-LoRA lessons.</li>
+</ul>
+
+<div class="callout note"><b>A curiosity, flagged per protocol:</b> while hunter was reading OpenAI's prompt-caching documentation page for this phase's updates, the page's fetched text contained lines that looked like instructions addressed at an AI reader. They were ignored, and none of the facts on this page come from those lines. If a docs page ever seems to talk TO you rather than ABOUT the product, treat it as content to quote, never as an order to follow.</div>
+<h2>Cheatsheet</h2>
+
+<pre class="cheatsheet">LIFECYCLE     tokenize → queue → PREFILL(parallel, compute-bound, builds KV)
+              → DECODE(serial, bandwidth-bound) → sample → stream
+LATENCY       TTFT  = queue + prefill        ← prompt size, cache, congestion
+              TPOT  = per decode step        ← model size, provider load
+              total = TTFT + out_toks × TPOT ← verify: E10
+KV CACHE      bytes/token = 2 · layers · kv_heads · head_dim · dtype_bytes
+              llama-3-8b bf16 ≈ 128 KB/tok → 1 GB @ 8k ctx  (kv_math.py)
+              concurrency limit = free_HBM / (bytes_per_tok × ctx)
+              vLLM gpu_memory_utilization default: 0.92 (v0.29.0; was 0.9)
+CACHING       exact PREFIX match from byte 0; stable content first,
+              volatile (timestamps, user text) last; one early byte = full miss
+              ≥1024-tok prefix, ~5–10 min lifetime; writes 1.25x, reads 0.1x
+              on new models → one-shot repeats can cost MORE than no cache
+PRICING       output ≈ 3-8x input across providers (prices.yaml: 4x)
+              cached input ≈ 0.1x input (Phase 3; cost formula can't price it yet)
+              gpt-4.1/-mini prices left the public sheet 2026-09; still served
+              (not on deprecations page) — read live prices from your dashboard
+SAMPLING      extraction 0-0.2 | drafting 0.7-1.0 | one knob at a time
+              temperature=0 ≠ reproducible (batch-size-dependent kernels;
+              80/1000 unique at temp 0 measured, Thinking Machines 2025)
+              Anthropic post-Opus-4.6: temperature≠1.0 → 400; top_k rejected
+REASONING     hidden thinking = billed output; max_tokens caps think+answer
+              (empty answer possible) · perceived TTFT = ttft + full thinking
+STOP          finish_reason (OpenAI) / stop_reason (Anthropic):
+              stop=answer, length/max_tokens=TRUNCATED (parse incident),
+              Claude adds model_context_window_exceeded, refusal, pause_turn;
+              budget max_tokens per schema, log the reason every call (E11)
+MEASURE       stream=True + stream_options.include_usage
+              usage from final chunk = invoice; tiktoken = estimate
+              log per call: ttft_ms, tpot_ms, in/out/cached toks, cost, finish_reason
+THIS COURSE   prices.yaml=prices/roles · ttft_meter.py=TTFT/TPOT/cost meter
+              cost formula has no cached price yet (Phase 3) · wire TTFT into
+              your own telemetry in Phase 5</pre>
+
+<h2>Things I could not verify</h2>
+
+<p>Carried from the module's own caveats and hunter's read of the sources. None of these are stated as fact anywhere above:</p>
+
+<ul>
+<li><b>E9's expected outcome.</b> "Usually ≥2 distinct outputs at temperature 0 in 10 runs on gpt-4.1-mini" has no public measurement behind it. The 80/1000 calibration is from a self-hosted Qwen3-235B. The module's hedge — raise runs until they split — is the right one.</li>
+<li><b>The chars/token table in 1.1</b> (English 4.0–4.5, Hindi 1.0–2.0, etc.). Directionally consistent with known BPE behavior and flagged "measure your own in E1" by the module, but not drawn from a ranked source.</li>
+<li><b><code>seed</code>/<code>system_fingerprint</code> current behavior</b> on OpenAI's 2026 API (module says best-effort only). Not re-checked.</li>
+<li><b>The reference TTFT/TPOT ranges table in 1.6.</b> Vendor benchmark conditions vary per model and provider; no numbers were re-run. The module's own rule (5x outside the table → suspect your measurement first) is a heuristic.</li>
+<li><b>Reasoning models "reject max_tokens and sampling parameters outright" on the 2026 API</b> (the lab reality-check wording). The Responses API surface has moved; unverified this run.</li>
+<li><b>The 64→57 concurrency worked example</b> is arithmetic on the module's own inputs (16 GB weights for Llama-3-8B at 2 bytes/param checks out), not a measured server result.</li>
+<li><b>Field names</b> — OpenAI's <code>usage.completion_tokens_details.reasoning_tokens</code> and Claude-side <code>usage</code> shapes as spelled — the OpenAI usage object was not re-fetched this run.</li>
+<li><b>The "typical stack logs 3 of 9 columns" line in 1.6</b> is the module's editorial claim: plausible, not measured.</li>
+<li><b>gpt-4.1/-mini live availability and current list prices.</b> Absent from the pricing/catalog pages, absent from deprecations; the actionable reading is "probably still served", but confirm with one API call and read prices from your dashboard before the lab.</li>
+<li><b>The kipply reference and the video links</b> were carried over from the module (verified there 2026-09-01), not re-opened by hunter this run.</li>
+</ul>
+
+<h2>Two things you could post</h2>
+
+<ul class="sources">
+<li><b>"temperature=0 is not reproducibility — and the measured proof finally exists."</b> Claim: your CI should never assert exact LLM bytes; what makes it his is that he can run E9 live on his own provider key and pair it with the published 80-unique-outputs-in-1,000 measurement, from a person who actually builds on these APIs.</li>
+<li><b>"The KV cache is a rent problem, and one formula sizes it."</b> Claim: concurrency limits at providers are pure memory arithmetic, and he can show the 2·layers·kv_heads·head_dim math recomputed from a public model config plus the vLLM 0.92 default he checked against source himself.</li>
+</ul>
+
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+</body>
+</html>
