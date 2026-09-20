@@ -1,3 +1,13 @@
+Scheduling and Memory
+
+In this lesson
+
+Inference Internals · Phase 2A
+
+# Scheduling and Memory
+
+How the server shares one GPU between strangers
+
 Your TTFT tripled at 3pm and your prompt did not change. You open your own logs. Your code sent the same bytes, at the same rate, with the same key. The provider returned the same answer, three times slower. Nothing on your side explains it. The explanation is not on your side. It is inside the server. It sits in the requests that arrived at the same second as yours.
 
 Phase 1 looked at one request on its own. You measured its TTFT, its TPOT, and its bill. TTFT is the time to first token. TPOT is the time per output token after the first. That model is correct, but it is not complete. A real inference server never runs one request. It runs a loop over a batch. Your request shares a GPU with requests from other people.
@@ -266,7 +276,7 @@ internal waste per request under paging: 8 tokens
 
 Paging admits 18.1x more concurrent requests on the same hardware. The model did not change. The GPU did not change. That result is why PagedAttention became the default in serving engines.
 
-The PagedAttention paper measured the same problem in real systems. In those systems, only 20.4% to 38.2% of KV cache memory held real token state. Reserved slots and fragmentation used the rest. The vLLM authors state in their talk that paging cut that waste to about 4%. The Anyscale team's benchmark post independently writes "under 4%". No written measurement method was found. Treat the exact figure as the authors' claim.
+The PagedAttention paper measured the same problem in real systems. In those systems, only 20.4% to 38.2% of KV cache memory held real token state. Reserved slots and fragmentation used the rest. The vLLM authors state in their talk that paging cut that waste to about 4%. The Anyscale team's benchmark post repeats that figure, quoting vLLM's own blog for "under 4%". No written measurement method was found. Treat the exact figure as the authors' claim.
 
   tokens held per request  1800
   shared prefix tokens  0
@@ -327,7 +337,7 @@ The signature is a WARNING log line naming PreemptionMode.RECOMPUTE. The second 
 
 One caveat, stated plainly. This is a vendor encyclopedia, and it gates remediation detail behind a signup. The mechanism is consistent with the v0.29.0 scheduler source. The parameter names check out. The exact log line and counter names were not grep-checked against the source tree. Treat those two strings as the vendor's spelling, and verify them on your own server. Source: denpex.com/failures/vllm-preemption-recompute-thrash (read 2026-09-19).
 
-The default value has a rot history, and it matters when you read tutorials. gpu_memory_utilization is 0.92 by default at vLLM 0.29.0, verified in vllm/config/cache.py at that tag. It was 0.95 originally. It was lowered to 0.9 in September 2023, recorded in vLLM issue #1018. When it moved from 0.9 to 0.92 is not pinned to a release. The move was not found in the release notes checked on 2026-09-19. Older material, including a vendor post from July 2026, still says 0.90. Any tutorial quoting 0.90 as the current default is stale.
+The default value has a rot history, and it matters when you read tutorials. gpu_memory_utilization is 0.92 by default at vLLM 0.29.0, verified in vllm/config/cache.py at that tag. It was 0.95 originally. vLLM issue #1018, opened in September 2023, records that it had already been lowered from 0.95 to 0.9 by then. The change itself carries no date. When it moved from 0.9 to 0.92 is not pinned to a release. The move was not found in the release notes checked on 2026-09-19. Older material, including a vendor post from July 2026, still says 0.90. Any tutorial quoting 0.90 as the current default is stale.
 
 The sentence to remember: paging reserves only the memory a request needs now, not the most it could need. That change makes high concurrency possible.
 
@@ -603,8 +613,7 @@ Every link below was fetched and checked on 2026-09-12, and the list was checked
 - Orca: A Distributed Serving System for Transformer-Based Generative Models, Yu, Jeong, Kim, Kim, Chun, OSDI 2022 — usenix.org/conference/osdi22/presentation/yu
 Focus on: section 3, which names the two problems. Some requests finish early and some arrive late. Then read section 4.2 and Algorithm 1, which is the scheduler loop in section 2.1.
 The headline number, with conditions: FasterTransformer served 0.185 requests per second at a median normalised latency of 190ms. Orca served 6.81, which is a 36.9x speedup. The test used GPT-3 175B in fp16 on 16 A100 40GB GPUs. Input lengths were drawn uniformly from 32 to 512 tokens. Output lengths were drawn from 1 to 128.
-Also read Figure 10a. There, Orca does not win on a 101B model at low load. The gain comes from scheduling, so it needs load to appear.
-Verification status, 2026-09-19: usenix.org blocks automated fetching and returns 403. Only the 36.9x headline is confirmed, and that through secondary reading notes of the paper. The 0.185 req/s, the 190ms latency, and the Figure 10a claim are not directly verified. The link works in a browser.
+Verification status, 2026-09-20: usenix.org blocks automated fetching and returns 403. A live re-check of the full English text of the paper on 2026-09-20 confirms the 36.9x throughput figure at the same latency on GPT-3 175B, from the abstract and introduction. The evaluation section was not readable in that copy, so the 0.185 req/s and 190ms conditions remain unverified. A claim this entry previously carried about Figure 10a, that Orca does not win at low load on the 101B model, could not be verified from any readable source and has been removed. The link works in a browser.
 
 - How continuous batching enables 23x throughput in LLM inference while reducing p50 latency, Anyscale, 22 June 2023 — anyscale.com/blog/continuous-batching-llm-inference
 Focus on: the three separate steps it measures. They are simple batching, continuous batching, and continuous batching with paged memory.
@@ -741,9 +750,9 @@ THE COMMANDS (all offline)
 
 ## Things I could not verify
 
-- Orca's exact figures of 0.185 requests per second and 190ms median normalised latency, and the Figure 10a low-load claim. usenix.org blocks automated fetching. Only the 36.9x headline is confirmed, through secondary reading notes of the paper.
+- Orca's exact figures of 0.185 requests per second and 190ms median normalised latency. usenix.org blocks automated fetching; a live re-check of the full English text of the paper on 2026-09-20 confirmed the 36.9x headline at the same latency on GPT-3 175B, but the evaluation section was not readable in that copy. A claim that Figure 10a shows Orca not winning at low load on the 101B model could not be verified from any readable source and was removed from the references.
 
-- When gpu_memory_utilization moved from 0.9 to 0.92, in which release. The 0.95 to 0.9 move in September 2023 is verified through issue #1018. The later move is not pinned.
+- When gpu_memory_utilization moved from 0.9 to 0.92, in which release. The 0.95 to 0.9 move is recorded in issue #1018 (September 2023), which shows the default was already 0.9 by then but does not date the change. The later move is not pinned.
 
 - The about-4% waste figure under paging as a written measurement. The vLLM authors state it in their talk and the Anyscale post writes "under 4%", but no measurement method was read.
 

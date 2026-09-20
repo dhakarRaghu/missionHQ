@@ -455,7 +455,7 @@ internal waste per request under paging: 8 tokens</pre>
 
 <p>Paging admits 18.1x more concurrent requests on the same hardware. The model did not change. The GPU did not change. That result is why PagedAttention became the default in serving engines.</p>
 
-<p>The PagedAttention paper measured the same problem in real systems. In those systems, only 20.4% to 38.2% of KV cache memory held real token state. Reserved slots and fragmentation used the rest. The vLLM authors state in their talk that paging cut that waste to about 4%. The Anyscale team's benchmark post independently writes "under 4%". No written measurement method was found. Treat the exact figure as the authors' claim.</p>
+<p>The PagedAttention paper measured the same problem in real systems. In those systems, only 20.4% to 38.2% of KV cache memory held real token state. Reserved slots and fragmentation used the rest. The vLLM authors state in their talk that paging cut that waste to about 4%. The Anyscale team's benchmark post repeats that figure, quoting vLLM's own blog for "under 4%". No written measurement method was found. Treat the exact figure as the authors' claim.</p>
 
 <figure class="diagram">
 <svg id="s22-svg" viewBox="0 0 640 170" role="img" aria-label="Concurrent requests under contiguous and paged allocation">
@@ -558,7 +558,7 @@ internal waste per request under paging: 8 tokens</pre>
 </aside>
 
 <aside class="addition" data-kind="update">
-<p><strong>The default value has a rot history, and it matters when you read tutorials.</strong> <code>gpu_memory_utilization</code> is 0.92 by default at vLLM 0.29.0, verified in <code>vllm/config/cache.py</code> at that tag. It was 0.95 originally. It was lowered to 0.9 in September 2023, recorded in <a href="https://github.com/vllm-project/vllm/issues/1018">vLLM issue #1018</a>. When it moved from 0.9 to 0.92 is not pinned to a release. The move was not found in the release notes checked on 2026-09-19. Older material, including a vendor post from July 2026, still says 0.90. Any tutorial quoting 0.90 as the current default is stale.</p>
+<p><strong>The default value has a rot history, and it matters when you read tutorials.</strong> <code>gpu_memory_utilization</code> is 0.92 by default at vLLM 0.29.0, verified in <code>vllm/config/cache.py</code> at that tag. It was 0.95 originally. <a href="https://github.com/vllm-project/vllm/issues/1018">vLLM issue #1018</a>, opened in September 2023, records that it had already been lowered from 0.95 to 0.9 by then. The change itself carries no date. When it moved from 0.9 to 0.92 is not pinned to a release. The move was not found in the release notes checked on 2026-09-19. Older material, including a vendor post from July 2026, still says 0.90. Any tutorial quoting 0.90 as the current default is stale.</p>
 </aside>
 
 <div class="keypoints">
@@ -856,8 +856,7 @@ messages = [
 <li><strong>Orca: A Distributed Serving System for Transformer-Based Generative Models, Yu, Jeong, Kim, Kim, Chun, OSDI 2022</strong> — <a href="https://www.usenix.org/conference/osdi22/presentation/yu">usenix.org/conference/osdi22/presentation/yu</a><br>
 Focus on: section 3, which names the two problems. Some requests finish early and some arrive late. Then read section 4.2 and Algorithm 1, which is the scheduler loop in section 2.1.<br>
 The headline number, with conditions: FasterTransformer served 0.185 requests per second at a median normalised latency of 190ms. Orca served 6.81, which is a 36.9x speedup. The test used GPT-3 175B in fp16 on 16 A100 40GB GPUs. Input lengths were drawn uniformly from 32 to 512 tokens. Output lengths were drawn from 1 to 128.<br>
-Also read Figure 10a. There, Orca does not win on a 101B model at low load. The gain comes from scheduling, so it needs load to appear.<br>
-Verification status, 2026-09-19: usenix.org blocks automated fetching and returns 403. Only the 36.9x headline is confirmed, and that through secondary reading notes of the paper. The 0.185 req/s, the 190ms latency, and the Figure 10a claim are not directly verified. The link works in a browser.</li>
+Verification status, 2026-09-20: usenix.org blocks automated fetching and returns 403. A live re-check of the full English text of the paper on 2026-09-20 confirms the 36.9x throughput figure at the same latency on GPT-3 175B, from the abstract and introduction. The evaluation section was not readable in that copy, so the 0.185 req/s and 190ms conditions remain unverified. A claim this entry previously carried about Figure 10a, that Orca does not win at low load on the 101B model, could not be verified from any readable source and has been removed. The link works in a browser.</li>
 
 <li><strong>How continuous batching enables 23x throughput in LLM inference while reducing p50 latency, Anyscale, 22 June 2023</strong> — <a href="https://www.anyscale.com/blog/continuous-batching-llm-inference">anyscale.com/blog/continuous-batching-llm-inference</a><br>
 Focus on: the three separate steps it measures. They are simple batching, continuous batching, and continuous batching with paged memory.<br>
@@ -992,8 +991,8 @@ THE COMMANDS (all offline)
 <h2>Things I could not verify</h2>
 
 <ul>
-<li>Orca's exact figures of 0.185 requests per second and 190ms median normalised latency, and the Figure 10a low-load claim. usenix.org blocks automated fetching. Only the 36.9x headline is confirmed, through secondary reading notes of the paper.</li>
-<li>When <code>gpu_memory_utilization</code> moved from 0.9 to 0.92, in which release. The 0.95 to 0.9 move in September 2023 is verified through issue #1018. The later move is not pinned.</li>
+<li>Orca's exact figures of 0.185 requests per second and 190ms median normalised latency. usenix.org blocks automated fetching; a live re-check of the full English text of the paper on 2026-09-20 confirmed the 36.9x headline at the same latency on GPT-3 175B, but the evaluation section was not readable in that copy. A claim that Figure 10a shows Orca not winning at low load on the 101B model could not be verified from any readable source and was removed from the references.</li>
+<li>When <code>gpu_memory_utilization</code> moved from 0.9 to 0.92, in which release. The 0.95 to 0.9 move is recorded in issue #1018 (September 2023), which shows the default was already 0.9 by then but does not date the change. The later move is not pinned.</li>
 <li>The about-4% waste figure under paging as a written measurement. The vLLM authors state it in their talk and the Anyscale post writes "under 4%", but no measurement method was read.</li>
 <li>The Denpex thrash report's exact log-line spelling and the <code>vllm:num_preemptions_total</code> counter name. The failure mechanism matches the documented vLLM scheduler. The page is a vendor artifact with gated remediation, and the strings were not grep-checked against the source tree.</li>
 <li>The perun.au post's claim of a PagedAttention block-eviction race corrupting continuation tokens during preemption. Single vendor source, no reproduction, no matching vLLM issue found. Do not cite it as real without a second source.</li>
