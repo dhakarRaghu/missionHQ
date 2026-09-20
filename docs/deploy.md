@@ -477,9 +477,15 @@ no board and no chat, because each of those is a request to a machine that is
 not in the picture. The read ticks come from the export and are true as of
 the push. The console on your laptop stays the place that changes anything.
 
-The console routes are deployed too, and behind the same password, but they
-have no backend to talk to. `/courses` and the rest will show "Could not load
-data — HTTP 404": the `/api/*` rewrite points at `BACKEND_ORIGIN`, which on
-Vercel is the serverless function's own localhost with nothing behind it.
-That is expected in this mode. `/read` is the route to use there; the console
-is for your own machine.
+The console routes are deployed too, and they have no backend to talk to:
+the `/api/*` rewrite lands on the serverless function's own localhost, so
+`/courses` showed "Could not load data — HTTP 404" and `/learn` showed empty
+boxes that never filled in. So on a deployment with no backend every console
+path now redirects to `/read`, including `/`. Open the bare domain on the
+phone and you land in the library.
+
+"No backend" is worked out without anything to configure: Vercel sets
+`VERCEL` itself, and a console deployment that does have a backend sets
+`NEXT_PUBLIC_API_BASE` (section 11). Your own machine sets neither, so the
+console there is untouched — `/` still goes to `/home` and every view works
+as before.

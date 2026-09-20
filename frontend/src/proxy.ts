@@ -49,14 +49,53 @@ function passwordFrom(header: string | null): string {
   }
 }
 
+/**
+ * Is this a deployment that has no backend behind it?
+ *
+ * Vercel sets `VERCEL` on its own. A console there can still be real — that
+ * is section 11 of the deploy guide, where `NEXT_PUBLIC_API_BASE` points at a
+ * backend on a VPS. With no API base there is nothing for the console to
+ * talk to, so every console view is a spinner that never resolves: he opened
+ * `/courses` and got "HTTP 404", then `/learn` and got empty boxes, because
+ * the `/api/*` rewrite lands on the function's own localhost.
+ *
+ * Nothing new to configure: his machine has no `VERCEL`, and a real console
+ * on Vercel has the API base.
+ */
+const readerOnly =
+  Boolean(process.env.VERCEL) && !process.env.NEXT_PUBLIC_API_BASE;
+
+/** Paths that must answer for themselves on a reader-only deployment. */
+function servesItself(path: string): boolean {
+  return (
+    path === "/read" ||
+    path.startsWith("/read/") ||
+    path.startsWith("/reader/") ||
+    path.startsWith("/_next/") ||
+    path === "/favicon.ico" ||
+    path === "/robots.txt"
+  );
+}
+
 export function proxy(request: NextRequest) {
   const expected = process.env.READER_PASSWORD ?? "";
-  if (!expected) return NextResponse.next();
+  const path = request.nextUrl.pathname;
 
-  if (sameSecret(passwordFrom(request.headers.get("authorization")), expected)) {
-    return NextResponse.next();
+  if (expected) {
+    const given = passwordFrom(request.headers.get("authorization"));
+    if (!sameSecret(given, expected)) return askForPassword();
   }
 
+  // Send the console's routes to the one view that works here, rather than
+  // leaving him on a page that will never fill in.
+  if (readerOnly && !servesItself(path)) {
+    return NextResponse.redirect(new URL("/read", request.url));
+  }
+
+  return NextResponse.next();
+}
+
+function askForPassword() {
   return new NextResponse("Mission HQ — sign in to read.", {
     status: 401,
     headers: {
