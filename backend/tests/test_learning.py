@@ -1257,7 +1257,7 @@ def test_course_briefs_load_one_shared_skill_and_one_object_skill() -> None:
     # repo copy, one section per call, and never re-labbed.
     published = learning.course_lesson_brief(platform, [])
     assert "read_course_source" in published and "write_lesson_part" in published
-    assert "One section per call" in published
+    assert "one section at a" in published and "not a patched copy" in published
     assert "write_lab_files" not in published
     assert "course-spec-research" in learning.course_study_brief(local)
     assert "course-spec-research" not in learning.course_study_brief(platform)
@@ -1888,44 +1888,105 @@ def test_a_course_build_gets_the_time_it_needs_and_a_reachable_reading_limit() -
     assert "reads heavier" in page_coverage(source, heavy)
 
 
-def test_what_mission_hq_adds_is_checked_against_the_sources_it_cites() -> None:
-    """The phase came from /study with its own review, and the page is checked
-    by code. The addition boxes are the one part nobody has read before him."""
+def test_the_lessons_own_new_facts_are_checked_without_marking_them() -> None:
+    """One finished lesson, not his phase with patches on it: "I need the
+    final enhanced version ... not putting the patches". Nothing on the page
+    is labelled, so the check compares the lesson with the phase it was
+    written from and takes the sentences that state something new."""
     import inspect
 
     from hq import engine
     from hq.learning_pipeline import (
-        MAX_CLAIMS_ROUNDS,
         claims_brief,
         claims_payload,
         claims_revision_brief,
         extract_claim_failures,
         is_claims_check,
     )
-    from hq.tools.learning_tools import page_additions
+    from hq.tools.learning_tools import new_claims
 
+    source = "## 2.1 - Batching\n" + " ".join(
+        ["The scheduler runs a loop over the batch and admits what fits."] * 30)
     page = (
-        '<aside class="addition" data-kind="update"><p>The default is 0.92 at v0.29.0.</p>'
-        '<p>Sources: <a href="https://example.dev/cache.py">cache.py</a></p></aside>'
-        '<aside class="addition" data-kind="incident"><p>It failed in production.</p></aside>'
+        "<h2><span class='num'>2.1</span> Batching</h2>"
+        "<p>The scheduler runs a loop over the batch and admits what fits.</p>"
+        "<p>At v0.29.0 the default is 0.92, read in "
+        "<a href='https://ex.dev/cache.py'>cache.py</a>.</p>"
+        "<pre>a drawing that happens to carry 1234 inside it somewhere</pre>"
     )
-    found = page_additions(page)
-    assert [a["kind"] for a in found] == ["update", "incident"]
-    assert found[0]["urls"] == ["https://example.dev/cache.py"] and found[1]["urls"] == []
+    found = new_claims(source, page)
+    assert len(found) == 1                       # his own sentence is not a claim
+    assert "0.92" in found[0]["claim"] and found[0]["urls"] == ["https://ex.dev/cache.py"]
+    assert "1234" not in " ".join(c["claim"] for c in found)   # drawings are not prose
 
     payload = claims_payload({"slug": "c-phase-02a-x", "course": "c", "title": "T",
                               "url": "https://p/x", "source": "platform"})
     assert is_claims_check(payload)
     brief = claims_brief(payload, found)
-    assert "fetch_source" in brief and "cites nothing is a finding" in brief
+    assert "fetch_source" in brief and "no source behind it" in brief
 
     assert extract_claim_failures('```json\n{"checked":2,"failed":[]}\n```') == []
     failures = extract_claim_failures(
-        '```json\n{"checked":2,"failed":[{"id":"a1","problem":"the tag says 0.9","fix":"use 0.9"}]}\n```')
-    assert failures[0]["id"] == "a1"
+        '```json\n{"checked":2,"failed":[{"id":"c1","problem":"the tag says 0.9",'
+        '"fix":"use 0.9"}]}\n```')
+    assert failures[0]["id"] == "c1"
     fix = claims_revision_brief(payload, failures)
-    assert "the tag says 0.9" in fix and "rewrite only the parts" in fix.lower()
+    assert "the tag says 0.9" in fix and "rewrite only the\nparts" in fix
 
     chain = inspect.getsource(engine._advance_learning)
-    assert "_page_additions_step" in chain and "is_claims_check" in chain
-    assert "MAX_CLAIMS_ROUNDS" in chain or str(MAX_CLAIMS_ROUNDS)
+    assert "_new_claims_step" in chain and "is_claims_check" in chain
+
+
+def test_a_lesson_keeps_its_page_even_when_only_the_markdown_is_recorded() -> None:
+    """Phase 2B was recorded with md_path alone, so the Courses page said the
+    lesson was not built while its page sat next to it on disk."""
+    import inspect
+
+    from hq.tools import learning_tools
+
+    src = inspect.getsource(learning_tools.record_lesson)
+    assert 'if not html_path.strip():' in src and 'with_suffix(".html")' in src
+
+
+def test_a_long_section_with_nothing_to_look_at_is_sent_back() -> None:
+    """He asked for a course page that works like a Claude artifact.
+
+    A section that runs long with only prose in it is the thing he was
+    pointing at, so the check names it and says which piece would fix it.
+    """
+    from hq.tools.learning_tools import page_coverage, sections_without_a_visual
+
+    prose = "<p>" + "the scheduler admits a request. " * 60 + "</p>"
+    source = "## 1.1 — Admission\n" + "the scheduler admits a request. " * 120
+    bare = "<h2><span class='num'>1.1</span> How admission works</h2>" + prose
+    assert sections_without_a_visual(bare) == ["1.1 How admission works"]
+    assert "nothing to look at" in page_coverage(source, bare)
+
+    shown = bare + '<div class="stats"><div class="stat"><b>0.92</b><span>utilisation</span></div></div>'
+    assert sections_without_a_visual(shown) == []
+    assert "nothing to look at" not in page_coverage(source, shown)
+
+    # Exercises and sources carry their own shape; a figure there is noise.
+    closing = "<h2>Exercises</h2>" + prose
+    assert sections_without_a_visual(closing) == []
+
+
+def test_a_figure_can_call_the_kit_helpers_where_it_is_written() -> None:
+    """`kit` is defined in the head, so a body script may use it inline.
+
+    And the dead-figure check knows `kit.calc('#id')` is a lookup, the same
+    as `querySelector('#id')`.
+    """
+    from hq.lesson_kit import wrap_page
+    from hq.tools.learning_tools import page_script_problems
+
+    body = ('<div class="calc" id="s3-kv"><input type="range" name="layers" value="32">'
+            '<b data-out="bytes"></b>'
+            "<script>kit.calc('#s3-kv', function(v){ return {bytes: kit.fmt(v.layers)}; });</script>"
+            "</div>")
+    page = wrap_page(body, title="Demo")
+    assert page.index("window.kit") < page.index("<body>")
+    assert page_script_problems(page) == ""
+
+    dead = body.replace("'#s3-kv'", "'#s3-kvcache'")
+    assert "s3-kvcache" in page_script_problems(wrap_page(dead, title="Demo"))

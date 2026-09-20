@@ -218,7 +218,6 @@ bar, copy buttons on code, and working steppers and tabs. No doctype, head,
 <p class="why">                        why this section matters (the lead)
 <div class="keypoints">                <p class="remember">  <p class="trap">  <p class="try">
 <div class="callout note|tip|warn">    a short aside
-<aside class="addition" data-kind="update|correction|incident|deeper|practice">
 <figure class="diagram"><svg viewBox="…">…</svg><figcaption>…
 <pre class="ascii">                    an exact box-drawing diagram
 <pre><code data-lang="python">          code
@@ -230,9 +229,30 @@ bar, copy buttons on code, and working steppers and tabs. No doctype, head,
 <ol class="timeline"><li><time>t=3s</time> …
 <ul class="exercises"><li><label><input type="checkbox"> <b>E1</b> <span class="tag">offline</span></label> …
 <details class="answer"><summary>Answer sketch</summary> …
+<div class="cards" data-cols="2"><div class="card"><h4>…</h4><p>…</p></div></div>
+<div class="lab">                      a block he runs: the command, what he should see
+<span class="badge">offline</span>     <kbd>Ctrl</kbd>
+<div class="calc" id="s3-kv">          a number he can move, and the result moves
+  <h4>KV cache per sequence</h4>
+  <label>Layers <input type="range" name="layers" min="8" max="96" value="32">
+    <span class="val" data-val="layers"></span></label>
+  <div class="result">Per token <b data-out="bytes"></b></div>
+  <script>kit.calc('#s3-kv', function(v){ return {bytes: kit.fmt(4*v.layers*128,0)+' B'}; });</script>
+</div>
+<div class="toggle-fig">               one view at a time: before and after
+  <button data-show="before">Without paging</button><button data-show="after">With paging</button>
+  <div class="views"><div data-view="before">…</div><div data-view="after">…</div></div>
+</div>
+<div class="legend"><span><i style="background:var(--accent)"></i>prefill</span>…</div>
 <pre class="cheatsheet">
 <ul class="sources">
 ```
+
+`kit` is ready before your script runs: `kit.$`, `kit.$$`, `kit.fmt(n, digits)`
+and `kit.calc(selector, compute)`. `kit.calc` reads every input in the box by
+its `name`, writes each `[data-val="name"]` with the current value, calls your
+function with them, and fills each `[data-out="key"]` from what it returns. A
+slider figure is then four lines of script, not forty.
 
 - **Nothing loaded from the internet.** No CDN script, no web font, no remote
   image. The frame blocks outside loads, and it has no storage either.
@@ -253,6 +273,29 @@ not measured" in its caption.
 A figure is for a **mechanism**: where a request goes, where the time is
 spent, what a number does to the outcome. A box per heading is decoration.
 Label parts with the real names from the material.
+
+**A course phase is not an article.** He asked for the page to work the way a
+Claude artifact does: "make it more visual". Every section long enough to
+carry a mechanism carries something to look at as well, and `write_lesson`
+refuses a page where a long section has none. It does not have to be an
+animation. A table, a stats row, bars, a timeline, a wrong/right compare, an
+ascii diagram, steps or a `calc` box all count, and the cheapest one that
+shows the mechanism is the right one.
+
+Reach for the piece that matches the idea:
+
+| The idea | The piece |
+|---|---|
+| where a request goes, what holds what | `<figure class="diagram">` with SVG, or `<pre class="ascii">` |
+| how one number drives another | `<div class="calc">` with a slider |
+| before and after a change | `<div class="toggle-fig">` |
+| the wrong way next to the right way | `<div class="compare">` |
+| an order of operations | `<ol class="steps">` |
+| when each thing happened | `<ol class="timeline">` |
+| the same job in two systems | `<div class="tabs">` |
+| a measurement | `<div class="stats">` or `<div class="bars">` |
+| three things that sit at the same level | `<div class="cards">` |
+| something he runs himself | `<div class="lab">` |
 
 An article carries **one** interactive figure, for its central mechanism. A
 course page may carry **one per major section** where it teaches. Drawn by

@@ -11,126 +11,76 @@ less ground to read lighter is the one trade he has ruled out.
 ## Two kinds of phase, and which one you have
 
 **Phases written with Claude.** The course is written with Claude and the
-/study skill. Its markdown is published to his study platform and kept in the
-repo under `learning/study-material/`. Most phases are this kind, and the
-brief says "Build the enhanced page". Follow "Building the enhanced page",
-below. The planning, page and diagram rules in this skill and in `teaching`
-all apply.
+/study skill, published to his study platform, and kept in the repo under
+`learning/study-material/`. Most phases are this kind, and the brief says
+"Write the lesson he reads". Follow "Writing the lesson for a phase", below.
 
 **Spec phases.** An older path: a spec in `learning/courses/` written up here
-from hunter's note. The evening run no longer starts these; a spec phase is
-generated with Claude first. The writing sections below remain for revising a
-lesson written this way.
+from hunter's note. The evening run no longer starts these. The writing
+sections further down remain for revising a lesson written that way.
 
-## Building the enhanced page
+## Writing the lesson for a phase
 
-The original stays on the study platform as markdown. **He reads your
-version.** It is the same course, all of it, made into the best page he could
-learn from: visual, interactive where that teaches, and carrying what hunter
-found after the original was written. It is not a summary and not a set of
-notes about the original.
+You have two inputs: his phase, through `read_course_source`, and hunter's
+research note. You write one lesson from them. He said what he wants from it:
 
-**Length follows value, not a target.** There is no word limit. A long page is
-right when every paragraph gives him something the source did not. What he
-objects to is the other kind of length: "repeated means don't increase the
-size by just explaining it again and again". So each point is explained once,
-in the place it belongs, and never restated in different words later.
-`write_lesson` measures near-repeats across the whole page and names them.
+> "I need the final enhanced version or improvement, I'm just learning, so no
+> need to mark it ... it's all about the content that you created, the final
+> content that was created for me to learn ... don't put these patches."
 
-**Rewrite only to make it simpler.** He said it: "rewriting is fine, the
-language simpler for me to understand". So you may reword any sentence, and
-you should when it is long or tangled. But the page must read more easily
-than his own text: shorter sentences on average, and fewer of them over 25
-words. `write_lesson` measures both and sends back a page that reads harder.
-A sentence that is already clear gains nothing from being reworded.
+So there is no "original" and no "addition" on the page. There is a lesson.
 
-**A number is a fact.** When you rewrite a passage, every number in it comes
-through: sizes, versions, prices, dates, measured results. The check lists
-the ones you dropped. If a number is wrong now, correct it and say so in a
-correction box, never by deleting it.
+**Judge every paragraph by one question: is this the best way to teach him
+this, today?** Where his sentence is already that, keep it word for word.
+Where the research changes the picture, teach the current picture as the
+plain fact of the matter, with its source named in the sentence — not the old
+version with a correction beside it. Where his phase has a gap the note
+found, teach it here, in the section where it belongs. How much of either
+input survives is not a measure of anything, and nobody is counting.
 
-**Say each point once.** A concept gets its explanation, and one summary: the
-key-points box. Do not also open with a lead that says the same thing, and do
-not repeat it again in the cheatsheet. The lead is for a section whose first
-paragraph does not already say why it matters. The cheatsheet holds values,
-flags, commands and formulas, not sentences. Leads, key-point boxes and the
-cheatsheet together stay under about 15% of the page.
+**Write it into the course, not beside it.** The brief lists the phases
+before this one with their sections, and the phases after it. A mechanism an
+earlier phase taught is used, with one clause to reconnect it, never taught
+again. A mechanism a later phase owns is named in a sentence and left for it.
+Something the course never covers and he needs here is taught here, properly,
+because this is where he will meet it.
 
-**What you keep, always.** Every numbered section, every exercise with its
-exact command and expected output, every checkpoint with its answer sketch,
-the references, the cheatsheet, and every number with its conditions. The
-original was reviewed and its numbers came from real runs: copy commands,
-outputs and numbers exactly. `write_lesson` refuses a page that drops a
-numbered section, an exercise id, an exact `Run:` command or an answer
-sketch, that teaches fewer words than the original, or that links anywhere
-the original and the note do not.
+**What must survive from his phase, exactly:**
 
-**Corrections go in the text.** When the note shows the original is now
-wrong (a default that changed, a model or price that moved), fix the sentence
-and every number that follows from it, then put a `correction` box right
-there saying what the original said, what is true now, and the source. He
-must never read a wrong sentence with the fix only in a side box.
+- every numbered section, in order, with its number
+- every exercise, its id, its exact command and its expected output: the
+  commands were run, and yours were not
+- every answer sketch, in `<details class="answer">`
+- every number, unless the research shows it changed, and then the new number
+  with its source and version
+- the lab, the check-it-yourself section, the references and the cheatsheet
 
-**His employer is never named**, even where the original names it. Older
-courses do. Replace each mention with the mechanism in general terms ("a
-multi-tenant SaaS platform"). A command or file path that contains the name
-is rewritten with a neutral name, with one line saying the file is named
-differently in his copy of the code. `write_lesson` refuses any page that
-still names it.
+**What the page must never contain:** a label saying something was added, a
+box announcing a correction, a percentage, a note about what the original
+said, or his employer's name. If the original was wrong, the lesson is
+simply right.
 
-**What you improve.**
+**Every fact is sourced.** Defaults, flags and versions come from the note,
+with the version they were read at. A number carries its conditions. A claim
+the note cannot support does not go in. A separate run opens the links behind
+the lesson's new facts and checks them, so an invented one is found.
 
-- **Diagrams.** A box-drawing diagram that shows a flow, a timeline, a
-  comparison or a ratio becomes a `figure.diagram` with inline SVG, or a
-  `.timeline`, `.compare`, `.stats` or `.bars` block. Keep the exact
-  `pre.ascii` when a drawing is already clear. Every number in a drawing comes
-  from the original.
-- **Interactivity, where it teaches.** For the phase's central mechanisms,
-  up to one interactive figure per major section: a slider that moves the
-  number the section is about, a toggle between the wrong and the right
-  state, a stepper through a sequence. The diagram-check rules in `teaching`
-  apply to each.
-- **Structure.** `p.why` for the "Why this matters" lead, `div.keypoints`
-  for the remember / trap / try lines, `.compare` for WRONG and RIGHT,
-  `ol.steps` for walkthroughs, `ul.exercises` for the lab, `details.answer`
-  for answer sketches, `pre.cheatsheet` for the cheatsheet.
-- **Teaching.** Where a paragraph is dense, split it, add the missing step,
-  or put a small worked example beside it. Never replace a precise sentence
-  with a vaguer one, and never reword one that is already clear.
-
-**What you add, from the note.** Put each finding inside the section it
-belongs to, as `<aside class="addition" data-kind="…">`:
-
-- `update` — a default, version, price or limit that changed: old value,
-  new value, version or date, source.
-- `correction` — the original is wrong now. Quote its sentence, give the
-  current fact and the source.
-- `incident` — a real failure on this mechanism: symptom, wrong first
-  theory, the signal that found it, the fix, what it changes for him.
-- `deeper` — the level below the section, from a primary source the note read.
-- `practice` — an exercise the section lacks, only when the note shows it runs.
-
-Every url in an addition comes from the note. Carry its labels: verified,
-inferred, not checked. Few and strong: an addition that restates the section
-is worse than none.
+**Diagrams, code and figures** follow `teaching`: his box drawings stay exact
+where they are clear, and become figures where a drawing teaches better.
 
 **How to write it, so it finishes.**
 
-1. `lesson_draft` first; continue after any saved parts.
-2. `read_course_source(slug)` for the section list.
-3. For each section in order: `read_course_source(slug, section)`, then
-   `write_lesson_part(slug, part, html=…)` with the markdown left empty.
-   Write the section body only; the kit adds the page around it. Headings are
-   `<h2><span class="num">3.1</span> …</h2>`, keeping the section number.
-   One section per call.
-4. `write_lesson(slug, title=…, subtitle=…, eyebrow=…)`, then
-   `record_lesson` with `kind: "course"`.
+1. `lesson_draft` with the slug; continue after any saved parts.
+2. `read_course_source(slug)` for the section list. Then, one section at a
+   time: read it, decide what this lesson's version of that section is, and
+   write it with `write_lesson_part`. One section per call.
+3. `write_lesson(slug, title=…, subtitle=…, eyebrow=…)`, then `record_lesson`
+   with `kind: "course"`.
 
 **If `write_lesson` sends the page back, fix only what it names.** Every part
-you saved is still there. Rewrite those part numbers with `write_lesson_part`
-and call `write_lesson` again. Rewriting the whole phase after one finding
-doubles the run: on 2026-09-17 a single length finding cost eleven sections
-rewritten for nothing.
+you saved is still there. Rewriting the whole phase after one finding doubles
+the run: on 2026-09-17 a single length finding cost eleven sections rewritten
+for nothing.
 
 ## A local spec is a contract
 
@@ -166,8 +116,8 @@ leaves-for-later:  terms that belong to a later phase
 
 ## Rewriting a platform module (older lessons only)
 
-The evening run no longer asks for this: published phases get additions,
-above. It applies only when a brief explicitly asks for a rewrite of a
+The evening run no longer asks for this: a published phase becomes one
+lesson, written as "Writing the lesson for a phase" describes. It applies only when a brief explicitly asks for a rewrite of a
 platform module lesson written before this change.
 
 - **Teach at least as much as the module.** The note opens with the module's
@@ -284,18 +234,30 @@ makes it stick. All of it comes from the note, per `teaching`.
 
 ## Diagrams and tables
 
-**Maximum five paragraphs before the next diagram or code block.** Count them.
+**Maximum five paragraphs before the next diagram, figure or code block.**
+Count them. And **every section that teaches a mechanism carries one piece of
+the kit**: he asked the course pages to work like a Claude artifact, and
+`write_lesson` refuses a page where a long section is prose only.
 
-Draw with box-drawing characters in fenced code blocks: `┌ ┐ └ ┘ │ ─ ├ ┤ ► ◄`.
-Four kinds, each for one job:
+`teaching` has the table that matches an idea to a piece. Four jobs come up in
+almost every phase:
 
 - **Architecture**: what sits where, what talks to what, arrow direction.
-- **Timeline**: sequences, rows `t=0`, `t=1`, `t=2`, actor on the left.
-- **Before / after**: two blocks, same labels, the changed value marked.
+  `<pre class="ascii">` with `┌ ┐ └ ┘ │ ─ ├ ┤ ► ◄`, or an SVG
+  `<figure class="diagram">` when the drawing carries more than boxes.
+- **Timeline**: `<ol class="timeline">`, actor and `t=` on each row.
+- **Before / after**: `<div class="toggle-fig">`, same labels in both views,
+  one button each. Use `<div class="compare">` when the two must be seen at
+  once.
 - **Comparison table, with real numbers** and their conditions. Never
   high/medium/low. No numbers means no table.
 
-Label parts with real names. On the page these stay in `<pre>` blocks.
+**Where a number drives a number, give him the slider**, not the formula
+alone: a `<div class="calc">` with `kit.calc` costs four lines of script and
+lets him find the cliff himself. Batch size against KV memory, concurrency
+against p99, block size against waste: each of those is a calc box.
+
+Label parts with real names.
 
 ## Code
 

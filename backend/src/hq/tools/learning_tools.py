@@ -356,6 +356,15 @@ async def record_lesson(
         raise ModelRetry("title is required: the lesson's own headline")
     if not md_path.strip():
         raise ModelRetry("md_path is required: where you wrote the lesson")
+    # The page is what he opens. On 2026-09-20 tutor recorded Phase 2B with
+    # only the markdown path, so the Courses page said the lesson was not
+    # built while its 114 KB page sat beside it on disk. `write_lesson`
+    # returns both paths; if one is left out, take the page that exists.
+    if not html_path.strip():
+        beside = settings().learning_dir.parent / md_path.strip()
+        page = beside.with_suffix(".html")
+        if page.is_file():
+            html_path = str(page.relative_to(settings().learning_dir.parent))
     urls = [u.strip() for u in source_urls.replace("\n", ",").split(",") if u.strip()]
     score = max(0, min(int(score or 0), 1000))
     relationship = relationship.strip().lower()
@@ -1157,7 +1166,8 @@ def _listed(items: Sequence[str]) -> str:
 _ID_ATTR_RE = re.compile(r"""\bid\s*=\s*["']([^"']+)["']""")
 _SCRIPT_RE = re.compile(r"<script[^>]*>(.*?)</script>", re.DOTALL | re.IGNORECASE)
 _ID_LOOKUP_RE = re.compile(
-    r"""getElementById\(\s*["']([^"']+)["']\s*\)|querySelector(?:All)?\(\s*["']#([\w-]+)["']"""
+    r"""getElementById\(\s*["']([^"']+)["']\s*\)"""
+    r"""|(?:querySelector(?:All)?|kit\.calc|kit\.\$\$?)\(\s*["']#([\w-]+)["']"""
 )
 
 
@@ -1322,30 +1332,83 @@ def _restatement_words(page_html: str) -> int:
     return sum(_visible_words(block) for block in _RESTATEMENT_RE.findall(page_html))
 
 
-_ADDITION_RE = re.compile(
-    r'<aside class="addition"[^>]*data-kind="([a-z]+)"[^>]*>(.*?)</aside>',
-    re.DOTALL | re.IGNORECASE,
-)
-_HREF_RE = re.compile(r'href="(https?://[^"]+)"')
+# An addition is a paragraph inside the section, marked for the checker and
+# unmarked for him. The old boxed form still parses: pages written before
+# 2026-09-20 use it.
+# What the lesson says that his original did not. He asked for one finished
+# lesson rather than the original with marked patches on it: "I need the final
+# enhanced version ... not putting the patches". So nothing is labelled in the
+# page, and the claims run finds the new material by comparing the lesson with
+# the phase it was written from. A sentence that carries a number, a flag, a
+# version or a link, and is not his, is a claim nobody has checked yet.
+_CLAIMY_RE = re.compile(r"\d|`[^`]+`|https?://")
+_HREF_RE = re.compile(r"""href=["'](https?://[^"']+)["']""")
+MAX_CLAIMS = 30
 
 
-def page_additions(page_html: str) -> list[dict[str, Any]]:
-    """What Mission HQ added to a phase: kind, text, and the urls it cites.
-
-    The claims in these boxes are the part of the page that his own course
-    did not carry, so they are the part nobody has checked. This is what the
-    claims run reads.
-    """
+def new_claims(source: str, page_html: str) -> list[dict[str, Any]]:
+    """Sentences the lesson adds that carry a checkable fact, with their links."""
+    original = [_shingles(s) for s in _sentences(source)]
     out: list[dict[str, Any]] = []
-    for index, (kind, block) in enumerate(_ADDITION_RE.findall(page_html), start=1):
-        text = " ".join(html_lib.unescape(re.sub(r"<[^>]+>", " ", block)).split())
-        out.append({
-            "id": f"a{index}",
-            "kind": kind,
-            "text": text[:1200],
-            "urls": sorted(set(_HREF_RE.findall(block))),
-        })
+    # The hero and the contents rail are not claims, and a box drawing is not
+    # a sentence: both produced noise on the first run.
+    body = re.sub(r"<(nav|header|pre)[^>]*>.*?</\1>", " ", page_html,
+                  flags=re.DOTALL | re.IGNORECASE)
+    for block in re.split(r"(?=<h2)", body)[1:]:
+        heading = re.search(r"<h2[^>]*>(.*?)</h2>", block, re.DOTALL)
+        where = " ".join(re.sub(r"<[^>]+>", " ", heading.group(1)).split())[:60] if heading else ""
+        links = sorted(set(_HREF_RE.findall(block)))
+        for sentence in _sentences(_page_text(block)):
+            marks = _shingles(sentence)
+            if not marks or not _CLAIMY_RE.search(sentence):
+                continue
+            if any(len(marks & o) / len(marks) > 0.5 for o in original):
+                continue  # his own sentence, reviewed where it came from
+            out.append({"id": f"c{len(out) + 1}", "section": where,
+                        "claim": sentence[:400], "urls": links[:6]})
+            if len(out) >= MAX_CLAIMS:
+                return out
     return out
+
+
+# A course phase is not an article: he asked for the page to work like a
+# Claude artifact, "more visual". A mechanism he can see, step through or move
+# a number in is what separates the two. So every section long enough to carry
+# a mechanism has to carry one piece of the kit as well, and this counts them.
+VISUAL_SECTION_WORDS = 220
+_VISUALS = (
+    "<figure", "<svg", "<table", "<pre",
+    'class="stats"', 'class="bars"', 'class="timeline"',
+    'class="compare"', 'class="steps"', 'class="tabs"', 'class="calc"',
+    'class="toggle-fig"', 'class="cards"',
+)
+# These carry their own shape, and a figure inside them would be noise.
+_NO_VISUAL_NEEDED = ("exercise", "answer", "source", "cheat", "reference",
+                     "further learning", "could not verify", "what to read",
+                     "before you start", "recap", "check it yourself", "question")
+
+
+def sections_without_a_visual(page_html: str) -> list[str]:
+    """Section headings whose text runs long with nothing to look at."""
+    parts = re.split(r"(?i)(?=<h2\b)", page_html)
+    bare = []
+    for part in parts[1:]:
+        head = re.search(r"(?is)<h2\b[^>]*>(.*?)</h2>", part)
+        if not head:
+            continue
+        title = " ".join(html_lib.unescape(re.sub(r"<[^>]+>", " ", head.group(1))).split())
+        if any(word in title.lower() for word in _NO_VISUAL_NEEDED):
+            continue
+        if _visible_words(part) < VISUAL_SECTION_WORDS:
+            continue
+        low = part.lower()
+        # A lab or a question set is already a list of things he does, and a
+        # figure between the items would only push them apart.
+        if 'class="exercises"' in low or "<details" in low:
+            continue
+        if not any(mark in low for mark in _VISUALS):
+            bare.append(title)
+    return bare
 
 
 def page_coverage(source: str, page_html: str, note: str = "") -> str:
@@ -1439,6 +1502,16 @@ def page_coverage(source: str, page_html: str, note: str = "") -> str:
             f" (ceiling {RESTATEMENT_SHARE:.0%}). One restatement per concept: keep"
             " the key-points box and drop the lead when the first paragraph"
             " already says why"
+        )
+
+    bare = sections_without_a_visual(page_html) if measurable else []
+    if bare:
+        problems.append(
+            "these sections run long with nothing to look at: " + _listed(bare)
+            + ". A course phase has to show the mechanism, not only describe it:"
+            " give each one a figure, an ascii diagram, a table, a stats row,"
+            " bars, a timeline, a wrong/right compare, steps, tabs, or a calc"
+            " box he can move a number in"
         )
 
     exercises = sorted(set(_EXERCISE_ID_RE.findall(source)), key=lambda e: int(e[1:]))

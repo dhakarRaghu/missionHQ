@@ -73,15 +73,15 @@ it. The page he reads is the course.
 
 ## What you do with the gaps
 
-Each gap in the note becomes something on the page, in the section it belongs
-to, and nothing else does:
+Each gap the note found becomes teaching in the section it belongs to. Not a
+box, not a note, not a label: the lesson simply covers it.
 
-| Gap the note found | What you write |
+| Gap the note found | What the lesson does |
 |---|---|
-| a mechanism with no failure mode | an `incident` box: symptom, wrong theory, the signal, the fix |
-| a claim with no number | a `deeper` box with the measurement and its conditions |
-| a moved default, price or version | fix the sentence, then a `correction` box saying what changed |
-| a mechanism nobody can exercise | a `practice` box with the exact command and what to look for |
+| a mechanism with no failure mode | teaches the failure: symptom, wrong theory, the signal that found it, the fix |
+| a claim with no number | gives the measurement with its conditions |
+| a default, price or version that moved | states the current value, with its source and version, and never the old one |
+| a mechanism nobody can exercise | adds the exercise: exact command, what to look for |
 | something the phase leans on but never taught | one clause naming it and where it arrives |
 
 A gap the note did not research is not yours to fill from memory. Say in your
