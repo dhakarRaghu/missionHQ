@@ -2044,3 +2044,27 @@ def test_claims_the_cap_gives_up_on_are_left_on_the_lesson() -> None:
 
     flag = inspect.getsource(engine._flag_unverified_claims_step)
     assert "review_status = 'revise'" in flag and "review_notes" in flag
+
+
+def test_a_whole_document_from_tutor_is_sent_back() -> None:
+    """The kit is the only way the design and the no-labels rule hold.
+
+    On 2026-09-20 Phase 2A arrived as its own document carrying a months-old
+    copy of the kit, so the page had none of the new components and printed
+    "ADDED · DEEPER" over every paragraph Mission HQ had written — the exact
+    marking he had asked to be rid of.
+    """
+    import inspect
+
+    from hq import lesson_kit
+    from hq.tools import learning_tools
+
+    src = inspect.getsource(learning_tools.write_lesson)
+    assert "is_full_document(html)" in src
+    assert "whole HTML document" in src
+    # wrap_page keeps its own escape hatch: it re-wraps pages that already exist.
+    assert "is_full_document" in inspect.getsource(lesson_kit.wrap_page)
+
+    # And the kit itself labels nothing it was given.
+    assert "::before" not in lesson_kit.KIT_CSS.split(".addition")[1].split("}")[0]
+    assert "Added" not in lesson_kit.KIT_CSS

@@ -75,23 +75,20 @@ th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--mu
 .callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
 .callout.tip{background:var(--ok-soft);border-color:transparent}
 .callout.warn{background:var(--warn-soft);border-color:transparent}
-.addition{margin:1.8rem 0;padding:1rem 1.1rem 1rem 1.2rem;border-radius:12px;
-  border:1px solid var(--line);border-left:4px solid var(--violet);background:var(--violet-soft)}
-.addition::before{display:block;font-size:.7rem;font-weight:700;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--violet);margin-bottom:.3rem;content:"Added · deeper"}
-.addition[data-kind=update]::before{content:"Added · what changed since"}
-.addition[data-kind=correction]{border-left-color:var(--bad);background:var(--bad-soft)}
-.addition[data-kind=correction]::before{content:"Correction";color:var(--bad)}
-.addition[data-kind=incident]{border-left-color:var(--warn);background:var(--warn-soft)}
-.addition[data-kind=incident]::before{content:"Production incident";color:var(--warn)}
-.addition[data-kind=practice]{border-left-color:var(--ok);background:var(--ok-soft)}
-.addition[data-kind=practice]::before{content:"Added · practice";color:var(--ok)}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
 .addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
 figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
 figure.diagram svg{width:100%;height:auto;display:block}
 figure.diagram svg text{fill:var(--fg);font-family:inherit}
 figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
-figure.diagram button,.steps-nav button,.tabs-nav button{font:inherit;font-size:.82rem;
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
   padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
   color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
 button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
@@ -133,8 +130,87 @@ details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(
 pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
 .sources li{margin:.4rem 0}
 hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
 @media print{nav.toc,#progress,.copy{display:none}}
 </style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
 </head>
 <body>
 <div id="progress"></div>
@@ -142,6 +218,7 @@ hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
 <nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
 <main>
 <header class="hero"><div class="eyebrow">Inference Internals · Phase 2A</div><h1>Scheduling and Memory</h1><p class="subtitle">How the server shares one GPU between strangers</p></header>
+
 <p class="why">Your TTFT tripled at 3pm and your prompt did not change. You open your own logs. Your code sent the same bytes, at the same rate, with the same key. The provider returned the same answer, three times slower. Nothing on your side explains it. The explanation is not on your side. It is inside the server. It sits in the requests that arrived at the same second as yours.</p>
 
 <p>Phase 1 looked at one request on its own. You measured its TTFT, its TPOT, and its bill. TTFT is the time to first token. TPOT is the time per output token after the first. That model is correct, but it is not complete. A real inference server never runs one request. It runs a loop over a batch. Your request shares a GPU with requests from other people.</p>
@@ -1009,6 +1086,7 @@ THE COMMANDS (all offline)
 </ul>
 
 <p>Part B covers three topics: chunked prefill and the stream freeze, constrained decoding, and the compaction trigger.</p>
+
 </main>
 </div>
 <script>
@@ -1029,6 +1107,24 @@ THE COMMANDS (all offline)
     links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
   }
   window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
   // Copy buttons. The clipboard can be refused inside the sandbox; say so.
   [].forEach.call(main.querySelectorAll('pre'),function(pre){
     var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');

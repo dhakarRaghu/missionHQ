@@ -672,6 +672,23 @@ async def write_lesson(
     markdown = _FRONTMATTER_RE.sub("", markdown, count=1)
     html = _FRONTMATTER_RE.sub("", html, count=1)
 
+    # A whole document from tutor bypasses the kit, and on 2026-09-20 that is
+    # exactly what happened: Phase 2A arrived with its own <style> block
+    # holding a months-old copy of the kit, so the page had none of the new
+    # components and still printed "ADDED · DEEPER" over every paragraph
+    # Mission HQ had written. He had already said what he wants there: "I need
+    # the final enhanced version... not putting the patches." The kit is the
+    # only way the design and that rule stay true for every page, so the body
+    # is the only thing this tool accepts.
+    if html.strip() and lesson_kit.is_full_document(html):
+        raise ModelRetry(
+            "this page is a whole HTML document. Send the body only: the"
+            " sections themselves, using the kit's components. write_lesson"
+            " adds the doctype, the head, the one stylesheet, the contents"
+            " rail and the hero. Remove everything from <!DOCTYPE> down to"
+            " <main>, and the </main> onwards, and send what is between them"
+        )
+
     source = await asyncio.to_thread(read_course_source_text, clean)
     if html.strip() and source:
         # Late import: review_tools imports this module.
@@ -692,7 +709,7 @@ async def write_lesson(
             f"a figure on the page cannot work: {broken}. Fix the parts with"
             " write_lesson_part, then call write_lesson again"
         )
-    if html.strip() and not lesson_kit.is_full_document(html):
+    if html.strip():
         page_title = title.strip() or next(
             (ln[2:].strip() for ln in markdown.splitlines() if ln.startswith("# ")), clean)
         html = lesson_kit.wrap_page(html, title=page_title, subtitle=subtitle.strip(),
