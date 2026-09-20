@@ -439,13 +439,36 @@ endpoint to inject them.
 ### Vercel settings
 
 1. Import the repo. Set **Root Directory** to `frontend`.
-2. Turn on **Deployment Protection** (Settings, Deployment Protection):
-   Vercel Authentication, or Password Protection with a password you keep.
-   Without it the URL is public, and the bundle is your whole library.
+2. Add one environment variable, for all environments:
+
+   | Variable | Set it to |
+   | --- | --- |
+   | `READER_PASSWORD` | A long random secret: `openssl rand -hex 24` |
+
+   That is the gate. `src/proxy.ts` checks it on the server before any route
+   or file is served, and answers `401` with `WWW-Authenticate: Basic` until
+   the request carries it. The browser asks once and remembers; any user name
+   is accepted, so only the password matters. Leave the variable unset on
+   your own machine and there is no gate, which is what `next start` behind
+   the console wants.
+
+   **Never name it `NEXT_PUBLIC_READER_PASSWORD`.** Anything with that prefix
+   is compiled into the JavaScript the browser downloads, so the secret would
+   be published rather than checked.
+
 3. Leave `NEXT_PUBLIC_API_BASE` and `BACKEND_ORIGIN` unset. The reader calls
    no API.
 4. Open `https://<your-project>.vercel.app/read` on the phone and add it to
    the home screen.
+
+The gate has no matcher, on purpose. The lessons are static files:
+`/reader/index.json` and `/reader/lessons/<slug>.html` can be fetched on
+their own, so a check drawn inside the React page would leave both open. Any
+matcher added later must keep covering `/reader`.
+
+Vercel's own Deployment Protection does the same job without any code, and
+the two can be used together. This project uses the variable instead, so the
+credential lives with the repo's other secrets.
 
 ### What the phone cannot do
 
@@ -455,5 +478,8 @@ not in the picture. The read ticks come from the export and are true as of
 the push. The console on your laptop stays the place that changes anything.
 
 The console routes are deployed too, and behind the same password, but they
-have no backend to talk to and will show their error states. That is expected
-in this mode; use the console locally.
+have no backend to talk to. `/courses` and the rest will show "Could not load
+data — HTTP 404": the `/api/*` rewrite points at `BACKEND_ORIGIN`, which on
+Vercel is the serverless function's own localhost with nothing behind it.
+That is expected in this mode. `/read` is the route to use there; the console
+is for your own machine.
