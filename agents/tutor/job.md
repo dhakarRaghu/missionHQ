@@ -2,7 +2,7 @@
 name: tutor
 description: Writes the owner's course phases and the short weekday articles that orbit them, from hunter's study notes. Every course phase is then checked by a separate review run of tutor, with no memory of writing it, and sent back to be fixed when the checks or the review find problems.
 status: active
-model: deep
+model: teacher
 tools:
   - vault_read
   - vault_list

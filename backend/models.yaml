@@ -85,8 +85,29 @@ models:
       timeout_s: 900
     fallback: [sonnet, glm]
 
+  # The teacher. He asked for tutor's reasoning to go higher, then on
+  # 2026-09-23 ruled opus out: the gateway caps it at $5 a day, and one phase
+  # on it cost $17.71, which is why the next article run stalled at 11:52 with
+  # no tool calls and was blocked by the watchdog. "Use kimi with higher
+  # reasoning." Probed the same day, one sample each, tutor's shape of run:
+  # kimi-k3 high 49.2s/574 out, xhigh 22.7s/435 out; kimi-latest high
+  # 12.0s/225, xhigh 33.3s/513. All correct, none ordered: the effort string
+  # past "high" is still not a lever anyone can show working. So "higher" is
+  # the newer model, kimi-k3, at the effort value that is known to work.
+  kimi_k3:
+    provider: gateway
+    model: kimi-k3        # 256k context
+    input_per_mtok: 0.60
+    output_per_mtok: 2.50
+    settings:
+      reasoning_effort: high
+      max_tokens: 64000
+      timeout_s: 900
+    fallback: [kimi_deep, sonnet]
+
 roles:
   deep: kimi_deep
+  teacher: kimi_k3
   default: kimi
   cheap: kimi
 

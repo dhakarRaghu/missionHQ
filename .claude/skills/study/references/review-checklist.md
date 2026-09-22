@@ -23,6 +23,22 @@ Work through the sections in order. Record every fix. The fixes go into `course.
 
 Use scratch files: one per section, plus the lab, checkpoint, references, and cheatsheet. Edit the scratch files, then reassemble the document. Never hand-edit the assembled file and the scratch files separately.
 
+## 0. Concepts. Run this first; nothing below rescues a phase that fails it
+
+Every error in the list above is a wrong fact. This section is about a right
+phase that teaches nothing, which the rest of the checklist cannot see: a
+phase passed all of it with a conceptual payload of three sentences in 6,840
+words.
+
+- [ ] The phase states its three to five concepts, each as a claim the learner could be wrong about. Not topics, facts, or advice (`quality-bar.md`, Rule 0).
+- [ ] Every section serves one of them. List any section that does not, and cut it.
+- [ ] Cover the concept list. Could the learner write those claims from the text alone?
+- [ ] For each concept, write down what the learner can predict after it. "Knows more facts" fails.
+- [ ] Each concept opens with a question the learner answers before the explanation.
+- [ ] No teaching paragraph tells the history of a finding. The conclusion and its mechanism are in the text. Who argued, and when, is in References.
+- [ ] Each concept has one piece of evidence, not three. Note what you cut.
+- [ ] Read it as the learner. Mark the three paragraphs they would skip. Cut them.
+
 ## A. Numbers
 
 - [ ] Every number in the text, diagrams, checkpoint answers, and cheatsheet comes from one of:

@@ -50,6 +50,22 @@ The test: does the sentence read the same to someone who learned English at
 school in India and uses it for work every day? If a sentence needs a second
 read to parse, split it.
 
+## Arithmetic: the formula and its constants come first
+
+On 2026-09-22 he pointed at this and said he could not tell what it was or
+what it was for: "Three decodes cost 18 + 0.12 × 3 = 18.4ms. A 24,000-token
+prefill costs 24,000 × 0.03 = 720ms." Every number was right. Nothing had said
+what 18, 0.12 and 0.03 are: they were defined in another document, days
+earlier. It survived a full rewrite because it was copied, not read.
+
+- **Name every constant before the first number that uses it**, with its unit
+  and what it charges for, even when an earlier phase defined it. Three rows
+  of a table is enough.
+- **Then the formula in words**, then the numbers.
+- **Then what the numbers mean.** Arithmetic with no sentence after it saying
+  what to notice is a calculation, not teaching.
+- Where a number drives a number, the calc box replaces the worked example.
+
 ## Teach, do not document
 
 - **Show the behaviour before you name it.** The counter reading zero, then
@@ -134,19 +150,23 @@ structure.
 
 `learning/sources.md` has the measurements and the method.
 
-## Length is not the lever
+## Length follows the ideas
 
-When a lesson reads as heavy, do not reach for the delete key. He was
-explicit: **"I'm not saying to reduce anything. I'm saying we improve the
-teaching ways, as I'm learning, so it generates the best readable content."**
+A lesson is as long as its ideas need, in both directions. He has said both
+halves. When a lesson read as heavy: "I'm not saying to reduce anything. I'm
+saying we improve the teaching ways." And when a lesson was complete, sourced
+and empty: "this way you create a larger one, with things that are not
+required."
 
-Weight is almost never word count. It is ideas arriving in the wrong order,
-or a term used before it was introduced. Fix the order and the pacing. Where
-a step is hard, spend two more sentences on it.
+So weight has two causes, and they have different fixes.
 
-Padding is a different thing: a paragraph that restates the one above it.
-Cut that. The test for every paragraph: does he know something after it that
-he did not know before it?
+- **Ideas in the wrong order**, or a term used before it was introduced. Fix
+  the order. Where a step is hard, spend two more sentences on it.
+- **Material that serves no idea.** A true, sourced paragraph that does not
+  help him understand a concept is weight. Cut it, however much work found it.
+
+The test for every paragraph: what does he understand after it that he did
+not before? "He knows one more fact" is not an answer.
 
 ## Facts come only from the study note
 
@@ -168,12 +188,13 @@ code, and a wrong flag costs him an evening.
 - **Carry the labels.** Verified stays verified. Inferred is written as
   inferred, in words, in the sentence that uses it. Not checked is left out
   or stated as not checked. You may never promote a label.
-- **Anything on the note's "Things I could NOT verify" list is left out or
-  stated as unverified.** Carry that list into your own "Things I could not
-  verify" section, plus anything you could not confirm yourself. It is never
-  dropped and never smoothed into confident prose.
-- **Where sources disagree, say so**, with the mechanism that explains the
-  difference. Do not pick the tidier side.
+- **Anything on the note's "Things I could NOT verify" list is left out.**
+  Not stated with a caveat, and not printed in a section of its own: he asked
+  that section off the page ("in learning it is not required"). It goes in
+  your report, so the next research run knows what to settle.
+- **Where sources disagree, teach what explains it**, as the plain fact. The
+  story of the disagreement is not the lesson: it goes in an evidence note, in
+  a sentence, or nowhere. If nothing explains it, do not build on it.
 - **References only from urls the note marks as opened.** Copy each url from
   the note. Never rebuild one from memory, never guess a docs path, never
   invent a video timestamp. If the note found no worthwhile video, say that.
@@ -193,9 +214,9 @@ and give the public equivalent.
 
 ## The page is the lesson
 
-**Simpler is the goal of every rewrite.** Rewording his sentence is welcome
-when the new one is shorter and plainer. It is waste when it is only
-different, and the check compares the page's average sentence length with his.
+**Plain is measured.** `write_lesson` counts the page's average sentence
+length and the share of sentences over 25 words, and sends back a page that
+reads heavier than 17 words and 18%.
 
 **Say it once.** Every idea gets one explanation and at most one summary.
 A lead that repeats the first paragraph, a key-point box that repeats the
@@ -215,6 +236,12 @@ bar, copy buttons on code, and working steppers and tabs. No doctype, head,
 `<style>` block or page script of your own. Use the kit's components:
 
 ```
+<ol class="concepts"><li id="c1"><b>the claim</b><span>what it lets him do</span></li></ol>
+<h2 data-concept="c1">                 a teaching section names the idea it serves
+<h2 data-kind="lab">                   apparatus: orientation | lab | checkpoint |
+                                       cheatsheet | limits | post | sources
+<details class="predict"><summary>Predict: …</summary>  the question first; answer inside
+<details class="evidence"><summary>Evidence</summary>   who measured it, where; closed
 <p class="why">                        why this section matters (the lead)
 <div class="keypoints">                <p class="remember">  <p class="trap">  <p class="try">
 <div class="callout note|tip|warn">    a short aside

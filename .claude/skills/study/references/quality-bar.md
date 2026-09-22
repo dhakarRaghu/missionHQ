@@ -2,7 +2,52 @@
 
 Read this before generating any phase. `writing-style.md` wins where the two conflict.
 
-## Rule 0: better than every alternative
+## Rule 0: concepts first. Everything else serves them
+
+A phase teaches **three to five concepts**. A concept is a claim, one sentence
+the learner could be wrong about, that lets them predict or decide something
+they could not before.
+
+| A concept | Not a concept |
+|---|---|
+| Prefill and decode share one forward pass, so a long prompt either waits or freezes every other stream | Chunked prefill (a topic) |
+| A schema controls which tokens are legal, never when generation stops | Strict mode guarantees the keys (a fact) |
+| A summary keeps what the summariser found interesting, so a rule that must survive is copied, never summarised | Compact at 60% of the window (advice) |
+
+This rule exists because a phase can meet every other rule in this file and
+teach almost nothing. One did: 6,840 words, 171 distinct numbers, 22 verified
+sources, every exercise run, and a conceptual payload of three sentences. The
+learner's verdict: "I don't feel any value, any concept. I'm not reading a
+book that says 2025 had this and now 2026 has this. It should be a teacher who
+knows everything and now shares the important concepts, not anything random."
+
+So, before the outline is approved and again before a phase is written:
+
+1. **Write the concepts down first.** The section list comes from them, not
+   the other way round. A section that serves no concept is cut, however
+   true, current and well sourced it is.
+2. **Details hang from a concept or they go.** A config key, a default, a
+   number: each is there because it is how the learner uses an idea.
+3. **One piece of evidence per concept, the best one.** Research reads ten
+   sources so the text can state one thing plainly. The other nine are how you
+   know. They are not material.
+4. **Teach what is true now. The history of how it was found is not the
+   lesson.** "A 2024 paper claimed X, a rebuttal measured the opposite, a 2026
+   paper split the cause" is a research finding (see `research-method.md`,
+   Rule 5). What the learner needs is the conclusion and the mechanism behind
+   it. Put the argument in the references entry for that source, in one line.
+   Keep a date in the text only when the learner will meet the old value in
+   the wild and be misled by it.
+5. **Ask before you tell.** Each concept opens with a question the learner
+   answers first, the one a capable engineer gets wrong.
+6. **Length follows the concepts, in both directions.** Never pad to look
+   thorough. A phase that needs 3,000 words is 3,000 words.
+
+The self-check before publishing: cover the concept list and ask whether the
+text alone would let the learner write those claims. Then, for each one, name
+what they can now predict. If you cannot, the section taught facts.
+
+## Rule 0b: better than every alternative
 
 The material must be better than:
 
@@ -17,7 +62,7 @@ What makes this material better:
 1. **Production first.** Every pattern appears as it runs at scale.
 2. **Failure first.** The learner sees what breaks, and the exact output when it breaks.
 3. **Measured.** The learner runs a script and gets the number the text quotes.
-4. **Verified.** Every fact carries its source and its conditions.
+4. **Verified.** Every fact that is in the text carries its source and its conditions. Verification decides how a fact is stated, never whether it belongs: see Rule 0.
 5. **Curated references.** Specific sections, figures, and timestamps. Never "search for it".
 6. **Complete.** The document is enough on its own. No other resource is needed to fill a gap.
 
@@ -62,9 +107,11 @@ Techniques:
 - No "as we discussed". The document is the source of truth.
 - Links to earlier sections name the section number, and the number must be checked.
 
-## Rule 3: depth
+## Rule 3: depth, under a concept
 
-The reader should feel they are reading an internal engineering document from a strong team.
+Depth means going one level below where a tutorial stops on the mechanism of a
+concept. It does not mean more facts per page. Each item below is there when a
+concept needs it, and absent otherwise.
 
 - Exact sizes, timeouts, versions, and defaults, with the version they came from.
 - What happens at the protocol or system-call level, when it explains behaviour.
@@ -73,11 +120,13 @@ The reader should feel they are reading an internal engineering document from a 
 - Source code or design documents for "why it was built this way".
 - Exact config keys with defaults, such as `max.poll.interval.ms=300000`. Never "the timeout setting".
 
-## Rule 4: three passes inside each concept
+## Rule 4: how one concept is taught
 
-1. **The mental model.** Three sentences and one diagram. A reader who stops here has the idea.
-2. **The details.** Exact configs, edge cases, a code example, the arithmetic.
-3. **The traps.** What breaks, measured, and an action for the reader.
+1. **The situation.** Two or three sentences where not knowing this costs something.
+2. **The question.** Ask the learner to predict, before you explain.
+3. **The mechanism, with its diagram.** Why it is true. A reader who stops here has the idea.
+4. **The one number, or the one failure**, with its conditions.
+5. **Use it.** The exercise that exercises this idea, and only then the configs and edge cases the learner needs to act on it.
 
 ## Rule 5: every concept ends with an action
 
@@ -307,11 +356,14 @@ Each part follows the same template. Add:
 - Show the arithmetic for every formula.
 - Name patterns: "this is the outbox pattern".
 - Show what failure looks like: logs, metrics, error output.
-- Name every source in the text.
+- Name a source in the text where the learner needs it to trust the claim. The rest belong in References.
 - Report your own first-draft mistakes when they teach something.
 
 ## DO NOT
 
+- No section that serves none of the phase's concepts.
+- No history of a debate in the teaching text. Teach its resolution.
+- No verification dates in teaching sentences. They belong in References.
 - No walls of text. At most five paragraphs before a diagram or a code block.
 - No toy examples.
 - No "simply", "just", or "easily".

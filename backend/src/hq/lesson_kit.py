@@ -14,6 +14,14 @@ localStorage, cookies or the network, and everything is inline.
 
 Components tutor may use (the `teaching` skill documents them):
 
+    <ol class="concepts"> <li id="c1"><b>the claim</b><span>what it lets him do</span>
+                                         the phase's ideas, first on the page
+    <h2 data-concept="c1">               a teaching section, and the idea it serves
+    <h2 data-kind="lab">                 apparatus: lab | checkpoint | cheatsheet |
+                                         sources | limits | post | orientation
+    <details class="predict"><summary>Predict: …</summary> the answer, and why
+    <details class="evidence"><summary>Evidence</summary> who measured it, where
+
     <p class="why">                      lead: why this section matters
     <div class="keypoints">              the three closing lines of a concept
       <p class="remember">…  <p class="trap">…  <p class="try">…
@@ -215,6 +223,27 @@ kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-b
 .legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
 h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
 h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
 @media print{nav.toc,#progress,.copy{display:none}}
 """
 

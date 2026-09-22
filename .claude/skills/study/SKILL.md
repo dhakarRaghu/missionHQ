@@ -179,6 +179,7 @@ Read these once per session. Ask the user only if a required value is missing.
 ### Starting a course: `/study <topic>`
 
 1. Look for `<baseDir>/<topic>/course.json`. If it exists, report progress and continue. Do not create a duplicate.
+1b. **Concepts before sections.** For each phase, write its three to five concepts as claims (`references/quality-bar.md`, Rule 0). The section list is derived from them. Save them in the outline entry as `concepts`. A phase whose concepts you cannot state is not ready to outline.
 2. **Overlap check.** Read the outlines and section headings of every completed course. List what this topic would repeat. The new outline links to those sections and teaches only what is new. See `references/curriculum-planning.md`.
 3. Ask one compact set of questions in one message. Use defaults if the user does not answer:
    - Is there an anchor repo? Default: none, which means learning-only mode.

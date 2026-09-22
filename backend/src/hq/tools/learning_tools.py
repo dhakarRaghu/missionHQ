@@ -725,12 +725,24 @@ async def write_lesson(
 
     shortfall = "" if source else page_shortfall(markdown, html)
     if not source and html.strip():
+        # An article is one idea, delivered: the same contract as a phase with
+        # the count set to one, plus the same plainness and repeat measures.
+        # A paper-day article is about the world as it was when the paper
+        # was written, so it names that year more than a phase would; the
+        # first run on the new contract was refused at 6% for exactly that.
+        # The review detector (sentences about a source) keeps its ceiling.
+        gap = page_coverage("", html, "", least=1, most=1, dated_share=ARTICLE_DATED_SHARE)
+        if gap:
+            raise ModelRetry(
+                f"the article is not ready yet: {gap}. Rewrite ONLY the parts this"
+                " names with write_lesson_part, then call write_lesson again"
+            )
         words = _visible_words(html)
         if words > ARTICLE_MAX_WORDS:
             raise ModelRetry(
                 f"the article is {words} words, which is about {words // 200} minutes;"
-                f" the band is {ARTICLE_MIN_WORDS} to {ARTICLE_MAX_WORDS}. Cut"
-                " restatement and background he already has, not the evidence"
+                f" past {ARTICLE_MAX_WORDS} it is carrying a second idea or a survey."
+                " Find which and cut it, not the evidence"
             )
     if shortfall:
         if from_parts:
@@ -1237,24 +1249,21 @@ def page_script_problems(page_html: str) -> str:
 # words, seventeen minutes, for one routing decision.
 ARTICLE_MIN_WORDS = 1_800
 ARTICLE_MAX_WORDS = 2_600
-PAGE_FLOOR = 0.95          # an enhanced page never teaches less than the source
-# No ceiling on length: "this should be according to value it gives".
-# A long page is fine when every paragraph earns its place. What is not fine
-# is length made of the same point explained again, so that is what is
-# measured: near-repeats inside the page, and the share spent on summaries.
+# No floor and no ceiling on length. "This should be according to value it
+# gives", and he meant both directions: a page may be shorter than the phase it
+# grew from when what it left out was not worth his time. What is measured is
+# length made of the same point explained again: near-repeats inside the page,
+# and the share spent on summaries.
 REPEAT_SHARE = 0.06        # sentences that say what an earlier one already said
 REPEAT_OVERLAP = 0.45      # five-word runs shared, for two sentences to count as one
-# He may rewrite freely, on one condition: "rewriting is fine for any, the
-# language simpler for me to understand". So the check is not whether his
-# sentences survive. It is whether a rewritten page reads more easily than
-# the source, and whether the facts came through it.
+# He reads English as a second language, so plainness is absolute. It used to
+# be measured against his phase's own sentences, which tied the page to a text
+# it is no longer required to follow.
 LONG_SENTENCE_WORDS = 25
-EASE_TOLERANCE = 3.0       # words of slack on the average
-LONG_TOLERANCE = 0.08      # slack on the share of long sentences
-PLAIN_SENTENCE_WORDS = 17.0  # plain in its own right, whatever the source does
+PLAIN_SENTENCE_WORDS = 17.0
 PLAIN_LONG_SHARE = 0.18
 RESTATEMENT_SHARE = 0.12   # leads and key-point boxes, of the page
-MEASURABLE_SOURCE_WORDS = 400  # below this the ratios mean nothing
+MEASURABLE_SOURCE_WORDS = 400  # a page shorter than this: the ratios mean nothing
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 # The cheatsheet is not counted: it is a reference card he uses while working,
 # not the same point told again. Counting it cost the Kubernetes page two
@@ -1297,29 +1306,8 @@ def reading_ease(text: str) -> tuple[float, float]:
     return sum(lengths) / len(lengths), long_ones / len(lengths)
 
 
-def _numbers(text: str) -> set[str]:
-    """Every number in the prose, normalised. Facts survive a rewrite or the
-    rewrite lost them."""
-    flat = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
-    return {n.replace(",", "").rstrip(".") for n in re.findall(r"\d[\d,.]*", flat)
-            if len(n.rstrip(".")) > 1}
 
 
-def _sentences_kept(source: str, page_html: str) -> tuple[int, int]:
-    """(kept, total) of the source's sentences that survive on the page.
-
-    Five-word runs, not exact matches: a sentence he wrote may be split or
-    lightly edited and still be his. Used to tell a rewrite from an edit, not
-    to forbid one.
-    """
-    page = [_shingles(s) for s in _sentences(_page_text(page_html))]
-    kept = 0
-    originals = _sentences(source)
-    for sentence in originals:
-        marks = _shingles(sentence)
-        if marks and any(len(marks & p) / len(marks) > 0.5 for p in page):
-            kept += 1
-    return kept, len(originals)
 
 
 def repeated_sentences(page_html: str) -> list[tuple[str, str]]:
@@ -1388,6 +1376,174 @@ def new_claims(source: str, page_html: str) -> list[dict[str, Any]]:
     return out
 
 
+# --- what a course page has to be ------------------------------------------------
+#
+# Every gate here used to reward more verified material: never fewer words than
+# the source, every section kept, every number kept, everything cited. Phase 2B
+# passed all of them at 11,609 words, 237 distinct numbers and 26 sources, and
+# its whole payload was three sentences. He read it and said: "I don't feel any
+# value, any concept or anything from it ... I'm not reading a book that says
+# 2025 had this and now 2026 has this ... it should be a teacher who knows
+# everything and now shares the important concepts that I should know."
+#
+# So his phase is a reference now, not a contract. Tutor may drop what is not
+# worth his time and teach what the phase lacks. What the page is held to
+# instead is whether it is built out of ideas: it names them, every teaching
+# section belongs to one, he meets each as a question before he is told, and
+# the prose is not a history of who measured what.
+CONCEPTS_MIN, CONCEPTS_MAX = 2, 6
+CLAIM_MAX_WORDS = 32
+# Apparatus: sections that are not teaching an idea and say so.
+# "limits" (Things I could not verify) is gone from the page at his request:
+# a fact too weak to state plainly is too weak to teach, and goes in the report.
+SECTION_KINDS = frozenset({
+    "orientation", "lab", "checkpoint", "cheatsheet", "sources", "post",
+})
+# Sentences that are about a source rather than about the mechanism. A little
+# is honest provenance. At 11% of the page it was a literature review.
+EVIDENCE_SHARE = 0.06
+# "2024 said X, the 2025 rebuttal said Y, the 2026 answer is Z." A year in a
+# sentence is nearly always that story, or a verification stamp; both belong in
+# an evidence note or the sources list, where he can find them and skip them.
+DATED_SHARE = 0.02
+ARTICLE_DATED_SHARE = 0.08
+_CONCEPT_LI_RE = re.compile(
+    r"<li\b[^>]*\bid=[\"'](c\d+)[\"'][^>]*>(.*?)</li>", re.DOTALL | re.IGNORECASE)
+_CONCEPTS_RE = re.compile(
+    r"<ol\b[^>]*class=[\"'][^\"']*\bconcepts\b[^\"']*[\"'][^>]*>(.*?)</ol>",
+    re.DOTALL | re.IGNORECASE)
+_H2_RE = re.compile(r"<h2\b([^>]*)>(.*?)</h2>", re.DOTALL | re.IGNORECASE)
+_ATTR_RE = re.compile(r"\bdata-(concept|kind)=[\"']([^\"']+)[\"']", re.IGNORECASE)
+_ISO_DATE_RE = re.compile(r"\b20\d\d-\d\d-\d\d\b")
+_YEAR_RE = re.compile(r"\b(?:19|20)\d\d\b")
+_EVIDENCE_TALK_RE = re.compile(
+    r"\b(?:paper|study|studies|authors?|researchers?|benchmark(?:ed)?|et al|"
+    r"abstract|rebuttal|appendix|preprint|arxiv|EMNLP|OSDI|NeurIPS|"
+    # How a fact was checked is provenance too: "its abstract was verified;
+    # the body numbers are the phase author's reading" sat in teaching prose.
+    r"verified|peer[- ]review(?:ed)?|could not be checked)\b"
+    r"|\b(?:Table|Figure|Algorithm|Section)\s+\d", re.IGNORECASE)
+# Left out of the prose measures: he can skip these, and they are where
+# provenance is supposed to live.
+_ASIDE_RE = re.compile(
+    r"<details\b[^>]*class=[\"'][^\"']*\bevidence\b[^\"']*[\"'][^>]*>.*?</details>"
+    r"|<(pre|script|style|nav)\b[^>]*>.*?</\1>"
+    r"|<ul\b[^>]*class=[\"'][^\"']*\bsources\b[^\"']*[\"'][^>]*>.*?</ul>",
+    re.DOTALL | re.IGNORECASE)
+
+
+def _plain(fragment: str) -> str:
+    return " ".join(html_lib.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
+
+
+def page_sections(page_html: str) -> list[dict[str, str]]:
+    """Every `<h2>` section: its title, what it declares itself to be, its markup."""
+    out = []
+    parts = re.split(r"(?i)(?=<h2\b)", page_html)
+    for part in parts[1:]:
+        head = _H2_RE.search(part)
+        if not head:
+            continue
+        attrs = {k.lower(): v.strip() for k, v in _ATTR_RE.findall(head.group(1))}
+        out.append({"title": _plain(head.group(2)).rstrip("#").strip(),
+                    "concept": attrs.get("concept", ""), "kind": attrs.get("kind", ""),
+                    "html": part})
+    return out
+
+
+def lesson_contract(page_html: str, *, least: int = CONCEPTS_MIN, most: int = CONCEPTS_MAX,
+                    dated_share: float = DATED_SHARE) -> str:
+    """Why this page is not yet a lesson built out of ideas, or "".
+
+    Deterministic, like every check here: a same-model reviewer passes what
+    reads well, and 2B read well. A phase carries three to five concepts; an
+    article carries one, and passes `least=most=1`.
+    """
+    problems: list[str] = []
+    block = _CONCEPTS_RE.search(page_html)
+    concepts = _CONCEPT_LI_RE.findall(block.group(1)) if block else []
+    ids = [cid for cid, _ in concepts]
+    if not block or not concepts:
+        return ('the page does not say what it teaches. Open it with <ol class="concepts">,'
+                ' one <li id="c1"><b>the claim</b><span>what it lets him do</span></li> per'
+                f" idea, {least} to {most} of them. A claim is a sentence he"
+                " could test or use to predict something, not a topic name")
+    if not least <= len(ids) <= most:
+        problems.append(
+            f"{len(ids)} concepts; this page carries {least} to {most}."
+            " More than that is a list of topics, and he keeps none of them")
+    if len(set(ids)) != len(ids):
+        problems.append("concept ids repeat: " + _listed(sorted({i for i in ids if ids.count(i) > 1})))
+    for cid, body in concepts:
+        claim = re.search(r"<b\b[^>]*>(.*?)</b>", body, re.DOTALL | re.IGNORECASE)
+        words = len(_plain(claim.group(1)).split()) if claim else 0
+        if not claim or words < 5:
+            problems.append(f"{cid} is a label, not a claim. Write the sentence he could be"
+                            " wrong about: \"prefill and decode share one forward pass\","
+                            " not \"chunked prefill\"")
+        elif words > CLAIM_MAX_WORDS:
+            problems.append(f"{cid} runs to {words} words; a claim he can hold is one sentence")
+
+    sections = page_sections(page_html)
+    lost = [s["title"] for s in sections if not s["concept"] and not s["kind"]]
+    if lost:
+        problems.append(
+            "these sections do not say what they are for: " + _listed(lost)
+            + '. A teaching section carries data-concept="c1" on its <h2>; apparatus'
+            " carries data-kind, one of " + ", ".join(sorted(SECTION_KINDS))
+            + ". A section that serves no concept and is not apparatus does not belong")
+    unknown = sorted({s["concept"] for s in sections if s["concept"] and s["concept"] not in ids})
+    if unknown:
+        problems.append("sections point at concepts the page never declares: " + _listed(unknown))
+    bad_kind = sorted({s["kind"] for s in sections if s["kind"] and s["kind"] not in SECTION_KINDS})
+    if bad_kind:
+        problems.append("unknown data-kind: " + _listed(bad_kind))
+
+    for cid in ids:
+        mine = [s for s in sections if s["concept"] == cid]
+        if not mine:
+            problems.append(f"{cid} is promised at the top and never taught")
+            continue
+        joined = " ".join(s["html"] for s in mine).lower()
+        if 'class="predict"' not in joined:
+            problems.append(
+                f"{cid} is told, never asked. Before the explanation, put a"
+                ' <details class="predict"><summary>Predict: …</summary> with the answer'
+                " and the reason inside. A concept he guessed wrong is one he keeps")
+        if not any(mark in joined for mark in _VISUALS):
+            problems.append(f"{cid} has nothing to look at: show the mechanism, not only describe it")
+
+    prose = _ASIDE_RE.sub(" ", page_html)
+    teaching = " ".join(s["html"] for s in page_sections(prose)
+                        if s["concept"] or s["kind"] == "orientation")
+    sentences = _sentences(_page_text(teaching))
+    if len(sentences) >= 40:
+        dated = [x for x in sentences if _YEAR_RE.search(x)]
+        stamped = [x for x in sentences if _ISO_DATE_RE.search(x)]
+        talk = [x for x in sentences if _EVIDENCE_TALK_RE.search(x)]
+        if stamped:
+            problems.append(
+                f"{len(stamped)} sentence(s) carry a verification date, such as"
+                f" “{stamped[0][:70]}…”. When something was checked belongs in the"
+                " sources list, not in the sentence teaching it")
+        if len(dated) / len(sentences) > dated_share:
+            problems.append(
+                f"{len(dated)} of {len(sentences)} teaching sentences name a year"
+                f" ({len(dated) / len(sentences):.0%}, ceiling {dated_share:.0%}), such as"
+                f" “{dated[0][:70]}…”. He is not reading a history. Teach what is true"
+                " now as the plain fact. Keep a date only where the concept cannot be"
+                ' understood without it, and move the rest into <details class="evidence">')
+        if len(talk) / len(sentences) > EVIDENCE_SHARE:
+            problems.append(
+                f"{len(talk)} of {len(sentences)} teaching sentences are about a source"
+                f" rather than the mechanism ({len(talk) / len(sentences):.0%}, ceiling"
+                f" {EVIDENCE_SHARE:.0%}), such as “{talk[0][:70]}…”. State the mechanism and"
+                " the one number that proves it, with its conditions. Who measured it, the"
+                " argument between groups and the table it came from go in"
+                ' <details class="evidence"> under the claim')
+    return "; ".join(problems)
+
+
 # A course phase is not an article: he asked for the page to work like a
 # Claude artifact, "more visual". A mechanism he can see, step through or move
 # a number in is what separates the two. So every section long enough to carry
@@ -1428,76 +1584,44 @@ def sections_without_a_visual(page_html: str) -> list[str]:
     return bare
 
 
-def page_coverage(source: str, page_html: str, note: str = "") -> str:
-    """Why the enhanced page is not a complete, faithful version, or "".
+_PAGE_RUN_RE = re.compile(r"Run:\s*(?:</\w+>\s*)*<code[^>]*>(.*?)</code>", re.DOTALL | re.IGNORECASE)
+_PAGE_EXERCISE_RE = re.compile(r"<b\b[^>]*>\s*(E\d+)\b", re.IGNORECASE)
+
+
+def page_coverage(source: str, page_html: str, note: str = "", *,
+                  least: int = CONCEPTS_MIN, most: int = CONCEPTS_MAX,
+                  dated_share: float = DATED_SHARE) -> str:
+    """Why this page is not ready for him to learn from, or "".
 
     Measured checks only, because a same-model reviewer passes what reads
-    well. The enhanced page must keep:
+    well. His phase (`source`) is a reference: nothing here asks how much of
+    it survived. What is asked:
 
-    * every numbered section ("3.1", "3.2"), and never less than the source's
-      words. There is no upper limit: length follows what the page adds;
-    * the facts when it rewrites, and simpler sentences than his when it
-      rewrites most of a section;
-    * one restatement per concept, not three;
-    * every exercise id, every exact `Run:` command, and every answer sketch:
-      the original's commands and outputs came from real runs;
-    * only links from the source or hunter's study note;
-    * no employer name, past or present.
+    * the page is built out of ideas (`lesson_contract`);
+    * it reads plainly, says each thing once, and shows its mechanisms;
+    * what it keeps from his lab is kept exactly, because his commands and
+      outputs came from real runs and a retyped one did not;
+    * every link comes from the phase or hunter's note, and no employer is named.
     """
-    sections = [h for h, _ in split_sections(source) if h]
-    numbers = [m.group(1) for h in sections if (m := _SECTION_NUM_RE.match(h))]
     visible = html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page_html)))
-    flat = " ".join(visible.split())
+    have = _visible_words(page_html)
+    measurable = have >= MEASURABLE_SOURCE_WORDS
     problems = []
 
-    missing = [n for n in numbers if not re.search(rf"(?<![\d.]){re.escape(n)}(?![\d])", visible)]
-    if missing:
-        problems.append("sections missing from the page: " + _listed(missing))
-
-    source_words = _prose_words(source)
-    have = _visible_words(page_html)
-    # The band, the fidelity floor and the restatement ceiling are ratios, and
-    # a ratio of a handful of sentences says nothing. A real phase is
-    # thousands of words; below that, only the section and command checks run.
-    measurable = source_words >= MEASURABLE_SOURCE_WORDS
-    if measurable and have < int(source_words * PAGE_FLOOR):
-        problems.append(
-            f"the page carries {have} words against {source_words} in the source;"
-            f" an enhanced version never teaches less (floor {int(source_words * PAGE_FLOOR)})"
-        )
+    contract = lesson_contract(page_html, least=least, most=most, dated_share=dated_share)
+    if contract:
+        problems.append(contract)
 
     if measurable:
-        # Simpler, always. He reads English as a second language, and the
-        # first enhanced page came back with longer sentences than his own
-        # (19 words against 15, and twice the share over 25). Rewriting is
-        # welcome — "rewriting is fine ... the language simpler for me to
-        # understand" — but only in that direction.
+        # He reads English as a second language. The bar is absolute: a page is
+        # plain or it is not, whatever the phase it grew from sounds like.
         page_avg, page_long = reading_ease(_page_text(page_html))
-        src_avg, src_long = reading_ease(source)
-        # Against a source that is already very plain (Phase 2A averages 13
-        # words), "no longer than his" is unreachable once additions and their
-        # conditions arrive, and tutor spent a whole run failing it. The page
-        # has to be plain in its own right, and not much heavier than his.
-        avg_limit = max(src_avg + EASE_TOLERANCE, PLAIN_SENTENCE_WORDS)
-        long_limit = max(src_long + LONG_TOLERANCE, PLAIN_LONG_SHARE)
-        if page_avg > avg_limit or page_long > long_limit:
-            kept, total = _sentences_kept(source, page_html)
+        if page_avg > PLAIN_SENTENCE_WORDS or page_long > PLAIN_LONG_SHARE:
             problems.append(
                 f"the page reads heavier than it should: sentences average"
-                f" {page_avg:.0f} words (limit {avg_limit:.0f}; his source is"
-                f" {src_avg:.0f}) and {page_long:.0%} run over"
-                f" {LONG_SENTENCE_WORDS} words (limit {long_limit:.0%}; his is"
-                f" {src_long:.0%}), with {kept}/{total} of his sentences kept."
-                " Split the longest sentences in the parts you added"
-            )
-        # A rewrite must carry the facts through it.
-        lost = sorted(_numbers(source) - _numbers(_page_text(page_html)))
-        if len(lost) > max(3, len(_numbers(source)) // 10):
-            problems.append(
-                f"{len(lost)} numbers the source states are missing from the page: "
-                + _listed(lost)
-                + ". A number is a fact: keep it, or say in a correction box why it"
-                " changed"
+                f" {page_avg:.0f} words (limit {PLAIN_SENTENCE_WORDS:.0f}) and"
+                f" {page_long:.0%} run over {LONG_SENTENCE_WORDS} words (limit"
+                f" {PLAIN_LONG_SHARE:.0%}). Split the longest sentences"
             )
 
     repeats = repeated_sentences(page_html) if measurable else []
@@ -1507,8 +1631,7 @@ def page_coverage(source: str, page_html: str, note: str = "") -> str:
         problems.append(
             f"{len(repeats)} of {sentence_count} sentences repeat a point an"
             f" earlier one already made ({len(repeats) / sentence_count:.0%}):"
-            f" {shown}. Length is fine when every paragraph earns it; saying the"
-            " same thing twice is not"
+            f" {shown}. Saying the same thing twice teaches nothing the second time"
         )
 
     said_again = _restatement_words(page_html) if measurable else 0
@@ -1516,50 +1639,55 @@ def page_coverage(source: str, page_html: str, note: str = "") -> str:
         problems.append(
             f"{said_again} of {have} words ({said_again / have:.0%}) are the same"
             f" points said again in key-point boxes and why-leads"
-            f" (ceiling {RESTATEMENT_SHARE:.0%}). One restatement per concept: keep"
-            " the key-points box and drop the lead when the first paragraph"
-            " already says why"
+            f" (ceiling {RESTATEMENT_SHARE:.0%}). One restatement per concept"
         )
 
     bare = sections_without_a_visual(page_html) if measurable else []
     if bare:
         problems.append(
             "these sections run long with nothing to look at: " + _listed(bare)
-            + ". A course phase has to show the mechanism, not only describe it:"
-            " give each one a figure, an ascii diagram, a table, a stats row,"
+            + ". Give each one a figure, an ascii diagram, a table, a stats row,"
             " bars, a timeline, a wrong/right compare, steps, tabs, or a calc"
             " box he can move a number in"
         )
 
-    exercises = sorted(set(_EXERCISE_ID_RE.findall(source)), key=lambda e: int(e[1:]))
-    lost = [e for e in exercises if not re.search(rf"\b{e}\b", visible)]
-    if lost:
-        problems.append("exercises missing: " + _listed(lost))
-
+    # What he keeps from the lab, he keeps exactly. An exercise may be left
+    # out; it may not be invented or reworded into a command nobody ran.
+    known_ids = set(_EXERCISE_ID_RE.findall(source))
+    invented = sorted(set(_PAGE_EXERCISE_RE.findall(page_html)) - known_ids,
+                      key=lambda e: int(e[1:])) if known_ids else []
+    if invented:
+        problems.append("exercise ids that his lab does not have: " + _listed(invented)
+                        + ". Use his exercises under their own ids, or none")
     employers = [name.lower() for name in settings().private_employers]
-    # A command whose path names an employer cannot be copied as is: the
-    # employer rule wins, and the skill says to rename the path and say so.
-    commands = [c.strip() for c in _RUN_CMD_RE.findall(source)
-                if not any(name in c.lower() for name in employers)]
-    changed = [c for c in commands if " ".join(c.split()) not in flat]
-    if changed:
-        problems.append(
-            "these exact commands are missing or were changed; copy them character"
-            " for character: " + _listed([f"`{c}`" for c in changed])
-        )
-
-    sketches = len(re.findall(r"<details", source, re.IGNORECASE))
-    if sketches and len(re.findall(r"<details", page_html, re.IGNORECASE)) < sketches:
-        problems.append(
-            f"the source has {sketches} answer-sketch block(s); keep each as"
-            ' <details class="answer">'
-        )
+    ran = {" ".join(c.split()) for c in _RUN_CMD_RE.findall(source)}
+    # A path that names an employer cannot be copied: the employer rule wins,
+    # and the skill says to rename that path. So such a command matches with
+    # the offending word left open, and with nothing else changed.
+    renamed = [
+        re.compile(r"\s+".join(
+            r"\S+" if any(name in word.lower() for name in employers) else re.escape(word)
+            for word in real.split()))
+        for real in ran if any(name in real.lower() for name in employers)
+    ]
+    if ran:
+        on_page = [" ".join(_plain(c).split()) for c in _PAGE_RUN_RE.findall(page_html)]
+        altered = [c for c in on_page if c and not any(c in real or real in c for real in ran)
+                   and not any(rx.fullmatch(c) for rx in renamed)]
+        if altered:
+            problems.append(
+                "these Run: commands are not in his lab, so nobody has run them: "
+                + _listed([f"`{c}`" for c in altered])
+                + ". Copy the command character for character, or leave the exercise out"
+            )
 
     allowed = source + "\n" + note
-    # SVG and XHTML namespace strings look like links and are not ones.
+    # SVG and XHTML namespace strings look like links and are not ones. With
+    # no source at all (an article) the digests are the provenance, and
+    # record_lesson checks those; nothing here can.
     foreign = sorted({u.rstrip(".,;:") for u in _PAGE_URL_RE.findall(page_html)
                       if u.rstrip(".,;:") not in allowed
-                      and not u.startswith(("http://www.w3.org/", "https://www.w3.org/"))})
+                      and not u.startswith(("http://www.w3.org/", "https://www.w3.org/"))}) if allowed.strip() else []
     if foreign:
         problems.append(
             "links that are in neither the phase nor hunter's note: " + _listed(foreign)

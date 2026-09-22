@@ -95,6 +95,8 @@ The correct output reports all four positions, then names the mechanism that exp
 
 **Where to look for the crux:** the method section, not the abstract. Abstracts state conclusions. Method sections state assumptions.
 
+**What goes into the phase is the mechanism, not the argument.** This rule is about how you find out what is true. The research report carries all four positions. The teaching text carries one sentence: asking for a format in the prompt costs accuracy, and the decoder adds little. The learner is not reading the history of the field (`quality-bar.md`, Rule 0). The four positions go in the References entry, in one line.
+
 ## Rule 6: Check the measurement instrument before you trust the measurement
 
 Ask how the result was scored. In every study of the example above, the scoring method moved the result more than the thing being studied.

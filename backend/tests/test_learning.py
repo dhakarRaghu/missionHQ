@@ -562,6 +562,28 @@ def test_no_asks_means_no_empty_section() -> None:
     assert "He asked for these" not in scan_brief(scan_payload(), requests=[])
 
 
+def _lesson(extra: str = "", *, concept_body: str = "") -> str:
+    """The smallest page that meets the lesson contract.
+
+    Two claims, a section for each that asks before it tells and has something
+    to look at, and one piece of apparatus. `extra` is appended; `concept_body`
+    goes inside the first concept's section.
+    """
+    ask = '<details class="predict"><summary>Predict: what happens?</summary><p>It waits.</p></details>'
+    look = '<div class="stats"><div class="stat"><b>720 ms</b><span>freeze</span></div></div>'
+    return (
+        '<ol class="concepts">'
+        '<li id="c1"><b>Prefill and decode share one forward pass.</b><span>So you can predict a freeze.</span></li>'
+        '<li id="c2"><b>A schema controls which tokens are legal, never when output stops.</b><span>So you check finish_reason.</span></li>'
+        "</ol>"
+        f'<h2 data-concept="c1">Why does one prompt freeze every stream?</h2>{ask}{look}{concept_body}'
+        f'<h2 data-concept="c2">Does a schema guarantee the answer?</h2>{ask}{look}'
+        '<h2 data-kind="sources">Sources</h2>'
+        + extra
+    )
+
+
+
 def test_the_agents_he_reads_get_room_to_think() -> None:
     # Measured 2026-09-12: effort low -> high doubled latency and tripled
     # reasoning tokens, so the parameter works. "xhigh" took 3.3x as long and
@@ -581,8 +603,34 @@ def test_the_agents_he_reads_get_room_to_think() -> None:
     assert deep["settings"]["timeout_s"] >= 600
 
     agents = scan(strict=True)
-    for name in ("sage", "hunter", "tutor", "scout"):
+    for name in ("sage", "hunter", "scout"):
         assert agents[name].model == "deep", name
+
+
+def test_tutor_teaches_on_a_model_it_can_afford_all_day() -> None:
+    """Opus is capped at $5 a day on the gateway, and one phase on it cost $17.71.
+
+    The next article run stalled with no tool calls and was blocked by the
+    watchdog. So the teacher is the newer kimi at the effort value that is
+    known to work, and a phase's token budget must fit its per-run cap.
+    """
+    import yaml
+
+    from hq import llm
+    from hq.config import settings
+    from hq.loader import scan
+
+    spec = yaml.safe_load(settings().models_file.read_text())
+    teacher = spec["models"][spec["roles"]["teacher"]]
+    assert teacher["model"].startswith("kimi"), "opus is capped at $5 a day"
+    assert teacher["settings"]["reasoning_effort"] == "high"
+    assert teacher["settings"]["timeout_s"] >= 600
+    assert teacher["fallback"]
+
+    tutor = scan(strict=True)["tutor"]
+    assert tutor.model == "teacher"
+    budget = llm.registry().token_budget(tutor.model, tutor.caps.cost_per_run_usd)
+    assert budget is not None and budget >= 2_500_000, budget
 
 
 def test_scout_can_reach_the_lesson_that_seeds_its_posts() -> None:
@@ -875,7 +923,7 @@ def test_the_briefs_teach_the_mechanism_not_the_tool() -> None:
 
     digests = [{"digest_path": "q.md", "title": "A", "url": "https://e"}]
     lesson = lesson_brief(lesson_payload(scan_payload(), digests), digests)
-    assert "Write ONE article on the one relationship" in lesson
+    assert "Write ONE article carrying ONE idea" in lesson
 
     skill = (pathlib.Path(__file__).resolve().parents[2] / "agents" / "tutor"
              / "skills" / "article" / "SKILL.md").read_text()
@@ -1242,6 +1290,7 @@ def test_a_written_phase_goes_to_review_and_a_review_is_not_a_write() -> None:
     assert not learning.is_course_written(review) and not learning.is_course_study(review)
 
 
+
 def test_course_briefs_load_one_shared_skill_and_one_object_skill() -> None:
     from hq import learning_pipeline as learning
 
@@ -1253,17 +1302,41 @@ def test_course_briefs_load_one_shared_skill_and_one_object_skill() -> None:
         assert "daily-lesson" not in brief
     assert "write_lab_files" in learning.course_lesson_brief(local, [])
     assert "shape.words" not in learning.course_lesson_brief(local, [])
-    # A phase written with Claude is rebuilt as the enhanced page, from the
-    # repo copy, one section per call, and never re-labbed.
     published = learning.course_lesson_brief(platform, [])
     assert "read_course_source" in published and "write_lesson_part" in published
-    assert "one section at a" in published and "not a patched copy" in published
     assert "write_lab_files" not in published
     assert "course-spec-research" in learning.course_study_brief(local)
     assert "course-spec-research" not in learning.course_study_brief(platform)
     assert "review-phase" in learning.course_review_brief(local)
     assert "the E3 regex missed" in learning.course_revision_brief(
         local, "the E3 regex missed", 1)
+
+
+def test_his_phase_is_reference_and_the_lesson_starts_from_concepts() -> None:
+    """The brief is where "keep everything" used to be asked for.
+
+    2B kept every section, cited 26 sources and passed every gate. He read it
+    and said: "I don't feel any value, any concept ... it should be a teacher
+    who knows everything and now shares the important concepts." And of his
+    own phase: "if you find the things there are not good to learn then you
+    can drop those ... that part is for reference."
+    """
+    from hq import learning_pipeline as learning
+
+    platform = {"slug": "s", "source": "platform", "title": "T", "course": "c", "url": "u"}
+    tutor = " ".join(learning.course_lesson_brief(platform, []).split())
+    assert "Neither is a contract" in tutor
+    assert "Start from the ideas, not from the section list" in tutor
+    assert "He is not reading a history" in tutor
+    for old in ("coverage contract", "shape.words", "not a patched copy", "nothing is lost"):
+        assert old not in tutor, old
+
+    hunter = " ".join(learning.course_study_brief(platform).split())
+    assert "Three to five, never more" in hunter
+    assert "What to leave out, and why" in hunter
+    assert "One piece of evidence per concept" in hunter
+    for old in ("Gaps against the standard", "section by section", "so nothing is lost"):
+        assert old not in hunter, old
 
 
 def test_every_skill_a_brief_loads_exists() -> None:
@@ -1539,8 +1612,9 @@ def test_a_published_phase_gets_an_enhanced_page_and_a_planned_one_is_never_writ
     assert TOOL_REGISTRY["read_course_source"].trust == "vault"
 
 
-def test_the_source_is_split_outside_code_fences_and_the_page_must_cover_it() -> None:
-    from hq.tools.learning_tools import match_section, module_sections, page_coverage
+
+def test_the_source_is_split_outside_code_fences() -> None:
+    from hq.tools.learning_tools import match_section, module_sections
 
     doc = (
         "# Phase 3A — The bill\n\nintro words here\n\n"
@@ -1559,14 +1633,25 @@ def test_the_source_is_split_outside_code_fences_and_the_page_must_cover_it() ->
     assert match_section(sections, "3.2") == "3.2 — Implicit prefix caching"
     assert match_section(sections, "9.9") is None
 
-    thin = "<h2><span class='num'>3.1</span> Classes</h2><p>short</p>"
-    gap = page_coverage(doc, thin)
-    # A short fixture only exercises the section check; the length band and
-    # the fidelity floor need a real phase behind them.
-    assert "3.2" in gap
-    full = ("<h2><span class='num'>3.1</span> Classes</h2><p>" + "word " * 130 + "</p>"
-            "<h2><span class='num'>3.2</span> Caching</h2>")
-    assert page_coverage(doc, full) == ""
+
+def test_a_page_may_leave_out_what_his_phase_covers() -> None:
+    """His phase is reference. Nothing asks how much of it survived.
+
+    The old check refused a page that dropped a numbered section, fell under
+    95% of the phase's words, or lost one of its numbers. Those three rules are
+    how a lesson became an inventory.
+    """
+    from hq.tools.learning_tools import page_coverage
+
+    source = (
+        "## 3.1 — Token classes\n" + "text 41 " * 300 + "\n"
+        "## 3.2 — Implicit prefix caching\n" + "more 97 " * 300 + "\n"
+        "- [ ] **E1 (offline).** Count.\n  - Run: `python a.py`\n"
+        "- [ ] **E2 (offline).** Again.\n  - Run: `python b.py`\n"
+    )
+    # No 3.2, a tenth of the words, none of its numbers, one exercise of two.
+    page = _lesson("<p><b>E1</b> Run: <code>python a.py</code></p>")
+    assert page_coverage(source, page) == ""
 
 
 def test_pages_are_wrapped_in_one_kit_and_whole_documents_are_left_alone() -> None:
@@ -1601,7 +1686,8 @@ def test_course_work_has_its_own_lane_and_queued_work_survives_a_code_change() -
     assert "SET application_version" in reap and "status = 'ENQUEUED'" in reap
 
 
-def test_an_enhanced_page_must_keep_commands_exercises_and_skip_the_employer() -> None:
+
+def test_what_a_page_keeps_from_his_lab_it_keeps_exactly() -> None:
     from hq.tools.learning_tools import page_coverage
 
     source = (
@@ -1612,20 +1698,23 @@ def test_an_enhanced_page_must_keep_commands_exercises_and_skip_the_employer() -
         "  - Run: `kubectl apply -f phase06_mindtickle/app.yaml`\n"
         "Read https://example.org/paper\n"
     )
-    body = "<h2><span class='num'>1.1</span> Tokens</h2><p>" + "word " * 60 + "</p>"
-    good = body + (
-        "<p><b>E1</b> <code>python tokenize_cost.py --role default</code></p>"
-        "<p><b>E2</b> <code>kubectl apply -f phase06_platform/app.yaml</code></p>"
+    good = _lesson(
+        "<p><b>E1</b> Run: <code>python tokenize_cost.py --role default</code></p>"
+        # The employer rule wins over exactness, for that one word only.
+        "<p><b>E2</b> Run: <code>kubectl apply -f phase06_platform/app.yaml</code></p>"
         "<a href='https://example.org/paper'>paper</a>"
     )
     assert page_coverage(source, good) == ""
-    # A changed command, a lost exercise, a foreign link and the employer.
-    bad = body + (
-        "<p><b>E1</b> <code>python tokenize.py</code></p>"
+    # His commands were run; a retyped one was not. An exercise may be left
+    # out, never invented. Plus a foreign link and the employer.
+    bad = _lesson(
+        "<p><b>E1</b> Run: <code>python tokenize.py</code></p>"
+        "<p><b>E7</b> Run: <code>python tokenize_cost.py --role default</code></p>"
         "<a href='https://made.up/x'>x</a> Mindtickle"
     )
     gap = page_coverage(source, bad)
-    assert "tokenize_cost.py" in gap and "E2" in gap
+    assert "python tokenize.py" in gap and "nobody has run them" in gap
+    assert "E7" in gap and "his lab does not have" in gap
     assert "https://made.up/x" in gap and "Mindtickle" in gap
 
 
@@ -1641,14 +1730,14 @@ def test_a_page_with_colliding_ids_or_dead_lookups_is_refused() -> None:
     assert "vcell" in page_script_problems(dead)
 
 
+
 def test_namespace_strings_are_not_links_and_dash_heavy_prose_is_sent_back() -> None:
     from hq.tools.learning_tools import page_coverage
 
     source = "## 1.1 — Tokens\n" + "word " * 40 + "\n"
-    body = "<h2><span class='num'>1.1</span> Tokens</h2><p>" + "word " * 60 + "</p>"
-    svg = body + '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
+    svg = _lesson('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
     assert page_coverage(source, svg) == ""
-    dashy = body + "<p>" + "a — b " * 30 + "</p>"
+    dashy = _lesson("<p>" + "a — b " * 30 + "</p>")
     assert "em dashes" in page_coverage(source, dashy)
 
 
@@ -1948,6 +2037,7 @@ def test_a_lesson_keeps_its_page_even_when_only_the_markdown_is_recorded() -> No
     assert 'if not html_path.strip():' in src and 'with_suffix(".html")' in src
 
 
+
 def test_a_long_section_with_nothing_to_look_at_is_sent_back() -> None:
     """He asked for a course page that works like a Claude artifact.
 
@@ -1956,15 +2046,15 @@ def test_a_long_section_with_nothing_to_look_at_is_sent_back() -> None:
     """
     from hq.tools.learning_tools import page_coverage, sections_without_a_visual
 
-    prose = "<p>" + "the scheduler admits a request. " * 60 + "</p>"
-    source = "## 1.1 — Admission\n" + "the scheduler admits a request. " * 120
-    bare = "<h2><span class='num'>1.1</span> How admission works</h2>" + prose
-    assert sections_without_a_visual(bare) == ["1.1 How admission works"]
-    assert "nothing to look at" in page_coverage(source, bare)
+    # Long enough for the page to be measurable at all (400 words).
+    prose = "<p>" + "the scheduler admits a request. " * 100 + "</p>"
+    bare = "<h2 data-kind='orientation'>How admission works</h2>" + prose
+    assert sections_without_a_visual(bare) == ["How admission works"]
+    assert "nothing to look at" in page_coverage("", _lesson(bare))
 
     shown = bare + '<div class="stats"><div class="stat"><b>0.92</b><span>utilisation</span></div></div>'
     assert sections_without_a_visual(shown) == []
-    assert "nothing to look at" not in page_coverage(source, shown)
+    assert "nothing to look at" not in page_coverage("", _lesson(shown))
 
     # Exercises and sources carry their own shape; a figure there is noise.
     closing = "<h2>Exercises</h2>" + prose
@@ -2123,3 +2213,79 @@ def test_the_phone_bundle_is_rebuilt_not_merged() -> None:
     src = inspect.getsource(reader_export.build)
     assert "shutil.rmtree" in src
     assert src.index("rmtree") < src.index("mkdir")
+
+
+def test_a_page_with_no_ideas_in_it_is_sent_back() -> None:
+    """The check that did not exist when 2B shipped.
+
+    Every gate rewarded more verified material, so an 11,609-word page with
+    237 numbers and 26 sources passed them all while teaching three sentences.
+    """
+    from hq.tools.learning_tools import lesson_contract
+
+    assert lesson_contract(_lesson()) == ""
+
+    # No concept list at all: the page never says what it teaches.
+    assert "does not say what it teaches" in lesson_contract("<h2>2.4 Chunked prefill</h2><p>x</p>")
+
+    # A topic name is not a claim he could be wrong about.
+    label = _lesson().replace("Prefill and decode share one forward pass.", "Chunked prefill")
+    assert "is a label, not a claim" in lesson_contract(label)
+
+    # A section that serves no idea and is not apparatus does not belong.
+    stray = _lesson("<h2>A survey of constraint libraries</h2><p>Outlines, XGrammar.</p>")
+    gap = lesson_contract(stray)
+    assert "do not say what they are for" in gap and "A survey of constraint libraries" in gap
+
+    # Promised at the top, never taught.
+    promised = _lesson().replace('<h2 data-concept="c2">', '<h2 data-kind="lab">')
+    assert "c2 is promised at the top and never taught" in lesson_contract(promised)
+
+    # Told, never asked.
+    told = _lesson().replace('class="predict"', 'class="answer"')
+    assert "is told, never asked" in lesson_contract(told)
+
+
+def test_a_lesson_that_reads_like_a_literature_review_is_sent_back() -> None:
+    """ "I'm not reading a book that says 2025 had this and now 2026 has this." """
+    from hq.tools.learning_tools import lesson_contract
+
+    mechanism = "<p>" + "The mask sets every illegal token to minus infinity. " * 60 + "</p>"
+    assert lesson_contract(_lesson(concept_body=mechanism)) == ""
+
+    history = "<p>" + (
+        "The mask sets every illegal token to minus infinity. " * 8
+        + "A 2024 paper reported a large drop on reasoning tasks. "
+        + "The authors of the library published a rebuttal in 2025. "
+    ) * 8 + "</p>"
+    gap = lesson_contract(_lesson(concept_body=history))
+    assert "name a year" in gap and "He is not reading a history" in gap
+    assert "about a source rather than the mechanism" in gap
+
+    # The same sentences inside a closed evidence note are where they belong.
+    filed = ("<p>" + "The mask sets every illegal token to minus infinity. " * 64 + "</p>"
+             '<details class="evidence"><summary>Evidence</summary><p>'
+             + "A 2024 paper reported a large drop. The authors published a rebuttal in 2025. " * 8
+             + "</p></details>")
+    assert lesson_contract(_lesson(concept_body=filed)) == ""
+
+    # When a fact was checked is for the sources list, not the sentence teaching it.
+    stamped = "<p>" + "The mask sets every illegal token to minus infinity. " * 60 \
+        + "This was checked against the source tree on 2026-09-12.</p>"
+    assert "carry a verification date" in lesson_contract(_lesson(concept_body=stamped))
+
+
+def test_an_article_carries_one_idea_and_is_held_to_it() -> None:
+    """An article is more exposed to "2025 had this, 2026 has this" than a phase.
+
+    Its material is news. So it gets the same contract as a phase, with the
+    concept count set to one, and the same review detector.
+    """
+    from hq.tools.learning_tools import lesson_contract, page_coverage
+
+    one = _lesson().replace('<li id="c2">', '<li id="zz">').replace(
+        '<h2 data-concept="c2">', '<h2 data-kind="lab">')
+    one = one[: one.index('<li id="zz">')] + one[one.index("</ol>"):]
+    assert lesson_contract(one, least=1, most=1) == ""
+    assert page_coverage("", one, "", least=1, most=1) == ""
+    assert "this page carries 1 to 1" in lesson_contract(_lesson(), least=1, most=1)

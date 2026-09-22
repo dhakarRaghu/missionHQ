@@ -16,6 +16,33 @@ changed default, an implementation that does it differently?
 So an article never stands alone, and it never repeats the phase. It takes
 the phase's model as known and tests it against something real.
 
+## One idea, and the test for it
+
+A course phase teaches three to five concepts. An article carries **one**: the
+one thing he knows about the phase's mechanism in the real world after reading
+it that the phase alone did not give him. Write that sentence before the plan.
+Every section delivers it; a section that does not is cut, however good the
+digest behind it was.
+
+The test is the same as for a phase: **after this, what can he predict or
+decide that he could not before?** "He knows what happened at one company" is
+not an answer. "He knows the signal that catches this failure, and whether he
+has it" is.
+
+He said what he does not want, of a phase that had passed every check: "I'm
+not reading a book that says 2025 had this and now 2026 has this ... not
+anything random." An article is more exposed to that than a phase, because
+its material is news. So:
+
+- **Teach what is true now.** Who published it and when is a line in Sources.
+- **One number, with its conditions.** The digests will offer six. The best
+  one goes in the text; the others are how you know it holds.
+- **The source story is not the lesson.** "The post reports X; the pull request
+  shows Y" is worth one sentence where the two differ, and nothing where they
+  agree.
+- **Ask before you tell.** Open the one idea with a `<details class="predict">`
+  question he answers first, the one a capable engineer gets wrong.
+
 ## What the brief gives you
 
 - **The phase**: course, slug, title, its question, and its sections.
@@ -150,8 +177,8 @@ site. The brief names the lesson and the section: `writing` for an article,
   are still there.
 - **Every fact stays**, with its number, its conditions and its source. If
   the lesson labelled a number as one team's own, the post says so too.
-- **The limits stay.** Turn the "could not verify" list into one honest
-  paragraph near the end. It is the part that earns trust.
+- **Honesty about the evidence stays.** Where the lesson said a number was
+  one team's own, the post says so in the sentence that uses it.
 - **His voice**: plain English, short sentences, no idioms, no em dashes in
   prose, and his employer is never named.
 - **No new links.** Only urls the lesson already carried.
@@ -184,17 +211,18 @@ they agree, where they contradict, what one covers that the others skip, which
 one has the real numbers. That is what makes several sources worth more than
 the best one.
 
-**Use the independent sources.** Every study note has a section
+**Use the independent sources, quietly.** Every study note has a section
 `## Independent sources`: the pull requests, docs and papers behind the
-article, and other sites that confirm or contradict it. Bring them into the
-text where the claim is made — "the vLLM post reports X; the pull request
-shows Y; an LMSYS benchmark on different hardware measured Z". A number that
-only the original authors report is said to be theirs, in the sentence that
-uses it.
+article, and other sites that confirm or contradict it. They are how you know
+a claim holds. Where they agree, the text states the claim once, plainly, and
+the receipt goes in `<details class="evidence">`. Where they differ, that is
+worth one sentence in the text, with the condition that explains it. A number
+that only the original authors report is said to be theirs, in the sentence
+that uses it.
 
-**One site is not enough.** If every url in the notes is on one site, say so
-in "Things I could not verify" and name what a second source would have to
-show. Never fill the gap from memory.
+**One site is not enough.** If every url in the notes is on one site, the
+claims that rest on it are stated as that team's account, and your report
+says what a second source would have to show. Never fill the gap from memory.
 
 **Sources lists every url the article used**, each with one line on what it
 contributed, grouped as: the article(s), what they point at (pull requests,
@@ -214,16 +242,22 @@ _<relationship> · <Course> Phase <N>: <Title> · Adds: <one line>_
 
 # <title: the question the article answers>
 
-## Why you are here: <the situation, named>
-## <sections that deliver the relationship, each heading a question>
-    the mechanism in the real system, a worked example, where it breaks
-## What this changes in the course        (only when it corrects or updates it)
-## Fifteen minutes today
-## A question to test the transfer
-## Things I could not verify
-## Two things you could post
-## Sources
+<the situation, as a story: what it looked like from the dashboard>   (no h2)
+<ol class="concepts"> with ONE <li id="c1">: the idea, and what it lets him do
+## <h2 data-concept="c1"> the question this section answers
+    predict first · the mechanism in the real system, drawn · the one number
+    or the incident walked · <details class="evidence"> for the receipt
+## <h2 data-concept="c1"> ... as many sections as the idea needs, usually 2 or 3
+## <h2 data-kind="orientation"> What this changes in the course   (only when it does)
+## <h2 data-kind="lab"> Fifteen minutes today
+## <h2 data-kind="checkpoint"> A question to test the transfer
+## <h2 data-kind="post"> Two things you could post
+## <h2 data-kind="sources"> Sources
 ```
+
+There is no "Things I could not verify" section. He asked for it off the
+page: "in learning it is not required". A claim the digests cannot support is
+left out. What you could not confirm goes in your report, for the next scan.
 
 **The header line comes first**, before the title and the story. It names the
 relationship, the course and phase it orbits, and what it adds beyond the
@@ -250,11 +284,10 @@ exercises. It must be answerable from the phase plus this article.
 
 ## Length
 
-**1,800 to 2,600 words**, which is nine to thirteen minutes. Length follows
-what the relationship needs: an incident walked properly needs more room than
-a changed default, but nothing needs 3,400 words, which is where the
-2026-09-17 article landed. Say each point once, as `teaching` says. The page
-is the lesson: the whole article is on the page.
+As long as the one idea needs, and no longer. An incident walked properly
+needs more room than a changed default. Past about 2,600 words (thirteen
+minutes) an article is carrying a second idea or a survey; find which and cut
+it. Say each point once, as `teaching` says. The page is the lesson.
 
 ## Write it and record it
 

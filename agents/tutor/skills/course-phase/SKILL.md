@@ -1,531 +1,248 @@
-# Write one course phase
+# Teach one course phase
 
-Load `teaching` first. Its rules on plain English, the story opening, the
-planning ledger, headings, length, facts and labels, the employer, the page
-and the diagram all apply here and are not repeated. This file adds what a
-course phase needs.
+Load `teaching` first. Its rules on plain English, the story opening, order,
+headings, facts, the employer, the page and the figures all apply here and are
+not repeated. This file is what a course phase adds.
 
-**One phase per run, full attention.** Length follows the material. Covering
-less ground to read lighter is the one trade he has ruled out.
+## What he asked for
 
-## Two kinds of phase, and which one you have
+He read a phase that kept every section of his original, cited 26 sources,
+carried 237 numbers and passed every check we had. Then he said:
 
-**Phases written with Claude.** The course is written with Claude and the
-/study skill, published to his study platform, and kept in the repo under
-`learning/study-material/`. Most phases are this kind, and the brief says
-"Write the lesson he reads". Follow "Writing the lesson for a phase", below.
+> "I don't feel any value, any concept or anything from it. I'm not reading a
+> book that says 2025 had this and now 2026 has this. Why should I care about
+> the past if that is not connected and not required? ... It should be a
+> teacher who knows everything and now shares the important concepts that I
+> should know for becoming better, not anything random."
 
-**Spec phases.** An older path: a spec in `learning/courses/` written up here
-from hunter's note. The evening run no longer starts these. The writing
-sections further down remain for revising a lesson written that way.
+And about his own phase, which you read through `read_course_source`:
 
-## Writing the lesson for a phase
+> "That is the course that I generated for learning. If you find the things
+> there are not good to learn then you can drop those, and can add things that
+> must be learned. That part is for reference."
 
-You have two inputs: his phase, through `read_course_source`, and hunter's
-research note. You write one lesson from them. He said what he wants from it:
+So you are the teacher, and you have two references: his phase and hunter's
+note. Neither is a contract. **The job is understanding, and the unit of
+understanding is a concept.**
 
-> "I need the final enhanced version or improvement, I'm just learning, so no
-> need to mark it ... it's all about the content that you created, the final
-> content that was created for me to learn ... don't put these patches."
+## A concept, and how to tell
 
-So there is no "original" and no "addition" on the page. There is a lesson.
+A concept is a claim, one sentence he could be wrong about, that lets him
+predict or decide something he could not before.
 
-**Judge every paragraph by one question: is this the best way to teach him
-this, today?** Where his sentence is already that, keep it word for word.
-Where the research changes the picture, teach the current picture as the
-plain fact of the matter, with its source named in the sentence — not the old
-version with a correction beside it. Where his phase has a gap the note
-found, teach it here, in the section where it belongs. How much of either
-input survives is not a measure of anything, and nobody is counting.
+| A concept | Not a concept |
+|---|---|
+| Prefill and decode share one forward pass, so a long prompt either waits or freezes every other stream | Chunked prefill (a topic) |
+| A schema controls which tokens are legal, never when generation stops | Strict mode guarantees the keys (a fact) |
+| A summary keeps what the summariser found interesting, so a rule that must survive is copied, never summarised | Compact at 60% of the window (advice) |
 
-**Write it into the course, not beside it.** The brief lists the phases
-before this one with their sections, and the phases after it. A mechanism an
-earlier phase taught is used, with one clause to reconnect it, never taught
-again. A mechanism a later phase owns is named in a sentence and left for it.
-Something the course never covers and he needs here is taught here, properly,
-because this is where he will meet it.
+The test: **after this, what can he predict that he could not before?** If the
+answer is "nothing, but he knows more facts", it is not a concept.
 
-**What must survive from his phase, exactly:**
+**A second test, because a fact can be dressed as a claim: could the next
+release make it false?** "The token budget has no single default: a B200 API
+server starts at 16,384 and an A100 offline run at 8,192" reads like a claim
+and is a version table. It shipped as a concept on 2026-09-22, with a predict
+question that asked him to recall those values. What survives releases is
+"the budget trades time-to-first-token against stream smoothness, so it is a
+product decision", and the table under it is one sentence: read the real
+value from your startup log. A concept is about how the system must behave.
+A default is a detail, however carefully verified, and at most one sentence.
 
-- every numbered section, in order, with its number
-- every exercise, its id, its exact command and its expected output: the
-  commands were run, and yours were not
-- every answer sketch, in `<details class="answer">`
-- every number, unless the research shows it changed, and then the new number
-  with its source and version
-- the lab, the check-it-yourself section, the references and the cheatsheet
+A phase teaches **three to five**. Facts, config keys, numbers and commands
+are welcome when they hang from a concept: they are how he uses it. With no
+concept above them they are trivia, however well sourced, and they go.
 
-**What the page must never contain:** a label saying something was added, a
-box announcing a correction, a percentage, a note about what the original
-said, or his employer's name. If the original was wrong, the lesson is
-simply right.
+## Plan before any prose
 
-**Every fact is sourced.** Defaults, flags and versions come from the note,
-with the version they were read at. A number carries its conditions. A claim
-the note cannot support does not go in. A separate run opens the links behind
-the lesson's new facts and checks them, so an invented one is found.
-
-**Diagrams, code and figures** follow `teaching`: his box drawings stay exact
-where they are clear, and become figures where a drawing teaches better.
-
-**How to write it, so it finishes.**
-
-1. `lesson_draft` with the slug; continue after any saved parts.
-2. `read_course_source(slug)` for the section list. Then, one section at a
-   time: read it, decide what this lesson's version of that section is, and
-   write it with `write_lesson_part`. One section per call.
-3. `write_lesson(slug, title=…, subtitle=…, eyebrow=…)`, then `record_lesson`
-   with `kind: "course"`.
-
-**If `write_lesson` sends the page back, fix only what it names.** Every part
-you saved is still there. Rewriting the whole phase after one finding doubles
-the run: on 2026-09-17 a single length finding cost eleven sections rewritten
-for nothing.
-
-## A local spec is a contract
-
-The spec block gives you:
+Write this plan in your first answer, before the first `write_lesson_part`.
+A lesson that fails does so here, not in its sentences.
 
 ```
-question:          the one question the phase answers
-minutes:           lesson time (the lab runs longer)
-assumes:           terms already taught, with the phase that taught them
-introduces:        the new terms this phase owns
-leaves-for-later:  terms that belong to a later phase
-### Why you're here      a situation, then the open question
-### Sections             N.1, N.2, ... a title and one line each
-### Lab                  what he builds or breaks
-### Demonstrate          the measured result that proves mastery
-### Test out             Explain / Predict / Demonstrate
+outcome    one sentence: what he can DO after this that he could not before
+c1..c5     the claim · the wrong belief it replaces · the question you will
+           ask him first · the ONE number or failure that proves it · the
+           picture that shows it · where he uses it (exercise, Mission HQ file)
+sections   each teaching section, in order, and the concept it serves
+left out   what is in his phase or hunter's note and not in the lesson, and why
+added      what is in neither reference's main line and the lesson needs
 ```
 
-- **Every `N.x` section appears in the lesson, in spec order, under its own
-  number.** Not merged, not reordered, not dropped. If one needs more room,
-  give it sub-headings under its own heading.
-- **The section list is the coverage contract.** There is no word floor for a
-  local spec. Each section is taught in full, with its three passes.
-- **`assumes`** is what you may use without teaching. Do not re-explain it: a
-  paragraph re-teaching 1.1 is padding in phase 2.
-- **`introduces`** is what you must define here, before first use.
-- **`leaves-for-later`** is forbidden. Never pre-teach it. If a sentence needs
-  it, name it in one clause as arriving later: "retry budgets, which 6.2
-  covers, would change this number."
-- **A term in none of the three lists** is either known from earlier phases
-  (check the note's Sequence block) or a forward reference you invented.
-  Define it where you first use it, and report that the spec was missing it.
+Then run the ledger from `teaching` on it: every term a section assumes was
+introduced by an earlier section, an earlier phase, or is known to him.
 
-## Rewriting a platform module (older lessons only)
+**`left out` is a decision, not a confession.** Hunter's note names what it
+found not worth his time; you may go further. A survey of libraries he will
+never choose between, the story of who measured what in which year, the
+release a default changed in, a second and third number proving what the first
+already proved: leave them out and say so in your report.
 
-The evening run no longer asks for this: a published phase becomes one
-lesson, written as "Writing the lesson for a phase" describes. It applies only when a brief explicitly asks for a rewrite of a
-platform module lesson written before this change.
+## How one concept is taught
 
-- **Teach at least as much as the module.** The note opens with the module's
-  measured `shape`. Your teaching sections total at least `shape.words`,
-  counted the same way: markdown with code fences removed, and not counting
-  the checkpoint, cheatsheet, corrections or sources. That is a floor. Near
-  the floor means you compressed something; go back and teach it.
-- **Every heading in `shape.sections` maps to somewhere in your plan.** A
-  module heading with no row is a section you are about to drop.
-- **Keep the module's declared shape.** Where the module has labs, keep them
-  runnable. Where it says it has no lab ("This phase has no lab and no Go
-  code"), it has none. Do not invent a lab, exercises or a Demonstrate block
-  the module left out on purpose.
-- **Replace employer sections** as `teaching` says. His modules often anchor
-  to a former employer's code.
-- **Correct the module** where the note shows it is wrong or stale, plainly,
-  with the current value and its version.
+In this order. It is the order in which understanding actually arrives.
 
-## Plan it: the ledger plus the coverage map
-
-Use the ledger from `teaching`, with three more columns:
+1. **The situation.** Two or three sentences that put him where not knowing
+   this costs something. His stream froze. His parser broke on valid JSON.
+2. **Ask before you tell.**
+   `<details class="predict"><summary>Predict: three streams are decoding and a
+   24,000-token prompt arrives. What happens to their next token?</summary>`
+   with the answer and the reason inside. Pick the question a capable engineer
+   gets wrong. A concept he guessed wrong is one he keeps. `write_lesson`
+   refuses a concept that is told and never asked.
+3. **The mechanism, with the picture.** Why it is true, one level below where
+   a tutorial stops. This is the body of the section, and it is drawn: a
+   figure, a calc box, a before/after. `teaching` has the table of pieces.
+4. **The one number, or the one failure.** The measurement with its
+   conditions, or the production failure with the symptom first. One. The
+   receipt goes in `<details class="evidence">` under it.
+5. **Use it.** The exercise from his lab that exercises this idea, copied
+   exactly. Then the Mission HQ file where the same mechanism lives, with a
+   question that reading it answers.
+6. **Close it**, with these labels verbatim:
 
 ```
-covers   which spec N.x or module heading it serves (or: apparatus)
-diagram  what the diagram or code block in this section shows
-action   the Try this now / Verify / In Mission HQ it ends with
+The sentence to remember:   the claim, as he would say it to a colleague
+The trap:                   the wrong belief, and what it costs in production
+Try this now:               one command, under five minutes, and what to look for
 ```
 
-Write the one-sentence outcome as something he can DO: predict a number,
-name the failure, build the thing. Not "understands X".
+If a section is heavy, the fix is never more detail. It is a better question
+in step 2 or a better picture in step 3.
 
-Then run the checks on the plan, not the prose:
-
-1. **The ledger.** No forward references, against the spec's `assumes` and
-   the note's Sequence block.
-2. **The coverage map.** Local: every `N.x` has a row, every `introduces`
-   term is introduced somewhere, no `leaves-for-later` term appears. Platform:
-   every `shape.sections` heading has a row, and the planned teaching is not
-   smaller than `shape.words`.
-3. **The shape.** Every section plans a diagram or code block. Every concept
-   section plans an action.
-
-## The shape of a phase
-
-In this order. Keep the spec's number in the heading, then the question:
-`## 2.3 Why p99 moves before the mean does`.
+## The shape of the page
 
 ```
-# <Course> Phase <N> — <Title>
-_<one line: course, phase, what it assumes, whether it has a lab>_
-
-## Why you are here: <the situation, named>
-## What this phase teaches, and what it does not
-    the `introduces` list in arrival order; `leaves-for-later` named as later
-## <N.1> <the question this section answers>
-    three passes, then the closing labels and the action
-## <N.2> ...  one per spec section (or module section), in order
-## The lab: <what he builds or breaks>
-## Exercises
-## Where this breaks in production: <the incident, named and dated>
-## Demonstrate: <the result that proves you have it>
-## Test out
-    Explain / Predict / Demonstrate, from the spec, expanded
-## Checkpoint <N>
-## In Mission HQ
-## Things I could not verify
-## Cheatsheet — Phase <N>
-## Two things you could post
-## Sources
+<why he is here: the situation, as a story>              (no h2)
+<ol class="concepts">                                    the three to five claims
+<h2 data-kind="orientation">  What this builds on, and what it leaves for later
+<h2 data-concept="c1">        the question this section answers
+<h2 data-concept="c1">        a concept may take more than one section
+<h2 data-concept="c2">        …
+<h2 data-kind="lab">          the exercises, under the concept each one proves
+<h2 data-kind="checkpoint">   scenario questions, answers in <details class="answer">
+<h2 data-kind="cheatsheet">   one screen
+<h2 data-kind="post">         Two things you could post
+<h2 data-kind="sources">      Sources
 ```
 
-A phase with no lab has no lab section and no exercises unless its source
-lists them. A platform module has no Demonstrate or Test out unless it carries
-them.
+Every `<h2>` carries `data-concept` or `data-kind`. A section that would carry
+neither serves no idea and is not apparatus: it does not belong. The concept
+list is the first thing on the page after the opening story, written as
+`<li id="c1"><b>the claim</b><span>what it lets him do</span></li>`.
 
-## Three passes inside every concept
+Headings name the question, per `teaching`. His phase's section numbers are
+not kept: they numbered his outline, and this is not his outline.
 
-Every concept is taught three times, at increasing depth, in the same
-section. Not three sections.
+## What is kept exactly
 
-**Pass 1: the mental model.** Three sentences and one diagram: what it is,
-what it does, why it exists. He could repeat it to a colleague after one read.
+His lab was run, and yours was not. So whatever you keep from it is kept to
+the character:
 
-**Pass 2: the details.** Config keys with defaults and versions, byte sizes,
-timeouts, edge cases, code. This is the pass usually missing, and the one that
-separates a staff engineer's wiki from a tutorial.
+- an exercise keeps its id (`E4`), its exact `Run:` command and its expected
+  output. `write_lesson` refuses a `Run:` command that is not in his lab, and
+  an exercise id his lab does not have.
+- you may leave an exercise out when it exercises nothing the lesson teaches.
+  Say which in your report. Other phases cite exercises by id, so never
+  renumber.
+- code is copied from his phase with its `file:line`, never retyped.
 
-**Pass 3: the failure.** What breaks, the exact error message, what it looks
-like in logs, metrics and traces, a real incident from the note, and
-something small he can run now that makes the failure appear.
-
-Close the concept with these labels, verbatim:
-
-```
-The sentence to remember:     one sentence he could write on a card
-The trap:                     the wrong belief this concept corrects
-Three things to internalize:  (hard concepts only, exactly three)
-Try this now:   a command he can run in under five minutes
-Verify:         how he checks he got it right, with the expected output
-In Mission HQ:  a file in this repo to open, with a question to answer
-```
-
-A concept with no action is not finished.
-
-## Depth calibration
-
-The test: could someone running this system at 3am get what they need from
-your section? That means exact config keys ("`max_batch_tokens`, 8192 in
-v0.11.0", never "the batch size setting"), byte sizes, timeouts, protocol
-versions, the error message copied exactly, and the log line, metric and span
-that show the failure. Add **why it was built that way**, with the source (a
-design doc, a paper's method section, a commit message): the reason is what
-makes it stick. All of it comes from the note, per `teaching`.
-
-## Diagrams and tables
-
-**Maximum five paragraphs before the next diagram, figure or code block.**
-Count them. And **every section that teaches a mechanism carries one piece of
-the kit**: he asked the course pages to work like a Claude artifact, and
-`write_lesson` refuses a page where a long section is prose only.
-
-`teaching` has the table that matches an idea to a piece. Four jobs come up in
-almost every phase:
-
-- **Architecture**: what sits where, what talks to what, arrow direction.
-  `<pre class="ascii">` with `┌ ┐ └ ┘ │ ─ ├ ┤ ► ◄`, or an SVG
-  `<figure class="diagram">` when the drawing carries more than boxes.
-- **Timeline**: `<ol class="timeline">`, actor and `t=` on each row.
-- **Before / after**: `<div class="toggle-fig">`, same labels in both views,
-  one button each. Use `<div class="compare">` when the two must be seen at
-  once.
-- **Comparison table, with real numbers** and their conditions. Never
-  high/medium/low. No numbers means no table.
-
-**Where a number drives a number, give him the slider**, not the formula
-alone: a `<div class="calc">` with `kit.calc` costs four lines of script and
-lets him find the cliff himself. Batch size against KV memory, concurrency
-against p99, block size against waste: each of those is a calc box.
-
-Label parts with real names.
-
-## Code
-
-**Production-grade or not in the phase.**
-
-- Runs as written: no missing import, no `// TODO`, no `...` at the hard part.
-- A top comment: what it demonstrates, how to run it, what he should see.
-- **Wrong first, then right**, with comments on why the first is wrong.
-- Real error handling, never `_ = err`. The error path is usually the lesson.
-- **Go by default, Python for the applied-AI course**: the spec's `language:`.
-
-## Exercises
-
-**7 to 12 per phase with a lab, numbered E1, E2, ...** They build on each
-other: E4 uses what E3 set up. **At least two are break-it exercises**: kill a
-process mid-write, corrupt a file, fill a bounded queue, exhaust a pool, hold
-a lock. In the lesson, each one reads:
-
-```
-E4 — <what he does, in one line>
-Kind:        observe | build | break | debug
-Run:         the exact command, from inside the exercise directory
-Expected:    the output or number, with a range where it varies
-If it fails: the likely cause and the check
-Teaches:     the one idea this exercise proves
-Verified:    auto (runs in the sandbox) | manual (and why)
-```
-
-## The lab files
-
-Write runnable lab code with `write_lab_files(slug, files)`. `slug` is the
-phase slug. `files` maps relative paths to file contents. Files land in
-`learning/labs/<slug>/`. Allowed extensions: `.go .mod .sum .py .txt .md
-.json .sql .sh .yaml .yml .toml`. At most 60 files, 200 KB each.
-
-It MUST include `exercises.json`:
-
-```json
-{
-  "slug": "<phase slug>",
-  "language": "go",
-  "exercises": [
-    {"id": "E1", "title": "one line", "kind": "observe|build|break|debug",
-     "cwd": "e01", "run": "go run .", "expect": ["regex that must match the output"],
-     "expect_exit": 0, "timeout_s": 60, "verify": "auto"}
-  ]
-}
-```
-
-**`run` is ONE command**, split into words the way a shell splits them, but
-with NO shell: no pipes, no `&&`, no redirects, no `$VAR`. The executable must
-be `go` or `python3`: `go run .`, `go test -run TestLeak -count=1 .`,
-`python3 main.py --requests 1000`. A break-it exercise that kills a process
-does it from inside the program: it starts a child (for example, itself
-again with a `-child` flag), kills it, then checks what survived.
-
-**Labs run in a sandbox with NO network, not even localhost, and writes are
-allowed only inside a temp copy of the lab.** So:
-
-- **Go standard library only.** No third-party modules. `go.mod` has a
-  `module` line and a `go` line and no `require` lines.
-- **Python standard library only.** No `pip install`.
-- **No listening sockets.** `httptest.NewServer` listens on localhost and
-  will fail. Call handlers directly with `httptest.NewRecorder`, connect
-  in-process with `net.Pipe`, or model the queue with goroutines and
-  channels.
-- **Write files only under the exercise's own directory, by relative path.**
-  Do not assume `/tmp` or the home directory is writable.
-- **Make output matchable.** Timing varies, so print a stable marker line
-  and match its shape: print `RESULT p99_ms=412 recovered=true`, expect
-  `RESULT p99_ms=\d+ recovered=true`. A break-it exercise normally reports
-  what broke and still exits 0.
-
-**An exercise that genuinely needs a network service** (a real Postgres,
-etcd, a model API, the running Mission HQ API) sets `"verify": "manual"` and
-a `"why_manual"` string. It is reported as unverified, never as passed. Where
-the spec's lab targets Mission HQ itself, prove the mechanism in auto
-exercises on a self-contained program first, then give the Mission HQ run as
-manual exercises. Never mark an exercise auto that cannot run in the sandbox.
-Do not pretend.
-
-**The lesson and `exercises.json` must match**: the same ids, the same
-commands, the same verify mode. The review run checks this.
-
-A phase with no lab and no exercises does not call `write_lab_files`. Say so
-in your report.
+Hunter's **Corrections** override his phase: teach the current value as the
+plain fact.
 
 ## Checkpoint questions
 
-Five to seven. Scenario-based, on systems he actually has: Mission HQ, the
-course's lab, a system named in the note. **Never "explain X".** At least one
-of each:
-
-1. **Walk me through**: "a task is created at 09:00 and the agent never runs.
-   Name every place on the path from the row to the runner where it stops."
-2. **A colleague says X, why are they wrong**: a specific, confident belief.
-3. **Design under constraints**: "one machine, 16 GB, ten minutes. What do
-   you give up?"
-4. **Debug from symptoms**: what do you look at first, and what does each
-   answer rule out?
-5. **Show the math**: a number from the phase's formula, inputs given.
-
-Every question is answerable from your article alone. If one needs something
-you did not teach, teach it or cut the question.
+Four to six, each tied to a concept, each a scenario with numbers on a system
+he has: Mission HQ, the lab, a system the note names. Never "explain X". The
+best ones are the predict questions one step harder: same mechanism, new
+situation. Every question is answerable from your lesson alone.
 
 ## Anchors in Mission HQ
 
-Two to four per phase. Each names a **real file in this repo** and asks a
-question he answers by reading it. An anchor pointing at a file that does not
-hold the mechanism is worse than none. These are verified:
+One per concept where the mechanism genuinely lives in this repo. An anchor
+pointing at a file that does not hold the mechanism is worse than none. These
+are verified:
 
 | File | What it is good for |
 |---|---|
-| `backend/src/hq/engine.py` | the DBOS workflows: an agent run start to finish, timeouts, the scheduled ticks |
+| `backend/src/hq/engine.py` | the DBOS workflows: an agent run start to finish, timeouts, queues, the scheduled ticks |
 | `backend/src/hq/runner.py` | `flush_outbox_step`, `await_runtime_approval`: where a run blocks and why |
-| `backend/src/hq/board.py` | the tickets state machine and the notification outbox insert |
-| `backend/src/hq/memory.py` | `search()`: FTS and pgvector run concurrently, fused by reciprocal-rank fusion, with a grep fallback |
+| `backend/src/hq/board.py` | the task state machine and the notification outbox insert |
+| `backend/src/hq/memory.py` | `search()`: FTS and pgvector fused by reciprocal rank; `trim_to_cap`: a context budget enforced by dropping the oldest lines |
+| `backend/src/hq/llm.py` | the model registry: per-model timeouts, output caps, the fallback chain |
 | `backend/src/hq/tools/registry.py` | the `@hq_tool` decorator: the single choke point for agent capabilities |
-| `backend/src/hq/safety.py` | action classes, budgets, HALT, the deterministic guardrail before any approval ticket |
-| `backend/src/hq/loader.py` | `validate_trifecta`: why a web reader may not also write trusted files |
+| `backend/src/hq/safety.py` | action classes, budgets, HALT, the deterministic guardrail |
 | `backend/src/hq/obs.py` | `emit()`: the Postgres event log every run writes into |
-| `backend/src/hq/channels/telegram.py` | `drain_outbox`: delivery, retries, idempotency keys |
-| `backend/migrations/*.sql` | the schema as it is, including the event log and the outbox |
+| `backend/migrations/*.sql` | the schema as it is |
 
-Pick the files the mechanism lives in, and write the question so reading the
-file changes what he believes: "`memory.search()` fuses both halves. What
-happens to `rank` when the vector half returns nothing, and would you notice?"
-
-## References
-
-Three good references beat twelve. Each carries:
-
-```
-<title and url>
-Why:   what this gives you that the phase does not
-Focus: the section, chapter or timestamp, as the note records it
-When:  before the lab / after the lab / when you hit this in production
-```
-
-A timestamp exists only if the note has one; otherwise "the whole talk".
+Write the question so that reading the file changes what he believes.
 
 ## The cheatsheet
 
-One screen, before the sources, no prose: **what → command or config** (flags,
-keys with defaults and versions), **the one formula** with units, **the three
-lines he is most likely to get wrong**, and the one diagram worth keeping. If
-he has to re-read the phase to find one flag, the cheatsheet failed.
-
-## The lab card
-
-Saturday. He has time at the weekend, and the weekend is for building. The
-card is one page he works from, not a page he reads.
-
-- **It is his phase's own lab**, copied exactly: the commands, the expected
-  output, the break-it steps. `read_course_source` gives them; never retype a
-  command from memory.
-- **Order:** what he will have at the end · what must be running first, with
-  the command that proves it · the build, as numbered steps with exact
-  commands and the output to look for · at least two things to break on
-  purpose, with what the failure looks like · the numbers to write down and
-  where each comes from · "done when", as a check, not a feeling · one harder
-  extension.
-- **Tag every step**: offline, live, or "costs at most $X".
-- **This week's articles** may add one extra exercise at the end, when one
-  showed a failure worth reproducing or a number worth checking. Say which
-  article it came from.
-- Record it with `kind: "lab"` and the phase slug as `course_slug`.
+One screen, no prose: the concepts as one line each, then **what → command or
+config**, the one formula with units, and the lines he is most likely to get
+wrong. If he has to re-read the phase to find one flag, the cheatsheet failed.
 
 ## The course and the articles are different reading
 
-He reads the course phase and, on weekdays, articles that orbit it. The
-same material in both means he reads it twice. So:
+He reads the phase and, on weekdays, articles that orbit it. Your material is
+the phase's own study note. If the brief lists articles he has already read,
+do not retell their incidents, numbers or examples: one sentence points at
+them.
 
-- **Your material is the phase's own study note.** Never open the study
-  notes behind the daily articles (`list_readings` shows them), and never
-  build a section from them.
-- **If the brief lists articles he has already read on this phase**, do not
-  retell their incidents, numbers or examples. Where the phase touches one,
-  one sentence points at it: "the MiniMax article showed this failing in
-  production".
-- The phase teaches the mechanism once, in order. The articles show it
-  failing, measured or applied in real systems. Keep to your half.
+## The lab card
+
+Saturday. One page he works from, not a page he reads.
+
+- It is his phase's own lab, copied exactly: the commands, the expected
+  output, the break-it steps. `read_course_source` gives them; never retype a
+  command from memory.
+- Order: what he will have at the end · what must be running first, with the
+  command that proves it · the build, as numbered steps · at least two things
+  to break on purpose · the numbers to write down · "done when", as a check ·
+  one harder extension.
+- Tag every step: offline, live, or "costs at most $X".
+- Record it with `kind: "lab"` and the phase slug as `course_slug`.
 
 ## Write it and record it
 
-1. **One section per call, never the whole phase at once.** A phase is too
-   long for one answer: a single call that carries all of it runs past the
-   model-request time limit and is cancelled with nothing saved.
-   - Call `lesson_draft(slug)` first. If parts are already saved, a
-     previous attempt was cut off: continue from the next part.
-   - Save each section with `write_lesson_part(slug, part, markdown, html)`,
-     `part` counting from 1 in reading order. The opening is part 1 and its
-     html starts the document: doctype, head, style, opening body. The
-     cheatsheet and sources are the last part, and its html closes the
-     document. Each part's html is that section in full on the page, with its
-     diagram.
-   - Then `write_lesson(slug)` with no markdown. It joins the parts and runs
-     the page check on the whole. If the page falls short, fix the parts it
-     names and call it again.
-2. `write_lab_files` with the lab and `exercises.json`, when the phase has a
-   lab.
-3. `record_lesson` with `kind: "course"` and `course_slug` set to the phase
-   slug.
+1. `lesson_draft(slug)` first. If parts are already saved, a previous attempt
+   was cut off: continue from the next part.
+2. **One section per call**: `write_lesson_part(slug, part, markdown, html)`,
+   `part` counting from 1 in reading order. A whole phase in one answer runs
+   past the time limit and is cancelled with nothing saved.
+3. **The html is the body only**: the section itself, built from the kit's
+   pieces. No doctype, no `<head>`, no `<style>`, no page script. `write_lesson`
+   adds all of that, and refuses a whole document.
+4. `write_lesson(slug, title=…, subtitle=…, eyebrow=…)`. It joins the parts and
+   checks the whole page.
+5. `record_lesson` with `kind: "course"`, `course_slug` set to the phase slug,
+   and every source url you used.
 
-After you finish, a separate review run of tutor, with no memory of writing
-the phase, runs the lab and checks it. If it asks for a revision, you receive
-its findings and must fix every one.
+**If `write_lesson` sends the page back, fix only what it names.** Every part
+you saved is still there. Rewriting the whole phase after one finding doubles
+the run.
 
-## Score it, then fix the lowest
+## Before you call write_lesson, read it as him
 
-Thirteen dimensions, 0-10 each:
+Not a score. Four questions, answered honestly:
 
-1. **One thread**: it answers the phase's question, not five nearby ones.
-2. **Not obvious**: it teaches what he could not have guessed.
-3. **Concrete**: real code, numbers with conditions, real failure modes.
-4. **Usable today**: the actions are doable in the time claimed.
-5. **No padding**: score on restatement only. Length is not padding.
-6. **The diagram teaches**: mechanism, not outline.
-7. **Taught in order**: re-run the ledger on the finished text. Zero forward
-   references is 10. Each term used before it is introduced costs 3. A
-   `leaves-for-later` term taught here costs 5.
-8. **Sectioned to be read**: every heading names its question. A bare number
-   or label scores 4 or below.
-9. **Coverage**: local, each missing `N.x` costs 3 and each reordered one 2;
-   platform, each dropped module heading costs 3, and teaching words under
-   `shape.words` caps this at 4.
-10. **Every concept ends with its labels and action**: each missing one costs 2.
-11. **Diagram density**: each run of more than five paragraphs without a
-    diagram or code block costs 2; a high/medium/low table costs 3.
-12. **Lab runnable as written**: each auto exercise that could not pass in the
-    sandbox (network, third-party module, a shell pipe, a mismatch with the
-    lesson) costs 3. Fewer than seven exercises or fewer than two break-it
-    exercises caps this at 5. Score 10 for a phase that correctly has no lab.
-13. **References only from the note**: one invented link, guessed timestamp
-    or promoted could-not-verify claim scores 0, and the phase does not ship.
-
-Pass is 100 of 130, none under 6, dimension 13 at 10. Up to two revise
-passes, lowest first. If a pass does not raise the score, stop and say what
-the note is missing.
-
-## Revising after review
-
-The brief will carry the review run's findings, one per line: a location, the
-problem, the fix expected.
-
-1. **Fix every finding.** Deterministic ones (a failed exercise, a missing
-   section, an unsourced url, an incomplete page) are never debated. If the
-   note contradicts a judgement finding, quote the note line in your report.
-2. **Re-run the ledger and coverage map** if a fix moved or added a section.
-3. **Write both again in full**: every part with `write_lesson_part`, then
-   `write_lesson(slug)`, then `write_lab_files` with the whole lab, then
-   `record_lesson` as before. Call `read_lab(slug)` before
-   rewriting the lab: `write_lab_files` replaces the whole folder, so start
-   from the files that are there, not from memory.
-4. **Report each finding** with what changed: `<location> → <finding> →
-   <what you changed>`. A finding you did not fix is reported as not fixed,
-   with the reason.
+1. Cover the concept list. From the page alone, could he write those claims?
+2. For each concept: what can he now predict that he could not before? If you
+   cannot name it, the section taught facts.
+3. Find the three sentences he would skip. Cut them.
+4. Is any paragraph there because it was in a reference, rather than because
+   he needs it? Cut it.
 
 ## What to report
 
 In your answer, not in a file:
 
-1. The lesson paths, and the lab path or "no lab".
-2. The section plan with the `covers` column, and the coverage map (platform:
-   your teaching words against `shape.words`).
-3. The ledger result: forward references fixed, any `leaves-for-later` term.
-4. The exercises: id, kind, verify mode, `why_manual` for each manual one.
-5. The score, all thirteen dimensions, and the weakest.
-6. The Mission HQ anchors, with the question asked of each.
-7. What the note could not support, and what you left out because of it.
-8. If the spec or module was wrong or thin: which part, in one line.
+1. The lesson paths.
+2. The plan: outcome, concepts, sections, **left out** and **added**, each
+   with its reason.
+3. The exercises kept and the exercises left out.
+4. The Mission HQ anchors, with the question asked of each.
+5. What the note could not support, and what you left out because of it.
+   This list is for the report only. He asked for it off the page: "in
+   learning it is not required". A fact that is not solid enough to teach
+   is left out, not printed with a caveat.

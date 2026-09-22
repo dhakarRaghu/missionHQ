@@ -1,92 +1,58 @@
 # The study standard
 
-The standard his own courses are written to, in `.claude/skills/study`
-(`quality-bar.md`, `research-method.md`, `writing-style.md`). You cannot load
-those files, so the parts that decide your work are here.
+How a fact is stated on a page he will act on. It comes from the standard his
+own courses are written to (`.claude/skills/study`). You cannot load those
+files, so the parts that decide your work are here.
 
-**Why you need it.** He reads your page, not the original: "I will learn
-enhanced content, so across the course I will learn all things properly". So
-the page has to meet the same bar as the course itself. Hunter's note lists
-the gaps it found against that bar; filling them is the job.
+**What the standard is for.** Rigour is how a teacher earns the right to be
+brief. Hunter checked ten things so that you can state one plainly. The
+standard governs *how* you state what you teach. It never decides *how much*
+you teach: a sourced fact that serves no concept stays out of the lesson.
 
-## Rank every source, and say which rank you used
+## How a fact is stated
+
+- **A number keeps its conditions**, in the same sentence: "up to 23x against
+  static batching, OPT-13B on one A100 40GB", never "23x faster".
+- **A default keeps where it lives**: the key, the value, the version it was
+  read at. "`gpu_memory_utilization` is 0.92 at v0.29.0."
+- **Teach the current value as the plain fact.** Not the old value with a
+  correction beside it, and not the release it changed in. One exception: when
+  he will meet the old value in tutorials and be misled, say so in one
+  sentence.
+- **Carry hunter's labels.** Verified stays verified. Inferred is written as
+  inferred, in words. Not checked is left out. You may never promote a label.
+- **When the note reports a disagreement, teach its explanation**, not the
+  disagreement. "The format request in the prompt costs accuracy, and the
+  decoder adds little" is the lesson. Which group said what, and when, goes in
+  an evidence note or nowhere.
+
+## Where evidence lives on the page
+
+The mechanism is the lesson. The citation is the receipt.
 
 ```
-┌──────┬───────────────────────────────────┬──────────────────────────────────┐
-│ Rank │ Source                            │ What it settles                  │
-├──────┼───────────────────────────────────┼──────────────────────────────────┤
-│  1   │ source code at a version tag      │ defaults, flag names, behaviour  │
-│  2   │ docs pinned to a version          │ intended behaviour, schema rules │
-│  3   │ the original paper                │ mechanism, the measurement       │
-│  4   │ a talk by the author              │ the mental model, worked examples│
-│  5   │ vendor engineering post WITH its   │ production behaviour at scale    │
-│      │ conditions stated                 │                                  │
-│  6   │ vendor post without conditions    │ nothing. A lead, not a source    │
-│  7   │ secondary blog, listicle, summary │ nothing. Never cite              │
-└──────┴───────────────────────────────────┴──────────────────────────────────┘
+<p>The freeze is one forward pass long. With a 24,000-token prompt at 0.03ms
+a token, that is 720ms in which no stream gets a token.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Measured on GPUs rather than simulated: mixing an unchunked prefill into a
+decode batch raised time between tokens 28.3x
+(<a href="…">Sarathi-Serve</a>, section 3).</p>
+</details>
 ```
 
-Rank 1 beats rank 2 for anything with a default. Documentation lags code.
+One evidence note per concept is usual, under the claim it supports. He can
+open it the day he wants to check. `write_lesson` counts how many of your
+teaching sentences are about a source rather than the mechanism, and how many
+name a year, and sends the page back when it reads like a review.
 
-**Defaults are checked in the source tree, at a tag, never in the docs.**
-Find the current release, read the config file at that exact tag with
-`fetch_source`, and write the version next to the value. "The default is 0.92
-(`vllm/config/cache.py`, v0.29.0)" is a fact. "The default is 0.92" is a
-rumour.
+## What does not go in
 
-**Every number carries its conditions**: hardware, model, version, workload,
-concurrency, and what the author did not control. A number without them
-cannot go on the page, and tutor will ask you for them.
-
-**When two sources disagree**, do not choose. Report both with their
-conditions and say what would settle it. A disagreement is often the most
-useful thing on the page.
-
-**Absence is a finding.** "The docs do not mention X" is worth reporting, and
-so is a flag that does not exist at the tag you checked.
-
-**Label every claim**: verified (you opened it), inferred (you reasoned from
-something verified, and you say from what), or not checked. Never give an
-inferred claim the tone of a verified one. Finish with the "Things I could
-NOT verify" section.
-
-## Audit the phase against the bar, and report the gaps
-
-After you have read the phase, check it against the standard it was written
-to. Each miss is a line in your note under **Gaps against the standard**, with
-what would fill it. Tutor turns those into what it adds.
-
-| The bar | What a gap looks like |
-|---|---|
-| Failure first | a mechanism is explained with no failure mode, no error text, no log line |
-| Measured | a claim with no number, or a number with no conditions |
-| Production first | the pattern is shown as it works in a tutorial, not as it runs at scale |
-| Exact config | "the timeout setting" instead of the key, its default and its version |
-| What it looks like when it breaks | no symptom in logs, metrics or traces |
-| Practice | a section with a mechanism nobody can exercise |
-| Current | a default, price, limit or version that has moved since it was written |
-| Complete on its own | it depends on something no phase has taught yet |
-
-**This is not only about his platform's text.** If the phase is thin on a
-mechanism he will meet in production, say so and bring the source that fills
-it. The page he reads is the course.
-
-## What you do with the gaps
-
-Each gap the note found becomes teaching in the section it belongs to. Not a
-box, not a note, not a label: the lesson simply covers it.
-
-| Gap the note found | What the lesson does |
-|---|---|
-| a mechanism with no failure mode | teaches the failure: symptom, wrong theory, the signal that found it, the fix |
-| a claim with no number | gives the measurement with its conditions |
-| a default, price or version that moved | states the current value, with its source and version, and never the old one |
-| a mechanism nobody can exercise | adds the exercise: exact command, what to look for |
-| something the phase leans on but never taught | one clause naming it and where it arrives |
-
-A gap the note did not research is not yours to fill from memory. Say in your
-report that it is still open, and it goes to the next research run.
-
-**Every number you write carries its conditions**, exactly as the note has
-them: hardware, model, version, workload. Strip them and the number becomes a
-rumour, and the claims run will find it.
+- A fact the note cannot support. Not softened, not hedged: out.
+- Anything on the note's "Things I could NOT verify" list. There is no
+  "could not verify" section on the page: he asked for it off, and a fact too
+  weak to state plainly is too weak to teach. It goes in your report.
+- A url the note does not mark as opened. Copy urls from the note; never
+  rebuild one from memory.
+- Whatever the note's **Leave out** section names, and anything else that
+  serves none of the lesson's concepts.
