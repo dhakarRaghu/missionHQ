@@ -647,8 +647,9 @@ def _register_cron() -> None:
     # It is not a budgeted 'notify' itself.
     _schedules.append({"schedule_name": "daily_digest", "workflow_fn": daily_digest,
                        "schedule": f"{DIGEST_MINUTE} {DIGEST_HOUR} * * *", "cron_timezone": tz})
-    # Nightly full reindex: index-on-write covers agent writes; this catches
-    # notes the owner edits by hand (Obsidian) that the app never sees.
+    # Nightly: the vault's one commit of the day, then a full reindex.
+    # Index-on-write covers agent writes; the reindex catches notes the owner
+    # edits by hand (Obsidian) that the app never sees.
     _schedules.append({"schedule_name": "reindex_vault", "workflow_fn": reindex_vault,
                        "schedule": f"0 {REINDEX_HOUR} * * *", "cron_timezone": tz})
     for sched in _schedules:
@@ -1975,7 +1976,7 @@ async def store_history(conversation_id: str, agent: str, messages_json: bytes,
 
 
 async def _reindex_vault_tick(scheduled: datetime, context: Any) -> None:
-    n = await memory.reindex_all()
+    n = await memory.reindex_all()   # makes the vault's one commit of the day first
     await runner.emit_step("vault.reindexed", payload={"chunks": n})
 
 

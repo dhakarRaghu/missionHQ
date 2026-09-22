@@ -2289,3 +2289,48 @@ def test_an_article_carries_one_idea_and_is_held_to_it() -> None:
     assert lesson_contract(one, least=1, most=1) == ""
     assert page_coverage("", one, "", least=1, most=1) == ""
     assert "this page carries 1 to 1" in lesson_contract(_lesson(), least=1, most=1)
+
+
+def test_vault_writes_are_committed_once_a_day_with_their_authors(tmp_path, monkeypatch) -> None:
+    """He asked for one commit per day instead of one per write.
+
+    The vault had collected 82 "sage: memory/agents/sage.md" commits and filled
+    his editor's source control. The daily commit still says which agent wrote
+    which note, and a hand edit is listed as the owner's.
+    """
+    import subprocess
+
+    from hq import memory
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    for cmd in (["git", "init", "-q"], ["git", "config", "user.email", "t@t"],
+                ["git", "config", "user.name", "t"],
+                ["git", "commit", "-q", "--allow-empty", "-m", "root"]):
+        subprocess.run(cmd, cwd=vault, check=True)
+    monkeypatch.setattr(memory, "_vault", lambda: vault)
+    monkeypatch.setattr(memory, "write_problem", lambda *a, **k: None)
+
+    def commits() -> int:
+        out = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=vault,
+                             capture_output=True, text=True, check=True).stdout
+        return int(out)
+
+    memory.write_sync("projects/a.md", "one", actor="hunter")
+    memory.write_sync("projects/b.md", "two", actor="sage")
+    memory.write_sync("projects/a.md", "one again", actor="hunter")
+    (vault / "notes.md").write_text("by hand")
+    assert commits() == 1, "a write must not commit on its own"
+
+    from datetime import date
+    paths = memory.commit_day_sync(date(2026, 9, 23))
+    assert paths == ["notes.md", "projects/a.md", "projects/b.md"]
+    assert commits() == 2
+    log = subprocess.run(["git", "log", "-1", "--format=%s%n%b"], cwd=vault,
+                         capture_output=True, text=True, check=True).stdout
+    assert log.startswith("vault 2026-09-23: 3 notes (hunter, owner, sage)")
+    assert "hunter: projects/a.md" in log and "sage: projects/b.md" in log
+    assert "owner: notes.md" in log
+    # Nothing new: no empty commit, and the ledger is cleared.
+    assert memory.commit_day_sync() == [] and commits() == 2
+    assert not (vault / ".git" / memory.PENDING_LEDGER).exists()

@@ -152,7 +152,7 @@ Promotion rule:
   "awaiting review" in active_projects.md, or is left out.
 
 Write rules:
-- Every write is a git commit the owner can revert. Keep each block's header
+- Every write lands in the vault's nightly commit, which the owner can revert. Keep each block's header
   comment. Do not write a block that has not changed. (Your own notebook,
   memory/agents/librarian.md, is not a block and is rewritten every run.)
 - Never invent facts. If the vault records nothing on a topic, write

@@ -56,7 +56,7 @@ agent ships on `codex`; change one line in its `job.md` to use `claude`.
 4. Claude reads pages in your browser and returns text.
 5. **Mission HQ writes that text** into `quarantine/`, through the same
    `memory.write` every agent uses: same provenance stamp, same path scope,
-   one git commit.
+   committed with that night's other vault writes.
 6. The run appears under Runs with its real cost. That cost is dollars on your
    Claude account, not gateway tokens.
 

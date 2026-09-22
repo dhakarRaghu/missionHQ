@@ -1,7 +1,11 @@
-"""Vault access: markdown files in a git repo, one commit per write.
+"""Vault access: markdown files in a git repo, committed once a day.
 
 All vault WRITES go through ``write()``, which holds one process-wide
-``asyncio.Lock`` so git never sees two writers. Reads are direct.
+``asyncio.Lock`` so two writers never interleave. A write is not committed on
+its own: it used to be, and the vault collected five commits an hour ("sage:
+memory/agents/sage.md" 82 times) that filled his editor's source control. He
+asked for one commit per day. ``commit_day()`` makes it, at the nightly
+reindex, and its body still says which agent wrote which note. Reads are direct.
 ``search()`` is a facade: Postgres full-text search over ``hq.memory_chunks``
 (migration 003) fused with pgvector cosine search over the same rows
 (migration 005, ``embedding`` column) by reciprocal-rank fusion. The vector
@@ -331,10 +335,22 @@ def write_problem(rel_path: str, content: str, *, actor: str, existing: str | No
     return None
 
 
+# Who wrote what since the last daily commit. It lives inside `.git`, so it
+# is never tracked itself, and it survives a restart between writes and the
+# nightly commit, which an in-memory list would not.
+PENDING_LEDGER = "hq-pending-writes"
+
+
+def _ledger() -> Path | None:
+    git_dir = _vault() / ".git"
+    return git_dir / PENDING_LEDGER if git_dir.is_dir() else None
+
+
 def write_sync(rel_path: str, content: str, *, actor: str) -> str:
-    """Blocking write + git commit. Call ONLY via ``write()``. Runs the code
-    gates in ``write_problem`` against the current file and raises
-    ``WriteRefused`` (a ValueError) when one refuses."""
+    """Blocking write. Call ONLY via ``write()``. Runs the code gates in
+    ``write_problem`` against the current file and raises ``WriteRefused``
+    (a ValueError) when one refuses. Not committed here: the write is noted in
+    the ledger, and ``commit_day`` commits the day's writes together."""
     rel_path = normalize(rel_path)
     p = _safe_path(rel_path)
     existing = p.read_text() if p.exists() else None
@@ -343,58 +359,70 @@ def write_sync(rel_path: str, content: str, *, actor: str) -> str:
         raise WriteRefused(problem)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content)
-    # Stage only this note: a hand edit elsewhere in the vault must not be
-    # attributed to the agent (``commit_stray_changes`` picks those up).
-    subprocess.run(["git", "add", "--", rel_path], cwd=_vault(), check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", f"{actor}: {rel_path}", "--allow-empty"],
-        cwd=_vault(), check=True, capture_output=True,
-    )
+    ledger = _ledger()
+    if ledger is not None:
+        with ledger.open("a") as fh:
+            fh.write(f"{actor}\t{rel_path}\n")
     return rel_path
 
 
-STRAY_COMMIT_MESSAGE = "owner: manual edits"
+def commit_day_sync(day: date | None = None) -> list[str]:
+    """Blocking. Commit every change in the vault as one commit for the day.
+    Call ONLY via ``commit_day``.
 
-
-def commit_stray_changes_sync() -> list[str]:
-    """Blocking. Commit every uncommitted change in the vault (hand edits made
-    outside ``write``) as ``owner: manual edits``. Returns the changed paths
-    (``[]`` when the tree was clean). Call ONLY via ``commit_stray_changes``."""
+    The subject says how many notes changed; the body lists each one with the
+    agent that wrote it, taken from the ledger. A changed path the ledger does
+    not know was edited by hand, and is listed as the owner's. Returns the
+    changed paths, ``[]`` when there was nothing to commit.
+    """
     status = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all"],
         cwd=_vault(), check=True, capture_output=True, text=True,
     ).stdout
-    paths = [line[3:].strip() for line in status.splitlines() if line.strip()]
+    paths = sorted({line[3:].strip().strip('"') for line in status.splitlines() if line.strip()})
+    ledger = _ledger()
     if not paths:
+        if ledger is not None:
+            ledger.unlink(missing_ok=True)
         return []
+    authors: dict[str, set[str]] = {}
+    if ledger is not None and ledger.exists():
+        for line in ledger.read_text().splitlines():
+            actor, _, rel = line.partition("\t")
+            if rel:
+                authors.setdefault(rel, set()).add(actor)
+    body = "\n".join(f"{', '.join(sorted(authors.get(rel) or {'owner'}))}: {rel}" for rel in paths)
+    who = sorted({a for rel in paths for a in (authors.get(rel) or {"owner"})})
+    subject = (f"vault {(day or datetime.now(ZoneInfo(settings().cron_tz)).date()).isoformat()}: {len(paths)} note"
+               f"{'' if len(paths) == 1 else 's'} ({', '.join(who)})")
     subprocess.run(["git", "add", "-A"], cwd=_vault(), check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", STRAY_COMMIT_MESSAGE],
-        cwd=_vault(), check=True, capture_output=True,
-    )
+    subprocess.run(["git", "commit", "-m", subject, "-m", body],
+                   cwd=_vault(), check=True, capture_output=True)
+    if ledger is not None:
+        ledger.unlink(missing_ok=True)
     return paths
 
 
 _write_lock = asyncio.Lock()
 
 
-async def commit_stray_changes() -> list[str]:
-    """Serialized (same lock as ``write``) commit of hand edits. Best-effort:
-    a git failure is logged and yields ``[]``; it never stops the caller."""
+async def commit_day() -> list[str]:
+    """The day's one vault commit, serialized with writes. Best-effort: a git
+    failure is logged and yields ``[]``; it never stops the nightly run."""
     async with _write_lock:
         try:
-            paths = await asyncio.to_thread(commit_stray_changes_sync)
+            paths = await asyncio.to_thread(commit_day_sync)
         except (subprocess.CalledProcessError, OSError) as exc:
-            log.warning("memory: could not commit stray vault changes: %s", exc)
+            log.warning("memory: could not make the daily vault commit: %s", exc)
             return []
     if paths:
-        log.info("memory: committed %d hand-edited vault paths as %r", len(paths), STRAY_COMMIT_MESSAGE)
+        log.info("memory: committed %d vault notes for the day", len(paths))
     return paths
 
 
 async def write(rel_path: str, content: str, *, actor: str) -> str:
-    """Serialized vault write: one writer at a time, so git commits never race.
-    The FTS index is refreshed after the commit; an index failure is logged,
+    """Serialized vault write: one writer at a time.
+    The FTS index is refreshed after the write; an index failure is logged,
     never raised — a vault write must not fail because of the index."""
     async with _write_lock:
         rel = await asyncio.to_thread(write_sync, rel_path, content, actor=actor)
@@ -583,9 +611,9 @@ def _read_all_notes() -> dict[str, str]:
 async def reindex_all() -> int:
     """Rebuild the whole index in one transaction: every *.md under the vault
     (skipping .git) is re-chunked, and chunks for deleted notes are removed.
-    Hand edits still uncommitted in the vault are committed first, so the
-    nightly reindex also captures them in git. Returns the total chunk count."""
-    await commit_stray_changes()
+    The day's vault commit is made first (``commit_day``): the agents' writes
+    and any hand edits, as one commit. Returns the total chunk count."""
+    await commit_day()
     notes = await asyncio.to_thread(_read_all_notes)
     total = 0
     changed = 0

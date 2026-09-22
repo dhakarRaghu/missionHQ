@@ -145,7 +145,7 @@ def _existing(rel: str) -> str | None:
 
 @hq_tool(action=ActionClass.VAULT_WRITE)
 async def vault_write(ctx: RunContext[HQDeps], path: str, content: str) -> str:
-    """Write a markdown note into the vault (git-committed). Path must be inside
+    """Write a markdown note into the vault (committed with the day's other writes, nightly). Path must be inside
     this agent's write scope. Notes outside memory/ get frontmatter with
     created, author and provenance set by code; quarantine/ notes must carry a
     source_urls list. Rewrites of memory/ notes may not drop more than 30% of

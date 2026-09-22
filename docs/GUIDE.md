@@ -132,7 +132,7 @@ time. Hunter holds web access, so it is refused any outward tool and may write
 nowhere but `quarantine/`. Getting this wrong stops the agent loading, loudly.
 
 **Memory cannot be quietly destroyed.** Each shared memory block has a size
-cap, every write is one git commit you can revert, and a consolidation that
+cap, every write is in one nightly git commit you can revert, and a consolidation that
 drops more than 30% of a file is refused.
 
 **There is an off switch.** Create a file called `HALT` in the repo root and

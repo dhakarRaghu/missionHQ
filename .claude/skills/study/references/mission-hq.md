@@ -8,23 +8,29 @@ It wins over the defaults in `SKILL.md` where the two differ.
 ```
 ┌────────────────────┐  publish   ┌──────────────────┐  sync    ┌─────────────────────┐
 │ /study, with Claude├───────────►│ study platform   ├─────────►│ Mission HQ          │
-│ one phase per turn │            │ /api/study       │          │ adds updates,       │
-│ reviewed + audited │            │ /api/courses     │          │ incidents, deeper   │
-└────────────────────┘            └──────────────────┘          │ material. He reads  │
-                                                                 │ it on /courses      │
+│ one phase per turn │            │ /api/study       │          │ hunter researches,  │
+│ reviewed + audited │            │ /api/courses     │          │ tutor writes the    │
+└────────────────────┘            └──────────────────┘          │ lesson he reads     │
                                                                  └─────────────────────┘
 ```
 
-1. The owner and Claude write each phase with this skill. The phase is the
-   course. It must be complete on its own.
+1. The owner and Claude write each phase with this skill.
 2. The phase is published to the study platform with `push_dashboard.py`.
 3. `uv run python -m hq.cli sync-courses` (in `backend/`) pulls it in. The
    planned row for that phase disappears and the published phase replaces it.
-4. Mission HQ's hunter researches past the phase. Tutor adds, under the
-   section each belongs to: updates, corrections, production incidents,
-   deeper material, practice. It never rewrites the published text.
-5. He reads the phase on the Courses page, with the additions in place, and
+4. Mission HQ's hunter decides which few concepts matter on this ground and
+   proves each. Tutor then writes the lesson he actually reads. **Your phase
+   is reference for that lesson, not a contract**: he said so himself ("that
+   is the course that I generated for learning ... if you find the things
+   there are not good to learn then you can drop those"). Tutor keeps what
+   teaches, drops what does not, adds what is missing, and copies your lab
+   commands exactly.
+5. He reads the lesson on the Courses page (or `/read` on his phone) and
    marks it read. The next phase is not started while one is unread.
+
+So write the phase you would want tutor to start from: concepts first
+(`quality-bar.md`, Rule 0), a lab that was really run, and exact commands.
+A phase that is a sourced survey gives tutor nothing to teach from.
 
 Mission HQ never writes a planned phase itself. A phase that is not
 published stays "planned" on the Courses page.
@@ -89,8 +95,9 @@ and leaves the planned row in place.
 
 ## Overlap. Never teach it twice
 
-- The owner has already read **inference-internals** (11 phases: 0, 1, 2, 3A,
-  3B, 4A, 4B, 5A, 5B, 6A, 6B). Its text is at
+- **inference-internals** is published in full (11 documents: 0, 1, 2A, 2B,
+  3A, 3B, 4A, 4B, 5A, 5B, 6A, 6B). He is reading it in order and has reached
+  2B, so a later phase is linked to by name, never assumed as read. Its text is at
   `https://raghu-monitoring.vercel.app/api/study?slug=<slug>`. Before a
   phase, read the sections its `assumes:` line names, and link to them.
 - Mission HQ writes weekday articles that orbit the active phase. They are
@@ -121,5 +128,6 @@ If no, use learning-only mode from `SKILL.md`.
 1. `push_dashboard.py --course learning/study-material/<slug> --files …`
    and report the "N of N live and identical" line.
 2. `cd backend && uv run python -m hq.cli sync-courses`.
-3. Tell him: the phase is on the Courses page, and Mission HQ adds its
-   updates on the next evening run, or at once with "Add updates now".
+3. Tell him: the phase is on the Courses page, and Mission HQ writes his
+   lesson from it on the next evening run, or at once with "Build enhanced
+   version".
