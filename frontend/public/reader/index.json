@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-09-20T22:46:57.277821+05:30",
+  "built_at": "2026-09-23T01:39:00.245976+05:30",
   "courses": [
     {
       "slug": "inference-internals",
@@ -29,17 +29,17 @@
           "one_liner": "How vLLM's scheduler loop, paged KV cache and prefix cache decide your latency, concurrency and bill \u2014 revised: unverifiable Orca Figure 10a claim removed per claims-run c3.",
           "minutes": 150,
           "date": "2026-09-20",
-          "read": false,
+          "read": true,
           "file": "2026-09-20-inference-internals-phase-02a-scheduling-memory.html"
         },
         {
           "slug": "inference-internals-phase-02b-decoding-context",
-          "title": "Inference Internals \u2014 Phase 2B: Chunked Prefill, Constrained Decoding and Context Budgets",
-          "one_liner": "The stream freeze, the constraint tax and the 400: chunked prefill's TTFT-vs-smoothness trade, what a schema really guarantees, and the compaction trigger plus backstop. Revised run: fixed claim c22 (V6E TPU default overrides only max_num_batched_tokens, 2048 offline / 1024 API server; max_num_seqs stays 256).",
+          "title": "Phase 2B \u2014 Decoding and context: the stream freeze, the schema, and the 400",
+          "one_liner": "Chunked prefill and the inter-token gap, what strict schemas do and do not guarantee, and context budgets with constraint-pinning compaction.",
           "minutes": 150,
-          "date": "2026-09-20",
+          "date": "2026-09-22",
           "read": false,
-          "file": "2026-09-20-inference-internals-phase-02b-decoding-context.html"
+          "file": "2026-09-22-inference-internals-phase-02b-decoding-context.html"
         }
       ]
     },
@@ -75,7 +75,7 @@
       "topic": "",
       "kind": "",
       "date": "2026-09-17",
-      "read": false,
+      "read": true,
       "file": "2026-09-17-routing-before-the-lifecycle.html"
     },
     {
