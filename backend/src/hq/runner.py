@@ -68,6 +68,15 @@ LEDGER_ARGS_CHARS = 80
 HANDOVER_TOOLS = frozenset({"create_subtask", "start_job_search"})
 
 GUARD_MODEL = "cheap"           # registry role for the guardrail judge
+# Wall-clock limit on every judge call made outside the agent's own model
+# steps (ledger, tool guard, browse guard). Those steps carry the step limit;
+# these did not, and nothing else bounded them. Measured over two weeks to
+# 2026-09-23: judges answer in 7-8s at p50 and 13-16s at p90, yet one
+# ledger.check hung 4.3 hours and one guard.browse 473s. On 2026-09-23 an
+# operator run sat in guard.browse for over 20 minutes and never reached its
+# approval ticket. Past the limit each judge takes the fallback it already
+# had for an unavailable model.
+JUDGE_LIMIT_S = 90.0
 GUARD_POLICY_CHARS = 6000       # policy.md text handed to the guard
 GUARD_ARGS_CHARS = 4000         # serialized tool args handed to the guard
 
@@ -170,7 +179,7 @@ async def _ledger_check_step(prompt: str, output: str, tool_calls: list[str]) ->
         + ("\n".join(f"- {line}" for line in tool_calls) or "- (none)")
     )
     try:
-        res = await _ledger().run(text)
+        res = await asyncio.wait_for(_ledger().run(text), JUDGE_LIMIT_S)
     except Exception as exc:  # noqa: BLE001 — the ledger must never fail the run
         log.warning("ledger check failed, treating as satisfied: %s", exc)
         return {
@@ -267,7 +276,7 @@ async def _guard_step(
         f"Tool call: {tool_name}\nArguments (JSON):\n{args_text}"
     )
     try:
-        res = await _guard().run(text)
+        res = await asyncio.wait_for(_guard().run(text), JUDGE_LIMIT_S)
     except Exception as exc:  # noqa: BLE001 — unavailable judge means allow
         log.warning("guard check failed, allowing %s: %s", tool_name, exc)
         return {"allow": True, "reason": f"guard unavailable: {str(exc)[:200]}",
@@ -411,9 +420,9 @@ def _browse_guard_agent() -> Agent[None, BrowseVerdict]:
 async def _browse_guard_step(agent: str, policy: str, summary: str) -> dict[str, Any]:
     """Judge one browser run. Never raises; an unavailable judge asks the owner."""
     try:
-        res = await _browse_guard_agent().run(
+        res = await asyncio.wait_for(_browse_guard_agent().run(
             f"Agent: {agent}\n\nStanding policies:\n{policy}\n\nTask:\n{summary[:1200]}"
-        )
+        ), JUDGE_LIMIT_S)
         v = res.output
         return {"allow": bool(v.allow and v.read_only and v.bounded),
                 "reason": v.reason[:300]}

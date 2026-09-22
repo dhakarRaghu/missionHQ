@@ -77,12 +77,16 @@ models:
     output_per_mtok: 2.50
     settings:
       reasoning_effort: high
-      # 64k output and fifteen minutes. Probed on 2026-09-12: the gateway
-      # accepted 32k, 64k and 128k. It also accepts nonsense reasoning-effort
-      # values, so acceptance proves little — 64k is chosen because it is far
-      # past any lesson or digest, not because 128k failed.
+      # 64k output. Probed on 2026-09-12: the gateway accepted 32k, 64k and
+      # 128k. It also accepts nonsense reasoning-effort values, so acceptance
+      # proves little — 64k is chosen because it is far past any lesson or
+      # digest, not because 128k failed.
       max_tokens: 64000
-      timeout_s: 900
+      # Eight minutes, from measurement, not fifteen. Over the week to
+      # 2026-09-23, 1,073 model steps: p50 23s, p90 119s, p99 408s, and the
+      # p99 includes retries. A request still silent at 480s is hung, and
+      # every extra minute it is allowed is a minute the whole lane waits.
+      timeout_s: 480
     fallback: [sonnet, glm]
 
   # The teacher. He asked for tutor's reasoning to go higher, then on
@@ -102,8 +106,10 @@ models:
     settings:
       reasoning_effort: high
       max_tokens: 64000
-      timeout_s: 900
-    fallback: [kimi_deep, sonnet]
+      timeout_s: 480      # see kimi_deep: p99 of a real step is 408s
+    # Spares on other providers. When kimi-k3 hangs, kimi-latest on the same
+    # backend is the likeliest to hang with it.
+    fallback: [sonnet, glm]
 
 roles:
   deep: kimi_deep

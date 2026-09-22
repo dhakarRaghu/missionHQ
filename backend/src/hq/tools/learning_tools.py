@@ -566,6 +566,58 @@ def _assemble(folder: Path) -> tuple[str, str]:
     return markdown, html
 
 
+async def _task_article_kind(task_id: str | None) -> str:
+    """The article kind this task was dispatched for, or ""."""
+    if not task_id:
+        return ""
+    row = await db.fetchone("SELECT payload ->> 'article_kind' AS k FROM hq.tasks WHERE id = %s",
+                            (task_id,))
+    return str((row or {}).get("k") or "")
+
+
+def part_notes(html: str, *, earlier_html: str = "", article: bool = False,
+               evidence_share: float | None = None, total_words: int = 0) -> list[str]:
+    """What `write_lesson` would send back about this one section, said now.
+
+    The page checks used to run only when every part was saved. Their findings
+    are page-wide, so a refusal could not say which part to fix, and tutor
+    rewrote them all: on 2026-09-23 a seven-part article was written three
+    times, about 35 minutes of rewriting, for findings each part could have
+    been told about as it was written. These are advice, not a refusal: the
+    whole-page check still decides.
+    """
+    notes: list[str] = []
+    share = EVIDENCE_SHARE if evidence_share is None else evidence_share
+    text = _page_text(html)
+    sentences = _sentences(text)
+    if len(sentences) >= 8:
+        avg, long = reading_ease(text)
+        if avg > PLAIN_SENTENCE_WORDS or long > PLAIN_LONG_SHARE:
+            notes.append(f"sentences average {avg:.0f} words and {long:.0%} run over"
+                         f" {LONG_SENTENCE_WORDS} (limits {PLAIN_SENTENCE_WORDS:.0f} and"
+                         f" {PLAIN_LONG_SHARE:.0%}): split the longest before moving on")
+        prose = _page_text(_ASIDE_RE.sub(" ", html))
+        teach = _sentences(prose) or sentences
+        talk = [x for x in teach if _EVIDENCE_TALK_RE.search(x)]
+        if len(talk) / len(teach) > share:
+            notes.append(f"{len(talk)} of {len(teach)} sentences are about a source, not"
+                         f" the mechanism (ceiling {share:.0%}); move who measured"
+                         ' it into <details class="evidence">')
+    for concept in re.findall(r'<h2\b[^>]*data-concept=["\'](c\d+)["\']', html, re.IGNORECASE):
+        asked = [h for h in re.split(r"(?i)(?=<h2\b)", earlier_html + html)
+                 if re.search(rf'data-concept=["\']{concept}["\']', h, re.IGNORECASE)]
+        if not any('class="predict"' in h.lower() for h in asked):
+            notes.append(f"{concept} is told, not yet asked: open it with a"
+                         ' <details class="predict"> question before explaining')
+    bare = sections_without_a_visual(html)
+    if bare:
+        notes.append("nothing to look at in: " + _listed(bare))
+    if article and total_words > ARTICLE_MAX_WORDS:
+        notes.append(f"the article is already {total_words} words, past the"
+                     f" {ARTICLE_MAX_WORDS} limit: cut here, not after the last part")
+    return notes
+
+
 @hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
 async def write_lesson_part(
     ctx: RunContext[HQDeps], slug: str, part: int, markdown: str, html: str = ""
@@ -607,8 +659,20 @@ async def write_lesson_part(
         await asyncio.to_thread(page.write_text, html)
     elif page.exists():
         await asyncio.to_thread(page.unlink)
-    return {"slug": clean, "saved": int(part),
-            "parts": await asyncio.to_thread(_draft_parts, folder)}
+    parts = await asyncio.to_thread(_draft_parts, folder)
+    earlier = "\n".join(
+        (folder / f"{p['part']:02d}.html").read_text() for p in parts
+        if p["part"] < int(part) and (folder / f"{p['part']:02d}.html").exists())
+    article = not await asyncio.to_thread(read_course_source_text, clean)
+    kind = await _task_article_kind(ctx.deps.task_id) if article else ""
+    notes = part_notes(
+        html, earlier_html=earlier, article=article,
+        evidence_share=PAPER_EVIDENCE_SHARE if kind == PAPER else EVIDENCE_SHARE,
+        total_words=sum(p["page_words"] for p in parts))
+    out: dict[str, Any] = {"slug": clean, "saved": int(part), "parts": parts}
+    if notes:
+        out["fix_this_part_now"] = notes
+    return out
 
 
 @hq_tool(action=ActionClass.READ, trust=Trust.TOOL)
@@ -731,7 +795,9 @@ async def write_lesson(
         # was written, so it names that year more than a phase would; the
         # first run on the new contract was refused at 6% for exactly that.
         # The review detector (sentences about a source) keeps its ceiling.
-        gap = page_coverage("", html, "", least=1, most=1, dated_share=ARTICLE_DATED_SHARE)
+        kind = await _task_article_kind(ctx.deps.task_id)
+        gap = page_coverage("", html, "", least=1, most=1, dated_share=ARTICLE_DATED_SHARE,
+                            evidence_share=PAPER_EVIDENCE_SHARE if kind == PAPER else EVIDENCE_SHARE)
         if gap:
             raise ModelRetry(
                 f"the article is not ready yet: {gap}. Rewrite ONLY the parts this"
@@ -1407,6 +1473,11 @@ EVIDENCE_SHARE = 0.06
 # an evidence note or the sources list, where he can find them and skip them.
 DATED_SHARE = 0.02
 ARTICLE_DATED_SHARE = 0.08
+# A paper-day article is ABOUT a paper: "the Orca paper names the two wastes"
+# is its subject, not a literature review. On 2026-09-23 the first paper
+# article on this contract was refused at 26% against the phase ceiling of 6%,
+# and rewrote all seven sections to get under it.
+PAPER_EVIDENCE_SHARE = 0.35
 _CONCEPT_LI_RE = re.compile(
     r"<li\b[^>]*\bid=[\"'](c\d+)[\"'][^>]*>(.*?)</li>", re.DOTALL | re.IGNORECASE)
 _CONCEPTS_RE = re.compile(
@@ -1452,7 +1523,8 @@ def page_sections(page_html: str) -> list[dict[str, str]]:
 
 
 def lesson_contract(page_html: str, *, least: int = CONCEPTS_MIN, most: int = CONCEPTS_MAX,
-                    dated_share: float = DATED_SHARE) -> str:
+                    dated_share: float = DATED_SHARE,
+                    evidence_share: float = EVIDENCE_SHARE) -> str:
     """Why this page is not yet a lesson built out of ideas, or "".
 
     Deterministic, like every check here: a same-model reviewer passes what
@@ -1533,11 +1605,11 @@ def lesson_contract(page_html: str, *, least: int = CONCEPTS_MIN, most: int = CO
                 f" “{dated[0][:70]}…”. He is not reading a history. Teach what is true"
                 " now as the plain fact. Keep a date only where the concept cannot be"
                 ' understood without it, and move the rest into <details class="evidence">')
-        if len(talk) / len(sentences) > EVIDENCE_SHARE:
+        if len(talk) / len(sentences) > evidence_share:
             problems.append(
                 f"{len(talk)} of {len(sentences)} teaching sentences are about a source"
                 f" rather than the mechanism ({len(talk) / len(sentences):.0%}, ceiling"
-                f" {EVIDENCE_SHARE:.0%}), such as “{talk[0][:70]}…”. State the mechanism and"
+                f" {evidence_share:.0%}), such as “{talk[0][:70]}…”. State the mechanism and"
                 " the one number that proves it, with its conditions. Who measured it, the"
                 " argument between groups and the table it came from go in"
                 ' <details class="evidence"> under the claim')
@@ -1590,7 +1662,8 @@ _PAGE_EXERCISE_RE = re.compile(r"<b\b[^>]*>\s*(E\d+)\b", re.IGNORECASE)
 
 def page_coverage(source: str, page_html: str, note: str = "", *,
                   least: int = CONCEPTS_MIN, most: int = CONCEPTS_MAX,
-                  dated_share: float = DATED_SHARE) -> str:
+                  dated_share: float = DATED_SHARE,
+                  evidence_share: float = EVIDENCE_SHARE) -> str:
     """Why this page is not ready for him to learn from, or "".
 
     Measured checks only, because a same-model reviewer passes what reads
@@ -1608,7 +1681,8 @@ def page_coverage(source: str, page_html: str, note: str = "", *,
     measurable = have >= MEASURABLE_SOURCE_WORDS
     problems = []
 
-    contract = lesson_contract(page_html, least=least, most=most, dated_share=dated_share)
+    contract = lesson_contract(page_html, least=least, most=most, dated_share=dated_share,
+                               evidence_share=evidence_share)
     if contract:
         problems.append(contract)
 

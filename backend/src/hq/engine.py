@@ -73,6 +73,25 @@ CHAT_TIMEOUT_S = 12 * 60   # a chat turn may not exceed 12 minutes (approval wai
 DIGEST_HOUR, DIGEST_MINUTE = 22, 0
 REINDEX_HOUR = 3
 
+MODEL_STEP_ATTEMPTS = 2
+
+
+def model_step_limit_s() -> float:
+    """Wall-clock limit of one model step: every model in the longest fallback
+    chain timing out in turn, plus half a minute."""
+    return llm.registry().longest_chain_timeout_s() + 30.0
+
+
+def hang_after_s() -> float:
+    """How long a running task may go with no sign of life before it is hung.
+
+    A run records an event on every tool call and on start. The longest a
+    healthy run can be silent is one model step that exhausts its attempts:
+    each attempt the whole fallback chain, plus the backoff between them. Past
+    that, nothing inside the run can still be working, whatever its lane.
+    """
+    return model_step_limit_s() * MODEL_STEP_ATTEMPTS + 5.0 * MODEL_STEP_ATTEMPTS + 300.0
+
 AGENTS: dict[str, tuple[AgentSpec, Agent[runner.HQDeps, str | DeferredToolRequests]]] = {}
 _queues: dict[str, Queue] = {}
 _schedules: list[ScheduleInput] = []  # built pre-launch, applied post-launch
@@ -196,46 +215,30 @@ def registered_agents() -> dict[str, tuple[AgentSpec, Agent[runner.HQDeps, str |
 
 def bootstrap_pre_launch() -> None:
     """Agents + cron workflows. MUST run BEFORE DBOS.launch()."""
-    # Durable retries on model requests: the OpenAI client has max_retries=0
-    # (DBOS owns retries), so a gateway hiccup must not fail a whole run.
+    # Durable retries on model requests. The OpenAI client has max_retries=0,
+    # the transport waits out a full slot table (429), and FallbackModel moves
+    # a failing request to a spare inside one step. What is left for DBOS to
+    # retry is a transient failure of the whole chain, and one retry is enough.
     #
-    # Two attempts two seconds apart was too tight to survive a real outage:
-    # eight runs in one week died reporting "the model gateway kept failing
-    # after several attempts", where several meant two. Four attempts doubling
-    # from two seconds covers about thirty. Past that, FallbackModel moves the
-    # request to another model rather than retrying the same failing one.
+    # It was four attempts, each capped at the longest single request timeout
+    # plus a minute. Measured over two weeks to 2026-09-23: 14 runs abandoned,
+    # every one silent 80 to 103 minutes after its last tool call. A hung
+    # request used the whole step, the spares got sixty seconds, the step was
+    # cancelled and retried on the same hung model, four times. And the run
+    # held the only worker on its lane the whole while, so everything queued
+    # behind it waited too.
     #
-    # max_attempts is 2, not 4, because FallbackModel already tries three
-    # models inside one attempt. Four attempts meant twelve model calls before
-    # giving up, and a scout run spent 2h45m doing exactly that: three fast
-    # tool calls, then two and three quarter hours of silence, then "exceeded
-    # its maximum of 4 retries". Retrying was not the missing piece; retrying
-    # too patiently was the failure.
-    #
-    # timeout_seconds is the hard stop the per-request timeout could not give.
-    # httpx resets its read timeout on every byte, so a gateway that trickles
-    # output never trips it. This one is wall-clock and cannot be reset.
+    # timeout_seconds is wall-clock (httpx resets its read timeout on every
+    # byte, so a trickling response never trips it), and it now covers the
+    # whole fallback chain, so a spare actually gets its turn.
     durability = DBOSDurability(
         models=llm.registry().all_instances(),
-        # pydantic-ai's StepConfig type has not yet caught up with DBOS's
-        # supported timeout_seconds option. DBOS.step accepts it at runtime.
-        # 2026-09-10: the gateway key allows FIVE parallel requests, and every
-        # model in the fallback chain shares that key. A 429 here is not a
-        # flaky model, it is a full slot table, and the right response is to
-        # wait for a slot — not to try two more models on the same key within
-        # two seconds, which is what happened: kimi, sonnet and glm all 429'd
-        # inside one attempt and the run died in under five seconds. Four
-        # attempts from five seconds, doubling, waits up to ~75s for a slot.
+        # pydantic-ai's StepConfig type has not caught up with DBOS's
+        # timeout_seconds option; DBOS.step accepts it at runtime.
         model_step_config=cast(StepConfig, {
-            "retries_allowed": True, "max_attempts": 4,
+            "retries_allowed": True, "max_attempts": MODEL_STEP_ATTEMPTS,
             "interval_seconds": 5.0, "backoff_rate": 2.0,
-            # The step limit follows the longest request timeout in
-            # models.yaml, plus a minute. It was a fixed 600 while kimi_deep
-            # allowed 900, so a long lesson answer was always cancelled at 600
-            # and retried four times: 2026-09-16, three tutor runs of 80-110
-            # minutes, nothing saved. Long lessons are now written one section
-            # per call; this keeps the two limits from disagreeing again.
-            "timeout_seconds": llm.registry().longest_timeout_s() + 60.0,
+            "timeout_seconds": model_step_limit_s(),
         }),
     )
     for name, spec in scan().items():
@@ -785,40 +788,39 @@ async def _release_workflow(task_id: str) -> None:
 
 
 async def _cap_overrunning_tasks() -> None:
-    """Block any task that has been running far longer than the task timeout.
+    """Block a running task that has shown no sign of life for too long.
 
-    SetWorkflowTimeout cannot help when the host suspends the process: while a
-    laptop sleeps mid-run, no timer advances, so a run started at 08:22 was
-    still "running" hours later. This is the backstop that closes the task on
-    the next tick after the machine wakes, so the board never shows work that
-    is not happening, and it cancels the workflow with it so the lane the
-    workflow was holding goes back to the queue.
-
-    The allowance follows the lane. A task row is only touched when its status
-    changes, so "no progress" here means "started this long ago", and a course
-    phase is allowed 100 minutes by SetWorkflowTimeout. Measuring it against
-    the 40-minute task cap meant the watchdog could kill a course run that was
-    still writing, 20 minutes inside its own limit. Each lane gets its own cap
-    plus the same doubling.
+    Liveness, not age. It used to measure from when the task started, with a
+    cap per lane, and got both directions wrong: a hung run was noticed only
+    80 minutes after it started (200 on the course lane), and a productive
+    course run could be killed while it was still writing. Now the clock is
+    the run's last event (every tool call records one), and the limit is the
+    longest a healthy run can be silent: one model step exhausting its
+    attempts (`hang_after_s`). A sleeping host shows the same silence, so this
+    also closes a run the laptop slept through, on the first tick after it
+    wakes. The task's workflow is cancelled with it, so the lane it held goes
+    back to the queue.
     """
+    limit = hang_after_s()
+    live = (
+        " greatest(t.updated_at, coalesce((SELECT max(e.ts) FROM hq.events e"
+        " JOIN hq.runs r ON r.id = e.run_id WHERE r.task_id = t.id), t.updated_at))"
+    )
     stale = await db.fetch(
-        "SELECT id::text FROM hq.tasks WHERE status = 'running'"
-        " AND updated_at < now() - make_interval(secs => CASE"
-        "   WHEN payload ->> 'stage' = ANY(%s) THEN %s ELSE %s END)",
-        (sorted(_COURSE_STAGES), COURSE_TIMEOUT_S * 2, TASK_TIMEOUT_S * 2),
+        "SELECT t.id::text FROM hq.tasks t WHERE t.status = 'running'"
+        f" AND {live} < now() - make_interval(secs => %s)",
+        (limit,),
     )
     # A run row whose workflow died without closing it stays open for ever, so
     # the Runs page shows work that stopped hours ago and `hq.cli health`
-    # counts it against the success rate. Two were open here: one from a
-    # cancelled workflow that could not run its own bookkeeping, one from a
-    # process that went away. Close them on the same tick that closes tasks.
+    # counts it against the success rate. Close it on the same evidence.
     orphans = await db.fetch(
         "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now()"
-        " FROM hq.tasks t WHERE t.id = r.task_id AND r.ended_at IS NULL"
-        " AND r.started_at < now() - make_interval(secs => CASE"
-        "   WHEN t.payload ->> 'stage' = ANY(%s) THEN %s ELSE %s END)"
+        " WHERE r.ended_at IS NULL AND greatest(r.started_at, coalesce("
+        "   (SELECT max(e.ts) FROM hq.events e WHERE e.run_id = r.id), r.started_at))"
+        "   < now() - make_interval(secs => %s)"
         " RETURNING r.id::text",
-        (sorted(_COURSE_STAGES), COURSE_TIMEOUT_S * 2, TASK_TIMEOUT_S * 2),
+        (limit,),
     )
     if orphans:
         await obs.emit("runs.abandoned", payload={"count": len(orphans)})
@@ -831,12 +833,10 @@ async def _cap_overrunning_tasks() -> None:
             status="blocked",
             data={
                 "reason": (
-                    "no progress for over "
-                    f"{COURSE_TIMEOUT_S * 2 // 60} minutes on a course lane, "
-                    f"{TASK_TIMEOUT_S * 2 // 60} elsewhere: either a model "
-                    "request kept hitting its time limit and was retried "
-                    "(DBOSStepTimeoutError in data/logs/backend.log), or the "
-                    "host was asleep mid-run"
+                    f"no sign of life for {int(limit // 60)} minutes: no tool"
+                    " call and no model answer. Either every model in the"
+                    " fallback chain hung twice (DBOSStepTimeoutError in"
+                    " data/logs/backend.log), or the host was asleep mid-run"
                 )
             },
         )

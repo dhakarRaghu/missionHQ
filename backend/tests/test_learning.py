@@ -600,7 +600,9 @@ def test_the_agents_he_reads_get_room_to_think() -> None:
 
     assert deep["settings"]["reasoning_effort"] == "high"
     assert deep["settings"]["max_tokens"] >= 32000
-    assert deep["settings"]["timeout_s"] >= 600
+    # Above the measured p99 of a whole model step (408s), and no further:
+    # a longer limit is only a longer hang.
+    assert 420 <= deep["settings"]["timeout_s"] <= 600
 
     agents = scan(strict=True)
     for name in ("sage", "hunter", "scout"):
@@ -624,7 +626,7 @@ def test_tutor_teaches_on_a_model_it_can_afford_all_day() -> None:
     teacher = spec["models"][spec["roles"]["teacher"]]
     assert teacher["model"].startswith("kimi"), "opus is capped at $5 a day"
     assert teacher["settings"]["reasoning_effort"] == "high"
-    assert teacher["settings"]["timeout_s"] >= 600
+    assert 420 <= teacher["settings"]["timeout_s"] <= 600
     assert teacher["fallback"]
 
     tutor = scan(strict=True)["tutor"]
@@ -1500,16 +1502,70 @@ def load_tutor_tools() -> list[str]:
     return list(scan()["tutor"].tools)
 
 
-def test_the_model_step_limit_follows_the_longest_request_timeout() -> None:
-    """The step limit was a fixed 600 while kimi_deep allowed 900 seconds, so
-    a long answer was always cancelled before its own timeout could fire."""
+def test_a_hung_model_request_hands_over_to_a_spare_and_fails_in_time() -> None:
+    """Fourteen runs in two weeks went silent 80 to 103 minutes and were killed.
+
+    A hung request used the whole step, the spares got a minute, and the step
+    was retried on the same hung model four times. Now the step covers the
+    whole fallback chain, it is attempted twice, and a full slot table is
+    waited out by the transport instead of by the step's retries.
+    """
     import inspect
 
     from hq import engine, llm
 
-    assert '"timeout_seconds": llm.registry().longest_timeout_s()' in inspect.getsource(
-        engine.bootstrap_pre_launch)
-    assert llm.registry().longest_timeout_s() >= 900
+    reg = llm.registry()
+    limit = engine.model_step_limit_s()
+    for name in reg.entries:
+        assert reg.chain_timeout_s(name) + 30 <= limit, name
+    assert engine.MODEL_STEP_ATTEMPTS == 2
+    src = inspect.getsource(engine.bootstrap_pre_launch)
+    assert '"max_attempts": MODEL_STEP_ATTEMPTS' in src
+    assert '"timeout_seconds": model_step_limit_s()' in src
+    # The longest a healthy run can be silent, and the watchdog's limit, stay
+    # well under the hour a hang used to cost.
+    assert engine.hang_after_s() <= 50 * 60, engine.hang_after_s()
+
+
+def test_a_full_slot_table_is_waited_out_not_failed(monkeypatch) -> None:
+    """A 429 from the gateway means its five slots are busy. Wait, then send again."""
+    import asyncio
+
+    import httpx
+
+    from hq import llm
+
+    calls = {"n": 0}
+
+    async def fake(self, request):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return httpx.Response(429, headers={"retry-after": "0"}, request=request)
+        return httpx.Response(200, json={"ok": True}, request=request)
+
+    slept: list[float] = []
+
+    async def no_sleep(s: float) -> None:
+        slept.append(s)
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", fake)
+    monkeypatch.setattr(llm.asyncio, "sleep", no_sleep)
+    request = httpx.Request("POST", "https://gw.example/v1/chat/completions", json={"a": 1})
+    response = asyncio.run(llm.GatewayCompatTransport().handle_async_request(request))
+    assert response.status_code == 200 and calls["n"] == 3
+    assert slept == [5.0, 10.0]
+
+
+def test_the_watchdog_judges_liveness_not_age() -> None:
+    """A long run that keeps calling tools is working; a silent one is not."""
+    import inspect
+
+    from hq import engine
+
+    src = inspect.getsource(engine._cap_overrunning_tasks)
+    assert "hang_after_s()" in src
+    assert "max(e.ts)" in src and "hq.events" in src
+    assert "COURSE_TIMEOUT_S * 2" not in src and "TASK_TIMEOUT_S * 2" not in src
 
 
 def test_an_unresolvable_host_is_an_answer_not_a_dead_run() -> None:
@@ -2334,3 +2390,56 @@ def test_vault_writes_are_committed_once_a_day_with_their_authors(tmp_path, monk
     # Nothing new: no empty commit, and the ledger is cleared.
     assert memory.commit_day_sync() == [] and commits() == 2
     assert not (vault / ".git" / memory.PENDING_LEDGER).exists()
+
+
+def test_no_model_call_in_a_live_run_is_unbounded() -> None:
+    """The judges and the page reader sit outside the agent's model steps.
+
+    Nothing bounded them: one ledger check hung 4.3 hours, and an operator run
+    sat in its browse guard for over 20 minutes without reaching its approval
+    ticket. Each now has a wall-clock limit that lands in the fallback it
+    already had for an unavailable model.
+    """
+    import inspect
+
+    from hq import runner
+    from hq.tools import web_tools
+
+    for step in (runner._ledger_check_step, runner._guard_step, runner._browse_guard_step):
+        src = inspect.getsource(step)
+        assert "asyncio.wait_for(" in src and "JUDGE_LIMIT_S" in src, step.__name__
+        assert "except Exception" in src, step.__name__
+    assert runner.JUDGE_LIMIT_S <= 120
+    assert "asyncio.wait_for(reader_agent().run(prompt), READER_LIMIT_S)" in inspect.getsource(web_tools.web_fetch)
+
+
+def test_a_section_hears_its_problems_when_it_is_written() -> None:
+    """Page-wide findings after the last part made tutor rewrite every part.
+
+    On 2026-09-23 a seven-part article was written three times. Each part now
+    says what the page check would say about it, while it is being written.
+    """
+    from hq.tools.learning_tools import (
+        ARTICLE_MAX_WORDS,
+        PAPER_EVIDENCE_SHARE,
+        part_notes,
+    )
+
+    look = '<div class="stats"><div class="stat"><b>1</b><span>x</span></div></div>'
+    told = '<h2 data-concept="c1">Why?</h2>' + look + "<p>" + "The mask sets a token to minus infinity. " * 10 + "</p>"
+    assert any("told, not yet asked" in n for n in part_notes(told))
+    asked_before = '<h2 data-concept="c1">Q</h2><details class="predict"><summary>Predict</summary>x</details>'
+    assert not any("told" in n for n in part_notes(told, earlier_html=asked_before))
+
+    long = "<p>" + ("This sentence keeps going with many more words than any reader wants to hold in one breath at all today. " * 10) + "</p>"
+    assert any("split the longest" in n for n in part_notes(long))
+
+    # Three sentences in ten about the paper: a review on a phase, the subject on paper day.
+    sourced = "<p>" + "The Orca paper measured the waste in its Figure 3. " * 3 \
+        + "A request holds its slot until the whole batch ends. " * 7 + "</p>"
+    assert any("about a source" in n for n in part_notes(sourced))
+    # On paper day that is the subject, not a review.
+    assert not any("about a source" in n for n in part_notes(sourced, evidence_share=PAPER_EVIDENCE_SHARE))
+
+    over = part_notes("<p>short.</p>", article=True, total_words=ARTICLE_MAX_WORDS + 1)
+    assert any("cut here" in n for n in over)

@@ -168,6 +168,14 @@ def _throttled(exc: BaseException) -> bool:
     return any(_throttled(sub) for sub in getattr(exc, "exceptions", ()))
 
 
+# One page through the reader model. A tool call is not a model step, so the
+# step limit never covered it: web_fetch p50 is 25s and p99 205s, and one took
+# 69 minutes. A reader that has not answered in three minutes is hung, and
+# the timeout lands in the "page unreadable" branch below, which hands the
+# agent an error and lets it move on.
+READER_LIMIT_S = 180.0
+
+
 @hq_tool(action=ActionClass.READ, trust=Trust.WEB, network=True)
 async def web_fetch(ctx: RunContext[HQDeps], url: str) -> dict:
     """Fetch a web page and return validated facts. Raw page text never reaches you;
@@ -234,7 +242,7 @@ async def web_fetch(ctx: RunContext[HQDeps], url: str) -> dict:
     try:
         for attempt in range(3):
             try:
-                result = await reader_agent().run(prompt)
+                result = await asyncio.wait_for(reader_agent().run(prompt), READER_LIMIT_S)
                 break
             except Exception as exc:
                 if not _throttled(exc) or attempt == 2:

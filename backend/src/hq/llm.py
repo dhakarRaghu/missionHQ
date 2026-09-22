@@ -7,6 +7,7 @@ truth for cost accounting; auto-pricing cannot price gateway-aliased ids.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -21,8 +22,18 @@ from hq.config import settings
 log = logging.getLogger(__name__)
 
 
+# A 429 from the gateway means its five-request slot table is full, not that
+# the model is broken. The right response is to wait for a slot. It used to be
+# handled by DBOS step retries, which forced four attempts per model step; the
+# same four attempts then made a HUNG request cost four full timeouts, about an
+# hour of a silent run holding the only worker on its lane. Waiting for a slot
+# here lets the step retry only what is worth retrying.
+SLOT_WAITS_S = (5.0, 10.0, 20.0, 40.0)
+
+
 class GatewayCompatTransport(httpx.AsyncHTTPTransport):
-    """Drops vendor extras the OpenAI schema rejects.
+    """Waits out a full slot table, and drops vendor extras the OpenAI schema
+    rejects.
 
     Grid proxies several backends, and some (Kimi) attach a ``metadata`` object
     whose ``weight_versions`` is a list. The OpenAI SDK types ``metadata`` as
@@ -33,6 +44,17 @@ class GatewayCompatTransport(httpx.AsyncHTTPTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         response = await super().handle_async_request(request)
+        for wait in SLOT_WAITS_S:
+            if response.status_code != 429:
+                break
+            try:
+                wait = max(wait, float(response.headers.get("retry-after", "")))
+            except ValueError:
+                pass
+            await response.aclose()
+            log.info("gateway slot table full (429); waiting %.0fs", wait)
+            await asyncio.sleep(min(wait, 60.0))
+            response = await super().handle_async_request(request)
         if "application/json" not in response.headers.get("content-type", ""):
             return response
         await response.aread()
@@ -100,7 +122,7 @@ def _gateway_client() -> AsyncOpenAI:
         api_key=s.gateway_api_key,
         max_retries=0,
         http_client=httpx.AsyncClient(  # type: ignore[arg-type]  # SDK stubs name httpx2
-            transport=GatewayCompatTransport(), timeout=180  # a hung request fails fast; DBOS retries once
+            transport=GatewayCompatTransport(), timeout=180  # overridden per model by timeout_s
         ),
     )
 
@@ -184,6 +206,25 @@ class ModelRegistry:
         if not out:
             raise RuntimeError("no usable models in models.yaml — check credentials in .env")
         return out
+
+    def chain_timeout_s(self, name_or_role: str, default: float = 300.0) -> float:
+        """How long one model step may need when every model in the entry's
+        fallback chain times out in turn: its own timeout plus each spare's.
+
+        The step's wall-clock limit must cover this, or the spares never get
+        their turn. It used to be the longest single timeout plus a minute, so
+        a hung primary used the whole step, the spares got sixty seconds, and
+        the step was cancelled and retried on the same hung primary.
+        """
+        e = self.entries[self.canonical(name_or_role)]
+        own = float((e.settings or {}).get("timeout_s", default))
+        spares = sum(float((self.entries[f].settings or {}).get("timeout_s", default))
+                     for f in (e.fallback or []) if f in self.entries and f != e.name)
+        return own + spares
+
+    def longest_chain_timeout_s(self) -> float:
+        """The longest `chain_timeout_s` of any entry: the model step's limit."""
+        return max((self.chain_timeout_s(n) for n in self.entries), default=300.0)
 
     def longest_timeout_s(self, default: float = 300.0) -> float:
         """The longest per-request timeout any entry declares in models.yaml."""
