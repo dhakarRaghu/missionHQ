@@ -18,6 +18,7 @@ from hq import learning_pipeline as learning
 from hq import lesson_kit, reader_export, signals, value
 from hq import lesson_writer as lw
 from hq.api import learning as learning_api
+from hq.api import reader as reader_api
 from hq.tools import learning_tools as lt
 
 CONCEPTS = ('<ol class="concepts"><li id="c1"><b>A batch rebuilt every iteration'
@@ -114,6 +115,131 @@ def test_the_signal_endpoint_validates_then_stores(monkeypatch: pytest.MonkeyPat
             asyncio.run(add(bad_lesson, body))
         assert err.value.status_code == status
     assert len(seen) == 2   # the refused shapes never reached the database
+
+
+# --- the phone sends it back ------------------------------------------------
+
+PHONE_FILE = "2026-09-22-inference-internals-phase-02b-decoding-context.html"
+PHONE_LESSON = "0b8f3c5e-8f6a-4c0e-9a55-1b2c3d4e5f60"
+
+
+class _FakeDb:
+    """hq.db for one lesson, recording every statement."""
+
+    def __init__(self, kind: str = "course") -> None:
+        self.kind = kind
+        self.seen: list[tuple[str, tuple]] = []
+
+    async def fetchone(self, sql: str, params: tuple = ()) -> dict[str, Any] | None:
+        self.seen.append((sql, params))
+        if "FROM hq.lessons WHERE html_path" in sql:
+            return {"id": PHONE_LESSON} if params[2] == f"/{PHONE_FILE}" else None
+        if sql.startswith("UPDATE hq.lessons"):
+            if params[0] != PHONE_LESSON:
+                return None
+            return {"id": PHONE_LESSON, "title": "Decoding", "kind": self.kind,
+                    "course_slug": "phase-02b" if self.kind == "course" else ""}
+        if sql.startswith("UPDATE hq.course_phases"):
+            return {"lesson_id": PHONE_LESSON, "title": "Decoding"}
+        if "INSERT INTO hq.concept_signals" in sql:
+            return {"lesson_id": params[-1], "concept": params[0], "verdict": params[1],
+                    "via": params[2]}
+        return None
+
+    async def fetch(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+        self.seen.append((sql, params))
+        return [{"id": PHONE_LESSON}]
+
+    async def execute(self, sql: str, params: tuple = ()) -> None:
+        self.seen.append((sql, params))
+
+
+@pytest.fixture
+def fake_db(monkeypatch: pytest.MonkeyPatch) -> _FakeDb:
+    fake = _FakeDb()
+    for name in ("fetchone", "fetch", "execute"):
+        monkeypatch.setattr(learning_api.db, name, getattr(fake, name))
+    return fake
+
+
+@pytest.mark.parametrize("file", [
+    "../etc/passwd", "lessons/x.html", "x.htm", ".html", "a.b.html", "x.html ", "",
+    "x.html?y", "%2e%2e.html", "a" * 201 + ".html", "x\\y.html"])
+def test_the_phone_names_a_lesson_only_by_its_page_file(fake_db: _FakeDb, file: str) -> None:
+    for call in (reader_api.reader_mark_read(reader_api.ReadBody(file=file[:220])),
+                 reader_api.reader_signal(reader_api.PhoneSignalBody(
+                     file=file[:220], concept="c1", verdict="got_it"))):
+        with pytest.raises(HTTPException) as err:
+            asyncio.run(call)
+        assert err.value.status_code == 400
+    assert fake_db.seen == []   # a refused name never reaches the database
+
+
+def test_a_phone_tap_is_validated_then_stored_as_from_the_phone(fake_db: _FakeDb) -> None:
+    body = reader_api.PhoneSignalBody
+    row = asyncio.run(reader_api.reader_signal(
+        body(file=PHONE_FILE, concept="c2", verdict="lost_me")))
+    assert row == {"lesson_id": PHONE_LESSON, "concept": "c2", "verdict": "lost_me",
+                   "via": "phone"}
+    assert any("INSERT INTO hq.concept_signals" in sql for sql, _ in fake_db.seen)
+
+    fake_db.seen.clear()
+    for concept, verdict in [("c100", "got_it"), ("C1", "got_it"), ("c1", "meh"),
+                             ("c1", "GOT_IT")]:
+        with pytest.raises(HTTPException) as err:
+            asyncio.run(reader_api.reader_signal(
+                body(file=PHONE_FILE, concept=concept, verdict=verdict)))
+        assert err.value.status_code == 400
+    assert fake_db.seen == []
+
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(reader_api.reader_signal(
+            body(file="2026-01-01-nothing.html", concept="c1", verdict="got_it")))
+    assert err.value.status_code == 404
+
+
+def test_a_phone_read_goes_through_the_consoles_mark_read(
+        fake_db: _FakeDb, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    real = learning_api.mark_read
+
+    async def spy(lesson_id: str) -> dict[str, Any] | None:
+        calls.append(lesson_id)
+        return await real(lesson_id)
+
+    monkeypatch.setattr(learning_api, "mark_read", spy)
+
+    out = asyncio.run(reader_api.reader_mark_read(reader_api.ReadBody(file=PHONE_FILE)))
+    assert out == {"ok": True, "title": "Decoding"}
+    asyncio.run(learning_api.mark_phase_read("inference-internals", "phase-02b"))
+    asyncio.run(learning_api.mark_lesson_read("2026-09-22", "course"))
+    assert calls == [PHONE_LESSON] * 3   # phone, course page, Learn page: one function
+
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(reader_api.reader_mark_read(
+            reader_api.ReadBody(file="2026-01-01-nothing.html")))
+    assert err.value.status_code == 404
+
+
+def test_reading_a_course_lesson_sets_the_lesson_and_its_phase(fake_db: _FakeDb) -> None:
+    asyncio.run(reader_api.reader_mark_read(reader_api.ReadBody(file=PHONE_FILE)))
+    writes = [(sql, params) for sql, params in fake_db.seen if sql.startswith("UPDATE")]
+    assert writes[0][0].startswith("UPDATE hq.lessons SET read_at = coalesce(read_at, now())")
+    assert writes[0][1] == (PHONE_LESSON,)
+    assert writes[1][0].startswith("UPDATE hq.course_phases SET read_at")
+    assert writes[1][1] == (PHONE_LESSON, "phase-02b")
+    assert writes[1][0].endswith("WHERE lesson_id = %s::uuid OR slug = %s")
+
+    fake_db.seen.clear()
+    fake_db.kind = "topic"
+    asyncio.run(reader_api.reader_mark_read(reader_api.ReadBody(file=PHONE_FILE)))
+    assert not any("hq.course_phases" in sql for sql, _ in fake_db.seen)
+    assert asyncio.run(learning_api.mark_read("not-a-uuid")) is None
+
+
+def test_the_reader_endpoints_require_the_owner() -> None:
+    from hq.api.deps import require_auth
+    assert any(d.dependency is require_auth for d in reader_api.router.dependencies)
 
 
 def test_the_current_answer_is_the_latest_tap() -> None:

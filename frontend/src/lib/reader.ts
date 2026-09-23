@@ -4,7 +4,9 @@
  * `backend/src/hq/reader_export.py` writes `public/reader/` on his machine and
  * he commits it. Everything here therefore reads the deployment's own files.
  * Nothing in this module may call `/api`: the point of the reader is that it
- * works when the Mac that runs the backend is asleep.
+ * works when the Mac that runs the backend is asleep. What he sends back
+ * (mark read, concept taps) is `lib/reader-sync.ts`, which queues it for
+ * whenever the backend is reachable and never blocks reading.
  */
 
 import {
@@ -78,11 +80,11 @@ export const readerApi = {
 /**
  * "Got it" / "Lost me" on the phone.
  *
- * The phone holds no credential for the backend, by design, so a tap stays
- * here: in this page's own storage (the lesson frame has none), one key per
- * lesson file and concept. Storage can be missing or refuse (private mode, a
- * full quota), so every access is guarded and a failure only means the
- * answer is not remembered. The console records taps for the next outline.
+ * What the buttons show is kept here: in this page's own storage (the lesson
+ * frame has none), one key per lesson file and concept. Storage can be
+ * missing or refuse (private mode, a full quota), so every access is guarded
+ * and a failure only means the answer is not remembered. Sending the tap to
+ * the backend, where the next outline reads it, is `lib/reader-sync.ts`.
  */
 const TAP_PREFIX = "hq:tap:";
 
