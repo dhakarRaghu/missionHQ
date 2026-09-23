@@ -485,6 +485,12 @@ async def run_task(task_id: str) -> str:
         await runner.emit_step("run.failed", run_id=run_id, task_id=task_id, agent=agent_name,
                                payload={"error": exc_text[:500],
                                         "exit_status": exit_status("failed", exc_text)})
+        if await _defer_if_offline_step(task_id, run_id):
+            # No model could even be reached: the machine was offline. The
+            # task waits and runs again; a lesson resumes where it stopped.
+            await runner.apply_step(task_id, "deferred_offline", status="backlog",
+                                    data={"retry_in_min": int(OFFLINE_RETRY_AFTER_S // 60)})
+            return "deferred: gateway unreachable"
         await _deliver_task_result_step(
             task_id, run_id, agent_name, "failed", f"Run failed: {exc_text}"
         )
@@ -1975,6 +1981,33 @@ async def _deliver_task_result_step(
             agent=agent_name,
             payload={"session_id": task["origin_session_id"]},
         )
+
+
+OFFLINE_RETRY_AFTER_S = 15 * 60
+OFFLINE_RETRIES = 4
+_UNREACHABLE = ("APIConnectionError", "ConnectError", "ConnectTimeout")
+
+
+@DBOS.step()
+async def _defer_if_offline_step(task_id: str, run_id: str) -> bool:
+    """True, with the task's start pushed back, when the run's last model
+    attempts all failed to connect at all. That is the machine off the
+    network, not a model or a task failing, and a retry in five seconds
+    meets the same outage. At most OFFLINE_RETRIES times per task."""
+    calls = await db.fetch(
+        "SELECT error_class FROM hq.model_calls WHERE run_id = %s"
+        " ORDER BY started_at DESC LIMIT 3", (run_id,))
+    if len(calls) < 3 or any(c["error_class"] not in _UNREACHABLE for c in calls):
+        return False
+    row = await db.fetchone(
+        "SELECT count(*) AS n FROM hq.events WHERE task_id = %s AND kind = 'task.updated'"
+        " AND payload->>'event' = 'deferred_offline'", (task_id,))
+    if int((row or {}).get("n") or 0) >= OFFLINE_RETRIES:
+        return False
+    await db.execute(
+        "UPDATE hq.tasks SET not_before = now() + make_interval(secs => %s) WHERE id = %s",
+        (OFFLINE_RETRY_AFTER_S, task_id))
+    return True
 
 
 @DBOS.step()

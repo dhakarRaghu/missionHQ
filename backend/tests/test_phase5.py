@@ -197,3 +197,12 @@ def test_an_operator_report_is_redacted_not_dropped(monkeypatch) -> None:
     assert privacy.employers_named(out) == []
     assert "Acmeology stays" in out and out.count(privacy.REDACTED) == 2
     assert "privacy.redact(" in inspect.getsource(engine._file_external_output)
+
+
+def test_an_offline_machine_defers_the_task_instead_of_failing_it() -> None:
+    src = inspect.getsource(engine.run_task) if hasattr(engine, "run_task") else ""
+    src = src or inspect.getsource(engine)
+    assert "_defer_if_offline_step(task_id, run_id)" in src
+    assert "APIConnectionError" in engine._UNREACHABLE
+    # the reconciler honours not_before, so a deferred task waits its turn
+    assert "not_before <= now()" in inspect.getsource(engine._orphaned_backlog_step)
