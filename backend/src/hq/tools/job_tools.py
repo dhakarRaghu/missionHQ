@@ -28,6 +28,7 @@ from hq import db
 from hq.config import settings
 from hq.job_pipeline import exhausted_targets, sweep_brief
 from hq.obs import emit
+from hq.privacy import private_employer
 from hq.safety import ActionClass, Trust
 from hq.tools.registry import HQDeps, hq_tool
 
@@ -111,22 +112,6 @@ def intern_title(role: str) -> str | None:
     return match.group(0).lower() if match else None
 
 
-def _squash(name: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", name.casefold())
-
-
-def private_employer(company: str) -> bool:
-    """True when this company is one of the owner's own employers.
-
-    Those are never researched, recorded or named: the names live in
-    ``settings().private_employers`` and nowhere else. Compared with spaces and
-    punctuation squeezed out, so a board slug or "<Name> Technologies" still
-    matches."""
-    key = _squash(company)
-    return bool(key) and any(
-        (name := _squash(employer)) and name in key
-        for employer in settings().private_employers
-    )
 
 
 # --- the fit score -----------------------------------------------------------

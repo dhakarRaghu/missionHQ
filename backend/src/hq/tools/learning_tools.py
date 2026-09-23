@@ -24,7 +24,7 @@ import httpx
 from pydantic_ai import ModelRetry, RunContext
 
 from hq import courses as courses_spec
-from hq import db, lesson_kit
+from hq import db, lesson_kit, privacy
 from hq.config import settings
 from hq.learning_pipeline import (
     ARTICLE_KINDS,
@@ -651,6 +651,9 @@ async def save_part(task_id: str | None, slug: str, part: int, markdown: str,
         html, earlier_html=earlier, article=article,
         evidence_share=PAPER_EVIDENCE_SHARE if article_kind == PAPER else EVIDENCE_SHARE,
         total_words=sum(p["page_words"] for p in parts))
+    named = employer_problem(markdown, html)
+    if named:
+        notes.insert(0, named)
     out: dict[str, Any] = {"slug": clean, "saved": int(part), "parts": parts}
     if notes:
         out["fix_this_part_now"] = notes
@@ -734,6 +737,15 @@ async def finish_lesson(
             " adds the doctype, the head, the one stylesheet, the contents"
             " rail and the hero. Remove everything from <!DOCTYPE> down to"
             " <main>, and the </main> onwards, and send what is between them"
+        )
+
+    # Every lesson, whatever its kind and whoever wrote it: the staged writer
+    # calls this directly, not through the tool registry's gate.
+    named = employer_problem(markdown, html, title, subtitle, eyebrow)
+    if named:
+        raise LessonRefused(
+            f"the lesson is not ready yet: {named}. Rewrite ONLY the parts that"
+            " carry it with write_lesson_part, then call write_lesson again"
         )
 
     source = await asyncio.to_thread(read_course_source_text, clean)
@@ -1277,6 +1289,22 @@ _PAGE_URL_RE = re.compile(r"https?://[^\s<>\"'`)\]]+")
 MAX_LISTED = 8
 
 
+def employer_problem(*texts: str) -> str:
+    """Why a lesson or a post that names an employer is refused, or "".
+
+    Points at each mention by the words around it, never by the name, so the
+    refusal locates the sentence without writing the name back into the run."""
+    if not privacy.problem(*texts):
+        return ""
+    spots = [*dict.fromkeys(s for t in texts
+             for s in privacy.where_named(html_lib.unescape(re.sub(r"<[^>]+>", " ", t))))]
+    where = ("; it appears near " + ", ".join(f"\u201c{s}\u201d" for s in spots[:6])
+             if spots else "")
+    return ("it names one of the owner's employers" + where
+            + ". Replace every mention with the mechanism it illustrates, in general"
+              " terms; the name is never written")
+
+
 def _listed(items: Sequence[str]) -> str:
     shown = ", ".join(items[:MAX_LISTED])
     return shown + (f" and {len(items) - MAX_LISTED} more" if len(items) > MAX_LISTED else "")
@@ -1698,9 +1726,11 @@ def page_coverage(source: str, page_html: str, note: str = "", *,
     * it reads plainly, says each thing once, and shows its mechanisms;
     * what it keeps from his lab is kept exactly, because his commands and
       outputs came from real runs and a retyped one did not;
-    * every link comes from the phase or hunter's note, and no employer is named.
+    * every link comes from the phase or hunter's note.
+
+    No employer is named either, but that is ``finish_lesson``'s check, run on
+    every lesson and not only on a page with a source.
     """
-    visible = html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page_html)))
     have = _visible_words(page_html)
     measurable = have >= MEASURABLE_SOURCE_WORDS
     problems = []
@@ -1801,16 +1831,6 @@ def page_coverage(source: str, page_html: str, note: str = "", *,
             " and a dash hides a second sentence. Split those sentences"
         )
 
-    lowered = visible.lower()
-    named = [name for name in settings().private_employers if name.lower() in lowered]
-    # Links count too: a url can name the employer in its path.
-    named += [name for name in settings().private_employers
-              if name not in named and name.lower() in page_html.lower()]
-    if named:
-        problems.append(
-            "the page names an employer (" + ", ".join(named) + "). Replace every"
-            " mention with the mechanism it illustrates, in general terms"
-        )
     return "; ".join(problems)
 
 
@@ -1860,10 +1880,8 @@ def post_problems(markdown: str, source: str) -> str:
         problems.append(
             "these belong to his private notes, not a post: " + _listed(private)
         )
-    named = [n for n in settings().private_employers
-             if re.search(rf"\b{re.escape(n.lower())}\b", lowered)]
-    if named:
-        problems.append("it names an employer (" + ", ".join(named) + ")")
+    if privacy.problem(markdown):
+        problems.append(employer_problem(markdown))
     left = placeholders_in(markdown)
     if left:
         problems.append("placeholders are still in it: " + _listed(left))
@@ -1906,6 +1924,8 @@ async def save_post(section: str, slug: str, title: str, summary: str, tags: str
     if source_lesson.strip():
         source = await asyncio.to_thread(_read_lesson_text, source_lesson.strip())
     gap = post_problems(markdown, source)
+    named = "" if gap else employer_problem(title, summary, slug, ", ".join(tag_list))
+    gap = gap or (f"its title, summary, slug or tags: {named}" if named else "")
     if gap:
         raise LessonRefused(f"this is not ready for his site: {gap}. Fix it and call again")
 

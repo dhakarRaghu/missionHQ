@@ -24,8 +24,8 @@ from pydantic_ai import Agent, RunContext
 
 from hq import llm
 from hq.obs import emit
+from hq.privacy import private_employer
 from hq.safety import ActionClass, Trust
-from hq.tools.job_tools import private_employer
 from hq.tools.registry import HQDeps, hq_tool
 
 # The owner's own employers are never researched. The names live only in

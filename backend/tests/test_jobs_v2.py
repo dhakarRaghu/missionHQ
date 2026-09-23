@@ -239,17 +239,29 @@ def test_job_board_and_discovery_refuse_the_owners_employer(monkeypatch) -> None
     assert "private_employer(company[\"name\"])" in inspect.getsource(web_tools.discover_companies)
 
 
-def test_the_discovery_brief_names_no_employer_in_source() -> None:
-    src = inspect.getsource(discovery_brief)
-    for name in settings().private_employers:
-        assert name not in src
-    assert "_employer_skip_line()" in src
+def test_the_discovery_brief_never_names_an_employer_and_code_drops_their_leads(
+    monkeypatch,
+) -> None:
+    """The brief is a prompt, and a prompt that carries the names is the leak.
+    Operator is not told whom to skip; code drops those leads instead."""
+    import json
 
+    from hq.job_pipeline import extract_discovery_leads
 
-def test_the_discovery_brief_takes_the_skip_line_from_settings(monkeypatch) -> None:
     monkeypatch.setattr(settings(), "private_employers", ("Acmecorp", "Globex"))
     brief = discovery_brief(discovery_payload(query="SDE-1", locations="India", max_roles=5))
-    assert "Skip Acmecorp and Globex too" in brief
+    assert "acmecorp" not in brief.lower() and "globex" not in brief.lower()
+
+    def lead(company: str, why: str = "fits") -> dict[str, str]:
+        return {"company": company, "role": "SDE-1", "why_fit": why,
+                "posting_url": "https://www.linkedin.com/jobs/view/1/"}
+
+    out = "```json\n" + json.dumps({"missionhq_job_leads": [
+        lead("Acmecorp Technologies"), lead("Initech", "like his Globex work"),
+        lead("Initech")]}) + "\n```"
+    leads = extract_discovery_leads(out)
+    assert [x["company"] for x in leads] == ["Initech"]
+    assert leads[0]["why_fit"] == "fits"
 
 
 # --- browser_read and ATS hosts ----------------------------------------------

@@ -38,7 +38,7 @@ def test_a_third_identical_call_is_refused_and_counted() -> None:
 
 def test_the_repeat_gate_sits_outside_the_retried_step() -> None:
     """A refusal inside a retried step was retried like a network error."""
-    assert "fn=_repeat_gated(tool_name, stepped)" in inspect.getsource(registry)
+    assert "fn=_repeat_gated(tool_name, stepped, private=private)" in inspect.getsource(registry)
     assert "note_call" not in inspect.getsource(registry._audited)
 
 

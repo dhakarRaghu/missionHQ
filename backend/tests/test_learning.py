@@ -1708,15 +1708,18 @@ def test_course_work_has_its_own_lane_and_queued_work_survives_a_code_change() -
 
 
 
-def test_what_a_page_keeps_from_his_lab_it_keeps_exactly() -> None:
-    from hq.tools.learning_tools import page_coverage
+def test_what_a_page_keeps_from_his_lab_it_keeps_exactly(monkeypatch) -> None:
+    from hq.config import settings
+    from hq.tools import learning_tools
+    from hq.tools.learning_tools import employer_problem, page_coverage
 
+    monkeypatch.setattr(settings(), "private_employers", ("Acmecorp",))
     source = (
         "## 1.1 — Tokens\n" + "word " * 40 + "\n"
         "- [ ] **E1 (offline).** Count tokens.\n"
         "  - Run: `python tokenize_cost.py --role default`\n"
         "- [ ] **E2 (offline).** Old path.\n"
-        "  - Run: `kubectl apply -f phase06_mindtickle/app.yaml`\n"
+        "  - Run: `kubectl apply -f phase06_acmecorp/app.yaml`\n"
         "Read https://example.org/paper\n"
     )
     good = _lesson(
@@ -1727,16 +1730,23 @@ def test_what_a_page_keeps_from_his_lab_it_keeps_exactly() -> None:
     )
     assert page_coverage(source, good) == ""
     # His commands were run; a retyped one was not. An exercise may be left
-    # out, never invented. Plus a foreign link and the employer.
+    # out, never invented. Plus a foreign link.
     bad = _lesson(
         "<p><b>E1</b> Run: <code>python tokenize.py</code></p>"
         "<p><b>E7</b> Run: <code>python tokenize_cost.py --role default</code></p>"
-        "<a href='https://made.up/x'>x</a> Mindtickle"
+        "<a href='https://made.up/x'>x</a> as we did at Acmecorp"
     )
     gap = page_coverage(source, bad)
     assert "python tokenize.py" in gap and "nobody has run them" in gap
     assert "E7" in gap and "his lab does not have" in gap
-    assert "https://made.up/x" in gap and "Mindtickle" in gap
+    assert "https://made.up/x" in gap
+    # The employer is finish_lesson's check, for every lesson; the refusal
+    # points at the sentence and never writes the name back.
+    named = employer_problem(bad)
+    assert "employers" in named and "as we did at" in named
+    assert "acmecorp" not in named.lower()
+    assert "employer_problem(markdown, html, title, subtitle, eyebrow)" in inspect.getsource(
+        learning_tools.finish_lesson)
 
 
 def test_a_page_with_colliding_ids_or_dead_lookups_is_refused() -> None:
@@ -1860,10 +1870,11 @@ def test_the_weekend_builds_instead_of_reading() -> None:
     assert "_start_lab_card" in run and "_start_week_review" in run
 
 
-def test_a_post_is_checked_before_it_reaches_his_site() -> None:
+def test_a_post_is_checked_before_it_reaches_his_site(monkeypatch) -> None:
     """A lesson is written for him; a post is for a stranger. The checks are
     code, not judgement: private words, an employer, invented links, or a
     rewrite that dropped the substance instead of the context."""
+    from hq.config import settings
     from hq.tools.learning_tools import POST_MIN_WORDS, post_problems
 
     source = ("The vLLM post https://vllm.ai/blog/x measured it. "
@@ -1875,7 +1886,10 @@ def test_a_post_is_checked_before_it_reaches_his_site() -> None:
     gap = post_problems(private, source)
     assert "private notes" in gap and "study note" in gap
 
-    assert "employer" in post_problems(good + " We did this at Mindtickle.", source)
+    monkeypatch.setattr(settings(), "private_employers", ("Acme Corp",))
+    named = post_problems(good + " We did this at acme corp.", source)
+    assert "employer" in named and "acme" not in named.lower()
+    assert "employer" not in post_problems(good + " Acmeology is a word.", source)
     assert "did not have" in post_problems(good + " https://invented.example/x", source)
     assert "lost the substance" in post_problems("Too short.", source)
 

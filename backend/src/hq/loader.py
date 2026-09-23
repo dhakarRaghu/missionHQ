@@ -73,7 +73,7 @@ class AgentSpec(BaseModel):
     system_prompt: str = ""
     policy: str = ""
     # Which shared memory blocks this agent carries, by file stem ("user",
-    # "decisions", "active_projects", "rules"). None carries them all. Tutor
+    # "decisions", "active_projects"). None carries them all. Tutor
     # does not need the job ledger; every block it carries is read each run.
     memory: list[str] | None = None
     dir: Path
@@ -102,16 +102,31 @@ class AgentSpec(BaseModel):
         """memory/agents/<name>.md: this agent's own scratch block."""
         return memory.working_memory_path(self.name)
 
+    def reads_web(self) -> bool:
+        """True for an agent whose context can carry text from the open web:
+        it holds a web-read tool, or it runs on an external runtime that
+        drives a browser outside our loop."""
+        return self.runtime in EXTERNAL_RUNTIMES or bool(
+            self.base_tool_names() & web_read_tools())
+
+    def keeps_notebook(self) -> bool:
+        """An agent carries a notebook only when it can rewrite it and reads
+        no web. A notebook is re-injected into every run of its agent, so for
+        a web reader it would turn one poisoned page into a standing
+        instruction; such an agent starts each run from its brief and the
+        shared memory, and leaves what it found in quarantine/."""
+        return "vault_write" in self.base_tool_names() and not self.reads_web()
+
     def vault_write_scopes(self) -> list[str]:
-        """Scopes from the manifest plus the agent's own working-memory block,
-        which every agent may write (its own scratch, not trusted memory: it
-        is never injected into other agents)."""
+        """Scopes from the manifest, plus the agent's own working-memory block
+        when it keeps a notebook (its own scratch, not trusted memory: it is
+        never injected into other agents)."""
         scopes: list[str] = []
         for t in self.tools:
             if t.split(":")[0] == "vault_write":
                 scopes.append(t.split(":", 1)[1] if ":" in t else "**")
         own = self.working_memory_path()
-        if own not in scopes:
+        if self.keeps_notebook() and own not in scopes:
             scopes.append(own)
         return scopes
 
@@ -152,12 +167,12 @@ class AgentSpec(BaseModel):
         write trusted memory: one poisoned page would otherwise become a
         permanent instruction. Enforced at load so the failure is loud."""
         names = self.base_tool_names()
-        # A claude-runtime agent reads the web through a browser it drives
+        # An external-runtime agent reads the web through a browser it drives
         # outside our loop, so it is a web reader whatever its manifest lists,
         # and every rule below applies to it unchanged.
-        by_runtime = self.runtime in EXTERNAL_RUNTIMES
-        if not by_runtime and not names & web_read_tools():
+        if not self.reads_web():
             return
+        by_runtime = self.runtime in EXTERNAL_RUNTIMES
         why = (
             f"agents on the {self.runtime} runtime" if by_runtime else "web-read tools"
         )
@@ -167,9 +182,9 @@ class AgentSpec(BaseModel):
             raise ValueError(
                 f"agent {self.name}: {why} cannot combine with {sorted(forbidden)}"
             )
+        # No exemption, not even the agent's own notebook: a notebook is
+        # re-injected into every run, which is exactly a standing instruction.
         for scope in self.vault_write_scopes():
-            if scope == self.working_memory_path():
-                continue  # its own scratch block; nothing else reads it
             if scope != "quarantine/**":
                 raise ValueError(
                     f"agent {self.name}: {why} may write only vault_write:quarantine/**,"
@@ -382,10 +397,9 @@ def instructions_for(spec: AgentSpec) -> str:
     if blocks:
         parts.append(f"# Shared memory\n{blocks}")
     own_path = spec.working_memory_path()
-    # A notebook is carried only by an agent that can rewrite it. Tutor held
-    # no vault_write, so its notebook was never updated and a week-old one
-    # rode along on every run, describing a flow that no longer existed.
-    if "vault_write" in spec.base_tool_names():
+    # A notebook is carried only by an agent that can rewrite it and reads no
+    # web (``AgentSpec.keeps_notebook``).
+    if spec.keeps_notebook():
         own = memory.load_working_memory(spec.name)
         if own:
             parts.append(f"# Your working memory ({own_path})\n{own}")

@@ -4,6 +4,7 @@ on its output."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 import re
 import shutil
 from pathlib import Path
@@ -161,6 +162,46 @@ def test_the_browse_guard_is_given_the_cards_contract(monkeypatch) -> None:
     verdict = asyncio.run(runner._browse_guard_step("operator", policy, "Task: read"))
     assert verdict["allow"] is True
     assert _contract_section() in asked[0]
+
+
+def test_the_browse_guard_states_the_real_risk() -> None:
+    """The sandbox binds shell commands, not the browser: the guard must not
+    be told the agent cannot click."""
+    text = runner.BROWSE_GUARD_INSTRUCTIONS
+    assert "It cannot" not in text and "sandbox is\nread-only" not in text
+    assert "computer-use" in text and "only its shell" in text
+    assert "contract" in text and "click" in text
+
+
+@pytest.mark.parametrize(("task", "why"), [
+    ("Find two people at a company on LinkedIn.", "names no page"),
+    ("Read https://www.linkedin.com/messaging/thread/1 and report.", "send, post"),
+    ("Open linkedin.com/mynetwork/invitation-manager/ and list them.", "send, post"),
+    ("Read chrome://settings and report.", "not a public web address"),
+    ("Read http://127.0.0.1:8000/admin and report.", "not a public web address"),
+    ("Read up to 20 pages of https://example.com/blog.", "ceiling is 8"),
+    ("Read " + " ".join(f"https://example.com/p{i}" for i in range(9)), "names 9 pages"),
+    ("Read " + " ".join(f"https://www.linkedin.com/in/p{i}" for i in range(4)), "LinkedIn or X"),
+])
+def test_code_decides_what_text_can_settle_before_the_judge(task: str, why: str) -> None:
+    problem = runner.browse_bounds_problem(task)
+    assert problem is not None and why in problem
+
+
+def test_the_real_briefs_pass_the_bounds_check() -> None:
+    discovery = job_pipeline.discovery_brief(job_pipeline.discovery_payload(
+        query="SDE-1", locations="India", max_roles=5))
+    referral = job_pipeline.referral_brief(job_pipeline.referral_payload(
+        job_id="1", company="Initech", role="SWE"))
+    assert runner.browse_bounds_problem(discovery) is None
+    assert runner.browse_bounds_problem(referral) is None
+    assert runner.browse_bounds_problem(
+        "Open https://www.linkedin.com/company/initech/people/ and name two engineers.") is None
+
+
+def test_an_unbounded_task_never_reaches_the_judge() -> None:
+    src = inspect.getsource(runner.await_runtime_approval)
+    assert src.index("browse_bounds_problem(summary)") < src.index("_browse_guard_step(")
 
 
 def test_the_guard_policy_is_truncated_to_its_limit(monkeypatch) -> None:

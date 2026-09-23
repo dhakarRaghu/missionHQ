@@ -4,7 +4,8 @@ Flow (L2 of the plan): the owner corrects an agent -> the agent calls
 ``check_policy_rule`` to fix the wording -> ``propose_policy`` opens an
 approval ticket whose arguments (rule, reason) are the review -> the owner
 approves -> the tool body appends the rule to ``agents/<agent>/policy.md``
-under ``## Rules``. ``loader.instructions_for`` re-reads that file on every
+under ``## Rules``, as the rule alone. The date and the reason are history,
+not instruction: they go in the ``policy.added`` event, never the prompt. ``loader.instructions_for`` re-reads that file on every
 run, so the rule applies from the next run. Policies are never auto-written:
 auto-written policies rot and can be poisoned.
 
@@ -143,9 +144,14 @@ def append_rule(policy_text: str, line: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def format_rule_line(rule: str, reason: str, day: str) -> str:
-    reason_text = " ".join(reason.split()).replace("-->", "").strip()[:REASON_CHARS]
-    return f"- [{day}] {rule.strip()}  <!-- reason: {reason_text or 'owner correction'} -->"
+def format_rule_line(rule: str) -> str:
+    """The line policy.md carries: the rule, nothing else. policy.md is read
+    into the prompt on every run, and a prompt states rules, not history."""
+    return f"- {rule.strip()}"
+
+
+def reason_text(reason: str) -> str:
+    return " ".join(reason.split()).strip()[:REASON_CHARS] or "owner correction"
 
 
 # --- I/O helpers --------------------------------------------------------------
@@ -241,10 +247,11 @@ async def propose_policy(ctx: RunContext[HQDeps], rule: str, reason: str) -> str
     if problem is not None:
         return f"rejected: {problem}; fix the wording with check_policy_rule and propose again"
     day = f"{datetime.now(ZoneInfo(settings().cron_tz)):%Y-%m-%d}"
-    new_text = append_rule(policy_text, format_rule_line(rule, reason, day))
+    new_text = append_rule(policy_text, format_rule_line(rule))
     await asyncio.to_thread(_write_atomic, path, new_text)
     await emit(
         POLICY_EVENT_KIND, run_id=ctx.deps.run_id, task_id=ctx.deps.task_id,
-        agent=ctx.deps.agent, payload={"agent": ctx.deps.agent, "rule": rule.strip()},
+        agent=ctx.deps.agent, payload={"agent": ctx.deps.agent, "rule": rule.strip(),
+                                       "reason": reason_text(reason), "day": day},
     )
     return "added to policy.md; applies from the next run"

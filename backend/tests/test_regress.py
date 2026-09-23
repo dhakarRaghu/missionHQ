@@ -30,8 +30,9 @@ def test_a_lesson_counts_only_when_write_lesson_got_through() -> None:
     assert regress._check(_case(lesson_written=True), "", accepted) == []
 
 
-def test_naming_the_employer_fails_the_case() -> None:
-    employer = regress.settings().private_employers[0]
+def test_naming_the_employer_fails_the_case(monkeypatch) -> None:
+    monkeypatch.setattr(regress.settings(), "private_employers", ("Acme Corp",))
+    employer = "Acme Corp"
     calls = [{"tool": "vault_write", "args": {"content": f"I work at {employer}."}, "ok": True}]
     assert "names his employer" in regress._check(_case(), "", calls)
 
