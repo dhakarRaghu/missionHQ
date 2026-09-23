@@ -249,6 +249,25 @@ async def _citation_step(note: str, claims: list[dict[str, Any]]) -> dict[str, A
     return result.output.model_dump()
 
 
+# --- side effects, each once --------------------------------------------------
+# Code outside a step runs again when DBOS recovers the workflow, so every
+# write the writer makes after its model calls is one step: on replay it
+# returns what it returned the first time instead of writing a second lesson
+# file under a new date, a second frontier line or a second event.
+
+_EFFECTS = {"finish": "finish_lesson", "record": "record_lesson_row",
+            "review": "set_review", "post": "save_post", "frontier": "append_frontier"}
+
+
+@DBOS.step(name="writer.effect")
+async def _effect_step(effect: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    return await getattr(lt, _EFFECTS[effect])(*args, **kwargs)
+
+
+async def _once(effect: str, /, *args: Any, **kwargs: Any) -> Any:
+    return await _effect_step(effect, list(args), kwargs)
+
+
 # --- material, gathered by code ----------------------------------------------
 
 async def _read_vault(path: str) -> str:
@@ -637,7 +656,7 @@ class Writer:
         assert self.outline is not None
         for round_ in range(REPAIR_ROUNDS + 1):
             try:
-                return await lt.finish_lesson(
+                return await _once("finish",
                     self.deps.task_id, self.m.slug, title=self.outline.title,
                     subtitle=self.outline.subtitle, eyebrow=self.outline.eyebrow,
                     article_kind=self.m.kind or None, run_id=self.deps.run_id,
@@ -738,7 +757,7 @@ class Writer:
         notes = ("Sentences the study note does not support:\n"
                  + "\n".join(f"- {c['claim'][:200]} ({c['why']})" for c in unsupported)
                  if unsupported else "")
-        await lt.set_review(lesson_id, self.review_status, notes)
+        await _once("review", lesson_id, self.review_status, notes)
         drop_outline(task_id)
         if self.m.article and self.m.kind == learning.FRONTIER and self.outline.frontier:
             await self._frontier(self.outline.frontier)
@@ -751,19 +770,19 @@ class Writer:
                   "source_urls": "\n".join(self.m.source_urls),
                   "run_id": self.deps.run_id, "agent": self.deps.agent}
         if self.m.page == "lab":
-            return await lt.record_lesson_row(
+            return await _once("record",
                 **common, kind="lab",
                 course_slug=str(self.m.payload.get("phase_slug") or ""),
                 topic=str(self.m.payload.get("phase_course") or ""))
         if self.m.page == "review":
-            return await lt.record_lesson_row(**common, kind="review", topic="week review")
+            return await _once("record", **common, kind="review", topic="week review")
         if self.m.article:
-            return await lt.record_lesson_row(
+            return await _once("record",
                 **common, kind="topic", article_kind=self.m.kind,
                 phase_slug=str(self.m.payload.get("phase_slug") or ""),
                 relationship=self.m.relationship,
                 topic=str(self.m.payload.get("phase_course") or ""))
-        return await lt.record_lesson_row(
+        return await _once("record",
             **common, kind="course", course_slug=self.m.slug,
             topic=str(self.m.payload.get("course") or ""))
 
@@ -771,7 +790,7 @@ class Writer:
         verdict, _, rest = line.partition(":")
         subject, _, changes = rest.partition(":")
         try:
-            await lt.append_frontier(subject.strip() or self.outline.title,  # type: ignore[union-attr]
+            await _once("frontier", subject.strip() or self.outline.title,  # type: ignore[union-attr]
                                      verdict.strip().lower(), changes.strip() or rest.strip())
         except lt.LessonRefused as exc:
             self.report.append(f"frontier note not filed: {exc}")
@@ -852,7 +871,7 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
                            + "\n\nReturn the whole post again with these fixed.")
             draft = PostDraft.model_validate(await _post_step(spec.model, instructions, prompt))
             try:
-                saved = await lt.save_post(
+                saved = await _once("post",
                     section, draft.slug, draft.title, draft.summary, ", ".join(draft.tags),
                     draft.markdown, md_path, run_id=deps.run_id, agent=deps.agent)
             except lt.LessonRefused as exc:
