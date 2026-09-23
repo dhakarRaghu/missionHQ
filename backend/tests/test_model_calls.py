@@ -222,3 +222,13 @@ def test_a_caller_can_give_one_call_a_longer_total() -> None:
     model = _streaming("m", _answers, timeout_s=300)
     assert model.total_limit_s(None) == 300
     assert model.total_limit_s({"timeout": 900}) == 900
+
+
+def test_a_failed_attempt_is_costed_at_its_prompt() -> None:
+    from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+    from hq import llm
+
+    msgs = [ModelRequest(parts=[UserPromptPart("x" * 4000)])]
+    sent, got = llm._estimated_tokens(msgs, None)
+    assert sent >= 1000 and got == 0

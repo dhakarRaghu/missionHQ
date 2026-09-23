@@ -287,6 +287,7 @@ class StreamingModel(WrapperModel):
         started = time.monotonic()
         first: float | None = None
         response: ModelResponse | None = None
+        live: Any = None
         error_class: str | None = None
         total = self.total_limit_s(model_settings)
         try:
@@ -295,6 +296,7 @@ class StreamingModel(WrapperModel):
                     async with self.wrapped.request_stream(
                         messages, model_settings, model_request_parameters
                     ) as stream:
+                        live = stream
                         events = stream.__aiter__()
                         while True:
                             try:
@@ -326,17 +328,29 @@ class StreamingModel(WrapperModel):
                 error_class = f"HTTP{exc.status_code}"
             raise
         finally:
-            await self._record(messages, response, error_class, started, first)
+            partial = None
+            if response is None and live is not None:
+                try:
+                    partial = live.get()
+                except Exception:  # noqa: BLE001 — cost is best effort
+                    partial = None
+            await self._record(messages, response, error_class, started, first, partial)
 
     async def _record(
         self, messages: list[ModelMessage], response: ModelResponse | None,
         error_class: str | None, started: float, first: float | None,
+        partial: ModelResponse | None = None,
     ) -> None:
         usage = response.usage if response is not None else None
         input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
         output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
         source = "reported"
-        if response is not None and input_tokens == 0 and output_tokens == 0:
+        if response is None:
+            # A timeout, an idle cut or a broken stream still cost the whole
+            # prompt and whatever had streamed; recording $0 hid that spend.
+            input_tokens, output_tokens = _estimated_tokens(messages, partial)
+            source = "estimated"
+        elif input_tokens == 0 and output_tokens == 0:
             input_tokens, output_tokens = _estimated_tokens(messages, response)
             source = "estimated"
             log.warning("model %s answered with no usage; estimated %d/%d tokens",
