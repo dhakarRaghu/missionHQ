@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import BaseModel
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 REPO_DIR = BACKEND_DIR.parent
@@ -193,10 +195,11 @@ class Settings(BaseSettings):
     # His own study platform. The catalogue at /api/study is public; the phase
     # pages are readable by slug. Tutor works through them one phase a day.
     study_api_base: str = "https://raghu-monitoring.vercel.app"
-    # Never named in anything written for him to read or post: his current
-    # and former employers. His older platform courses name the former one;
-    # an enhanced page built from them must not. Checked by code, not prose.
-    private_employers: tuple[str, ...] = ("Mindtickle", "Juspay")
+    # His current and former employers. Never named in anything an agent
+    # loads, writes, searches or posts (``hq.privacy`` is the one gate). The
+    # names live only in .env as PRIVATE_EMPLOYERS, comma-separated, so no
+    # prompt, source line or test in this repo carries them.
+    private_employers: Annotated[tuple[str, ...], NoDecode] = ()
     # His own site, beside this repo. Posts are written into its content
     # folder and never committed or pushed from here: publishing is his.
     portfolio_dir: Path = REPO_DIR.parent / "portfolio"
@@ -206,6 +209,18 @@ class Settings(BaseSettings):
     # Defaults applied when an agent manifest omits caps
     default_caps: Caps = Caps()
 
+
+    @field_validator("private_employers", mode="before")
+    @classmethod
+    def _split_employers(cls, v: object) -> object:
+        """``PRIVATE_EMPLOYERS=A Corp,B Inc`` in .env; blanks dropped. A JSON
+        list (``["A Corp","B Inc"]``) is read too."""
+        if isinstance(v, str):
+            text = v.strip()
+            if text.startswith("["):
+                return tuple(str(n).strip() for n in json.loads(text) if str(n).strip())
+            return tuple(n.strip() for n in text.split(",") if n.strip())
+        return v
 
 @lru_cache
 def settings() -> Settings:

@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from hq import privacy
 from hq.dbos_app import DBOS
 from hq.safety import ActionClass, Trust
 
@@ -80,6 +81,8 @@ class ToolDef:
     # and draft, and he acts. Enforced at load, not by an approval prompt.
     world_facing: bool
     description: str
+    # True when the employer gate (``hq.privacy``) checks every argument.
+    private: bool = False
 
 
 TOOL_REGISTRY: dict[str, ToolDef] = {}
@@ -148,13 +151,35 @@ def forget_run(run_id: str | None) -> None:
         _repeats.pop(run_id, None)
 
 
-def _repeat_gated(tool_name: str, stepped: Callable[..., Any]) -> Callable[..., Any]:
+def privacy_gated(action: ActionClass, trust: Trust, network: bool) -> bool:
+    """Whether a tool's arguments pass the employer gate (``hq.privacy``).
+
+    Every tool whose arguments leave the agent's own reading does: anything
+    sent over the network (a search query, a url), anything written (a note,
+    a job row, a lesson, a post, a proposal), and anything handed to another
+    agent (a subtask brief). Only local reads of the vault and the owner's own
+    data are exempt, because refusing a lookup protects nothing."""
+    return network or action != ActionClass.READ or trust not in (Trust.VAULT, Trust.USER)
+
+
+def _repeat_gated(
+    tool_name: str, stepped: Callable[..., Any], *, private: bool = False,
+) -> Callable[..., Any]:
     """Count and refuse repeats outside the durable step, once per model tool
     call. Inside the step a refusal was retried like a network error, and each
-    retry of a failing fetch counted as a repeat of itself."""
+    retry of a failing fetch counted as a repeat of itself.
+
+    With ``private`` set, the employer gate runs first, here and not inside
+    the step, for the same reason: a refusal is an answer, not a failure."""
 
     @functools.wraps(stepped)
     async def gated(*args: Any, **kwargs: Any) -> Any:
+        if private:
+            refused = privacy.problem(args[1:], kwargs)
+            if refused:
+                from pydantic_ai import ModelRetry
+
+                raise ModelRetry(refused)
         deps_now = _run_context(args)
         if deps_now is not None and deps_now.run_id:
             n = note_call(deps_now.run_id, tool_name, args[1:], kwargs)
@@ -261,15 +286,17 @@ def hq_tool(
         stepped = DBOS.step(name=f"tool.{tool_name}", **(NETWORK_RETRIES if network else {}))(
             _audited(tool_name, wrapped)
         )
+        private = privacy_gated(action, trust, network)
         TOOL_REGISTRY[tool_name] = ToolDef(
             name=tool_name,
-            fn=_repeat_gated(tool_name, stepped),
+            fn=_repeat_gated(tool_name, stepped, private=private),
             action=action,
             trust=trust,
             requires_approval=action in OUTBOUND_ACTIONS,
             owner_only=owner_only,
             world_facing=world_facing,
             description=(fn.__doc__ or "").strip().splitlines()[0] if fn.__doc__ else "",
+            private=private,
         )
         return stepped
 

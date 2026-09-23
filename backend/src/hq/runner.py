@@ -26,12 +26,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, ToolDenied
@@ -468,21 +471,30 @@ class BrowseVerdict(BaseModel):
 
 BROWSE_GUARD_INSTRUCTIONS = """\
 You decide whether a coordinator may approve one browser run without waking
-the owner. The browser is the owner's own, signed into his real accounts, so
-the risk is not that the agent writes something. It cannot: the sandbox is
-read-only and no agent in this system holds a tool that acts on the world.
-The risk is his account being restricted for behaving like a bot, and his
-private pages being read for no good reason.
+the owner. The browser is the owner's own Chrome, signed into his real
+accounts, and the agent drives it with a computer-use tool: it can click,
+type and submit anything he could. The read-only sandbox binds only its shell
+commands, not the browser. What stops a click that sends a message, applies,
+connects, posts or changes a setting is the agent's contract, which forbids
+all of those. So the risks are: a task that invites such a click, his account
+being restricted for behaving like a bot, and his private pages being read
+for no good reason.
+
+Code has already checked that the task names the pages it will open, that
+their hosts are public web hosts, that none is a page that sends, posts,
+applies or changes a setting, and that the page count fits the contract's
+budget. You judge what code cannot.
 
 You receive the task the agent was given.
 
-read_only: the task only looks and reports. False if it asks to click,
-submit, send, connect, follow, apply, message, buy, or change a setting, or
-if it is vague enough that the agent might.
+read_only: the task only looks and reports: it navigates, reads, and at
+most types into a search box. False if it asks to click, submit, send,
+connect, follow, apply, message, buy, or change a setting, or if it is vague
+enough that the agent might.
 
-bounded: the task names what to open. A company, a person, his own profile,
-a handful of pages. False for anything open-ended: walking a list of
-employees, followers, search results, or "check my socials" with no target.
+bounded: the task says what to read on those pages and when to stop. False
+for anything open-ended: walking a list of employees, followers or search
+results one by one, or "check my socials" with no target.
 
 allow: true only when read_only AND bounded are both true. When unsure, false.
 The owner is then asked, which costs him ten seconds; a wrong yes costs him
@@ -491,6 +503,84 @@ the account he is job hunting with.
 reason: one plain sentence, addressed to the owner, saying what the run will
 read and why it is safe or is not.
 """
+
+# The contract's default page budget (agents/operator/AGENTS.md rule 4): eight
+# page loads a run, at most three of them on LinkedIn or X. A task may name a
+# smaller budget, or a different split inside eight, never a larger one.
+BROWSE_PAGE_BUDGET = 8
+BROWSE_SOCIAL_BUDGET = 3
+_SOCIAL_HOSTS = ("linkedin.com", "x.com", "twitter.com")
+_BROWSE_URL_RE = re.compile(r"\b(?:https?|file|chrome|about|javascript|data):[^\s<>\"'`)\]]*",
+                            re.IGNORECASE)
+_BROWSE_HOST_RE = re.compile(
+    r"(?<![@\w.-])((?:[a-z0-9-]+\.)+(?:com|in|io|ai|co|org|net|dev|app|so|me|xyz|tech))\b"
+    r"(/[^\s<>\"'`)\]]*)?", re.IGNORECASE)
+# Pages whose purpose is to act as him: a click there sends, posts, applies,
+# pays or changes his account. A read-only run has no reason to open one.
+_ACTION_PATH_RE = re.compile(
+    r"/(?:messaging|messages|compose|inbox|settings|preferences|account|checkout|"
+    r"cart|payments?|billing|invit[\w-]*|apply|easy-?apply|post/new|intent|share|"
+    r"mynetwork/invit[\w-]*)(?:[/?#]|$)", re.IGNORECASE)
+_NUMBER_WORDS = {w: i for i, w in enumerate(
+    ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"])}
+_BUDGET_RE = re.compile(r"\b(\d+|" + "|".join(_NUMBER_WORDS) + r")\s+(?:page loads?|pages)\b",
+                        re.IGNORECASE)
+
+
+def _named_pages(summary: str) -> list[tuple[str, str]]:
+    """(host, path) for every page the task names, as a url or a bare host.
+    A url whose scheme is not http(s) comes back with an empty host."""
+    pages: list[tuple[str, str]] = []
+    for m in _BROWSE_URL_RE.finditer(summary):
+        parts = urlsplit(m.group(0))
+        web = parts.scheme.lower() in ("http", "https")
+        pages.append(((parts.hostname or "").lower() if web else "", parts.path or "/"))
+    for m in _BROWSE_HOST_RE.finditer(_BROWSE_URL_RE.sub(" ", summary)):
+        pages.append((m.group(1).lower(), m.group(2) or "/"))
+    return pages
+
+
+def _public_host(host: str) -> bool:
+    if not host or host == "localhost" or host.endswith((".local", ".internal")):
+        return False
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return "." in host
+    return False
+
+
+def browse_bounds_problem(summary: str) -> str | None:
+    """Why a browser task is not bounded, decided by code; None when it is.
+
+    Runs before the model judge and can only send a run to the owner, never
+    approve one. Checks what text can settle: the task names the pages it
+    opens, every one is a public http(s) host and none is a page that acts
+    as him, and the page count fits the contract's budget."""
+    pages = _named_pages(summary)
+    if not pages:
+        return "the task names no page to open, so nothing bounds where the browser goes"
+    if any(not _public_host(host) for host, _path in pages):
+        return "the task names a page that is not a public web address"
+    if any(_ACTION_PATH_RE.search(path) for _host, path in pages):
+        return ("the task names a page whose purpose is to send, post, apply, pay or"
+                " change a setting, which a read-only run never opens")
+    stated = [int(n) if n.isdigit() else _NUMBER_WORDS[n.lower()]
+              for n in _BUDGET_RE.findall(summary)]
+    if stated and max(stated) > BROWSE_PAGE_BUDGET:
+        return (f"the task allows {max(stated)} pages; the contract's ceiling is"
+                f" {BROWSE_PAGE_BUDGET}")
+    distinct = set(pages)
+    if len(distinct) > BROWSE_PAGE_BUDGET:
+        return (f"the task names {len(distinct)} pages; the contract's ceiling is"
+                f" {BROWSE_PAGE_BUDGET}")
+    social = {(h, p) for h, p in distinct
+              if any(h == d or h.endswith("." + d) for d in _SOCIAL_HOSTS)}
+    if not stated and len(social) > BROWSE_SOCIAL_BUDGET:
+        return (f"the task names {len(social)} LinkedIn or X pages and no budget; the"
+                f" contract allows {BROWSE_SOCIAL_BUDGET}")
+    return None
+
 
 _browse_guard: Agent[None, BrowseVerdict] | None = None
 
@@ -550,7 +640,11 @@ async def await_runtime_approval(spec: AgentSpec, deps: HQDeps, summary: str) ->
     # it both read-only and bounded to named pages. Anything open-ended, and
     # anything the judge is unsure about, still goes to him. The check runs on
     # the cheap model and its verdict is recorded either way.
-    verdict = await _browse_guard_step(spec.name, _current_policy(spec), summary)
+    # Code first: what text can settle is not left to a model. A task code
+    # finds unbounded goes to the owner without a judge call.
+    unbounded = browse_bounds_problem(summary)
+    verdict = ({"allow": False, "reason": unbounded} if unbounded else
+               await _browse_guard_step(spec.name, _current_policy(spec), summary))
     if verdict["allow"]:
         await emit_step(
             "approval_resolved", run_id=deps.run_id, task_id=deps.task_id,

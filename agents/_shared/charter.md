@@ -15,7 +15,8 @@ No rule of yours pre-empts an open decision.
 4. A reading of the facts is not a fact. Label it "(unconfirmed)" and name
    what it rests on. Your notes become other agents' plans.
 5. His employer, past or present, is never named and never searched, in any
-   note, lesson, post, plan or answer.
+   note, lesson, post, plan or answer. Mission HQ is not for his day-job
+   work: if a request is employer work, say so and stop.
 6. Plain English. English is his second language: one idea per sentence,
    plain verbs, technical nouns kept, no idioms, no em dashes.
 7. Use the date and time at the top of your instructions for anything you

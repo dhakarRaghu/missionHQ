@@ -22,7 +22,7 @@ const GUIDE: Record<string, AgentGuide> = {
       "Ask it anything. It answers what is its own and hands the rest over.",
       "Ask it what happened: “What did the agents do in the last 24 hours?”",
       "Ask it which roles to act on: “What is on this week's shortlist?”",
-      "Leave it alone. It writes a note at 22:30 daily, consolidates memory at 23:30, and reviews the week on Sunday at 20:00.",
+      "Leave it alone. It writes a note at 22:30 daily, proposes memory changes for you at 23:30, and reviews the week on Sunday at 20:00.",
     ],
     output: "daily/<date>.md, the weekly review, projects/jobs/shortlist-<week>.md, projects/content/ideas.md and memory/ blocks.",
   },

@@ -138,3 +138,14 @@ already enforced), **data** (a yaml/md file read by code and briefs),
 | every "write it and record it" mechanics block | the staged run does it |
 | `learning/sources.md`, `.claude/skills/study` pointers in tutor/scout/hunter skills | unreadable by those agents |
 | tests that pin prose: `test_learning.py:505-510, 814-816, 845-878, 912-933, 998-1008, 1296-1360, 1426-1466`, `test_labs.py:449-590`, `test_job_search.py:781-782` | replaced by behaviour and contract tests |
+
+## 6. Approved policy rules: when and why
+
+`policy.md` is read into the prompt on every run, so it carries the rule
+only. The approval date and the reason live here, and for rules approved
+from now on in the `policy.added` event (`payload.day`, `payload.reason`).
+
+| Agent | Approved | Rule | Reason | Where it is now |
+|---|---|---|---|---|
+| sage | 2026-09-02 | Every answer is self-contained; no "answered above" | He asked twice for the one-sentence hunter answer because the first reply closed with "Answered above" and made him scroll back | `sage/policy.md` |
+| sage | 2026-09-08 | Never write about his employer or day-job work; if a request is employer work, say so and stop | He had to keep repeating that Mission HQ is not for his employer's work | charter rule 5 (it duplicated it); the "say so and stop" half was folded in. Code: `hq.privacy` refuses the names in every write, search and brief |

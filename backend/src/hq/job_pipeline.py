@@ -23,7 +23,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
 
-from hq.config import settings
+from hq import privacy
 
 WORKFLOW = "job_search"
 DISCOVERY_STAGE = "browser_discovery"
@@ -119,18 +119,18 @@ def extract_discovery_leads(output: str) -> list[dict[str, str]]:
             lead["posting_url"]
         ):
             continue
+        if _names_employer(lead):
+            continue
         leads.append(lead)
     return leads
 
 
-def _employer_skip_line() -> str:
-    """The skip line for the owner's own employers, named from settings at
-    runtime so no prompt file or source line carries the names."""
-    names = [n.strip() for n in settings().private_employers if n.strip()]
-    if not names:
-        return ""
-    return ("Skip " + " and ".join(names) + " too: he works or worked there, and"
-            " they are never researched.")
+def _names_employer(fields: Mapping[str, str]) -> bool:
+    """A lead at one of the owner's own employers, or one whose text names
+    one. Such a lead is dropped here, in code: the brief never names them,
+    because a prompt that carries the names is itself the leak."""
+    return privacy.private_employer(fields.get("company", "")) or bool(
+        privacy.problem(list(fields.values())))
 
 
 def discovery_brief(payload: Mapping[str, Any]) -> str:
@@ -226,7 +226,6 @@ Skip aggregator and staffing reposts: Jobgether, Crossing Hurdles, and any
 posting that names a recruiting agency or "a client" instead of the actual
 employer. You cannot apply to an unnamed company, research it, or find a
 referral into it, so it is not a lead however well the title fits.
-{_employer_skip_line()}
 
 Skip any title carrying senior, staff, principal, lead, manager, head,
 director, architect or founding scope. Those are excluded by the candidate
@@ -526,6 +525,13 @@ def extract_referral_people(output: str) -> list[dict[str, str]]:
         }
         if not person["name"]:
             continue
+        # A field that names one of the owner's employers is blanked, not
+        # kept: the row is shown to him and read by agents. The person stays.
+        for field in _PERSON_FIELDS:
+            if field != "name" and privacy.problem(person[field]):
+                person[field] = ""
+        if privacy.problem(person["name"]):
+            continue
         if not _HTTP_URL_RE.match(person["profile_url"]):
             person["profile_url"] = ""
         degree = person["degree"].lower().strip()
@@ -563,7 +569,7 @@ when you are done.
 End your response with exactly one fenced JSON object using this schema, so
 the people can be recorded mechanically:
 ```json
-{{"missionhq_referral_people":[{{"name":"...","headline":"their title as shown","profile_url":"https://www.linkedin.com/in/...","degree":"1st|2nd|3rd|none|persona","shared_ground":"a post, repo, talk, school or employer he can open with","why_them":"why this person rather than another","mutuals":"shared connections if the page names them"}}]}}
+{{"missionhq_referral_people":[{{"name":"...","headline":"their title as shown","profile_url":"https://www.linkedin.com/in/...","degree":"1st|2nd|3rd|none|persona","shared_ground":"a post, repo, talk, school or public project he can open with","why_them":"why this person rather than another","mutuals":"shared connections if the page names them"}}]}}
 ```
 Use an empty array when no person was found. Do not put commentary inside the
 JSON fence; write your prose above it."""

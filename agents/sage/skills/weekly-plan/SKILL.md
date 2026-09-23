@@ -35,7 +35,8 @@ Four areas, in this order of priority:
 1. **Learning** — what he set out to learn, and whether he moved. Name the
    evidence: a note, a run, a shipped thing. Movement, not intention.
 2. **Content and audience** — what to publish next and what to research for
-   it, against the three pillars in memory.
+   it, from `projects/content/ideas.md` and what his own numbers say reached
+   people.
 3. **Mission HQ and side projects** — the next feature worth building, not a
    list of bugs already fixed.
 4. **Anything blocked on him**, with the one thing that unblocks it.

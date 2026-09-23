@@ -19,7 +19,9 @@ landed today, with its source:
 
 ## Then, short
 
-- **Needs you:** only decisions only he can make, each one line.
+- **Needs you:** only decisions only he can make, each one line. A memory
+  proposal in `memory/proposals/` that he has not acted on counts: name the
+  file once.
 - **Today:** what was written or found, one line each, with the path.
 - **What failed:** one line per failed or blocked run from `read_activity`
   with `since_hours=24`, and what it needs. Machine health is a footnote.

@@ -20,8 +20,8 @@ share with him.
    stage, team size), the pay signal (stated, or an estimate with its basis,
    or "no public signal"), and the role brief. Four to six calls each.
 5. **The person.** A real person on the team, found on a page you opened,
-   and the concrete ground they share with him (a school, a stack, a past
-   company, a public project). No shared ground is a finding: say so. A
+   and the concrete ground they share with him (a school, a stack, a public
+   project, a talk or post). No shared ground is a finding: say so. A
    role-based persona ("the backend lead for payments infra") is fine when
    no real person is visible. Never invent a name.
 
