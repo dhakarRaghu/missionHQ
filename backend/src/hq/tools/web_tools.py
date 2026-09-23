@@ -25,7 +25,15 @@ from pydantic_ai import Agent, RunContext
 from hq import llm
 from hq.obs import emit
 from hq.safety import ActionClass, Trust
+from hq.tools.job_tools import private_employer
 from hq.tools.registry import HQDeps, hq_tool
+
+# The owner's own employers are never researched. The names live only in
+# settings().private_employers; the refusal never repeats them.
+PRIVATE_EMPLOYER_REFUSAL = (
+    "this company is one of the owner's own employers and is never researched."
+    " Move on to the next company."
+)
 
 log = logging.getLogger(__name__)
 
@@ -656,6 +664,8 @@ async def job_board(
             "error": f"{company!r} is not a board slug; use the path segment"
             " from the careers URL, not a full address"
         }
+    if private_employer(company):
+        return {"provider": provider, "error": PRIVATE_EMPLOYER_REFUSAL}
 
     url = ATS_BOARDS[provider].format(company=company)
     try:
@@ -669,6 +679,13 @@ async def job_board(
             "error": f"could not reach the board ({type(exc).__name__})",
         }
     if resp.status_code == 404:
+        # Recorded as an empty run: a slug that 404s three nights running is
+        # on the sweep's skip list, the same as a board that lists nothing.
+        await emit(
+            "job_board", run_id=ctx.deps.run_id, task_id=ctx.deps.task_id,
+            agent=ctx.deps.agent,
+            payload={"provider": provider, "company": company, "jobs": 0, "error": "404"},
+        )
         return {
             "provider": provider,
             "company": company,
@@ -823,7 +840,9 @@ async def discover_companies(
                     "industries": (row.get("industries") or [])[:4],
                     "batch": row.get("batch", ""),
                 }
-                if company["name"]:
+                # The owner's own employers are skipped silently: never listed,
+                # never resolved, never a lead.
+                if company["name"] and not private_employer(company["name"]):
                     out.append(company)
             if resolve_boards and out:
                 found = await asyncio.gather(

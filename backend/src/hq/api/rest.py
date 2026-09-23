@@ -249,7 +249,8 @@ JOB_SELECT = (
     " location, remote_policy,"
     " experience_band, compensation, stack, fit_score, fit_bucket, status,"
     " why_fit, next_step, notes, referral, seen_count, first_seen, last_seen,"
-    " company_brief, pay_signal, role_brief, researched_at, linkedin_url"
+    " company_brief, pay_signal, role_brief, researched_at, linkedin_url,"
+    " fit_parts, pay_lakh::float8 AS pay_lakh, lane"
     " FROM hq.jobs"
 )
 

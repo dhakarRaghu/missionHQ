@@ -158,8 +158,8 @@ Negative signals:
 
 ## Confirmed preferences
 
-Stated by the owner on 2026-09-09. These are hard rules, and the scoring
-rubric in job.md applies them:
+Stated by the owner on 2026-09-09. These are hard rules, and `record_job`
+computes the fit score from them (`job_tools.fit_score`):
 
 - **Seniority ceiling: under three years.** He is not eligible for roles whose
   experience floor is 3+ years, most of all at large companies, where the bar

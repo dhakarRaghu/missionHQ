@@ -51,6 +51,14 @@ SOCIAL_DOMAINS = frozenset({
     "threads.net", "tiktok.com", "reddit.com",
 })
 
+# The applicant tracking systems job_board already reads from their own JSON.
+# Rendering one of their pages costs minutes and a large share of a run to
+# learn what the board answered in under a second, so the browser refuses them.
+ATS_DOMAINS = frozenset({
+    "greenhouse.io", "lever.co", "ashbyhq.com", "workable.com", "recruitee.com",
+    "smartrecruiters.com",
+})
+
 _STARTUP_TIMEOUT_S = 20.0
 _last_load_at = 0.0
 _pace_lock = asyncio.Lock()
@@ -69,6 +77,15 @@ def social_domain(url: str) -> str | None:
         return None
     base = _registrable(host)
     return base if base in SOCIAL_DOMAINS else None
+
+
+def ats_domain(url: str) -> str | None:
+    """The applicant-tracking domain this URL belongs to, or None."""
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return None
+    base = _registrable(host)
+    return base if base in ATS_DOMAINS else None
 
 
 async def _debug_port_alive(port: int) -> bool:
@@ -184,6 +201,22 @@ async def browser_read(ctx: RunContext[HQDeps], url: str) -> dict:
                 f"{blocked} is not readable with a browser: automated access "
                 "breaks its terms and risks the owner's account. Use its "
                 "official API, or ask the owner to read it. Pick another source."
+            ),
+        }
+
+    ats = ats_domain(url)
+    if ats:
+        await emit(
+            "browser.refused", run_id=ctx.deps.run_id, task_id=ctx.deps.task_id,
+            agent=ctx.deps.agent, payload={"url": url, "domain": ats},
+        )
+        return {
+            "url": url,
+            "error": (
+                f"{ats} is an applicant tracking board: read it with job_board"
+                " (detect_job_board gives the provider and slug), which returns"
+                " every open role with its title, location and link. Do not"
+                " re-read what the board already answered."
             ),
         }
 

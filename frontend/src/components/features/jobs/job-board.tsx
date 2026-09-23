@@ -45,14 +45,13 @@ const ACTIVE_COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
 ];
 
 /**
- * "interviewing" is deliberately absent. The owner tracks that himself, and a
- * column that is always empty costs the three that are not a quarter of the
- * width each. The status still exists in the API and in the ledger, so a row
- * already in it is not orphaned — it simply is not a stage of this board.
+ * Interviews sit with the outcomes rather than in the active pipeline: the
+ * active view keeps its four columns at a quarter width each, and a role in
+ * interview is past everything an agent does for it. Every status is a choice
+ * on every card, so a role can be moved to any stage from either view.
  */
-const HIDDEN_STATUSES: ReadonlySet<string> = new Set(["interviewing"]);
-
 const OUTCOME_COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
+  { key: "interviewing", label: "Interviewing", hint: "Roles you are interviewing for." },
   { key: "offer", label: "Offers", hint: "Offers will appear here." },
   { key: "rejected", label: "Rejected", hint: "Rejected roles stay searchable." },
   { key: "closed", label: "Closed", hint: "Expired or closed roles stay in the ledger." },
@@ -139,12 +138,12 @@ export function JobBoard() {
           value={statusView}
           onValueChange={(value) => setStatusView(value as "active" | "outcomes")}
         >
-          <SelectTrigger size="sm" className="w-40" aria-label="Filter by status">
+          <SelectTrigger size="sm" className="w-52" aria-label="Filter by status">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="active">Active pipeline</SelectItem>
-            <SelectItem value="outcomes">Outcomes</SelectItem>
+            <SelectItem value="outcomes">Interviews and outcomes</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -171,6 +170,25 @@ export function JobBoard() {
 }
 
 type Column = { key: JobStatus; label: string; hint: string };
+
+const FIT_PART_ORDER = ["lane", "years", "stack", "domain", "pay", "geography", "adjust"];
+
+/**
+ * The score's reasons, on hover. The score is computed from the row's fields,
+ * so each point it gained or lost is named rather than asserted.
+ */
+function fitTitle(job: Job): string {
+  const parts = job.fit_parts ?? {};
+  const moved = FIT_PART_ORDER.flatMap((key) => {
+    const part = parts[key];
+    if (!part || typeof part !== "object" || !part.points) return [];
+    const sign = part.points > 0 ? "+" : "";
+    const why = part.note ?? part.lane ?? part.reason ?? "";
+    return [`${key} ${sign}${part.points}${why ? ` (${why})` : ""}`];
+  });
+  const head = `${job.fit_bucket} fit`;
+  return moved.length ? `${head}: base 5, ${moved.join(", ")}` : head;
+}
 
 /** A column of roles. */
 function BoardColumn({ column, items }: { column: Column; items: Job[] }) {
@@ -404,7 +422,7 @@ function JobCard({ job }: { job: Job }) {
             "shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium tabular-nums",
             BUCKET_TONE[job.fit_bucket],
           )}
-          title={`${job.fit_bucket} fit`}
+          title={fitTitle(job)}
         >
           {job.fit_score}
         </span>
@@ -553,7 +571,7 @@ function JobCard({ job }: { job: Job }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {JOB_STATUSES.filter((s) => !HIDDEN_STATUSES.has(s)).map((status) => (
+            {JOB_STATUSES.map((status) => (
               <SelectItem key={status} value={status}>
                 {status}
               </SelectItem>
