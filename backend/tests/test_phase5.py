@@ -133,3 +133,23 @@ def test_one_reindex_a_night_whichever_path_starts_it() -> None:
     assert "memory.reindex_all" not in src
     assert "_nightly_reindex" in inspect.getsource(engine._reindex_vault_tick)
     assert "IS DISTINCT FROM" in inspect.getsource(engine._claim_reindex_step)
+
+
+def test_every_wait_fits_inside_the_cap_that_would_cancel_it() -> None:
+    from types import SimpleNamespace
+
+    from hq import learning_pipeline as learning
+    from hq import llm, runner
+    from hq.config import settings
+
+    one_call = float(llm.registry().model_settings_for("deep").get("timeout") or 0)
+    assert one_call >= 900
+    # A tool approval, then one full call of the deep model, inside a task.
+    assert runner.APPROVAL_TIMEOUT_S + one_call <= engine.TASK_TIMEOUT_S
+    # A chat turn fits one full call and an approval wait.
+    assert engine.CHAT_TIMEOUT_S >= one_call + runner.APPROVAL_TIMEOUT_S
+    # A browser run's approval wait leaves room for the run and its guards.
+    wait = runner.runtime_approval_wait_s(SimpleNamespace(runtime="codex"))
+    assert wait + settings().codex_timeout_s + 2 * runner.JUDGE_LIMIT_S <= engine.TASK_TIMEOUT_S
+    for stage in (learning.LAB_CARD_STAGE, learning.WEEK_REVIEW_STAGE, learning.POST_STAGE):
+        assert engine.lane_for({"stage": stage}) == "courses"

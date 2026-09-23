@@ -50,12 +50,14 @@ from hq.tools.registry import TOOL_REGISTRY, HQDeps
 log = logging.getLogger(__name__)
 
 APPROVAL_TOPIC = "approval"
-# 30 minutes, inside the 40-minute task cap. DBOS cancels a workflow at its
-# deadline even while it waits in recv, so a 24-hour wait was really a
-# 40-minute one that ended in a cancelled run and a ticket left open. At the
-# deadline a tool call waiting on him is refused and the run carries on
-# without it; a browser run that was never approved ends blocked.
-APPROVAL_TIMEOUT_S = 1800
+# DBOS cancels a workflow at its deadline even while it waits in recv, so a
+# wait is only as long as the time left after it for the work it unblocks.
+# A tool call waiting on him: 15 minutes, leaving room inside the 40-minute
+# task cap for one full model call after it. At the deadline the call is
+# refused and the run carries on without it. A browser run: what is left of
+# the cap once the browser run and its guard calls are paid for
+# (`runtime_approval_wait_s`); a run never approved ends blocked.
+APPROVAL_TIMEOUT_S = 900
 APPROVAL_POLL_S = 60        # one recv round; the ticket table is re-read each round
 MAX_RESUME_ROUNDS = 5       # hard stop against approval/answer loops
 REQUEST_LIMIT = 90          # model requests per run (x3 with the caps, 2026-09-10 —
@@ -88,6 +90,16 @@ GUARD_MODEL = "cheap"           # registry role for the guardrail judge
 JUDGE_LIMIT_S = 90.0
 GUARD_POLICY_CHARS = 6000       # policy text (policy.md or the card's contract) per guard call
 GUARD_ARGS_CHARS = 4000         # serialized tool args handed to the guard
+
+
+def runtime_approval_wait_s(spec: Any) -> float:
+    """How long a browser run may wait for his approval: the task cap, less
+    the run it unblocks, its guard calls and five minutes to file the result."""
+    from hq.engine import TASK_TIMEOUT_S
+
+    run_s = (settings().codex_timeout_s if getattr(spec, "runtime", "") == "codex"
+             else settings().claude_timeout_s)
+    return max(float(APPROVAL_POLL_S), TASK_TIMEOUT_S - run_s - 2 * JUDGE_LIMIT_S - 300.0)
 
 
 @dataclass
@@ -557,7 +569,7 @@ async def await_runtime_approval(spec: AgentSpec, deps: HQDeps, summary: str) ->
                     agent=spec.name,
                     payload={"ticket_id": ticket_id, "tool": f"runtime:{spec.runtime}"})
 
-    max_rounds = APPROVAL_TIMEOUT_S // APPROVAL_POLL_S
+    max_rounds = int(runtime_approval_wait_s(spec) // APPROVAL_POLL_S)
     status = "pending"
     for round_no in range(max_rounds + 1):
         status = (await _ticket_statuses_step([ticket_id])).get(ticket_id, "pending")

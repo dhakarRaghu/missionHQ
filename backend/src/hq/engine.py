@@ -67,7 +67,10 @@ TASK_TIMEOUT_S = 40 * 60   # a cron/board run may not exceed 40 minutes
 # cap cancelled Phase 2A at 20:56 with nine sections written and nothing
 # recorded, so the course lane gets its own.
 COURSE_TIMEOUT_S = 100 * 60
-CHAT_TIMEOUT_S = 12 * 60   # a chat turn may not exceed 12 minutes (approval waits excluded: they block in recv)
+# A chat turn: one full model call of sage's (llm entry timeout, 25 minutes
+# for a long answer), plus an approval wait, plus tool calls. Twelve minutes
+# cancelled any turn whose one call ran long, and any turn waiting on him.
+CHAT_TIMEOUT_S = 45 * 60
 
 # The two system schedules that are not "every minute". Each is named in TWO
 # places — the cron entry in _register_cron and the catch-up window in
@@ -312,6 +315,9 @@ async def dispatch(
 # staged writer builds in the same bounded pieces as a phase.
 _COURSE_STAGES = frozenset({
     learning.COURSE_STAGE, learning.COURSE_WRITTEN_STAGE, learning.LESSON_STAGE,
+    # The lab card, the week review and a post run the same staged writer:
+    # a plan and six to eight parts plus the citation pass does not fit 40.
+    learning.LAB_CARD_STAGE, learning.WEEK_REVIEW_STAGE, learning.POST_STAGE,
 })
 
 
