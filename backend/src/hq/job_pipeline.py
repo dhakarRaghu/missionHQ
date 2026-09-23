@@ -281,9 +281,7 @@ For each promising lead:
    LinkedIn job URL as BOTH `url` and `linkedin_url` — the owner applies from
    LinkedIn and does not need the company's own portal. Do not go looking for
    that portal: for a big company it is the wall (Workday, Eightfold, a
-   JavaScript-only site) that turns a recordable role into a lost one. On
-   2026-09-12 American Express "Software Engineer I, 1-2 years" arrived with
-   everything needed and was lost to exactly that detour.
+   JavaScript-only site) that turns a recordable role into a lost one.
 3. Only when a lead is MISSING the experience it asks for, go and find it:
    detect_job_board on the careers URL, then job_board when it is a supported
    provider (which also gives a stable provider/external_id for dedup). If it

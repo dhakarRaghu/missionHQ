@@ -164,3 +164,24 @@ def test_a_cron_slot_starts_with_its_skill_in_the_brief() -> None:
     brief = asyncio.run(engine._cron_brief_step.__wrapped__("sage", "Write today's daily note.",
                                                             "daily-note"))
     assert brief.startswith("Write today's daily note.") and "## The daily-note skill" in brief
+
+
+def test_briefs_built_by_code_state_rules_not_history() -> None:
+    """A dated incident in a prompt is history the model reads as a rule."""
+    import ast
+    import re
+
+    from hq import job_pipeline
+    from hq import learning_pipeline as learning
+
+    for mod in (learning, job_pipeline):
+        tree = ast.parse(inspect.getsource(mod))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.JoinedStr):
+                for part in node.values:
+                    if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                        for line in part.value.splitlines():
+                            if '{"' in line:
+                                continue  # an example envelope, where a date is a field
+                            assert not re.search(r"\b20\d\d-\d\d-\d\d\b", line), (
+                                mod.__name__, node.lineno, line)

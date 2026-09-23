@@ -487,7 +487,7 @@ def test_the_scan_knows_where_daily_volume_lives() -> None:
     assert "huggingface.co/papers" in brief
     assert "arxiv.org/list/cs.DC/recent" in brief
     # HN is in, with the measurement that says to filter it hard.
-    assert "three of fifteen were technical" in brief
+    assert "three of fifteen are technical" in brief
     # ...and they are for finding, never for quoting.
     assert "Record the primary article's own URL" in brief
 
@@ -565,7 +565,7 @@ def test_the_scan_is_given_a_budget_for_the_metered_call() -> None:
 
     assert "at most four in this run" in brief
     assert "forty calls a day" in brief
-    assert "index pages are free" in brief
+    assert "index pages do nearly all the useful work and are free" in brief
 
 
 def test_two_takes_on_one_story_do_not_eat_two_reading_slots() -> None:
@@ -598,7 +598,7 @@ def test_the_scan_is_told_not_to_guess_an_address() -> None:
 
     assert "One story, once." in brief
     assert "Never put forward a URL you did not open" in brief
-    assert "exact post URL unverified" in brief
+    assert "address is unverified" in brief
 
 
 def test_the_lanes_match_what_he_actually_asked_for() -> None:
