@@ -37,9 +37,18 @@ RESULT_CHARS = 400  # the tool result is truncated to this many chars
 # threw away everything the agent had already read. Four tries doubling from
 # two seconds covers about thirty, which is the length of a real transient
 # outage rather than a packet drop.
+def _worth_retrying(exc: BaseException) -> bool:
+    """A refusal addressed to the model (ModelRetry) or a policy refusal is the
+    same answer every time; only transport failures get another attempt."""
+    from pydantic_ai import ModelRetry
+
+    return not isinstance(exc, (ModelRetry, PermissionError, ValueError))
+
+
 NETWORK_RETRIES: dict[str, Any] = {
     "retries_allowed": True, "max_attempts": 4,
     "interval_seconds": 2.0, "backoff_rate": 2.0,
+    "should_retry": _worth_retrying,
 }
 
 
@@ -139,6 +148,29 @@ def forget_run(run_id: str | None) -> None:
         _repeats.pop(run_id, None)
 
 
+def _repeat_gated(tool_name: str, stepped: Callable[..., Any]) -> Callable[..., Any]:
+    """Count and refuse repeats outside the durable step, once per model tool
+    call. Inside the step a refusal was retried like a network error, and each
+    retry of a failing fetch counted as a repeat of itself."""
+
+    @functools.wraps(stepped)
+    async def gated(*args: Any, **kwargs: Any) -> Any:
+        deps_now = _run_context(args)
+        if deps_now is not None and deps_now.run_id:
+            n = note_call(deps_now.run_id, tool_name, args[1:], kwargs)
+            if n >= REPEAT_REFUSED_AT:
+                from pydantic_ai import ModelRetry
+
+                raise ModelRetry(
+                    f"you have called {tool_name} with exactly these arguments"
+                    f" {n - 1} times already; the answer will not change. Use what"
+                    " it returned, change the arguments, or finish and say what is"
+                    " missing.")
+        return await stepped(*args, **kwargs)
+
+    return gated
+
+
 def _audited(tool_name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
     """Emit one ``tool.called`` hq.events row per call. Logging must never
     break the tool: emit failures are swallowed and the tool result (or its
@@ -151,17 +183,6 @@ def _audited(tool_name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
         error: str | None = None
         result: Any = None
         try:
-            deps_now = _run_context(args)
-            if deps_now is not None and deps_now.run_id:
-                n = note_call(deps_now.run_id, tool_name, args[1:], kwargs)
-                if n >= REPEAT_REFUSED_AT:
-                    from pydantic_ai import ModelRetry
-
-                    raise ModelRetry(
-                        f"you have called {tool_name} with exactly these arguments"
-                        f" {n - 1} times already; the answer will not change. Use what"
-                        " it returned, change the arguments, or finish and say what is"
-                        " missing.")
             result = await fn(*args, **kwargs)
             return result
         except BaseException as exc:
@@ -242,7 +263,7 @@ def hq_tool(
         )
         TOOL_REGISTRY[tool_name] = ToolDef(
             name=tool_name,
-            fn=stepped,
+            fn=_repeat_gated(tool_name, stepped),
             action=action,
             trust=trust,
             requires_approval=action in OUTBOUND_ACTIONS,

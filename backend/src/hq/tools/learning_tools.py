@@ -1851,12 +1851,17 @@ def post_problems(markdown: str, source: str) -> str:
     """
     problems = []
     lowered = markdown.lower()
-    private = sorted({w for w in PRIVATE_WORDS if w in lowered})
+    # Whole words: "usage" is not "sage" and "tutorial" is not "tutor". As a
+    # substring check it refused a clean post twice and named words the
+    # rewrite could not find to remove.
+    private = sorted({w for w in PRIVATE_WORDS
+                      if re.search(rf"(?<![a-z]){re.escape(w)}(?![a-z])", lowered)})
     if private:
         problems.append(
             "these belong to his private notes, not a post: " + _listed(private)
         )
-    named = [n for n in settings().private_employers if n.lower() in lowered]
+    named = [n for n in settings().private_employers
+             if re.search(rf"\b{re.escape(n.lower())}\b", lowered)]
     if named:
         problems.append("it names an employer (" + ", ".join(named) + ")")
     left = placeholders_in(markdown)

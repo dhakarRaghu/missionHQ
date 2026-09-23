@@ -688,12 +688,25 @@ async def _system_dispatch_step(tool: str, kwargs: dict[str, Any]) -> str:
         return f"not started: {exc}"[:500]
 
 
+@DBOS.step()
+async def _release_slot_step(key: str) -> None:
+    await db.execute("DELETE FROM hq.control WHERE key = %s", (key,))
+
+
 async def _run_system_dispatch(name: str, tool: str, kwargs: dict[str, Any],
                                slot: datetime, via: str) -> None:
+    """Start one evening chain. The task it creates is enqueued by the backlog
+    reconciliation on the next watchdog tick (a step cannot start a
+    workflow), so a start never depends on the process that made it."""
     key = f"system:{name}:{slot:%Y-%m-%d-%H%M}"
     if not await _claim_slot_step(key):
         return
-    result = await _system_dispatch_step(tool, kwargs)
+    try:
+        result = await _system_dispatch_step(tool, kwargs)
+    except Exception as exc:  # noqa: BLE001 — a failed start must be retryable
+        await _release_slot_step(key)
+        log.warning("system dispatch %s failed: %s", key, exc)
+        return
     await runner.emit_step(via, agent="sage", payload={"slot": key, "result": result[:300]})
 
 
@@ -814,6 +827,7 @@ async def _watchdog_tick(scheduled: datetime, context: Any) -> None:
         return
     await db.execute("DELETE FROM hq.control WHERE key = 'halt_notified'")
     await _catch_up_missed(scheduled)
+    await _reconcile_backlog()
     await _deadman_check(scheduled)
     await _cap_overrunning_tasks()
     await _archive_old_tasks()
@@ -1997,6 +2011,37 @@ async def _publish_reader() -> None:
 CATCH_UP_WINDOW = timedelta(hours=12)
 
 
+@DBOS.step()
+async def _orphaned_backlog_step() -> list[dict[str, Any]]:
+    """Backlog tasks with no live workflow: the board says do it, nothing is."""
+    return await db.fetch(
+        "SELECT t.id::text AS id,"
+        " EXISTS (SELECT 1 FROM hq.runs r WHERE r.task_id = t.id) AS has_runs"
+        " FROM hq.tasks t WHERE t.status = 'backlog'"
+        " AND (t.not_before IS NULL OR t.not_before <= now())"
+        " AND t.updated_at < now() - interval '30 seconds'"
+        " AND NOT EXISTS (SELECT 1 FROM dbos.workflow_status w"
+        "   WHERE w.workflow_uuid LIKE 'task-' || t.id::text || '%%'"
+        "   AND w.status IN ('ENQUEUED', 'PENDING'))"
+        " ORDER BY t.created_at LIMIT 20"
+    )
+
+
+async def _reconcile_backlog() -> None:
+    """The board is the durable intent. A task can be left in backlog by a
+    dispatch made inside a step (a tool, a starter), a CLI run, or a deploy;
+    every watchdog tick gives each one its workflow. Workflow ids are derived
+    from the task, so this is idempotent."""
+    for row in await _orphaned_backlog_step():
+        try:
+            if row["has_runs"]:
+                await requeue(row["id"])
+            else:
+                await _enqueue(row["id"], lane=await _lane_of(row["id"]))
+        except Exception as exc:  # noqa: BLE001 — one bad row must not stop the tick
+            log.warning("could not enqueue backlog task %s: %s", row["id"], exc)
+
+
 async def _catch_up_missed(now_utc: datetime) -> None:
     """Fire schedules the machine slept through.
 
@@ -2108,6 +2153,18 @@ async def _deadman_check(now_utc: datetime) -> None:
             else:
                 await runner.emit_step("notify_digested", agent=agent_name,
                                        payload={"text": text[:200]})
+    for sname, schedule, _tool, _kwargs in SYSTEM_DISPATCHES:
+        slot = croniter(schedule, now).get_prev(datetime)
+        if now - slot < DEADMAN_GRACE or now - slot > CATCH_UP_WINDOW:
+            continue
+        key = f"system:{sname}:{slot:%Y-%m-%d-%H%M}"
+        if await _deadman_seen(key) or await db.fetchone(
+                "SELECT 1 FROM hq.control WHERE key = %s", (key,)):
+            continue
+        await _deadman_mark(key)
+        await runner.emit_step("cron.missed", agent="sage", payload={
+            "slot": key, "schedule": schedule, "slot_at": slot.isoformat(),
+            "task_status": "", "last_outcome": "the starter never ran"})
     if queued:
         await runner.flush_outbox_step()
 

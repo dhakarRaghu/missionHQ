@@ -13,6 +13,15 @@ from hq.safety import ActionClass
 from hq.tools.registry import HQDeps, hq_tool
 
 
+def _now_local():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from hq.config import settings
+
+    return datetime.now(ZoneInfo(settings().cron_tz))
+
+
 @hq_tool(action=ActionClass.READ)
 async def read_board(ctx: RunContext[HQDeps]) -> list[dict]:
     """Read open tasks on the board (id, title, agent, status)."""
@@ -118,7 +127,11 @@ async def start_job_search(
         parent_task_id=ctx.deps.task_id,
         origin_session_id=ctx.deps.session_id,
         payload={**payload, "run_id": ctx.deps.run_id},
-        dedup_key=f"job-search-discovery:{ctx.deps.task_id}:{ctx.deps.run_id}",
+        # A nightly start has no task or run of its own; the date keeps one
+        # discovery per night instead of one ever ("None:None").
+        dedup_key=(f"job-search-discovery:{ctx.deps.task_id}:{ctx.deps.run_id}"
+                   if ctx.deps.task_id or ctx.deps.run_id
+                   else f"job-search-discovery:system:{_now_local():%Y-%m-%d}"),
     )
     return (
         f"started browser job discovery task {task_id} for operator; "
