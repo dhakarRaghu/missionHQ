@@ -412,6 +412,10 @@ def main() -> None:
         raise SystemExit(asyncio.run(cmd_models()))
     if args[0] == "ask" and len(args) >= 3:
         raise SystemExit(asyncio.run(cmd_ask(args[1], " ".join(args[2:]))))
+    if args[0] == "regress" and len(args) >= 2:
+        from hq import regress
+
+        raise SystemExit(regress.main(args[1:]))
     if args[0] == "evals" and len(args) >= 3:
         raise SystemExit(asyncio.run(cmd_evals(args[1], args[2], args[3:])))
     print(__doc__)

@@ -1,0 +1,53 @@
+# Hunter: job verification and research. Job tools are canned; nothing is
+# recorded for real.
+
+- id: hunter-linkedin-lead-is-verification
+  agent: hunter
+  source: >-
+    A LinkedIn listing that states company, role and experience is the
+    verification. On 2026-09-12 a lead was lost to a portal detour; on this
+    task hunter called detect_job_board five times for leads it already had.
+  brief_from_task: 9822e6ac
+  canned:
+    list_jobs: []
+    record_job: {recorded: true, status: seen}
+    detect_job_board: {provider: null}
+    job_board: {jobs: []}
+    web_fetch: {text: "page could not be read in this evaluation"}
+    fetch_source: {text: "page could not be read in this evaluation"}
+    web_search: {results: []}
+    request_operator: {filed: true}
+    vault_write: {ok: true}
+  expect:
+    calls: [record_job]
+    args_match:
+      record_job: "Visa"
+    args_not_match:
+      detect_job_board: "4468603502|visa"
+  request_limit: 60
+
+- id: hunter-senior-title-is-not-opened
+  agent: hunter
+  source: >-
+    A senior, lead or level-two title is out before it is opened; a sweep on
+    2026-09-10 spent 285,000 tokens mostly on manager and lead roles.
+  prompt: >-
+    Check Groww's board for AI engineer and backend roles that fit the
+    candidate profile, and record any that fit.
+  canned:
+    list_jobs: []
+    detect_job_board: {provider: greenhouse, slug: groww}
+    job_board:
+      jobs:
+        - {title: "Lead AI Engineer", location: "Bengaluru", url: "https://boards.greenhouse.io/groww/jobs/1", external_id: "1"}
+        - {title: "Engineering Manager, Platform", location: "Bengaluru", url: "https://boards.greenhouse.io/groww/jobs/2", external_id: "2"}
+        - {title: "Software Engineer I, Backend", location: "Bengaluru", url: "https://boards.greenhouse.io/groww/jobs/3", external_id: "3", description: "0-2 years. Go, Kafka, Postgres. 22-30 LPA."}
+    record_job: {recorded: true}
+    web_fetch: {text: "page could not be read in this evaluation"}
+    vault_write: {ok: true}
+  expect:
+    args_match:
+      record_job: "Software Engineer I"
+    args_not_match:
+      web_fetch: "jobs/1|jobs/2"
+      browser_read: "jobs/1|jobs/2"

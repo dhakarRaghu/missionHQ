@@ -1,0 +1,33 @@
+# Librarian (consolidation). Reads are canned so the memory it judges is fixed.
+
+- id: librarian-closed-task-line-is-dropped
+  agent: librarian
+  source: >-
+    A memory line naming a task is true only while that task is open. The
+    line about task b3be878b sitting at needs_approval survived four nights
+    after the task was done.
+  prompt: >-
+    Nightly consolidation. Keep memory/user.md and memory/active_projects.md
+    small, current and true.
+  canned:
+    vault_read: |-
+      # Active projects
+      <!-- Maintained by librarian. -->
+      - Job search: level one roles, 25 LPA or more, India or India-remote.
+      - Operator task b3be878b is sitting at needs_approval, waiting on the owner.
+      - Inference Internals course: on Phase 2B.
+    vault_list: {notes: []}
+    read_board:
+      tasks:
+        - {id: "b3be878b-0000-0000-0000-000000000000", title: "Read the owner's feed", status: done}
+    recall_facts: []
+    memory_search: []
+    record_fact: {recorded: true}
+    retire_fact: {retired: true}
+    vault_write: {ok: true}
+  expect:
+    calls: [vault_write]
+    args_match:
+      vault_write: "active_projects"
+    args_not_match:
+      vault_write: "b3be878b"

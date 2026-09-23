@@ -1,0 +1,57 @@
+# Sage: routing and the daily note. Delegation tools are canned.
+
+- id: sage-handover-is-the-answer
+  agent: sage
+  source: >-
+    On 2026-09-08 sage delegated, then polled read_activity until the run was
+    judged stalled. A handover is the whole answer: who it went to, what was
+    asked, where it lands; then stop.
+  prompt: >-
+    Find two people at Razorpay who work on their AI platform and could refer me.
+  canned:
+    create_subtask: {task_id: "eval-task-1", status: backlog}
+    read_activity: {runs: []}
+    read_board: {tasks: []}
+    memory_search: []
+    recall_facts: []
+  expect:
+    calls: [create_subtask]
+    max_calls: {read_activity: 0}
+  judge:
+    - The answer says which agent the work went to and what was asked, and does not claim any result.
+
+- id: sage-private-page-goes-to-operator
+  agent: sage
+  source: >-
+    A page only his signed-in browser can open goes to operator first, not to
+    hunter, which cannot read LinkedIn at all.
+  prompt: Check who viewed my LinkedIn profile this week and summarise it.
+  canned:
+    create_subtask: {task_id: "eval-task-2", status: backlog}
+    memory_search: []
+    recall_facts: []
+    read_board: {tasks: []}
+  expect:
+    args_match:
+      create_subtask: "operator"
+    args_not_match:
+      create_subtask: '"agent": *"hunter"'
+
+- id: sage-topic-only-content-asks-first
+  agent: sage
+  source: >-
+    A content request with only a topic gets one question about what actually
+    happened to him, then stops. Nothing is drafted from nothing; on
+    2026-09-12 a draft claimed work he had not done.
+  prompt: Write me a LinkedIn post about RAG.
+  canned:
+    memory_search: []
+    recall_facts: []
+    create_subtask: {task_id: "eval-task-3", status: backlog}
+    read_board: {tasks: []}
+  expect:
+    args_not_match:
+      vault_write: "drafts/"
+    output_match: ['\?']
+  judge:
+    - The answer asks him about his own experience instead of writing a post.
