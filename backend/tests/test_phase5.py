@@ -96,3 +96,18 @@ def test_a_model_call_counts_as_a_sign_of_life() -> None:
     """The staged writer calls models with no tool events between them."""
     src = inspect.getsource(engine._cap_overrunning_tasks)
     assert src.count("hq.model_calls") == 2
+
+
+def test_an_ideas_batch_goes_on_top_and_keeps_the_rest() -> None:
+    from hq.tools import content_tools as ct
+
+    old = "---\ncreated: 2026-09-16\n---\n# Content ideas\n\n## 2026-09-16 — Old\n\n- old idea\n  why: x\n"
+    new = ct.with_batch(old, "## 2026-09-23 stray heading\nIntro line.\n\n- new idea\n  why: y\n",
+                        "2026-09-23", "Morning batch")
+    assert new.startswith("---\ncreated: 2026-09-16\n---\n# Content ideas\n\n## 2026-09-23 — Morning batch")
+    assert new.index("new idea") < new.index("## 2026-09-16 — Old") < new.index("old idea")
+    assert "stray heading" not in new
+    assert ct.with_batch(None, "- a\n", "2026-09-23", "").startswith("# Content ideas\n\n## 2026-09-23\n")
+    assert ct.batch_problems("no bullets here")
+    assert ct.batch_problems("- one\n  why: x\n- two\n") == []
+    assert ct.batch_problems("\n".join(f"- {i}" for i in range(9)))

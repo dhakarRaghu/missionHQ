@@ -140,8 +140,9 @@ def test_the_study_brief_demands_a_digest_before_the_ledger_entry() -> None:
     picks = [{"title": "A post", "url": "https://example.com/a", "why": "because"}]
     brief = study_brief(study_payload(scan_payload(), picks), picks)
 
-    assert "record_reading" in brief
-    assert "digest_path" in brief
+    assert "record_reading" in brief  # a skip is recorded
+    assert "file_study_note" in brief  # a note is filed from the reply's text
+    assert "Never pass a note as a tool" in brief
     assert "Do not write the lesson itself" in brief
 
 
@@ -712,7 +713,7 @@ def test_the_agents_he_reads_get_room_to_think() -> None:
     # a longer limit is only a longer hang.
     # Streamed: a silent request is failed by the idle limit; the total only
     # has to fit a long answer at the gateway's measured speed.
-    assert 600 <= deep["settings"]["timeout_s"] <= 1200
+    assert 600 <= deep["settings"]["timeout_s"] <= 1500
 
     agents = scan(strict=True)
     for name in ("sage", "hunter"):
@@ -1416,8 +1417,9 @@ def test_a_local_phase_can_record_its_study_note() -> None:
 
     from hq.tools import learning_tools
 
-    src = inspect.getsource(learning_tools.record_reading)
+    src = inspect.getsource(learning_tools._checked_reading_url)
     assert 'startswith("local://")' in src and "hq.course_phases" in src
+    assert "_checked_reading_url" in inspect.getsource(learning_tools.file_study_note)
 
 
 def test_the_ledger_is_filtered_by_phase_before_it_is_cut() -> None:
@@ -2361,3 +2363,33 @@ def test_a_long_lesson_is_written_one_section_per_call(tmp_path) -> None:
     # A finished lesson clears its draft.
     assert "shutil.rmtree" in inspect.getsource(lt.finish_lesson)
     assert "write_lesson_part" in load_tutor_tools()
+
+
+def test_a_study_note_is_filed_from_the_text_of_the_reply() -> None:
+    from datetime import UTC, datetime
+
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        ToolCallPart,
+        UserPromptPart,
+    )
+
+    from hq.tools import learning_tools as lt
+
+    note = "# KV paging\n\nSee https://docs.vllm.ai/en/v0.6.0/paging.html, and (https://arxiv.org/abs/2309.06180)."
+    msgs = [
+        ModelRequest(parts=[UserPromptPart("go")]),
+        ModelResponse(parts=[TextPart("```markdown\n" + note + "\n```"),
+                             ToolCallPart("file_study_note", {"url": "https://a.dev/x"})]),
+    ]
+    assert lt.reply_text(msgs) == note
+    assert lt.study_note_sources(note, "https://a.dev/x") == [
+        "https://a.dev/x", "https://docs.vllm.ai/en/v0.6.0/paging.html",
+        "https://arxiv.org/abs/2309.06180"]
+    assert lt.study_note_sources(note, "local://learning/courses/x.md#phase-1")[0].startswith(
+        "https://docs")
+    day = datetime(2026, 9, 23, tzinfo=UTC)
+    assert lt.study_note_path("inference-3a", "", day) == "quarantine/2026-09-23-inference-3a-study.md"
+    assert lt.study_note_path("", "https://a.dev/X y", day).startswith("quarantine/2026-09-23-https-a-dev")

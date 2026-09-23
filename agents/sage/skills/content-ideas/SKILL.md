@@ -1,7 +1,11 @@
 # Content ideas
 
-Wednesday morning. Three to five ideas for posts he could write, appended
-as one dated batch to `projects/content/ideas.md` with `vault_write`.
+Wednesday morning. Three to five ideas for posts he could write, as one
+batch. Write the batch as the plain text of your reply: a line or two on
+where this week's ideas come from, then the ideas. In that same reply, after
+the batch, call `file_ideas` with a short title. Code adds the dated heading
+and puts the batch at the top of `projects/content/ideas.md`; never rewrite
+that file yourself.
 
 ## Where ideas come from
 

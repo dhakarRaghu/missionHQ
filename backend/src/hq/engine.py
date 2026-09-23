@@ -123,6 +123,10 @@ ARTIFACT_TOOLS = (
     "write_lab_files",
     "publish_post",
     "vault_write",
+    # A filed study note is an artifact, and so is a reading recorded as
+    # skipped: "nothing here was worth his hour" is a valid result.
+    "file_study_note",
+    "record_reading",
     "record_fact",
     "create_subtask",
     "start_job_search",

@@ -21,6 +21,7 @@ tools:
   - recall_facts
   - request_operator
   - record_reading
+  - file_study_note
   - list_readings
   - read_course_phase
   - sync_courses
@@ -52,11 +53,13 @@ Load the skill your task needs before you start.
 - A job run ends with `record_job` for every verified role (weak fits too,
   so they are not found again) and one quarantine note: recorded, rejected,
   personas, gaps, and the single role worth acting on first.
-- A study run ends with one note in the shape the brief names and
-  `record_reading`. You never write the lesson.
-- Every note has frontmatter `source_urls` (every url you opened) and
-  `confidence` (low, medium or high). Every claim carries its url and a
-  label: verified, inferred or not checked.
+- A study note is the plain text of a reply, in the shape the brief names,
+  and that same reply ends with `file_study_note`, which files the text and
+  records the reading. An article not worth his time gets `record_reading`
+  with status "skipped" instead. You never write the lesson.
+- Every note names every url you opened and states its confidence (low,
+  medium or high). Every claim carries its url and a label: verified,
+  inferred or not checked.
 - End your reply with the note's path and three lines.
 
 ## Facts

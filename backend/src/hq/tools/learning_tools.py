@@ -175,6 +175,56 @@ async def scan_context() -> tuple[str, list[str], int, str, str, list[str]]:
     )
 
 
+async def _checked_reading_url(url: str) -> str:
+    """The ledger key: a full web address, or a known local phase's local:// url."""
+    url = url.strip()
+    if url.startswith("local://"):
+        # A phase written as a spec in learning/courses/ has no web address; its
+        # course_phases row carries local://<spec path>#phase-N. Refusing it
+        # meant hunter could never record the study note for a local phase, and
+        # every one of them stopped at "study finished with no digest".
+        known = await db.fetchone(
+            "SELECT 1 AS ok FROM hq.course_phases WHERE url = %s AND source = 'local'",
+            (url,),
+        )
+        if not known:
+            raise ModelRetry(
+                "a local:// url must be a local course phase's url, exactly as the"
+                " brief gave it"
+            )
+    elif not url.startswith(("http://", "https://")):
+        raise ModelRetry("url must be the full https:// address of the article")
+    return url
+
+
+async def _save_reading(
+    url: str, title: str = "", author: str = "", source: str = "", topic: str = "",
+    posted_date: str = "", why: str = "", score: int = 0, status: str = "found",
+    digest_path: str = "",
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO hq.readings (url, title, author, source, topic, posted_date,
+                                 why, score, status, digest_path)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (url) DO UPDATE SET
+            title = COALESCE(NULLIF(EXCLUDED.title, ''), hq.readings.title),
+            author = COALESCE(NULLIF(EXCLUDED.author, ''), hq.readings.author),
+            source = COALESCE(NULLIF(EXCLUDED.source, ''), hq.readings.source),
+            topic = COALESCE(NULLIF(EXCLUDED.topic, ''), hq.readings.topic),
+            posted_date = COALESCE(NULLIF(EXCLUDED.posted_date, ''), hq.readings.posted_date),
+            why = COALESCE(NULLIF(EXCLUDED.why, ''), hq.readings.why),
+            score = GREATEST(EXCLUDED.score, hq.readings.score),
+            status = EXCLUDED.status,
+            digest_path = COALESCE(NULLIF(EXCLUDED.digest_path, ''), hq.readings.digest_path),
+            last_seen = now()
+        """,
+        (url, title.strip()[:300], author.strip()[:120], source.strip()[:40],
+         topic.strip()[:120], posted_date.strip()[:40], why.strip()[:600],
+         score, status, digest_path.strip()[:300]),
+    )
+
+
 @hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
 async def record_reading(
     ctx: RunContext[HQDeps],
@@ -198,23 +248,7 @@ async def record_reading(
     Use "skipped" for something you looked at and judged not worth his time,
     with `why` saying what was wrong. A skip recorded is a skip not repeated.
     """
-    url = url.strip()
-    if url.startswith("local://"):
-        # A phase written as a spec in learning/courses/ has no web address; its
-        # course_phases row carries local://<spec path>#phase-N. Refusing it
-        # meant hunter could never record the study note for a local phase, and
-        # every one of them stopped at "study finished with no digest".
-        known = await db.fetchone(
-            "SELECT 1 AS ok FROM hq.course_phases WHERE url = %s AND source = 'local'",
-            (url,),
-        )
-        if not known:
-            raise ModelRetry(
-                "a local:// url must be a local course phase's url, exactly as the"
-                " brief gave it"
-            )
-    elif not url.startswith(("http://", "https://")):
-        raise ModelRetry("url must be the full https:// address of the article")
+    url = await _checked_reading_url(url)
     status = (status or "found").strip().lower()
     if status not in STATUSES:
         raise ModelRetry(f"status must be one of {', '.join(STATUSES)}")
@@ -225,30 +259,101 @@ async def record_reading(
         )
     score = max(0, min(int(score or 0), 10))
 
-    await db.execute(
-        """
-        INSERT INTO hq.readings (url, title, author, source, topic, posted_date,
-                                 why, score, status, digest_path)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (url) DO UPDATE SET
-            title = COALESCE(NULLIF(EXCLUDED.title, ''), hq.readings.title),
-            author = COALESCE(NULLIF(EXCLUDED.author, ''), hq.readings.author),
-            source = COALESCE(NULLIF(EXCLUDED.source, ''), hq.readings.source),
-            topic = COALESCE(NULLIF(EXCLUDED.topic, ''), hq.readings.topic),
-            posted_date = COALESCE(NULLIF(EXCLUDED.posted_date, ''), hq.readings.posted_date),
-            why = COALESCE(NULLIF(EXCLUDED.why, ''), hq.readings.why),
-            score = GREATEST(EXCLUDED.score, hq.readings.score),
-            status = EXCLUDED.status,
-            digest_path = COALESCE(NULLIF(EXCLUDED.digest_path, ''), hq.readings.digest_path),
-            last_seen = now()
-        """,
-        (url, title.strip()[:300], author.strip()[:120], source.strip()[:40],
-         topic.strip()[:120], posted_date.strip()[:40], why.strip()[:600],
-         score, status, digest_path.strip()[:300]),
-    )
+    await _save_reading(url, title, author, source, topic, posted_date, why, score,
+                        status, digest_path)
     await emit("reading.recorded", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
                payload={"url": url[:200], "status": status, "score": score})
     return f"recorded {url[:120]} as {status}"
+
+
+STUDY_NOTE_MIN_CHARS = 800
+_URL_IN_TEXT = re.compile(r"https?://[^\s<>()\[\]\"'`]+")
+
+
+def reply_text(messages: Sequence[Any]) -> str:
+    """The plain text of the reply that called the filing tool.
+
+    A study note runs to tens of thousands of characters. The gateway streams
+    text but not tool-call arguments, so a note sent as an argument is
+    generated in silence and cut at the idle limit. The note is written as
+    the reply's text, which streams, and the tool files that text.
+    """
+    from pydantic_ai.messages import ModelResponse, TextPart
+
+    for msg in reversed(messages):
+        if isinstance(msg, ModelResponse):
+            text = "".join(p.content for p in msg.parts if isinstance(p, TextPart)).strip()
+            fence = re.match(r"^```(?:markdown|md)?\n(.*)\n```$", text, re.DOTALL)
+            return fence.group(1).strip() if fence else text
+    return ""
+
+
+def study_note_path(title: str, url: str, day: datetime) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (title or url).lower()).strip("-")[:60].strip("-")
+    return f"quarantine/{day:%Y-%m-%d}-{slug or 'note'}-study.md"
+
+
+def study_note_sources(text: str, url: str) -> list[str]:
+    found = [u.rstrip(".,;:") for u in _URL_IN_TEXT.findall(text)]
+    if url.startswith(("http://", "https://")):
+        found.insert(0, url)
+    return list(dict.fromkeys(found))[:80]
+
+
+@hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
+async def file_study_note(ctx: RunContext[HQDeps], url: str, title: str) -> str:
+    """File the study note you wrote in this same reply and mark the reading digested.
+
+    Write the whole note as plain markdown text in your reply, then, in that
+    same reply after the note, call this with the reading's `url` (exactly as
+    the brief gave it) and a short `title`. Code files the text you wrote
+    before the call into quarantine/, lists every url in it as a source, and
+    records the reading as digested. Never pass the note as an argument.
+    """
+    from hq import memory
+
+    url = await _checked_reading_url(url)
+    rel = study_note_path(title, url, _today())
+    if not memory.in_scope(rel, ctx.deps.vault_write_scopes):
+        raise ModelRetry(f"refused: agent {ctx.deps.agent} may not write {rel}")
+    text = reply_text(ctx.messages)
+    if len(text) < STUDY_NOTE_MIN_CHARS:
+        raise ModelRetry(
+            "no note found in this reply: write the whole study note as plain text in"
+            " your reply, then call file_study_note in that same reply, after the note"
+        )
+    sources = study_note_sources(text, url)
+    if not sources:
+        raise ModelRetry("the note cites no urls; list every source you opened in it")
+    import yaml
+
+    meta, body = memory.parse_frontmatter(text)
+    meta = {**(meta or {}), "source_urls": sources}
+    content = memory.stamp_frontmatter(
+        "---\n" + yaml.safe_dump(meta, sort_keys=False, allow_unicode=True) + "---\n"
+        + (body if body.strip() else text).lstrip("\n"),
+        author=ctx.deps.agent, provenance="web")
+    try:
+        existing = await asyncio.to_thread(_existing_note, rel)
+        problem = memory.write_problem(rel, content, actor=ctx.deps.agent, existing=existing)
+        if problem:
+            raise ModelRetry(problem)
+        await memory.write(rel, content, actor=ctx.deps.agent)
+    except memory.WriteRefused as exc:
+        raise ModelRetry(str(exc)) from None
+    await _save_reading(url, title=title, status="digested", digest_path=rel)
+    await emit("reading.recorded", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
+               payload={"url": url[:200], "status": "digested", "chars": len(text)})
+    return f"filed {rel} ({len(text)} characters) and recorded {url[:120]} as digested"
+
+
+def _existing_note(rel: str) -> str | None:
+    from hq import memory
+
+    try:
+        return memory.read(rel)
+    except FileNotFoundError:
+        return None
 
 
 @hq_tool(action=ActionClass.READ, trust=Trust.VAULT)

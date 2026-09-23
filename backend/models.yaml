@@ -87,7 +87,10 @@ models:
       # this total no longer decides what counts as hung. It only has to fit
       # a long answer at this gateway's speed: kimi streams reasoning at about
       # 20 characters a second and text at about 40 (measured 2026-09-23).
-      timeout_s: 900
+      # Twenty-five minutes: hunter writes a study note as the text of one
+      # reply, and a 25k-character note after high-effort reasoning needs ~15.
+      # Longer would push the hang watchdog past the course lane's cap.
+      timeout_s: 1500
     fallback: [sonnet, glm]
 
   # The teacher. He asked for tutor's reasoning to go higher, then on

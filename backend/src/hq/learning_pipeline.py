@@ -1256,7 +1256,7 @@ For each article:
 
 1. `web_fetch` it. If the fetch fails or returns a stub, say so in the note
    and move on — a missing digest is fine, a fabricated one is not.
-2. Write ONE note to `quarantine/<YYYY-MM-DD>-<slug>-study.md` in the same
+2. Write ONE note per article as the plain text of a reply, in the same
    shape as the study digests already in quarantine/: the core argument
    first, then every technical concept explained properly, then what it means
    for someone building AI systems on ordinary infrastructure — the language
@@ -1292,8 +1292,10 @@ For each article:
    the body is a frontend tutorial or a product pitch. Do not write a digest for it, and say so in
    your answer. A skipped article is a good outcome: it is the reading he did
    not have to do.
-6. Otherwise call `record_reading` for that url with `status` "digested" and
-   `digest_path` set to the note you just wrote.
+6. Otherwise, in the same reply as the note and after it, call
+   `file_study_note` with that url and a short title. It files the text you
+   wrote and records the reading as digested. Never pass a note as a tool
+   argument: arguments are not streamed, and a long one is cut off.
 
 Write for an engineer learning the material, not for a summary. Length
 follows the material: a dense paper deserves more than a short release note.
@@ -1756,8 +1758,7 @@ Then do the thinking, in this order:
 7. **What is now wrong.** A default that moved, a flag that is gone. Current
    value, version, url. He will run this code.
 
-Write ONE study note to `quarantine/<YYYY-MM-DD>-<slug>-study.md`, in this
-shape:
+Write ONE study note as the plain text of your reply, in this shape:
 
 ```
 ## Sequence
@@ -1773,11 +1774,15 @@ shape:
 ```
 
 Label every claim verified, inferred or not checked. A claim stated more
-strongly than its evidence is worse than a missing one.
+strongly than its evidence is worse than a missing one. Tutor needs the
+evidence, not a transcript: most notes land between 8,000 and 25,000
+characters.
 
-Then call `record_reading` with `url` set to `{payload.get("url")}`, `status`
-"digested" and `digest_path` set to that note. That is how tutor finds your
-work.
+In that same reply, after the note, call `file_study_note` with `url` set to
+`{payload.get("url")}` and `title` set to `{payload.get("slug")}`. It files the
+text you wrote and records the reading as digested, which is how tutor finds
+your work. Never pass the note as a tool argument: arguments are not
+streamed, and a long one is cut off.
 
 Do not write anything for him to read. Tutor writes the lesson from your note.
 """

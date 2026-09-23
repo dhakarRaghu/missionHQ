@@ -20,6 +20,7 @@ tools:
   - list_agent_drafts
   - vault_read
   - vault_write
+  - file_ideas
   - vault_list
   - memory_search
   - read_board
