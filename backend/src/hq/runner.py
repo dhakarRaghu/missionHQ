@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -501,10 +502,29 @@ async def await_runtime_approval(spec: AgentSpec, deps: HQDeps, summary: str) ->
 
 @DBOS.step(name="runtime.codex")
 async def codex_turn_step(prompt: str, *, system_suffix: str) -> dict[str, Any]:
-    """One Codex turn, as a durable step so a crash does not repeat the work."""
-    result = await codex_cli.run_turn(f"{system_suffix}\n\n{prompt}")
+    """One Codex turn, as a durable step so a crash does not repeat the work.
+
+    Costed from Codex's own token counts at the `external.codex` price in
+    models.yaml, and recorded as one hq.model_calls row like any model call.
+    """
+    started = time.monotonic()
+    reg = llm.registry()
+    model_id = str((reg.external.get("codex") or {}).get("model", "codex"))
+    try:
+        result = await codex_cli.run_turn(f"{system_suffix}\n\n{prompt}")
+    except Exception as exc:
+        await llm.record_call(model="codex", model_id=model_id,
+                              ms=int((time.monotonic() - started) * 1000),
+                              input_tokens=0, output_tokens=0, cost_usd=0.0,
+                              error_class=type(exc).__name__)
+        raise
+    cost = reg.external_cost("codex", result.input_tokens, result.output_tokens)
+    await llm.record_call(model="codex", model_id=model_id,
+                          ms=int((time.monotonic() - started) * 1000),
+                          input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+                          cost_usd=cost, error_class="error" if result.is_error else None)
     return {
-        "text": result.text, "cost_usd": 0.0,
+        "text": result.text, "cost_usd": cost,
         "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
         "is_error": result.is_error,
     }
@@ -554,6 +574,13 @@ async def execute_external(
     spec: AgentSpec, *, prompt: str, deps: HQDeps,
 ) -> RunOutcome:
     """One turn on an external CLI runtime, already approved by the caller."""
+    with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent=spec.name):
+        return await _execute_external(spec, prompt=prompt, deps=deps)
+
+
+async def _execute_external(
+    spec: AgentSpec, *, prompt: str, deps: HQDeps,
+) -> RunOutcome:
     runtime = spec.runtime
     module = codex_cli if runtime == "codex" else claude_cli
     reason = module.available()
@@ -600,6 +627,17 @@ async def execute_external(
 # --- run loop ----------------------------------------------------------------
 
 async def execute(
+    agent, spec: AgentSpec, *, prompt: str, deps: HQDeps,
+    message_history=None,
+) -> RunOutcome:
+    """One agent run. Every model call made inside it, the judges' and the
+    web reader's included, is recorded against this run in hq.model_calls."""
+    with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent=spec.name):
+        return await _execute(agent, spec, prompt=prompt, deps=deps,
+                              message_history=message_history)
+
+
+async def _execute(
     agent, spec: AgentSpec, *, prompt: str, deps: HQDeps,
     message_history=None,
 ) -> RunOutcome:

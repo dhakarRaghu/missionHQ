@@ -26,6 +26,10 @@ class Settings(BaseSettings):
 
     gateway_base_url: str = ""
     gateway_api_key: str = ""
+    # Requests the gateway key allows at once. Every chat, embedding and judge
+    # call waits for one of these before it is sent, so the backend never
+    # overfills the key's slot table and has to wait out 429s instead.
+    gateway_parallel: int = 5
     openai_api_key: str = ""
     grid_api_key: str = ""
 

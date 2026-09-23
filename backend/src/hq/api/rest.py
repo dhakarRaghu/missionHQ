@@ -107,8 +107,9 @@ async def cancel_task(task_id: str) -> dict:
     # with outcome NULL would count against the success rate in `hq.cli health`.
     # A deliberate stop is not a failure, so record it as its own outcome.
     await db.execute(
-        "UPDATE hq.runs SET outcome = 'cancelled', ended_at = now()"
-        " WHERE task_id = %s AND ended_at IS NULL",
+        "UPDATE hq.runs r SET outcome = 'cancelled', ended_at = now(),"
+        f" {safety.CALLS_COSTED}"
+        " WHERE r.task_id = %s AND r.ended_at IS NULL",
         (task_id,),
     )
     await board.apply(

@@ -248,14 +248,13 @@ def bootstrap_pre_launch() -> None:
 
 async def bootstrap_post_launch() -> None:
     """Queues + schedules. Both need a launched executor."""
-    # One task worker, not two, since 2026-09-10. The gateway key permits five
-    # parallel requests in total, shared with Codex and the chat queue, and a
-    # single agent run holds one slot itself plus a ledger or guard call beside
-    # it. Two task workers and one chat turn already filled the table and the
-    # overflow died as 429s. The nightly chain is spread across 2.5 hours and a
-    # task may run 40 minutes, so serial is not a bottleneck; a run waiting on
-    # approval blocks in recv without holding a model slot.
-    _queues["tasks"] = await DBOS.register_queue_async("tasks", worker_concurrency=1)
+    # Two task workers. The gateway key allows five requests at once, shared
+    # by every lane, the judges and embeddings; the gateway transport admits
+    # at most `gateway_parallel` of them and holds a streamed answer's slot
+    # until its body closes, so a second worker waits for a slot rather than
+    # overfilling the key. A run waiting on approval blocks in recv without
+    # holding a model slot.
+    _queues["tasks"] = await DBOS.register_queue_async("tasks", worker_concurrency=2)
     # Course work gets its own lane, one at a time. On 2026-09-17 two course
     # builds the owner started waited behind a job sweep, which has run for
     # four hours. Two agent runs plus a chat turn, each one request at a
@@ -633,7 +632,9 @@ def _register_cron() -> None:
     for name, (spec, _agent) in AGENTS.items():
         for i, entry in enumerate(spec.cron):
             wf_name = f"cron_{name}_{i}"
-            fire = DBOS.workflow(name=wf_name)(_make_cron(name, i, entry.prompt))
+            fire = DBOS.workflow(name=wf_name)(
+                _make_cron(name, i, entry.prompt, entry.schedule)
+            )
             _schedules.append({
                 "schedule_name": wf_name, "workflow_fn": fire,
                 "schedule": entry.schedule, "cron_timezone": tz,
@@ -659,9 +660,27 @@ def _register_cron() -> None:
         get_dbos_func_name(sched["workflow_fn"])  # raises unless registered as a workflow
 
 
-def _make_cron(agent_name: str, idx: int, prompt: str):
+@DBOS.step()
+async def _newest_slot_step(schedule: str) -> str:
+    """The schedule's most recent slot, as of now. A step, so a recovered
+    workflow sees the answer it saw the first time."""
+    now = datetime.now(ZoneInfo(settings().cron_tz))
+    return croniter(schedule, now).get_prev(datetime).isoformat()
+
+
+def _make_cron(agent_name: str, idx: int, prompt: str, schedule: str):
     async def fire(scheduled: datetime, context: Any) -> None:
         local = scheduled.astimezone(ZoneInfo(settings().cron_tz))
+        # After a restart DBOS fires every slot it missed, all at once: seven
+        # tasks in one second at 01:06 on 2026-09-20. Only the newest slot of
+        # a schedule is worth running; an older one is yesterday's job, and
+        # `_catch_up_missed` already covers the newest.
+        newest = datetime.fromisoformat(await _newest_slot_step(schedule))
+        if local < newest:
+            await runner.emit_step("cron.skipped_backfill", agent=agent_name,
+                                   payload={"slot": f"{local:%Y-%m-%d %H:%M}",
+                                            "newest": f"{newest:%Y-%m-%d %H:%M}"})
+            return
         await dispatch(
             agent=agent_name, title=cron_title(prompt), brief=prompt, source="cron",
             dedup_key=f"cron:{agent_name}:{idx}:{local:%Y-%m-%d-%H%M}",
@@ -815,7 +834,8 @@ async def _cap_overrunning_tasks() -> None:
     # the Runs page shows work that stopped hours ago and `hq.cli health`
     # counts it against the success rate. Close it on the same evidence.
     orphans = await db.fetch(
-        "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now()"
+        "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now(),"
+        f" {safety.CALLS_COSTED}"
         " WHERE r.ended_at IS NULL AND greatest(r.started_at, coalesce("
         "   (SELECT max(e.ts) FROM hq.events e WHERE e.run_id = r.id), r.started_at))"
         "   < now() - make_interval(secs => %s)"
@@ -1948,10 +1968,17 @@ async def _start_run(task_id: str | None, spec: AgentSpec) -> str:
 @DBOS.step()
 async def _finish_run(run_id: str, outcome: str, input_tokens: int,
                       output_tokens: int, cost_usd: float, error: str | None = None) -> None:
+    """Close the run. Its cost and tokens are the sum of its recorded model
+    calls when it has any: that counts the spare that answered at its own
+    price, the judges, and the attempts that failed. The figures the runner
+    passed are the fallback for runtimes with no rows (the claude CLI)."""
     await db.execute(
-        "UPDATE hq.runs SET ended_at = now(), outcome = %s, input_tokens = %s,"
-        " output_tokens = %s, cost_usd = %s, error = %s WHERE id = %s",
-        (outcome, input_tokens, output_tokens, cost_usd, error, run_id),
+        "UPDATE hq.runs r SET ended_at = now(), outcome = %s, error = %s,"
+        f" input_tokens = coalesce({safety.CALLS_SUM.format(col='input_tokens')}, %s),"
+        f" output_tokens = coalesce({safety.CALLS_SUM.format(col='output_tokens')}, %s),"
+        f" cost_usd = coalesce({safety.CALLS_SUM.format(col='cost_usd')}, %s)"
+        " WHERE r.id = %s",
+        (outcome, error, input_tokens, output_tokens, cost_usd, run_id),
     )
 
 
