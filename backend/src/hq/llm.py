@@ -235,8 +235,10 @@ async def record_call(
 
 # A streamed answer sends reasoning and text as it goes. Silence this long
 # means the request is hung, whatever its total allowance: fail it and let
-# the spare try, instead of waiting out the whole limit.
-IDLE_LIMIT_S = 120.0
+# the spare try, instead of waiting out the whole limit. Just under the
+# gateway's own 300-second cut: a model writing tool-call arguments sends
+# nothing while it writes, and that silence is legitimate until then.
+IDLE_LIMIT_S = 290.0
 
 
 class StreamIdle(Exception):

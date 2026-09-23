@@ -67,14 +67,16 @@ JUDGE_MODEL = "cheap"
 STEP_LIMIT_S = llm.registry().longest_chain_timeout_s() + 30.0
 _STEP: dict[str, Any] = {"retries_allowed": True, "max_attempts": 2, "interval_seconds": 5.0,
          "backoff_rate": 2.0, "timeout_seconds": STEP_LIMIT_S}
-# Measured on this gateway, 2026-09-23: kimi streams reasoning at about 20
-# characters a second and text at about 40. At high effort the plan reasoned
-# for nine minutes before its first word. So effort is spent where it pays:
-# the plan, which decides what he learns, reasons at medium with a long
-# total; a section executes a fixed plan and reasons low.
-OUTLINE_EFFORT = "medium"
+# Measured on this gateway, 2026-09-23, on the real article outline: kimi-k3
+# reasons at about 20 characters a second and effort decides how long. At
+# high and at medium it reasoned for nine minutes and more and had not
+# finished the plan at twenty; at low it thought for 200 characters and
+# returned the whole plan in 211 seconds. The plan's quality is held by what
+# it must contain and by the checks (outline_problems and the release-test
+# judge), not by minutes of hidden reasoning.
+OUTLINE_EFFORT = "low"
 SECTION_EFFORT = "low"
-OUTLINE_LIMIT_S = 1200.0
+OUTLINE_LIMIT_S = 900.0
 _OUTLINE_STEP: dict[str, Any] = {**_STEP, "timeout_seconds": OUTLINE_LIMIT_S * 3 + 30.0}
 
 

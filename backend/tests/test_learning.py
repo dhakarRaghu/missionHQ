@@ -589,7 +589,9 @@ def test_the_agents_he_reads_get_room_to_think() -> None:
     assert deep["settings"]["max_tokens"] >= 32000
     # Above the measured p99 of a whole model step (408s), and no further:
     # a longer limit is only a longer hang.
-    assert 420 <= deep["settings"]["timeout_s"] <= 600
+    # Streamed: a silent request is failed by the idle limit; the total only
+    # has to fit a long answer at the gateway's measured speed.
+    assert 600 <= deep["settings"]["timeout_s"] <= 1200
 
     agents = scan(strict=True)
     for name in ("sage", "hunter"):
@@ -613,7 +615,7 @@ def test_tutor_teaches_on_a_model_it_can_afford_all_day() -> None:
     teacher = spec["models"][spec["roles"]["teacher"]]
     assert teacher["model"].startswith("kimi"), "opus is capped at $5 a day"
     assert teacher["settings"]["reasoning_effort"] == "high"
-    assert 420 <= teacher["settings"]["timeout_s"] <= 600
+    assert 600 <= teacher["settings"]["timeout_s"] <= 1200
     assert teacher["fallback"]
 
     tutor = scan(strict=True)["tutor"]
@@ -1356,7 +1358,9 @@ def test_a_hung_model_request_hands_over_to_a_spare_and_fails_in_time() -> None:
     assert '"timeout_seconds": model_step_limit_s()' in src
     # The longest a healthy run can be silent, and the watchdog's limit, stay
     # well under the hour a hang used to cost.
-    assert engine.hang_after_s() <= 50 * 60, engine.hang_after_s()
+    assert engine.hang_after_s() <= 100 * 60, engine.hang_after_s()
+    # What catches a hang now is silence, not the total.
+    assert llm.IDLE_LIMIT_S < 300
 
 
 def test_a_full_slot_table_is_waited_out_not_failed(monkeypatch) -> None:
