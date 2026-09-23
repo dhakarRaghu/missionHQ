@@ -82,6 +82,9 @@ async def file_ideas(ctx: RunContext[HQDeps], title: str = "") -> str:
         raise ModelRetry(f"today's batch ({day}) is already filed; say so and stop")
     content = memory.stamp_frontmatter(
         with_batch(existing, text, day, title), author=ctx.deps.agent, provenance="agent")
+    problem = memory.write_problem(IDEAS_PATH, content, actor=ctx.deps.agent, existing=existing)
+    if problem:
+        raise ModelRetry(problem)
     try:
         await memory.write(IDEAS_PATH, content, actor=ctx.deps.agent)
     except memory.WriteRefused as exc:

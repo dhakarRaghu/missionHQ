@@ -106,3 +106,16 @@ def problem(*values: object) -> str | None:
         if employers_named(text):
             return REFUSAL
     return None
+
+
+REDACTED = "[an employer of the owner]"
+
+
+def redact(text: str) -> str:
+    """``text`` with every employer name replaced. For material that arrives
+    from outside (a browser report of his own accounts) and is worth filing:
+    the name goes, the rest of the reading stays."""
+    for name in settings().private_employers:
+        if name.strip():
+            text = re.sub(_pattern(name.strip()).pattern, REDACTED, text, flags=re.IGNORECASE)
+    return text

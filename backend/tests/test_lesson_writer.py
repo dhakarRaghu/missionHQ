@@ -337,3 +337,16 @@ def test_the_writer_is_told_the_charter_first() -> None:
     text = lw.section_instructions()
     assert text.startswith("# Mission HQ charter")
     assert len(lw.bundle_sha()) == 12
+
+
+def test_a_part_that_names_an_employer_is_sent_back_alone(monkeypatch) -> None:
+    from hq import privacy
+    from hq.config import settings
+
+    monkeypatch.setattr(settings(), "private_employers", ("Acme Corp",))
+    privacy._pattern.cache_clear()
+    html = '<h2 data-concept="c1">Queues</h2><p>At Acme Corp the queue grew every night.</p>'
+    probs = lw.section_problems(html, earlier="", article=True, kind="", apparatus=True,
+                                total_words=0)
+    assert any("employers" in p for p in probs)
+    assert not any("Acme" in p for p in probs)   # the refusal never repeats the name

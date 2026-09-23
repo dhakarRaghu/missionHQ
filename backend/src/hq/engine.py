@@ -38,6 +38,7 @@ from hq import (
     llm,
     memory,
     obs,
+    privacy,
     reader_export,
     runner,
     safety,
@@ -1150,7 +1151,9 @@ async def _file_external_output(
         return replace(outcome, outcome="no_artifact", error=UNSOURCED_REASON)
 
     front = "\n".join(f"  - {u}" for u in urls)
-    content = (
+    # A report of his own accounts can carry an employer's name; the name is
+    # replaced and the reading filed, rather than the whole report refused.
+    content = privacy.redact(
         f"---\nsource_urls:\n{front}\nconfidence: medium\n---\n"
         f"# {spec.name}: browser session {today:%Y-%m-%d}\n\n{text}\n"
     )

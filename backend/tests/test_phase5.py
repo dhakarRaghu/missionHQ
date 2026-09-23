@@ -185,3 +185,15 @@ def test_briefs_built_by_code_state_rules_not_history() -> None:
                                 continue  # an example envelope, where a date is a field
                             assert not re.search(r"\b20\d\d-\d\d-\d\d\b", line), (
                                 mod.__name__, node.lineno, line)
+
+
+def test_an_operator_report_is_redacted_not_dropped(monkeypatch) -> None:
+    from hq import privacy
+    from hq.config import settings
+
+    monkeypatch.setattr(settings(), "private_employers", ("Acme Corp",))
+    privacy._pattern.cache_clear()
+    out = privacy.redact("Referral at ACME corp and acme-corp.com; Acmeology stays.")
+    assert privacy.employers_named(out) == []
+    assert "Acmeology stays" in out and out.count(privacy.REDACTED) == 2
+    assert "privacy.redact(" in inspect.getsource(engine._file_external_output)

@@ -440,6 +440,10 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
     broken = lt.page_script_problems(html)
     if broken:
         probs.append(f"a figure cannot work: {broken}")
+    # Caught on the part that has it, so only that part is rewritten.
+    named = lt.employer_problem(html)
+    if named:
+        probs.append(named)
     notes = lt.part_notes(
         html, earlier_html=earlier, article=article,
         evidence_share=lt.PAPER_EVIDENCE_SHARE if kind == learning.PAPER else lt.EVIDENCE_SHARE,
