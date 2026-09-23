@@ -55,6 +55,7 @@ log = logging.getLogger(__name__)
 
 WRITER_DIR = "writer"
 SECTION_RETRIES = 2          # a part is rewritten at most twice for its own findings
+PLAN_ATTEMPTS = 3            # a plan is sent back at most twice with what failed
 REPAIR_ROUNDS = 1            # whole-page and citation findings: one round of repairs
 NOTE_CHARS = 60_000          # a study note is a few thousand words; this is a ceiling
 SOURCE_CHARS = 40_000
@@ -336,6 +337,17 @@ def _norm(text: str) -> str:
     return " ".join(text.split())
 
 
+def normalize_outline(outline: Outline) -> Outline:
+    """Settle what code can settle, so a plan is not sent back for it. A
+    section tagged both as a concept and as valid apparatus is apparatus."""
+    for s in outline.sections:
+        s.kind = s.kind.strip().lower()
+        s.concept = s.concept.strip().lower()
+        if s.kind and s.concept and s.kind in lt.SECTION_KINDS:
+            s.concept = ""
+    return outline
+
+
 def outline_problems(outline: Outline, note: str, *, article: bool) -> list[str]:
     """Why this plan cannot be written from, or [] when it can."""
     probs: list[str] = []
@@ -350,7 +362,9 @@ def outline_problems(outline: Outline, note: str, *, article: bool) -> list[str]
     for c in outline.concepts:
         words = len(c.claim.split())
         if words > lt.CLAIM_MAX_WORDS:
-            probs.append(f"{c.id}'s claim is {words} words; one sentence of at most {lt.CLAIM_MAX_WORDS}")
+            probs.append(f"{c.id}'s claim is {words} words: \"{c.claim.strip()}\". Say it as"
+                         f" one sentence of at most {lt.CLAIM_MAX_WORDS} words (aim for 20);"
+                         " the detail belongs in the section, not the claim")
         if not c.predict.strip().endswith("?"):
             probs.append(f"{c.id} needs a predict question he answers first")
         quote = _norm(c.evidence_quote)[:160]
@@ -476,10 +490,10 @@ class Writer:
 
     async def plan(self) -> Outline | None:
         problems: list[str] = []
-        for attempt in range(2):
+        for attempt in range(PLAN_ATTEMPTS):
             raw = await _outline_step(self.spec.model, self.m.article, self.m.prompt, problems,
                                       self.m.page)
-            outline = Outline.model_validate(raw)
+            outline = normalize_outline(Outline.model_validate(raw))
             if self.m.article and outline.cannot_write.strip():
                 self.report.append(f"Not written: {outline.cannot_write.strip()}")
                 return None
@@ -493,7 +507,8 @@ class Writer:
             if not problems:
                 return outline
             self.report.append(f"plan attempt {attempt + 1} sent back: " + "; ".join(problems))
-        raise lt.LessonRefused("the plan still fails after a second attempt: " + "; ".join(problems))
+        raise lt.LessonRefused(f"the plan still fails after {PLAN_ATTEMPTS} attempts: "
+                               + "; ".join(problems))
 
     async def write_section(self, i: int, problems: list[str] | None = None) -> str:
         assert self.outline is not None

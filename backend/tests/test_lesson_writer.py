@@ -214,3 +214,19 @@ def test_the_writer_takes_what_tutor_writes(stage: str, source: str | None,
     if source:
         payload["source"] = source
     assert lw.handles(tutor, payload) is expected
+
+
+def test_code_settles_what_code_can_settle_in_a_plan() -> None:
+    plan = _outline()
+    plan["sections"][2] = {"heading": "What this changes in the course", "concept": "c1",
+                           "kind": "orientation", "covers": "the change"}
+    outline = lw.normalize_outline(lw.Outline.model_validate(plan))
+    assert outline.sections[2].concept == "" and outline.sections[2].kind == "orientation"
+    assert lw.outline_problems(outline, NOTE, article=True) == []
+
+
+def test_a_long_claim_is_sent_back_with_the_claim_quoted() -> None:
+    long = " ".join(["word"] * 41)
+    plan = lw.Outline.model_validate(_outline(concepts=[_concept(claim=long)]))
+    probs = lw.outline_problems(plan, NOTE, article=True)
+    assert any(long in p and "aim for 20" in p for p in probs)
