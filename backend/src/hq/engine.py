@@ -7,7 +7,6 @@ the API lifespan BEFORE DBOS.launch(); queues + schedules after.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -30,7 +29,7 @@ from pydantic_ai import Agent, DeferredToolRequests
 from pydantic_ai.durable_exec.dbos import DBOSDurability, StepConfig
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-from hq import board, db, digest, llm, memory, obs, runner, safety
+from hq import board, db, digest, lesson_writer, llm, memory, obs, runner, safety
 from hq import learning_pipeline as learning
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -42,7 +41,7 @@ from hq.job_pipeline import (
     verification_brief,
     verification_payload,
 )
-from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, scan
+from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, bundle_sha, scan
 
 # Doubled 2026-09-10 alongside high reasoning effort and tripled call caps: a
 # run that thinks harder and calls more tools needs the wall clock to match, or
@@ -107,10 +106,8 @@ ARTIFACT_TOOLS = (
     # and its task showed as blocked on the board.
     "write_lesson",
     "record_lesson",
-    # A lab is an artifact, and so is a review verdict: a reviewer that ran
-    # the lab and recorded "revise" did its job, and must not show as blocked.
+    # A lab is an artifact.
     "write_lab_files",
-    "record_review",
     "vault_write",
     "record_fact",
     "create_subtask",
@@ -294,8 +291,7 @@ async def dispatch(
 
 
 _COURSE_STAGES = frozenset({
-    learning.COURSE_STAGE, learning.COURSE_WRITTEN_STAGE, learning.COURSE_REVIEW_STAGE,
-    learning.CLAIMS_STAGE,
+    learning.COURSE_STAGE, learning.COURSE_WRITTEN_STAGE,
 })
 
 
@@ -445,6 +441,10 @@ async def run_task(task_id: str) -> str:
                 return "blocked: not approved"
             outcome = await runner.execute_external(spec, prompt=prompt, deps=deps)
             outcome = await _file_external_output(spec, task_id, run_id, outcome)
+        elif lesson_writer.handles(spec, task["payload"]):
+            # A course phase or an article: outline, sections, assembly and a
+            # citation pass, each a bounded call, instead of one agent loop.
+            outcome = await lesson_writer.write(task, spec, deps)
         else:
             outcome = await runner.execute(agent, spec, prompt=prompt, deps=deps)
     except Exception as exc:  # noqa: BLE001 — a run must never wedge the board
@@ -1298,54 +1298,6 @@ async def _found_count_step(phase_slug: str) -> int:
 
 
 @DBOS.step()
-async def _course_review_state_step(slug: str) -> dict[str, Any]:
-    """The verdict the reviewer recorded on the newest lesson for a phase."""
-    row = await db.fetchone(
-        "SELECT review_status, review_notes, review_round FROM hq.lessons"
-        " WHERE kind = 'course' AND course_slug = %s ORDER BY created_at DESC LIMIT 1",
-        (slug,),
-    )
-    return dict(row) if row else {}
-
-
-@DBOS.step()
-async def _mark_review_failed_step(slug: str) -> None:
-    await db.execute(
-        "UPDATE hq.lessons SET review_status = 'failed' WHERE id = ("
-        " SELECT id FROM hq.lessons WHERE kind = 'course' AND course_slug = %s"
-        " ORDER BY created_at DESC LIMIT 1)",
-        (slug,),
-    )
-
-
-@DBOS.step()
-async def _flag_unverified_claims_step(slug: str, failures: list[dict[str, Any]]) -> None:
-    """Put the claims that still do not match their sources on the lesson.
-
-    The rounds are capped so a disagreement between two model runs cannot loop
-    for ever. What the cap must not do is lose the finding: on 2026-09-20 the
-    second check on Phase 2A found two claims that misread their sources, the
-    branch asked the board for done -> blocked, which is not a legal
-    transition, and the note went nowhere. He read the page believing every
-    added fact had been checked. So the finding goes on the lesson he reads,
-    and the Courses gate holds the next phase until he has decided.
-    """
-    notes = "\n".join(
-        f"- {f.get('id', '?')}: {f.get('problem', '')}".strip() + (
-            f"\n  fix: {f['fix']}" if f.get("fix") else "")
-        for f in failures
-    )
-    await db.execute(
-        "UPDATE hq.lessons SET review_status = 'revise',"
-        " review_notes = left(%s, 4000) WHERE id = ("
-        " SELECT id FROM hq.lessons WHERE kind = 'course' AND course_slug = %s"
-        " ORDER BY created_at DESC LIMIT 1)",
-        ((f"{len(failures)} added claim(s) still do not match their sources"
-          f" after a fix round:\n{notes}"), slug),
-    )
-
-
-@DBOS.step()
 async def _learning_requests_step() -> list[str]:
     """What he asked to learn about, for the scan brief."""
     from hq.tools.learning_tools import open_requests
@@ -1426,25 +1378,6 @@ async def _course_shape_step(course: str, slug: str) -> list[dict[str, Any]]:
             "sections": "; ".join(str(x)[:60] for x in (sections or [])[:8]),
         })
     return out
-
-
-@DBOS.step()
-async def _new_claims_step(slug: str) -> list[dict[str, Any]]:
-    """The facts the lesson states that his own phase did not, with their links."""
-    from hq.tools.learning_tools import new_claims, read_course_source_text
-
-    row = await db.fetchone(
-        "SELECT l.html_path FROM hq.lessons l WHERE l.course_slug = %s AND l.kind = 'course'"
-        " AND l.html_path <> ''", (slug,))
-    path = str((row or {}).get("html_path") or "")
-    if not path:
-        return []
-    full = (settings().learning_dir.parent / path).resolve()
-    if not full.is_file():
-        return []
-    page = await asyncio.to_thread(full.read_text)
-    source = await asyncio.to_thread(read_course_source_text, slug)
-    return new_claims(source, page)
 
 
 @DBOS.step()
@@ -1643,128 +1576,10 @@ async def _advance_learning(
         )
 
     if learning.is_course_written(payload):
-        # A written phase is not finished until it has been checked by a run
-        # that did not write it. That is a fresh tutor task, not a separate
-        # agent: task runs start with no message history, so the review run
-        # has no memory of the plan it would otherwise defend. The tools keep
-        # the two jobs apart (see learning_tools.current_task_stage).
-        if result != "done":
-            return None
-        if payload.get("source") == "platform":
-            # The phase itself went through the /study review, and the page is
-            # checked by code. What nobody has read is what Mission HQ added:
-            # a claim in one of those boxes reaches him unexamined. One run
-            # opens every url they cite and checks the claim against it.
-            if "hunter" not in AGENTS:
-                return None
-            additions = await _new_claims_step(str(payload.get("slug") or ""))
-            if not additions:
-                return None
-            claims = learning.claims_payload(payload, int(payload.get("claims_round") or 0))
-            return await dispatch(
-                agent="hunter",
-                title=f"Check the additions: {str(payload.get('title') or '')[:48]}",
-                brief=learning.claims_brief(claims, additions),
-                source="agent",
-                parent_task_id=task_id,
-                origin_session_id=task.get("origin_session_id"),
-                payload={**claims, "run_id": run_id},
-                dedup_key=f"course-claims:{task_id}",
-            )
-
-    if learning.is_claims_check(payload):
-        if result != "done":
-            return None
-        failures = learning.extract_claim_failures(output)
-        round_ = int(payload.get("claims_round") or 0)
-        if not failures:
-            return None
-        if round_ + 1 >= learning.MAX_CLAIMS_ROUNDS:
-            # No status here: this task is already done, and done -> blocked is
-            # not a legal transition, so asking for one only logged a warning
-            # and lost the finding. The lesson carries it instead.
-            slug = str(payload.get("slug") or "")
-            await _flag_unverified_claims_step(slug, failures)
-            await board.apply(
-                task_id, "noted",
-                data={"reason": f"{len(failures)} claim(s) on {slug} still do not"
-                                " match their sources after a fix. The lesson is marked"
-                                " for revision and the findings are on it",
-                      "claims": failures[:10]},
-            )
-            return None
-        return await dispatch(
-            agent="tutor",
-            title=f"Fix {len(failures)} claim(s): {str(payload.get('title') or '')[:40]}",
-            brief=learning.claims_revision_brief(payload, failures),
-            source="agent",
-            parent_task_id=task_id,
-            origin_session_id=task.get("origin_session_id"),
-            payload={**payload, "run_id": run_id,
-                     "stage": learning.COURSE_WRITTEN_STAGE,
-                     "claims_round": round_ + 1},
-            dedup_key=f"course-claims-fix:{task_id}",
-        )
-        if "tutor" not in AGENTS:
-            await board.apply(
-                task_id, "noted",
-                data={"reason": f"{payload.get('slug')} was written but tutor is not"
-                                " loaded, so it has not been reviewed"},
-            )
-            return None
-        prior = await _course_review_state_step(str(payload.get("slug") or ""))
-        return await dispatch(
-            agent="tutor",
-            title=f"Review: {str(payload.get('title') or payload.get('slug'))[:56]}",
-            brief=learning.course_review_brief(payload, int(payload.get("round") or 0)),
-            source="agent",
-            parent_task_id=task_id,
-            origin_session_id=task.get("origin_session_id"),
-            payload={**payload, "run_id": run_id, "stage": learning.COURSE_REVIEW_STAGE,
-                     "review_round_before": int(prior.get("review_round") or 0)},
-            dedup_key=f"course-review:{task_id}",
-        )
-
-    if learning.is_course_review(payload):
-        if result != "done":
-            return None
-        slug = str(payload.get("slug") or "")
-        state = await _course_review_state_step(slug)
-        action = learning.review_next_action(state, payload)
-        if action == "passed":
-            return None
-        if action == "no_verdict":
-            await board.apply(
-                task_id, "noted", status="blocked",
-                data={"reason": f"the review of {slug} finished without recording a new verdict"},
-            )
-            return None
-        round_ = int(payload.get("round") or 0) + 1
-        if action == "failed":
-            # Bounded on purpose. A phase that fails review three times needs a
-            # person, not a fourth pass of the same writer.
-            await _mark_review_failed_step(slug)
-            await board.apply(
-                task_id, "noted", status="blocked",
-                data={"reason": f"{slug} still failed review after "
-                                f"{learning.MAX_REVIEW_ROUNDS} revisions; the findings "
-                                "are on the lesson"},
-            )
-            return None
-        return await dispatch(
-            agent="tutor",
-            title=f"Revise: {str(payload.get('title') or slug)[:56]}",
-            brief=learning.course_revision_brief(
-                payload, str(state.get("review_notes") or ""), round_
-            ),
-            source="agent",
-            parent_task_id=task_id,
-            origin_session_id=task.get("origin_session_id"),
-            # Back to the written stage, so the revision is reviewed in turn.
-            payload={**payload, "run_id": run_id,
-                     "stage": learning.COURSE_WRITTEN_STAGE, "round": round_},
-            dedup_key=f"course-revise:{task_id}",
-        )
+        # Nothing follows a written phase. The staged writer checked its plan,
+        # every part, the whole page, and every sentence against the study
+        # note before recording it; what did not map is on the lesson.
+        return None
 
     if learning.is_deep_study(payload):
         urls = [str(u) for u in (payload.get("urls") or [])]
@@ -1955,10 +1770,10 @@ async def _deliver_task_result_step(
 @DBOS.step()
 async def _start_run(task_id: str | None, spec: AgentSpec) -> str:
     row = await db.fetchone(
-        "INSERT INTO hq.runs (task_id, wf_id, agent, model, job_hash)"
-        " VALUES (%s, %s, %s, %s, %s) RETURNING id::text",
+        "INSERT INTO hq.runs (task_id, wf_id, agent, model, job_hash, bundle_sha)"
+        " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id::text",
         (task_id, DBOS.workflow_id, spec.name, llm.registry().canonical(spec.model),
-         spec.job_hash),
+         spec.job_hash, bundle_sha(spec)),
     )
     assert row is not None
     await runner.emit_step("run.started", run_id=row["id"], task_id=task_id, agent=spec.name)

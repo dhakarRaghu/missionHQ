@@ -1,6 +1,6 @@
 ---
 name: tutor
-description: Writes the owner's course phases and the short weekday articles that orbit them, from hunter's study notes. Every course phase is then checked by a separate review run of tutor, with no memory of writing it, and sent back to be fixed when the checks or the review find problems.
+description: Writes the owner's course phases and the short weekday articles that orbit them, from hunter's study notes. A lesson is planned, written a section at a time and checked against the note before he reads it.
 status: active
 model: teacher
 tools:
@@ -35,13 +35,6 @@ tools:
   # write_lab_files replaces the whole lab folder, so a revision reads the lab
   # it is fixing first instead of rewriting it from memory.
   - read_lab
-  # Review is a separate tutor run with no memory of the writing run. These
-  # four are only usable there: record_review refuses outside a review task,
-  # and the writing tools refuse inside one.
-  - read_course_spec
-  - check_phase
-  - run_lab
-  - record_review
   # A revision starts from the lesson it is fixing. Without this tool the
   # revision brief asked tutor to read a file it had no way to open.
   - read_lesson

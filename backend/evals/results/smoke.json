@@ -1,0 +1,52 @@
+{
+ "label": "smoke",
+ "at": "2026-09-23T11:54:42.130538+05:30",
+ "results": [
+  {
+   "id": "sage-handover-is-the-answer",
+   "agent": "sage",
+   "source": "On 2026-09-08 sage delegated, then polled read_activity until the run was judged stalled. A handover is the whole answer: who it went to, what was asked, where it lands; then stop.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": true,
+     "failures": [],
+     "output": "Done. To restate the complete answer:\n\n- **Agent:** operator (task `eval-task-1`) \u2014 LinkedIn work, so hunter is ruled out in code.\n- **Asked for in full:** two referrable people on Razorpay's AI platform/AI-engineering side (not the ~4-year-bar FDE track), India-based and ideally Bengaluru, each with title/team, connection degree to you, and one line of shared ground. Read-only; nothing sent, no connections initiated.\n- **Where it lands:** quarantine/ first, and the finished result posts back into this chat automatically \u2014 nothing for you to fetch or check.\n\nWhen it comes back with names I can hand the shared-ground digging and a draft referral message to hunter, so it's ready to send.",
+     "calls": [
+      {
+       "tool": "load_skill",
+       "args": {
+        "name": "job-search"
+       },
+       "ok": true,
+       "result": "{\"eval\": \"no data for this tool in this evaluation\"}"
+      },
+      {
+       "tool": "create_subtask",
+       "args": {
+        "title": "Find 2 referrable people on Razorpay's AI platform (LinkedIn)",
+        "agent": "operator",
+        "brief": "Read-only LinkedIn task, one answer needed.\n\nGoal: the owner (Raghvendra, Product Engineer I at Juspay, job hunting) wants two people at Razorpay who work on Razorpay's AI platform (their internal AI/LLM platform, GenAI, or AI engineering org \u2014 not the FDE-support track) and who could credibly refer him.\n\nSteps:\n1. Open the Razorpay company page on LinkedIn (linkedin.com/company/razorpay) and its People tab.\n2. Search LinkedIn for current Razorpay employees with titles like AI Engineer, ML Engineer, Applied AI, GenAI, Platform (AI), Forward Deployed. Locations should be India (Bengaluru preferred).\n3. For each plausible person, record: full name, current title/team at Razorpay, whether they are a 1st-degree connection of the owner (yes/no / degree shown), location, and one line of shared ground (Juspay/payments background, Bengaluru, school, past employer, mutual connections if visible).\n\nReturn: the two best candidates ranked, with a one-line reason each for why they could refer (e.g. direct connection vs 2nd-degree with shared employer). If none are 1st-degree, still return the best two with degree shown. Keep it under 15 lines. Do not open profiles of anyone outside Razorpay, do not send anything, do not connect \u2014 read-only."
+       },
+       "ok": true,
+       "result": "{\"task_id\": \"eval-task-1\", \"status\": \"backlog\"}"
+      },
+      {
+       "tool": "vault_write",
+       "args": {
+        "path": "memory/agents/sage.md",
+        "content": "# sage notebook\n\n## Last run: 2026-09-23 ~11:51 Razorpay referral handover\n- Owner asked: find 2 people at Razorpay on the AI platform who could refer him.\n- Routed to operator (task eval-task-1): LinkedIn = operator-only; bridge back\n  since 09-18 so referral checks run. Read-only brief: Razorpay company page +\n  People tab, AI/ML/GenAI titles, India/Bengaluru, return 2 best ranked with\n  connection degree + shared ground. Answer comes back into chat via quarantine/.\n- job-search skill loaded: no content. Routing by rules.\n\n## Carried (still live)\n- Course chain + weekday article chain gated on owner reading + marking\n  Phase 2A. 2A->2B sequence pointer bug still open for owner/tutor.\n- Operator backlog: job discovery 98021639, feeds read abf6fe02, own X\n  numbers d80e3079. One prior feed read died on 429.\n- Apply queue: BJAK first, then Rippling/Visa/Cloudflare/Adobe/Cardboard 9s,\n  Docusign, ThoughtSpot. None applied. LinkedIn postings expire silently \u2014\n  operator re-verify of the 4 LinkedIn-sourced 9s before applying.\n- Razorpay context: FDE track has ~4-yr bar; AI-platform lane is the opening.\n- YC-India rotation exhausted, 6th zero run; owner decision pending (stop?).\n- Daily note 09-22 written (~02:25); no daily note on 09-21 (gap, cause unknown).\n- 04:28 run: dispatched 2 operator requests (Barclays Pune LI 4467616590 years\n  bar -> 408133cb; BJAK AAE dup/years 4468357952 -> 2800c112).\n\n## Open questions for owner\n- Read + mark the Phase 2A lesson? (unblocks both learning chains)\n- Apply to top four this week?\n- Stop YC-India rotation? (now 6th straight zero)\n- Post the return post? (17 days; scout's new #1, the sweep off-switch, 62)\n- Optifye.ai founding exception y/n; Jobgether y/n.\n"
+       },
+       "ok": true,
+       "result": "{\"ok\": true, \"eval\": \"recorded, not performed\"}"
+      }
+     ],
+     "seconds": 195.2,
+     "cost_usd": 0.0274,
+     "error": null
+    }
+   ],
+   "passed": true
+  }
+ ]
+}

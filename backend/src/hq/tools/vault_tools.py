@@ -42,7 +42,7 @@ def _folder_entries(path: str) -> list[str]:
 # failed reads in one run). Name the tool that does reach them.
 _REPO_PATHS = {
     "learning/lessons": "lessons are read with read_lesson; list_lessons gives the paths",
-    "learning/courses": "course specs are read with read_course_spec",
+    "learning/courses": "course specs are not read by agents",
     "learning/study-material": "course sources are read with read_course_source",
     "learning/sources.md": "the roster is not readable by a tool; the part you need"
                            " arrives inside your brief",

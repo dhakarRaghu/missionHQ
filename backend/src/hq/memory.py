@@ -34,7 +34,12 @@ from hq.config import settings
 log = logging.getLogger(__name__)
 
 # Core memory blocks: hard size caps are the feature (Letta lesson).
-BLOCK_CAPS = {"memory/user.md": 4000, "memory/active_projects.md": 6000, "memory/rules.md": 4000}
+BLOCK_CAPS = {
+    "memory/user.md": 4000,
+    "memory/decisions.md": 4000,
+    "memory/active_projects.md": 4000,
+    "memory/rules.md": 4000,
+}
 # Per-agent working memory: memory/agents/<name>.md. One small block an agent
 # rewrites at the end of every run so it never forgets its own last run. It is
 # the agent's own scratch, not trusted shared memory: never injected into
@@ -45,7 +50,7 @@ _WORKING_MEMORY_RE = re.compile(r"^memory/agents/([A-Za-z0-9_-]+)\.md$")
 
 # Blocks no agent may write. Rules come only from the owner (policy tools or a
 # direct edit), so a poisoned or over-eager run can never mint a standing rule.
-OWNER_ONLY = frozenset({"memory/rules.md"})
+OWNER_ONLY = frozenset({"memory/rules.md", "memory/decisions.md"})
 MEMORY_PREFIX = "memory/"
 # Destructive-edit gate: a rewrite of a memory note that drops more than this
 # share of its existing non-empty lines is refused (write-time consolidation
@@ -444,12 +449,15 @@ def block_status() -> list[dict]:
     return rows
 
 
-def load_core_blocks() -> str:
-    """Concatenated memory blocks injected into every agent's instructions.
+def load_core_blocks(names: list[str] | None = None) -> str:
+    """Memory blocks injected into an agent's instructions. ``names`` picks
+    blocks by file stem ("user", "decisions", ...); None means every block.
     Each heading carries ``(N/CAP chars)`` so agents see how full a block is
     before they try to add to it."""
     parts = []
     for rel, cap in BLOCK_CAPS.items():
+        if names is not None and Path(rel).stem not in names:
+            continue
         p = _vault() / rel
         if p.exists():
             text = p.read_text()
