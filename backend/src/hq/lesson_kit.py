@@ -373,6 +373,103 @@ KIT_JS = """
 })();
 """
 
+# The per-concept tap: "Got it" / "Lost me" under each idea on the concept
+# list and at the end of each section that teaches one. The page cannot keep
+# the answer itself: it has no network (its own content policy) and no
+# storage (the frame has no origin). So it tells the page around it, the
+# console or the phone reader, and that page decides where the answer goes.
+# The outer page may send the stored answers back so the buttons show them.
+# Self-contained, styles included, because `with_taps` also adds it to pages
+# written before it existed, and those carry an older stylesheet.
+KIT_TAPS_JS = """
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+"""
+# An attribute, not an id: the page check counts ids, and this must never be
+# the reason a page is refused.
+TAPS_MARKER = 'data-hq="concept-taps"'
+TAPS_SCRIPT = f"<script {TAPS_MARKER}>{KIT_TAPS_JS}</script>"
+
+_CONCEPTS_RE = re.compile(r"""<ol\b[^>]*\bclass\s*=\s*["'][^"']*\bconcepts\b""", re.IGNORECASE)
+_BODY_END_RE = re.compile(r"</body\s*>", re.IGNORECASE)
+
+
+def has_concepts(html: str) -> bool:
+    """Whether the page opens with a concept list, which is what a tap answers."""
+    return bool(_CONCEPTS_RE.search(html))
+
+
+def with_taps(html: str) -> str:
+    """The page with the tap script, when it has a concept list to tap.
+
+    A page without `<ol class="concepts">` is returned unchanged: an older
+    page has no ideas to answer for. A page that already carries the script
+    (every page `wrap_page` writes now) is left alone too.
+    """
+    if TAPS_MARKER in html or not has_concepts(html):
+        return html
+    ends = list(_BODY_END_RE.finditer(html))
+    if ends:
+        at = ends[-1].start()
+        return html[:at] + TAPS_SCRIPT + html[at:]
+    return html + TAPS_SCRIPT
+
+
 _DOCTYPE_RE = re.compile(r"^\s*<!doctype", re.IGNORECASE)
 
 
@@ -413,5 +510,6 @@ def wrap_page(
         '<div id="progress"></div>\n<div class="layout">\n'
         '<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>\n'
         f"<main>\n{hero}\n{body}\n</main>\n</div>\n<script>{KIT_JS}</script>\n"
-        "</body>\n</html>\n"
+        + (TAPS_SCRIPT + "\n" if has_concepts(body) else "")
+        + "</body>\n</html>\n"
     )

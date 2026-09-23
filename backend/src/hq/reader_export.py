@@ -24,8 +24,14 @@ the place that changes them.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
+import logging
+import os
 import shutil
+import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,7 +39,12 @@ from typing import Any
 from hq import db
 from hq.config import REPO_DIR, settings
 
+log = logging.getLogger(__name__)
+
 READER_DIR = REPO_DIR / "frontend" / "public" / "reader"
+READER_BRANCH = "reader"
+FINGERPRINT_TRAILER = "Reader-Fingerprint"
+GIT_TIMEOUT_S = 120
 
 
 def _page_file(html_path: str) -> Path | None:
@@ -171,3 +182,152 @@ async def build(target: Path | None = None) -> dict[str, Any]:
         "pages": copied,
         "bytes": sum(f.stat().st_size for f in pages.iterdir()),
     }
+
+
+# --- nightly publishing -----------------------------------------------------
+#
+# The loop he ran by hand was export, commit, push. Done nightly, a commit on
+# `main` would be wrong twice over: `git add` in his working tree can sweep
+# up his half-done work, and a bot commit ahead of his HEAD makes him rebase
+# every morning. So the bundle goes to its own branch, `reader`, which Vercel
+# deploys from, and it gets there without the working tree or `main` being
+# touched: the files are hashed into the object store, a tree is built in a
+# throwaway index, and the commit is made with `commit-tree` onto the
+# branch's previous commit. Nothing is checked out, nothing is staged in his
+# index, and HEAD does not move.
+#
+# The tree is the app as it was last pushed (`origin/main`: already public,
+# so nothing unpushed leaves this machine) with `frontend/public/reader`
+# replaced by tonight's bundle. A commit is made only when the bundle's
+# content changed; `built_at` changes every run and is left out of that
+# comparison, so an unchanged library makes no commit and no Vercel build.
+
+
+def fingerprint(bundle: Path) -> str:
+    """A hash of what the phone would show: every file in the bundle, with
+    `index.json`'s `built_at` left out."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in bundle.rglob("*") if p.is_file()):
+        rel = path.relative_to(bundle).as_posix()
+        data = path.read_bytes()
+        if rel == "index.json":
+            try:
+                index = json.loads(data)
+                index.pop("built_at", None)
+                data = json.dumps(index, sort_keys=True).encode()
+            except (ValueError, AttributeError):
+                pass
+        digest.update(rel.encode() + b"\0" + hashlib.sha256(data).digest())
+    return digest.hexdigest()
+
+
+def _git(repo: Path, *args: str, env: dict[str, str] | None = None,
+         stdin: str | None = None, check: bool = True) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args], input=stdin, capture_output=True, text=True,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0", **(env or {})},
+        timeout=GIT_TIMEOUT_S, check=False,
+    )
+    if check and result.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args[:2])} failed: {result.stderr.strip()[:400]}")
+    return result.stdout.strip()
+
+
+def _rev(repo: Path, ref: str) -> str:
+    """The commit a ref names, or "" when it does not exist."""
+    return _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False)
+
+
+def _identity(repo: Path) -> dict[str, str]:
+    """His configured identity when there is one; a named bot otherwise, so a
+    machine without `user.email` still commits."""
+    if _git(repo, "config", "user.email", check=False):
+        return {}
+    return {"GIT_AUTHOR_NAME": "Mission HQ", "GIT_AUTHOR_EMAIL": "hq@localhost",
+            "GIT_COMMITTER_NAME": "Mission HQ", "GIT_COMMITTER_EMAIL": "hq@localhost"}
+
+
+def publish_to_branch(bundle: Path, *, repo: Path = REPO_DIR, branch: str = READER_BRANCH,
+                      remote: str = "origin", prefix: str = "frontend/public/reader",
+                      base: str = "main", push: bool = True) -> dict[str, Any]:
+    """Commit `bundle` at `prefix` on `branch` and push it, when it changed.
+
+    Returns what happened: `committed` (the new commit or ""), `pushed`,
+    `fingerprint`, and `error` when a step failed. Never raises: it runs
+    inside the nightly tick, and a failed push (no network, no credential)
+    must not cost the night anything else. A commit that could not be pushed
+    stays on the local branch and goes out with the next run that can push.
+    """
+    out: dict[str, Any] = {"branch": branch, "committed": "", "pushed": False,
+                           "fingerprint": "", "error": ""}
+    try:
+        if not bundle.is_dir():
+            raise RuntimeError(f"no bundle at {bundle}")
+        prefix = prefix.strip("/")
+        fp = fingerprint(bundle)
+        out["fingerprint"] = fp
+        local = _rev(repo, f"refs/heads/{branch}")
+        parent = local or _rev(repo, f"refs/remotes/{remote}/{branch}")
+        previous = _git(repo, "log", "-1", "--format=%B", parent, check=False) if parent else ""
+        if f"{FINGERPRINT_TRAILER}: {fp}" not in previous:
+            base_commit = (_rev(repo, f"refs/remotes/{remote}/{base}") or parent
+                           or _rev(repo, f"refs/heads/{base}"))
+            if not base_commit:
+                raise RuntimeError(f"nothing to build on: no {remote}/{base}, {branch} or {base}")
+            tree = _bundle_tree(repo, bundle, prefix, base_commit)
+            count = sum(1 for p in bundle.rglob("*") if p.is_file())
+            message = (f"Reader bundle, {datetime.now().astimezone():%Y-%m-%d %H:%M}\n\n"
+                       f"{count} file(s) at {prefix}, on {base_commit[:12]}.\n\n"
+                       f"{FINGERPRINT_TRAILER}: {fp}\n")
+            commit = _git(repo, "commit-tree", tree, *(["-p", parent] if parent else []),
+                          "-F", "-", env=_identity(repo), stdin=message)
+            # The old value makes this a compare-and-swap: if anything moved
+            # the branch meanwhile, this fails instead of dropping its commit.
+            _git(repo, "update-ref", f"refs/heads/{branch}", commit, local or "0" * 40)
+            out["committed"] = commit
+        tip = _rev(repo, f"refs/heads/{branch}")
+        if push and tip and tip != _rev(repo, f"refs/remotes/{remote}/{branch}"):
+            _git(repo, "push", "--quiet", remote, f"refs/heads/{branch}:refs/heads/{branch}")
+            out["pushed"] = True
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        out["error"] = str(exc)[:500]
+        log.warning("reader: publish to %s failed: %s", branch, exc)
+    return out
+
+
+def _bundle_tree(repo: Path, bundle: Path, prefix: str, base_commit: str) -> str:
+    """The base commit's tree with `prefix` replaced by the bundle, built in a
+    throwaway index so his own index and working tree are never read or written."""
+    files = sorted(p for p in bundle.rglob("*") if p.is_file())
+    with tempfile.TemporaryDirectory(prefix="hq-reader-index-") as tmp:
+        env = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
+        _git(repo, "read-tree", base_commit, env=env)
+        old = _git(repo, "ls-files", "-z", "--", prefix, env=env)
+        if old:
+            _git(repo, "update-index", "-z", "--force-remove", "--stdin", env=env, stdin=old)
+        blobs = _git(repo, "hash-object", "-w", "--no-filters", "--stdin-paths",
+                     stdin="".join(f"{p}\n" for p in files)).splitlines() if files else []
+        entries = "".join(
+            f"100644 {sha}\t{prefix}/{p.relative_to(bundle).as_posix()}\0"
+            for p, sha in zip(files, blobs, strict=True))
+        if entries:
+            _git(repo, "update-index", "-z", "--index-info", env=env, stdin=entries)
+        return _git(repo, "write-tree", env=env)
+
+
+async def publish_nightly() -> dict[str, Any]:
+    """Build the bundle and publish it to the `reader` branch. Never raises.
+
+    Built into a temporary folder, not `frontend/public/reader`: that folder
+    is tracked on `main`, and rewriting it every night would leave his
+    working tree dirty. `export-reader` still writes it for a manual run.
+    """
+    try:
+        with tempfile.TemporaryDirectory(prefix="hq-reader-") as tmp:
+            made = await build(Path(tmp) / "reader")
+            result = await asyncio.to_thread(publish_to_branch, Path(made["dir"]))
+            return {**result, "pages": made["pages"]}
+    except Exception as exc:
+        log.warning("reader: nightly export failed", exc_info=True)
+        return {"branch": READER_BRANCH, "committed": "", "pushed": False,
+                "fingerprint": "", "error": str(exc)[:500]}

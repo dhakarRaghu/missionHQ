@@ -43,7 +43,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.usage import UsageLimits
 
-from hq import db, llm, memory
+from hq import db, llm, memory, signals
 from hq import learning_pipeline as learning
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -270,9 +270,11 @@ async def gather(payload: dict[str, Any]) -> Material:
         note_path, note = await _study_note(slug)
         sequence = await _course_sequence(str(payload.get("course") or ""), slug)
         articles = await _articles_on(slug)
+        lost = await signals.lost_material(str(payload.get("course") or ""), slug)
         prompt = (
             f"# The phase: {payload.get('title')} ({slug})\n\n"
             f"{payload.get('summary') or ''}\n\n{sequence}\n\n"
+            + (f"{lost}\n\n" if lost else "")
             + (f"He has already read these articles on this phase; do not retell"
                f" them:\n{articles}\n\n" if articles else "")
             + f"## Hunter's study note ({note_path})\n\n{note[:NOTE_CHARS]}\n\n"

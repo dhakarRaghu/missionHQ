@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from hq import board, db, engagement, safety
+from hq import board, db, engagement, safety, value
 from hq.api.deps import require_auth
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -515,6 +515,14 @@ async def start_value_week() -> dict:
     same shape as GET /engagement."""
     await engagement.start_value_week()
     return await engagement.value_week_status()
+
+
+@router.get("/value/week", operation_id="getValueWeek")
+async def get_value_week() -> dict:
+    """The past seven days: lessons written vs read, concept taps, jobs he
+    moved, content ideas vs drafts, model spend and cost per lesson. Counts
+    from the tables, no model call."""
+    return await value.week_report()
 
 
 @router.get("/agents", operation_id="listAgents")
