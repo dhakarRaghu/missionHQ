@@ -44,12 +44,18 @@ from hq.dbos_app import DBOS
 from hq.loader import AgentSpec
 from hq.obs import emit
 from hq.runtimes import claude_cli, codex_cli
+from hq.tools import registry
 from hq.tools.registry import TOOL_REGISTRY, HQDeps
 
 log = logging.getLogger(__name__)
 
 APPROVAL_TOPIC = "approval"
-APPROVAL_TIMEOUT_S = 86400  # 24h total; after that the run is blocked
+# 30 minutes, inside the 40-minute task cap. DBOS cancels a workflow at its
+# deadline even while it waits in recv, so a 24-hour wait was really a
+# 40-minute one that ended in a cancelled run and a ticket left open. At the
+# deadline a tool call waiting on him is refused and the run carries on
+# without it; a browser run that was never approved ends blocked.
+APPROVAL_TIMEOUT_S = 1800
 APPROVAL_POLL_S = 60        # one recv round; the ticket table is re-read each round
 MAX_RESUME_ROUNDS = 5       # hard stop against approval/answer loops
 REQUEST_LIMIT = 90          # model requests per run (x3 with the caps, 2026-09-10 —
@@ -704,8 +710,11 @@ async def execute(
     """One agent run. Every model call made inside it, the judges' and the
     web reader's included, is recorded against this run in hq.model_calls."""
     with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent=spec.name):
-        return await _execute(agent, spec, prompt=prompt, deps=deps,
-                              message_history=message_history)
+        try:
+            return await _execute(agent, spec, prompt=prompt, deps=deps,
+                                  message_history=message_history)
+        finally:
+            registry.forget_run(deps.run_id)
 
 
 async def _execute(
@@ -815,7 +824,7 @@ async def _execute(
             )
             if verdicts is None:
                 return await finish(
-                    "approval timed out", "blocked", error="approval ticket expired after 24h",
+                    "approval expired", "blocked", error="an approval ticket was expired",
                 )
             if rounds >= MAX_RESUME_ROUNDS:
                 return await finish(
@@ -836,6 +845,13 @@ async def _execute(
             return await finish(output, "done", messages_json=messages_json)
 
         tool_lines = _tool_call_lines(result.new_messages())
+        # Stalls are detected in code: the judge is asked only when the run
+        # repeated a call exactly. A run that did distinct work and stopped is
+        # done; the artifact assertion catches one that claims done and wrote
+        # nothing. The judge used to run after every round and said
+        # "satisfied" 91.5% of the time.
+        if registry.run_repeats(deps.run_id) == 0:
+            return await finish(output, "done", messages_json=messages_json)
         if any(line.split("(", 1)[0] in HANDOVER_TOOLS for line in tool_lines):
             await emit_step("ledger", run_id=deps.run_id, task_id=deps.task_id,
                             agent=spec.name, payload={
@@ -985,10 +1001,11 @@ async def _await_approvals(
         else:
             await asyncio.sleep(APPROVAL_POLL_S)
 
-    if pending:  # deadline reached with tickets still open
-        for ticket_id in list(pending):
+    if pending:  # deadline reached with tickets still open: refuse, carry on
+        for ticket_id, call_id in list(pending.items()):
             await expire_ticket_step(ticket_id, "timeout")
-        expired = True
+            verdicts[call_id] = False
+        pending.clear()
     if expired:
         return None
     if deps.task_id:

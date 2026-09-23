@@ -538,14 +538,19 @@ async def run_task(task_id: str) -> str:
         task_id, run_id, agent_name, result, delivered_output
     )
     await enqueue_agent_tasks(run_id)
-    if task["source"] == "cron" and await safety.notification_budget_left():
+    # One owner-facing voice. A scheduled run that went well is in the daily
+    # note and the digest; it was the largest source of the notifications the
+    # daily cap held back. His phone hears from the engine only when a
+    # scheduled run failed, was blocked, or claimed done and wrote nothing.
+    if (task["source"] == "cron" and result != "done"
+            and await safety.notification_budget_left()):
         # A card, not a paste. The answer is the agent's own markdown, and
         # Telegram renders a small HTML subset — sent raw it arrived as
         # literal ** and ## around the words meant to stand out, which is a
         # wall of punctuation to read on a phone.
         from hq.channels import cards
 
-        icon = "⚠️" if result == "no_artifact" else "🟢"
+        icon = "⚠️"
         footer = f"{outcome.cost_usd:.4f} USD"
         if result == "no_artifact":
             footer = f"claimed done but wrote nothing · {footer}"

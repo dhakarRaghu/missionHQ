@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hashlib
 import inspect
 import json
 import logging
@@ -110,6 +111,34 @@ def _run_context(args: tuple[Any, ...]) -> Any:
     return deps if isinstance(deps, HQDeps) else None
 
 
+# Identical calls per run: (tool, hash of arguments) -> count. A model that
+# repeats the same call is looping; the answer will not change. The third
+# identical call is refused with a note the model can act on, and the runner
+# asks the judge whether the run has stalled only when this count is set.
+REPEAT_REFUSED_AT = 3
+_repeats: dict[str, dict[tuple[str, str], int]] = {}
+
+
+def note_call(run_id: str, tool_name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> int:
+    key = hashlib.sha1(
+        json.dumps([args, kwargs], default=str, sort_keys=True).encode()).hexdigest()
+    counts = _repeats.setdefault(run_id, {})
+    counts[(tool_name, key)] = counts.get((tool_name, key), 0) + 1
+    return counts[(tool_name, key)]
+
+
+def run_repeats(run_id: str | None) -> int:
+    """How many calls in this run repeated an earlier call exactly."""
+    if not run_id:
+        return 0
+    return sum(n - 1 for n in _repeats.get(run_id, {}).values() if n > 1)
+
+
+def forget_run(run_id: str | None) -> None:
+    if run_id:
+        _repeats.pop(run_id, None)
+
+
 def _audited(tool_name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
     """Emit one ``tool.called`` hq.events row per call. Logging must never
     break the tool: emit failures are swallowed and the tool result (or its
@@ -122,6 +151,17 @@ def _audited(tool_name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
         error: str | None = None
         result: Any = None
         try:
+            deps_now = _run_context(args)
+            if deps_now is not None and deps_now.run_id:
+                n = note_call(deps_now.run_id, tool_name, args[1:], kwargs)
+                if n >= REPEAT_REFUSED_AT:
+                    from pydantic_ai import ModelRetry
+
+                    raise ModelRetry(
+                        f"you have called {tool_name} with exactly these arguments"
+                        f" {n - 1} times already; the answer will not change. Use what"
+                        " it returned, change the arguments, or finish and say what is"
+                        " missing.")
             result = await fn(*args, **kwargs)
             return result
         except BaseException as exc:
