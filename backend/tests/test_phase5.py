@@ -57,3 +57,14 @@ def test_documentation_about_prompts_is_not_an_injection() -> None:
     field = web_tools.PageFacts.model_fields["contains_instructions"].description or ""
     assert "addresses the AI agent reading it" in field
     assert "is false" in field
+
+
+def test_a_deploy_does_not_orphan_a_run_in_flight() -> None:
+    """DBOS recovers only workflows of the running code version; a run the
+    deploy stopped is cancelled, costed and queued again at boot."""
+    from hq import board, engine
+
+    src = inspect.getsource(engine.reap)
+    assert "application_version IS DISTINCT FROM" in src and "w.status = 'PENDING'" in src
+    assert "CALLS_COSTED" in src and "requeued_after_deploy" in src
+    assert "backlog" in board.ALLOWED["blocked"] and "blocked" in board.ALLOWED["running"]

@@ -1017,6 +1017,36 @@ async def reap() -> None:
         except Exception as exc:  # noqa: BLE001
             log.warning("could not release stuck workflow %s: %s", row["wf_id"], exc)
 
+    # A deploy stops every run in flight, and DBOS recovers only workflows of
+    # the code version now running. A run started under the old code is left
+    # PENDING for ever: its task says running, nothing works on it, and the
+    # watchdog only notices once it has been silent for an hour and a half.
+    # Cancel it, close its run with what it spent, and queue the task again
+    # on the new code. Its durable pieces (a lesson's saved parts) survive.
+    for row in await db.fetch(
+        "SELECT t.id::text AS task_id, r.id::text AS run_id, r.wf_id FROM hq.tasks t"
+        " JOIN hq.runs r ON r.task_id = t.id AND r.ended_at IS NULL"
+        " JOIN dbos.workflow_status w ON w.workflow_uuid = r.wf_id"
+        " WHERE t.status = 'running' AND w.status = 'PENDING'"
+        " AND w.application_version IS DISTINCT FROM %s",
+        (DBOS.application_version,),
+    ):
+        try:
+            await DBOS.cancel_workflow_async(row["wf_id"])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not cancel old-version workflow %s: %s", row["wf_id"], exc)
+        await db.execute(
+            "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now(),"
+            f" error = 'stopped by a deploy', {safety.CALLS_COSTED} WHERE r.id = %s",
+            (row["run_id"],),
+        )
+        # running -> blocked -> backlog: the board's legal path, and the
+        # backlog loop below gives it the next attempt's workflow id.
+        await board.apply(row["task_id"], "stopped_by_deploy", status="blocked",
+                          data={"reason": "the backend restarted on new code mid-run"})
+        await board.apply(row["task_id"], "requeued_after_deploy", status="backlog",
+                          data={"reason": "queued again on the new code"})
+
     # A crash between create_task and enqueue leaves a task in backlog forever.
     # Re-enqueue is safe: the workflow id is derived from the task id.
     #
