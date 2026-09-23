@@ -112,6 +112,10 @@ class RunOutcome:
     error: str | None = None
     messages_json: bytes | None = None
     stall_count: int = 0
+    # A reasoned "nothing to write today" (charter rule 9). Code sets it when
+    # the writer's plan says the material cannot carry the piece; it is a
+    # result, not a missing artifact.
+    declined: str = ""
 
 
 # --- progress ledger ---------------------------------------------------------

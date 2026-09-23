@@ -38,8 +38,8 @@ everything rests on one site, say so.
 
 ## Concepts, not an inventory
 
-The note proposes the concepts a teacher should teach: two to six claims
-he could be wrong about, each letting him predict or decide something new.
+The note proposes the concepts a teacher should teach: as many claims as
+the brief names, each one he could be wrong about, each letting him predict or decide something new.
 Two tests: after this, what can he predict that he could not before; and
 could the next release make it false (a default, a version table, a list
 of which product supports what fails). Give each concept one piece of

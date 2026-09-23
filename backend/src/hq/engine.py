@@ -492,7 +492,7 @@ async def run_task(task_id: str) -> str:
     # Artifact assertion: "done" without a recorded side effect is not done.
     result: str = outcome.outcome
     error: str | None = outcome.error
-    if (result == "done" and task["source"] in ARTIFACT_SOURCES
+    if (result == "done" and not outcome.declined and task["source"] in ARTIFACT_SOURCES
             and expects_artifact(task_text) and not await _artifact_check_step(run_id)):
         result, error = "no_artifact", NO_ARTIFACT_REASON
 

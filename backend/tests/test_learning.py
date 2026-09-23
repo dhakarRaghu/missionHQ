@@ -674,8 +674,8 @@ def test_no_asks_means_no_empty_section() -> None:
 def _lesson(extra: str = "", *, concept_body: str = "") -> str:
     """The smallest page that meets the lesson contract.
 
-    Two claims, a section for each that asks before it tells and has something
-    to look at, and one piece of apparatus. `extra` is appended; `concept_body`
+    Three claims, a section for each that asks before it tells and has
+    something to look at, and one piece of apparatus. `extra` is appended; `concept_body`
     goes inside the first concept's section.
     """
     ask = '<details class="predict"><summary>Predict: what happens?</summary><p>It waits.</p></details>'
@@ -684,9 +684,11 @@ def _lesson(extra: str = "", *, concept_body: str = "") -> str:
         '<ol class="concepts">'
         '<li id="c1"><b>Prefill and decode share one forward pass.</b><span>So you can predict a freeze.</span></li>'
         '<li id="c2"><b>A schema controls which tokens are legal, never when output stops.</b><span>So you check finish_reason.</span></li>'
+        '<li id="c3"><b>A queue in front of a busy server adds its wait to every request.</b><span>So you size the queue.</span></li>'
         "</ol>"
         f'<h2 data-concept="c1">Why does one prompt freeze every stream?</h2>{ask}{look}{concept_body}'
         f'<h2 data-concept="c2">Does a schema guarantee the answer?</h2>{ask}{look}'
+        f'<h2 data-concept="c3">Where does the wait come from?</h2>{ask}{look}'
         '<h2 data-kind="sources">Sources</h2>'
         + extra
     )
@@ -2243,7 +2245,8 @@ def test_an_article_carries_one_idea_and_is_held_to_it() -> None:
     from hq.tools.learning_tools import lesson_contract, page_coverage
 
     one = _lesson().replace('<li id="c2">', '<li id="zz">').replace(
-        '<h2 data-concept="c2">', '<h2 data-kind="lab">')
+        '<h2 data-concept="c2">', '<h2 data-kind="lab">').replace(
+        '<h2 data-concept="c3">', '<h2 data-kind="lab">')
     one = one[: one.index('<li id="zz">')] + one[one.index("</ol>"):]
     assert lesson_contract(one, least=1, most=1) == ""
     assert page_coverage("", one, "", least=1, most=1) == ""

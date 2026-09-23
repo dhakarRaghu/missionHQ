@@ -1602,7 +1602,14 @@ def new_claims(source: str, page_html: str) -> list[dict[str, Any]]:
 # instead is whether it is built out of ideas: it names them, every teaching
 # section belongs to one, he meets each as a question before he is told, and
 # the prose is not a history of who measured what.
-CONCEPTS_MIN, CONCEPTS_MAX = 2, 6
+# How many ideas a phase teaches: one rule, read by the plan check, the page
+# contract, and the study brief that asks hunter to name them.
+CONCEPTS_MIN, CONCEPTS_MAX = 3, 5
+_NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven"}
+
+
+def concept_range_words() -> str:
+    return f"{_NUMBER_WORDS[CONCEPTS_MIN]} to {_NUMBER_WORDS[CONCEPTS_MAX]}"
 CLAIM_MAX_WORDS = 32
 # Apparatus: sections that are not teaching an idea and say so.
 # "limits" (Things I could not verify) is gone from the page at his request:

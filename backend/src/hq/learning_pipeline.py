@@ -1679,6 +1679,12 @@ def is_course_written(payload: object) -> bool:
     return _is_stage(payload, COURSE_WRITTEN_STAGE)
 
 
+def _concepts() -> str:
+    from hq.tools.learning_tools import concept_range_words
+
+    return concept_range_words()
+
+
 def course_study_brief(payload: Mapping[str, Any]) -> str:
     """Hunter: decide what he should learn from this ground, and prove it."""
     return f"""Work out what he should learn from one phase of his course, and bring the
@@ -1705,7 +1711,7 @@ itself: what he has already been taught, and what arrives later. Put a short
 
 Then do the thinking, in this order:
 
-1. **Name the concepts. Three to five, never more.** Each is a claim, one
+1. **Name the concepts. {_concepts().capitalize()}, never more.** Each is a claim, one
    sentence he could be wrong about, that lets him predict or decide something
    he could not before: "prefill and decode share one forward pass, so a long
    prompt either waits or freezes every other stream". Not a topic ("chunked
@@ -1785,6 +1791,6 @@ def course_lesson_brief(
         f" in `{payload.get('course')}`.\n\n"
         f"Material: hunter's study note {notes} and his phase as he wrote it."
         + (f" Articles he has already read on this phase: {read}." if read else "")
-        + "\n\nPlanned as three to five concepts, written one section at a time,"
+        + f"\n\nPlanned as {_concepts()} concepts, written one section at a time,"
         " checked as a page and sentence by sentence against the note, then recorded."
     )

@@ -373,10 +373,12 @@ def normalize_outline(outline: Outline) -> Outline:
 def outline_problems(outline: Outline, note: str, *, article: bool) -> list[str]:
     """Why this plan cannot be written from, or [] when it can."""
     probs: list[str] = []
-    least, most = (1, 1) if article else (3, 5)
+    least, most = (1, 1) if article else (lt.CONCEPTS_MIN, lt.CONCEPTS_MAX)
     n = len(outline.concepts)
     if not least <= n <= most:
-        probs.append(f"the plan has {n} concepts; {'an article carries exactly one' if article else 'a phase teaches three to five'}")
+        rule = ("an article carries exactly one" if article
+                else f"a phase teaches {lt.concept_range_words()}")
+        probs.append(f"the plan has {n} concepts; {rule}")
     ids = [c.id for c in outline.concepts]
     if len(set(ids)) != len(ids) or any(not re.fullmatch(r"c\d+", i) for i in ids):
         probs.append("concept ids must be c1, c2, ... and unique")
@@ -898,7 +900,8 @@ async def write(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any:
                               output_tokens=0, cost_usd=0.0, error=f"lesson refused: {exc}"[:500])
     if done is None:
         return RunOutcome(output="\n".join(w.report), outcome="done", input_tokens=0,
-                          output_tokens=0, cost_usd=0.0)
+                          output_tokens=0, cost_usd=0.0,
+                          declined="\n".join(w.report) or "the material cannot carry it")
     md_path, html_path, _lesson_id = done
     # The artifact assertion reads tool.called events; the writer calls the
     # function behind record_lesson directly, so it says so the same way.
