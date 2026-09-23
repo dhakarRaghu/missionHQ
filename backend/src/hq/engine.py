@@ -444,7 +444,9 @@ async def run_task(task_id: str) -> str:
                 )
                 return "blocked: not approved"
             outcome = await runner.execute_external(spec, prompt=prompt, deps=deps)
-            outcome = await _file_external_output(spec, task_id, run_id, outcome)
+            outcome = await _file_external_output(
+                spec, task_id, run_id, outcome, payload=task.get("payload"),
+            )
         else:
             outcome = await runner.execute(agent, spec, prompt=prompt, deps=deps)
     except Exception as exc:  # noqa: BLE001 — a run must never wedge the board
@@ -473,12 +475,12 @@ async def run_task(task_id: str) -> str:
     status = {"done": "done", "blocked": "blocked", "no_artifact": "blocked"}.get(result, "failed")
     data: dict[str, Any] = {"output": outcome.output[:TASK_OUTPUT_CHARS]}
     if result == "no_artifact":
-        data["reason"] = NO_ARTIFACT_REASON
+        data["reason"] = error or NO_ARTIFACT_REASON
     await runner.apply_step(task_id, f"run_{result}", status=status, data=data)
     if result == "no_artifact":
         await runner.emit_step("run.no_artifact", run_id=run_id, task_id=task_id,
                                agent=agent_name,
-                               payload={"reason": NO_ARTIFACT_REASON,
+                               payload={"reason": error or NO_ARTIFACT_REASON,
                                         "expected_tools": list(ARTIFACT_TOOLS)})
     await runner.emit_step("run.finished", run_id=run_id, task_id=task_id, agent=agent_name,
                            payload={"outcome": result, "exit_status": exit_status(result, error),
@@ -928,8 +930,21 @@ async def reap() -> None:
 _URL_RE = re.compile(r"https?://[^\s<>\)\]\"'`]+")
 
 
+UNSOURCED_REASON = "the reply named no source URL, so it was not filed"
+
+
+def files_own_envelope(payload: object) -> bool:
+    """A task whose answer is a JSON envelope the engine parses and files
+    itself: job discovery, a referral hunt, the morning feed pass. An empty
+    envelope is a real answer there ("looked, found nothing"), and its
+    follow-up stage must still run, so a reply with no URL stays done."""
+    return (is_browser_discovery(payload) or is_referral_hunt(payload)
+            or learning.is_feed_pass(payload))
+
+
 async def _file_external_output(
     spec: AgentSpec, task_id: str, run_id: str, outcome: runner.RunOutcome,
+    *, payload: object = None,
 ) -> runner.RunOutcome:
     """Write what the external agent reported into quarantine, as web-derived.
 
@@ -939,6 +954,10 @@ async def _file_external_output(
     frontmatter is stamped by code so the note carries the same author and
     provenance as anything an in-process agent writes. Routing around those
     checks would make this the one note in the vault that nobody vouched for.
+
+    A reply that names no source URL cannot be filed, and on a plain task
+    that makes the run ``no_artifact``, not ``done``: the contract says a
+    claim with no URL is not filed, so nothing usable came back.
     """
     if outcome.outcome != "done" or not outcome.output.strip():
         return outcome
@@ -950,11 +969,13 @@ async def _file_external_output(
     # with no URL in it is an answer we cannot attribute, so it is not filed.
     urls = list(dict.fromkeys(_URL_RE.findall(text)))[:20]
     if not urls:
-        await runner.emit_step(
-            "run.no_artifact", run_id=run_id, task_id=task_id, agent=spec.name,
-            payload={"reason": "the reply named no source URL, so it was not filed"},
-        )
-        return outcome
+        if files_own_envelope(payload):
+            await runner.emit_step(
+                "external.unfiled", run_id=run_id, task_id=task_id, agent=spec.name,
+                payload={"reason": UNSOURCED_REASON},
+            )
+            return outcome
+        return replace(outcome, outcome="no_artifact", error=UNSOURCED_REASON)
 
     front = "\n".join(f"  - {u}" for u in urls)
     content = (

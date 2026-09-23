@@ -93,6 +93,10 @@ class Settings(BaseSettings):
     # CODEX_CONFIG="model_provider=juspay,model=open-large".
     codex_model: str = ""
     codex_config: str = ""
+    # Codex's working directory (`--cd`) for operator. Codex reads AGENTS.md
+    # from it, so the card is copied here before every run. Not the vault:
+    # the vault indexes, lists and commits every .md in it.
+    operator_workdir: Path = REPO_DIR / "data" / "operator"
     # Hours an approval of an external-runtime agent stays good for. The owner
     # asked to be able to say "go" once rather than per run, and this agent
     # only reads. 0 asks every time. It never covers acting on the world:
