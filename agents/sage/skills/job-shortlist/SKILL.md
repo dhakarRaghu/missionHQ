@@ -6,7 +6,7 @@ page, `projects/jobs/shortlist-<YYYY>-W<NN>.md` (ISO week).
 ## Read
 
 1. `list_jobs` with status `seen`, then `shortlisted`, then `referral`. The
-   ledger is the source: hunter verified every row and `record_job` computed
+   ledger is the source: hunter verified every row and code computed
    its score. Closed rows are out; do not revive one.
 2. Fewer than five open roles: say so and list what there is. Never fill the
    page from memory or from a search.

@@ -22,12 +22,15 @@ evening, after your own day is done, so the work is waiting when you wake up:
 
 | Time | What happens |
 |---|---|
-| 21:00 | Hunter sweeps for new roles, verifies them, and scores them into the job ledger |
-| 21:30 | Scout reads the newest research and adds ranked content ideas |
-| 22:00 | The digest goes out: everything the notification cap held back during the day |
-| 22:30 | Sage writes the day's note: what the agents did, anything you filed, one suggestion, and one question for you |
-| 23:30 | The librarian folds the day's notes into your long-term memory, without letting it grow past its size cap |
-| 03:00 | The vault search index is rebuilt, so notes you edited by hand in Obsidian become searchable |
+| 18:30 | The next phase of your course is studied by hunter and written by tutor, once you have read the last one |
+| 21:00 | Hunter sweeps company boards for new roles, verifies them, and scores them into the job ledger |
+| 21:15 | Operator searches LinkedIn in your signed-in browser; hunter verifies what it finds |
+| 22:00 | The learning run starts today's article (or Saturday's lab card, Sunday's week review); the digest goes out |
+| 22:30 | Sage writes the day's note: one thing you did not know, what needs you, and one action |
+| 23:30 | Sage folds the day into your memory blocks, dropping what is no longer true |
+| 03:00 | The vault commits once for the day, the search index is rebuilt, and new lessons are published to your phone |
+| Monday 09:00 | Sage proposes five roles to act on, with the next step for each |
+| Wednesday 09:00 | Sage adds three to five content ideas from what you learned and built |
 | Sunday 20:00 | Sage writes the weekly review |
 
 And when you do want something:
@@ -49,15 +52,14 @@ The second one is the point. You asked one agent; a different one did the work.
 
 ## 2. The agents
 
-Four run in-process. One more runs outside it, through an agent CLI.
+Three run in-process. One more runs outside it, through an agent CLI.
 
 | Agent | What it is for | Runs |
 |---|---|---|
-| **sage** | Your second brain and the one you talk to. Daily notes, weekly reviews, answers from the vault, and handing work to the others | 22:30 daily, Sunday 20:00, and whenever you chat |
-| **librarian** | Keeps memory small and current. Merges the day's notes into the shared memory blocks and retires what is no longer true | 23:30 daily |
-| **hunter** | Reads the web and writes what it found. The only agent with web access, and it can write nowhere but `quarantine/` | 21:00 daily, and on request |
-| **scout** | Content for YouTube and X. Turns hunter's research into ideas and drafts. Never posts without your approval | 21:30 daily |
-| **operator** | Everything the Codex CLI can reach: the browser *you are signed into*, web search, the shell, files. Reads only, and needs your approval | On request |
+| **sage** | The one you talk to, and the keeper of memory. Routes work, writes the daily note and weekly review, proposes the job shortlist and content ideas, consolidates memory | 22:30 and 23:30 daily, Monday and Wednesday 09:00, Sunday 20:00, and whenever you chat |
+| **hunter** | Reads the web and writes what it found: verified roles with a person to reach, and the study notes lessons are built from. It can write nowhere but `quarantine/` | 21:00 daily, and when the learning run asks |
+| **tutor** | Your teacher. Plans the concepts worth knowing, writes each lesson a section at a time, checks every sentence against the study note | When the learning run or the course asks |
+| **operator** | Reads pages only your signed-in browser can open, read-only, under one contract (`agents/operator/AGENTS.md`), with your approval | 21:15 discovery, and on request |
 
 ### Agent or skill?
 
@@ -72,9 +74,8 @@ An agent earns its own folder only when it needs one of three things:
    from acting and may write only to `quarantine/`. That isolation is the
    whole reason it is separate.
 2. **Its own runtime.** Operator runs outside the in-process loop.
-3. **Separation of duties.** The librarian rewrites the shared memory blocks;
-   sage should not be both the author of the notes and the consolidator of
-   them.
+3. **A separate trust boundary.** Tutor writes the files you read and holds
+   no web tool, which is why it may write them.
 
 A schedule is not a reason: sage can hold a cron slot that loads a skill.
 Weekly planning was an agent and is now `weekly-plan`, because it needed no

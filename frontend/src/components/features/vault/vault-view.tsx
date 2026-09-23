@@ -19,7 +19,7 @@ const BLURBS: Record<string, string> = {
   "memory/user.md":
     "What the agents know about you: your goals, your audience, how you like things done. Every agent reads this before it works.",
   "memory/active_projects.md":
-    "What you are working on now. The librarian keeps it current from your daily notes.",
+    "What you are working on now. Sage consolidates it every night from what changed that day.",
   "memory/rules.md":
     "Standing rules. Only you write here: an agent can propose a rule, but never mint one.",
 };

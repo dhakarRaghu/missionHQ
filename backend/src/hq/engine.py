@@ -77,9 +77,9 @@ CHAT_TIMEOUT_S = 12 * 60   # a chat turn may not exceed 12 minutes (approval wai
 # The digest lands half an hour before sage's daily note, because it is the
 # outlet for what the notification cap held back and the note then summarises
 # the day that includes it. The whole nightly chain is:
-#   21:00 hunter -> 21:15 sage discovery -> 21:30 scout -> 22:00 digest
-#   -> 22:30 sage note
-#   -> 23:30 librarian -> 03:00 reindex
+#   18:30 course study (system) -> 21:00 hunter sweep
+#   -> 21:15 job discovery (system) -> 22:00 learning run (system) + digest
+#   -> 22:30 sage note -> 23:30 sage consolidation -> 03:00 reindex
 # Change an agent's cron in its job.md and these two may need to move with it.
 DIGEST_HOUR, DIGEST_MINUTE = 22, 0
 REINDEX_HOUR = 3
