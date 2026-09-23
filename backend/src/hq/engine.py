@@ -623,6 +623,69 @@ async def _reply_outbound(text: str, *, idempotency_key: str, html: bool = False
 
 # --- cron / watchdog ---------------------------------------------------------
 
+# Evening starters that need no model. They were sage crons whose whole
+# prompt was "call this one tool exactly once and stop": four model runs a
+# day, each able to misread the instruction, to make one deterministic call.
+# The job query is his decision (memory/decisions.md), stated here once.
+JOB_QUERY = ("entry-level software engineer, AI engineer, applied AI engineer,"
+             " SDE-1, 0-2 years")
+SYSTEM_DISPATCHES: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
+    ("course_study", "30 18 * * *", "start_course_study", {}),
+    ("job_search", "15 21 * * *", "start_job_search",
+     {"query": JOB_QUERY, "locations": "India|Bengaluru|Remote", "max_roles": 20}),
+    ("learning_run", "0 22 * * *", "start_learning_run", {}),
+    ("source_hunt", "0 7 * * 0", "start_source_hunt", {}),
+)
+
+
+@DBOS.step()
+async def _claim_slot_step(key: str) -> bool:
+    """True the first time a slot key is claimed, False after: a restart or a
+    catch-up can never start the same evening chain twice."""
+    row = await db.fetchone(
+        "INSERT INTO hq.control (key, value) VALUES (%s, 'true'::jsonb)"
+        " ON CONFLICT (key) DO NOTHING RETURNING key", (key,))
+    return row is not None
+
+
+@DBOS.step()
+async def _system_dispatch_step(tool: str, kwargs: dict[str, Any]) -> str:
+    """Call the tool behind a starter directly, as sage would have."""
+    import inspect
+    from types import SimpleNamespace
+
+    from pydantic_ai import ModelRetry
+
+    from hq.tools.registry import TOOL_REGISTRY
+
+    raw = inspect.unwrap(TOOL_REGISTRY[tool].fn)
+    ctx = SimpleNamespace(deps=runner.HQDeps(agent="sage"))
+    try:
+        return str(await raw(ctx, **kwargs))[:500]
+    except ModelRetry as exc:  # a refusal (the last lesson is unread) is an answer
+        return f"not started: {exc}"[:500]
+
+
+async def _run_system_dispatch(name: str, tool: str, kwargs: dict[str, Any],
+                               slot: datetime, via: str) -> None:
+    key = f"system:{name}:{slot:%Y-%m-%d-%H%M}"
+    if not await _claim_slot_step(key):
+        return
+    result = await _system_dispatch_step(tool, kwargs)
+    await runner.emit_step(via, agent="sage", payload={"slot": key, "result": result[:300]})
+
+
+def _make_system(name: str, schedule: str, tool: str, kwargs: dict[str, Any]):
+    async def fire(scheduled: datetime, context: Any) -> None:
+        local = scheduled.astimezone(ZoneInfo(settings().cron_tz))
+        newest = datetime.fromisoformat(await _newest_slot_step(schedule))
+        if local < newest:
+            return
+        await _run_system_dispatch(name, tool, kwargs, local, "cron.dispatched")
+    fire.__name__ = fire.__qualname__ = f"system_{name}"
+    return fire
+
+
 def _register_cron() -> None:
     """Register every scheduled function as a NAMED workflow (closures would
     otherwise collide on __qualname__) and build the schedule list. Schedules
@@ -639,6 +702,13 @@ def _register_cron() -> None:
                 "schedule_name": wf_name, "workflow_fn": fire,
                 "schedule": entry.schedule, "cron_timezone": tz,
             })
+    for sname, schedule, tool, kwargs in SYSTEM_DISPATCHES:
+        wf_name = f"system_{sname}"
+        _schedules.append({
+            "schedule_name": wf_name,
+            "workflow_fn": DBOS.workflow(name=wf_name)(_make_system(sname, schedule, tool, kwargs)),
+            "schedule": schedule, "cron_timezone": tz,
+        })
     watchdog = DBOS.workflow(name="watchdog")(_watchdog_tick)
     outbox = DBOS.workflow(name="drain_outbox")(_drain_outbox_tick)
     daily_digest = DBOS.workflow(name="daily_digest")(_daily_digest_tick)
@@ -1849,6 +1919,11 @@ async def _catch_up_missed(now_utc: datetime) -> None:
             await dispatch(agent=agent_name, title=cron_title(entry.prompt),
                            brief=entry.prompt, source="cron", dedup_key=key)
             await runner.emit_step("cron.caught_up", agent=agent_name, payload={"slot": key})
+
+    for sname, schedule, tool, kwargs in SYSTEM_DISPATCHES:
+        slot = croniter(schedule, now).get_prev(datetime)
+        if now - slot <= CATCH_UP_WINDOW:
+            await _run_system_dispatch(sname, tool, kwargs, slot, "cron.caught_up")
 
     # digest: DIGEST_HOUR:DIGEST_MINUTE local, at most once per date
     # (send_digest dedups by date)

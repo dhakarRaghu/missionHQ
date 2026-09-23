@@ -197,3 +197,24 @@ def test_runs_are_costed_from_their_calls() -> None:
     assert "call_context(" in src
     assert "call_context(" in inspect.getsource(runner.execute_external)
     assert "record_call(" in inspect.getsource(runner.codex_turn_step)
+
+
+def test_a_silent_stream_is_hung_even_with_a_long_allowance(calls, monkeypatch) -> None:
+    """A long total is for models that are sending. Silence is a hang."""
+    monkeypatch.setattr(llm, "IDLE_LIMIT_S", 0.1)
+
+    async def silent(messages, info) -> AsyncIterator[str]:
+        yield "."
+        await asyncio.sleep(5)
+        yield "never"
+
+    out = _run(FallbackModel(_streaming("stuck", silent, timeout_s=60),
+                             _streaming("spare", _answers), fallback_on=llm.moves_to_spare))
+    assert out == "fine"
+    assert calls[0]["error_class"] == "StreamIdle" and calls[0]["ms"] < 2000
+
+
+def test_a_caller_can_give_one_call_a_longer_total() -> None:
+    model = _streaming("m", _answers, timeout_s=300)
+    assert model.total_limit_s(None) == 300
+    assert model.total_limit_s({"timeout": 900}) == 900

@@ -36,7 +36,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from pydantic import BaseModel, Field
@@ -67,6 +67,12 @@ JUDGE_MODEL = "cheap"
 STEP_LIMIT_S = llm.registry().longest_chain_timeout_s() + 30.0
 _STEP: dict[str, Any] = {"retries_allowed": True, "max_attempts": 2, "interval_seconds": 5.0,
          "backoff_rate": 2.0, "timeout_seconds": STEP_LIMIT_S}
+# The plan is the one call that reasons for minutes before it answers: on
+# 2026-09-23 kimi-k3 streamed its reasoning for the full 480 seconds (first
+# token at 2.5s) without finishing the plan. It gets a longer total; a hung
+# stream is still caught by the idle limit in llm.StreamingModel.
+OUTLINE_LIMIT_S = 900.0
+_OUTLINE_STEP: dict[str, Any] = {**_STEP, "timeout_seconds": OUTLINE_LIMIT_S * 3 + 30.0}
 
 
 # --- the plan -----------------------------------------------------------------
@@ -141,10 +147,11 @@ def _model_for(spec_model: str) -> tuple[Any, Any]:
     return reg.resolve(spec_model), reg.model_settings_for(spec_model)
 
 
-@DBOS.step(name="writer.outline", **_STEP)
+@DBOS.step(name="writer.outline", **_OUTLINE_STEP)
 async def _outline_step(spec_model: str, article: bool, material: str,
                         problems: list[str]) -> dict[str, Any]:
     model, model_settings = _model_for(spec_model)
+    model_settings = cast(Any, {**(model_settings or {}), "timeout": OUTLINE_LIMIT_S})
     agent = Agent(model, output_type=Outline, instructions=outline_instructions(article),
                   model_settings=model_settings)
     prompt = material

@@ -233,6 +233,16 @@ async def record_call(
         log.warning("could not record a model call for %s: %s", model, exc)
 
 
+# A streamed answer sends reasoning and text as it goes. Silence this long
+# means the request is hung, whatever its total allowance: fail it and let
+# the spare try, instead of waiting out the whole limit.
+IDLE_LIMIT_S = 120.0
+
+
+class StreamIdle(Exception):
+    """The stream sent nothing for IDLE_LIMIT_S."""
+
+
 class StreamingModel(WrapperModel):
     """Every request streamed, bounded by wall clock, and recorded.
 
@@ -260,6 +270,12 @@ class StreamingModel(WrapperModel):
     def limit_s(self) -> float:
         return float((self.entry.settings or {}).get("timeout_s", 300.0))
 
+    def total_limit_s(self, model_settings: ModelSettings | None) -> float:
+        """The attempt's whole allowance: the entry's own, or longer when the
+        caller asks for it (a planning call that reasons for minutes)."""
+        asked = (model_settings or {}).get("timeout")
+        return max(self.limit_s, float(asked) if isinstance(asked, int | float) else 0.0)
+
     async def request(
         self,
         messages: list[ModelMessage],
@@ -270,21 +286,31 @@ class StreamingModel(WrapperModel):
         first: float | None = None
         response: ModelResponse | None = None
         error_class: str | None = None
+        total = self.total_limit_s(model_settings)
         try:
             try:
-                async with asyncio.timeout(self.limit_s):
+                async with asyncio.timeout(total):
                     async with self.wrapped.request_stream(
                         messages, model_settings, model_request_parameters
                     ) as stream:
-                        async for _ in stream:
+                        events = stream.__aiter__()
+                        while True:
+                            try:
+                                await asyncio.wait_for(anext(events), IDLE_LIMIT_S)
+                            except StopAsyncIteration:
+                                break
+                            except TimeoutError as exc:
+                                raise StreamIdle(f"nothing streamed for {IDLE_LIMIT_S:.0f}s") from exc
                             if first is None:
                                 first = time.monotonic()
                     response = stream.get()
             except ModelAPIError:
                 raise
+            except StreamIdle as exc:
+                raise ModelAPIError(self.model_name, str(exc)) from exc
             except TimeoutError as exc:
                 raise ModelAPIError(
-                    self.model_name, f"no complete answer within {self.limit_s:.0f}s"
+                    self.model_name, f"no complete answer within {total:.0f}s"
                 ) from exc
             except (httpx.HTTPError, openai.APIError, OSError) as exc:
                 raise ModelAPIError(
