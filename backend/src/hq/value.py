@@ -6,8 +6,9 @@ Seven days, counted from the tables, no model call:
 - concept taps, got it vs lost me (`hq.concept_signals`),
 - jobs he moved (`job.updated` events that changed a status; only the
   console's `update_job` emits them, so every one is his),
-- content ideas vs drafts vs posts (ideas are counted in scout's
-  `projects/content/ideas.md` batches, drafts from `post.drafted` events;
+- content ideas vs drafts vs posts (ideas are counted in the dated batches
+  sage's content-ideas skill appends to `projects/content/ideas.md`, drafts
+  from `post.drafted` events;
   nothing records a post going out, so that one says "not recorded"),
 - model spend (`hq.model_calls`) and tutor's spend per lesson written.
 
@@ -38,7 +39,10 @@ NOT_RECORDED = "not recorded"
 LESSON_AGENT = "tutor"
 _STATUS_FIELD = "status = %s"      # how update_job names a status change in its event
 _BATCH_RE = re.compile(r"^##\s+(\d{4}-\d{2}-\d{2})")
-_IDEA_RE = re.compile(r"^\s*\d+\.\s+\S")
+# One idea is one top-level item: a `- ` bullet (the content-ideas skill's
+# shape) or a numbered item (older batches). Its indented `why:` and
+# `Sources:` lines, and any copy under it, are not ideas.
+_IDEA_RE = re.compile(r"^(?:-|\d+\.)\s+\S")
 
 
 def _at(value: Any) -> datetime | None:
@@ -54,8 +58,11 @@ def _at(value: Any) -> datetime | None:
 
 
 def count_ideas(markdown: str | None, since: date, until: date) -> int | None:
-    """Numbered ideas in the dated `## YYYY-MM-DD` batches inside the window.
-    None when the file could not be read."""
+    """Ideas in the dated `## YYYY-MM-DD` batches inside the window.
+
+    A batch heading may carry a title (`## 2026-09-23 — Morning batch`); an
+    idea is a top-level `- ` bullet or numbered item under it. None when the
+    file could not be read."""
     if markdown is None:
         return None
     n, inside = 0, False

@@ -375,6 +375,35 @@ def test_ideas_are_counted_in_the_batches_of_the_week() -> None:
     md = ("---\ntitle: ideas\n---\n# Content ideas\n\n"
           "## 2026-09-22 — tonight\n1. one\n2. two\n\n"
           "## 2026-09-10\n1. old\n\n"
-          "## 2026-09-20\n1. three\n- not numbered\n")
-    assert value.count_ideas(md, date(2026, 9, 16), date(2026, 9, 23)) == 3
+          "## 2026-09-20\n1. three\n- four, a bullet\n   1. nested, not an idea\n")
+    assert value.count_ideas(md, date(2026, 9, 16), date(2026, 9, 23)) == 4
     assert value.count_ideas(None, date(2026, 9, 16), date(2026, 9, 23)) is None
+
+
+def test_ideas_are_counted_in_the_content_ideas_skills_own_shape() -> None:
+    # The shape sage's content-ideas skill writes: a titled dated heading, a
+    # lead paragraph, then `- ` bullets each with indented why/Sources lines.
+    # The counter once looked only for numbered items and read this as zero.
+    md = (
+        "---\ncreated: 2026-09-23\nauthor: sage\n---\n# Content ideas\n\n"
+        "## 2026-09-23 — Morning batch\n\n"
+        "Three ideas from this week's work. The strongest is 2.\n\n"
+        "- The famous 36.9x batching number was measured against a 2022 baseline.\n"
+        "  why: hunter read the paper in full on 09-22.\n"
+        "  Sources: learning/lessons/2026-09-20-phase-02a.md\n\n"
+        "- A checking pass on my own lesson failed one of my claims.\n"
+        "  why: the claims-run checked 30 claims and found c24 wrong.\n"
+        "  Sources: learning/lessons/2026-09-22-phase-02b.md\n\n"
+        "- Writing my last lesson cost $17.71. Correcting it cost $8.36 more.\n"
+        "  why: real run costs from the board.\n"
+        "  Sources: memory/active_projects.md\n\n"
+        "## 2026-09-22 — Evening pass\n\n"
+        "Two finished posts.\n\n"
+        "1. I've run my job sweep every day for about two weeks.\n\n"
+        "   Tonight it found nothing new, again.\n\n"
+        "   - an indented aside, not an idea\n\n"
+        "2. My research agent recommended what I didn't want.\n\n"
+        "## 2026-09-01 — Last month\n\n"
+        "- outside the window\n"
+    )
+    assert value.count_ideas(md, date(2026, 9, 16), date(2026, 9, 23)) == 5

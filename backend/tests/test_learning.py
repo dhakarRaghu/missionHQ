@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import inspect
+from datetime import date
+from pathlib import Path
 
 from hq.api.learning import CSP, harden_page
 from hq.db import load_migrations
@@ -274,20 +276,141 @@ def test_the_source_hunt_looks_for_writers_not_articles() -> None:
     assert str(MAX_SOURCE_LEADS) in brief
 
 
-def test_the_merge_protects_what_the_owner_wrote() -> None:
-    from hq.learning_pipeline import (
-        roster_merge_brief,
-        roster_merge_payload,
-        source_hunt_payload,
+ROSTER_FIXTURE = """# Who to read
+
+Intro the owner wrote. Chip Huyen once sat here.
+
+## Course 1 — Performance, concurrency and the machine · elite-performance
+
+- **Marc Brooker** — brooker.co.za/blog · 2026-07-29 · tail latency, Little's
+  law, queueing with the maths.
+- **Chip Huyen** — huyenchip.com/blog · 2025-01-16 · ML systems.
+
+### Papers — the shelf for this course
+
+- **Chip Huyen paper** — somewhere.org · behind: a shelf entry, not a source.
+
+## Course 5 — Distributed systems and verification · elite-distributed
+
+- **Jepsen** — jepsen.io · archive · consistency tests.
+
+## Checked and rejected — do not re-add without a new date
+
+**Stale** (newest post): Martin Kleppmann 2025-12-08 · avi.im 2026-04-18
+
+## How this file is maintained
+
+- The owner's edits win.
+"""
+
+
+def _hunt_leads() -> list[dict[str, object]]:
+    def lead(name: str, url: str, why: str, *, score: int = 9, topic: str = "",
+             handle: str = "", stale: bool = False) -> dict[str, object]:
+        return {"name": name, "url": url, "handle": handle, "topic": topic, "why": why,
+                "score": score, "stale": stale}
+
+    return [
+        # New, verified, and its topic names course 5.
+        lead("Phil Eaton", "https://notes.eatonphil.com/", "databases from scratch,"
+             " newest 2026-09-06", topic="distributed systems", handle="@eatonphil"),
+        # New and verified, but no course names its topic.
+        lead("Murat Demirbas", "https://muratbuffalo.blogspot.com",
+             "reads papers aloud; newest post 2026-09-10", score=7, topic="paper reviews"),
+        # Already in the file: by name in another case, by site, and in the stale list.
+        lead("marc brooker", "https://example.net/", "newest 2026-09-01"),
+        lead("Kyle Kingsbury", "https://jepsen.io/", "newest 2026-09-01"),
+        lead("Martin Kleppmann", "https://martin.kleppmann.com/", "newest 2026-09-01"),
+        # Below the floor, undated, and dated but long quiet.
+        lead("Low Score", "https://low.example/", "newest 2026-09-01", score=5),
+        lead("No Date", "https://nodate.example/", "looks active"),
+        lead("Long Quiet", "https://quiet.example/", "newest 2025-02-01"),
+        # Gone quiet: one the roster lists, one it never had.
+        lead("Chip Huyen", "https://huyenchip.com/blog/", "newest post 2025-01-16",
+             score=0, stale=True),
+        lead("Nobody Here", "https://nobody.example/", "newest post 2025-03-01",
+             score=0, stale=True),
+    ]
+
+
+def test_the_roster_merge_is_code_and_keeps_the_owners_file(tmp_path: Path) -> None:
+    # Tutor was sent to rewrite a repo file it could neither read nor write;
+    # every source hunt ended in a run that could not succeed. The merge is
+    # mechanical, so it is code.
+    from hq.learning_pipeline import ROSTER_FOUND_HEADING, merge_roster
+
+    path = tmp_path / "sources.md"
+    path.write_text(ROSTER_FIXTURE)
+    today = date(2026, 9, 23)
+
+    merged, counts = merge_roster(path.read_text(), _hunt_leads(), today)
+    path.write_text(merged)
+
+    assert counts == {"added": 2, "duplicate": 3, "low_score": 1, "undated": 1, "quiet": 1,
+                      "full": 0, "stale_moved": 1, "stale_unlisted": 1}
+    lines = merged.splitlines()
+    # Under the course its topic names, after that course's last source.
+    eaton = next(i for i, line in enumerate(lines) if "**Phil Eaton**" in line)
+    assert lines[eaton] == (
+        "- **Phil Eaton** — notes.eatonphil.com · 2026-09-06 · databases from scratch,"
+        " newest 2026-09-06 · @eatonphil (found 2026-09-23)"
     )
+    assert lines[eaton - 1].startswith("- **Jepsen**")
+    # No course names the topic: a section of its own at the end, with the topic.
+    assert lines[-3:] == [
+        ROSTER_FOUND_HEADING,
+        "",
+        ("- **Murat Demirbas** — muratbuffalo.blogspot.com · 2026-09-10 · reads papers"
+         " aloud; newest post 2026-09-10 · paper reviews (found 2026-09-23)"),
+    ]
+    for skipped in ("Low Score", "No Date", "Long Quiet", "Kyle Kingsbury", "Nobody Here"):
+        assert skipped not in merged
+    assert merged.casefold().count("marc brooker") == 1
+    # The quiet source left its course, its paper-shelf namesake stayed, and it
+    # sits in the rejected section with the date that condemned it.
+    assert "huyenchip.com/blog · 2025-01-16 · ML systems" not in merged
+    assert "- **Chip Huyen paper**" in merged
+    moved = merged.index(
+        "- **Chip Huyen** — huyenchip.com/blog · newest post 2025-01-16"
+        " (moved by the source hunt 2026-09-23)"
+    )
+    assert merged.index("## Checked and rejected") < moved < merged.index("## How this file")
+    # What the owner wrote is untouched.
+    assert "Intro the owner wrote." in merged
+    assert "**Stale** (newest post): Martin Kleppmann 2025-12-08" in merged
+    assert "- The owner's edits win." in merged
 
-    leads = [{"name": "Someone", "url": "https://example.com", "handle": "", "topic": "x",
-              "why": "because", "score": 8}]
-    brief = roster_merge_brief(roster_merge_payload(source_hunt_payload(), 1), leads, "- Existing")
+    again, counts = merge_roster(path.read_text(), _hunt_leads(), today)
+    assert again == merged
+    assert counts["added"] == 0 and counts["stale_moved"] == 0
 
-    assert "crossed out" in brief
-    assert "untrusted data" in brief
-    assert "25 names" in brief
+
+def test_the_roster_merge_opens_a_stale_section_and_keeps_the_cap() -> None:
+    from hq.learning_pipeline import ROSTER_SECTION_CAP, merge_roster
+
+    full = "\n".join(
+        ["## Course 1 — Performance · elite-performance", ""]
+        + [f"- **Writer {n}** — w{n}.example · 2026-09-01" for n in range(ROSTER_SECTION_CAP)]
+    )
+    new = {"name": "One More", "url": "https://more.example/", "handle": "",
+           "topic": "performance", "why": "newest 2026-09-20", "score": 9, "stale": False}
+    gone = {"name": "Writer 3", "url": "https://w3.example/", "handle": "", "topic": "",
+            "why": "newest post 2025-05-05", "score": 0, "stale": True}
+    today = date(2026, 9, 23)
+
+    merged, counts = merge_roster(full, [new, gone], today)
+
+    assert "- **Writer 3** — w3.example · 2026-09-01" not in merged
+    assert merged.endswith(
+        "## Stale\n\n- **Writer 3** — w3.example · newest post 2025-05-05"
+        " (moved by the source hunt 2026-09-23)\n"
+    )
+    # The quiet one freed the slot the new name took; the next one does not fit.
+    assert counts["stale_moved"] == 1 and counts["added"] == 1
+    assert "- **One More** — more.example · 2026-09-20" in merged
+    two = {**new, "name": "Two More", "url": "https://two.example/"}
+    _merged, counts = merge_roster(merged, [two], today)
+    assert counts["full"] == 1 and counts["added"] == 0
 
 
 def test_hunter_skips_what_was_not_worth_reading() -> None:
@@ -314,12 +437,7 @@ def test_a_dead_source_comes_back_as_a_removal_not_a_name() -> None:
     # Adding names is the easy half. The roster went wrong because nothing
     # re-checked what was already on it: a blog whose last post was January
     # 2025 sat there until the owner noticed.
-    from hq.learning_pipeline import (
-        extract_source_leads,
-        roster_merge_brief,
-        roster_merge_payload,
-        source_hunt_payload,
-    )
+    from hq.learning_pipeline import extract_source_leads, merge_roster
 
     output = """```json
     {"missionhq_source_leads":[
@@ -334,11 +452,14 @@ def test_a_dead_source_comes_back_as_a_removal_not_a_name() -> None:
     assert [lead["stale"] for lead in leads] == [False, True]
     # A score of 0 does not disqualify a removal: "this one died" is worth
     # more than a new name on a roster with a size limit.
-    brief = roster_merge_brief(roster_merge_payload(source_hunt_payload(), 2), leads, "- Chip Huyen")
-    assert "gone quiet" in brief
-    assert "2025-01-16" in brief
-    assert "Do not\n    simply delete it" in brief or "Do not simply delete it" in brief
-    assert "Phil Eaton" in brief
+    roster = "## Found by the source hunt\n\n- **Chip Huyen** — huyenchip.com/blog · 2025-01-16\n"
+    merged, counts = merge_roster(roster, leads, date(2026, 9, 23))
+    assert counts["stale_moved"] == 1 and counts["added"] == 1
+    assert merged.endswith(
+        "## Stale\n\n- **Chip Huyen** — huyenchip.com/blog · newest post 2025-01-16"
+        " (moved by the source hunt 2026-09-23)\n"
+    )
+    assert "- **Phil Eaton** — notes.eatonphil.com · 2026-09-06" in merged
 
 
 def test_the_scan_is_told_how_much_reading_is_in_hand() -> None:

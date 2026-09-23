@@ -7,6 +7,7 @@ the API lifespan BEFORE DBOS.launch(); queues + schedules after.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -1438,6 +1439,26 @@ async def _learning_context_step() -> tuple[str, list[str], int, str, str, list[
 
 
 @DBOS.step()
+async def _roster_merge_step(leads: list[dict[str, Any]]) -> dict[str, int]:
+    """Fold a source hunt's leads into learning/sources.md; the counts of what happened."""
+    path = settings().learning_dir / "sources.md"
+
+    def _merge() -> dict[str, int]:
+        try:
+            roster = path.read_text()
+        except FileNotFoundError:
+            roster = ""
+        merged, counts = learning.merge_roster(
+            roster, leads, datetime.now(ZoneInfo(settings().cron_tz)).date()
+        )
+        if merged != roster:
+            path.write_text(merged)
+        return counts
+
+    return await asyncio.to_thread(_merge)
+
+
+@DBOS.step()
 async def _active_phase_step() -> dict[str, Any] | None:
     """The course phase the day's article orbits, or None with no active course."""
     from hq.tools.learning_tools import active_phase
@@ -1675,18 +1696,12 @@ async def _advance_learning(
         leads = learning.extract_source_leads(output)
         if not leads:
             return None
-        roster, _taught, _pending, *_rest = await _learning_context_step()
-        merge = learning.roster_merge_payload(payload, len(leads))
-        return await dispatch(
-            agent="tutor",
-            title=f"Add {len(leads)} name{'' if len(leads) == 1 else 's'} to the reading roster",
-            brief=learning.roster_merge_brief(merge, leads, roster),
-            source="agent",
-            parent_task_id=task_id,
-            origin_session_id=task.get("origin_session_id"),
-            payload={**merge, "run_id": run_id},
-            dedup_key=f"learning-roster:{task_id}",
-        )
+        # The merge is code: sources.md is a repo file no agent can write, and
+        # every rule of the merge is mechanical.
+        counts = await _roster_merge_step(leads)
+        await obs.emit("learning.roster_merged", run_id=run_id, task_id=task_id,
+                       payload={"leads": len(leads), **counts})
+        return None
 
     if learning.is_course_study(payload):
         if result != "done":
