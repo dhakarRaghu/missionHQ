@@ -177,7 +177,13 @@ def test_an_article_is_written_in_stages_and_passes_the_real_page_contract(
     monkeypatch.setattr(lw, "_release_step", release_step)
     monkeypatch.setattr(lw, "_section_step", section_step)
     monkeypatch.setattr(lw, "_citation_step", citation_step)
+    reviews: list[tuple[str, str, str]] = []
+
+    async def set_review(lesson_id: str, status: str, notes: str = "") -> None:
+        reviews.append((lesson_id, status, notes))
+
     monkeypatch.setattr(lt, "record_lesson_row", record_row)
+    monkeypatch.setattr(lt, "set_review", set_review)
     monkeypatch.setattr(lt, "emit", no_emit)
 
     material = lw.Material(article=True, slug="", kind="paper", relationship="foundation",
@@ -197,6 +203,8 @@ def test_an_article_is_written_in_stages_and_passes_the_real_page_contract(
     assert recorded["kind"] == "topic" and recorded["phase_slug"].endswith("02a-scheduling-memory")
     assert recorded["source_urls"] == "https://ex.dev/orca"
     assert lesson_id == "lesson-1"
+    assert reviews == [("lesson-1", "passed", "")]   # a clean page is passed
+    assert lw.saved_outline("t-1") is None           # the plan is dropped once recorded
 
 
 @pytest.mark.parametrize("stage,source,expected", [
@@ -230,3 +238,102 @@ def test_a_long_claim_is_sent_back_with_the_claim_quoted() -> None:
     plan = lw.Outline.model_validate(_outline(concepts=[_concept(claim=long)]))
     probs = lw.outline_problems(plan, NOTE, article=True)
     assert any(long in p and "aim for 20" in p for p in probs)
+
+
+def _fake_writer(tmp_path: Path, monkeypatch, *, fail_at: int | None = None,
+                 unsupported: set[int] | None = None):
+    """A writer with every model call faked; returns (writer factory, log)."""
+    learning = tmp_path / "learning"
+    (learning / "lessons").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(lt.settings(), "learning_dir", learning)
+    log: dict[str, Any] = {"outline": 0, "sections": [], "cited": [], "reviews": []}
+
+    async def outline_step(*a: Any, **k: Any):
+        log["outline"] += 1
+        return _outline()
+
+    async def release_step(claims):
+        return {"fails": [], "reasons": []}
+
+    async def section_step(model: str, prompt: str) -> str:
+        if "Id prefix: s0-" in prompt:
+            return "<p>Your endpoint is fast alone.</p><p>Under load, short answers wait.</p>"
+        number = int(prompt.split("Id prefix for this section: s")[1].split("-")[0])
+        if fail_at is not None and number == fail_at and not log.get("failed"):
+            log["failed"] = True
+            raise RuntimeError("gateway went away")
+        log["sections"].append(number)
+        plan = lw.Outline.model_validate(_outline())
+        return _section_html(number, plan.sections[number - 1])
+
+    async def citation_step(note: str, claims):
+        log["cited"].append([c["id"] for c in claims])
+        bad = [c["id"] for c in claims
+               if unsupported and int(c["id"][1:].split("-")[0]) in unsupported]
+        return {"unsupported": bad, "reasons": ["not in the note"] * len(bad)}
+
+    async def record_row(**kw: Any) -> str:
+        return "lesson-1"
+
+    async def set_review(lesson_id: str, status: str, notes: str = "") -> None:
+        log["reviews"].append((status, notes))
+
+    async def no_emit(*a: Any, **k: Any) -> None:
+        return None
+
+    monkeypatch.setattr(lw, "_outline_step", outline_step)
+    monkeypatch.setattr(lw, "_release_step", release_step)
+    monkeypatch.setattr(lw, "_section_step", section_step)
+    monkeypatch.setattr(lw, "_citation_step", citation_step)
+    monkeypatch.setattr(lt, "record_lesson_row", record_row)
+    monkeypatch.setattr(lt, "set_review", set_review)
+    monkeypatch.setattr(lt, "emit", no_emit)
+
+    def make() -> lw.Writer:
+        material = lw.Material(article=True, slug="", kind="paper", relationship="foundation",
+                               note=NOTE, prompt="the material",
+                               source_urls=["https://ex.dev/orca"], payload={})
+        spec = type("Spec", (), {"model": "teacher", "name": "tutor"})()
+        return lw.Writer(spec, HQDeps(agent="tutor", task_id="t-9", run_id=None),  # type: ignore[arg-type]
+                         material)
+    return make, log
+
+
+def test_a_requeued_lesson_resumes_from_its_plan_and_finished_parts(
+        tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch, fail_at=4)
+    with pytest.raises(RuntimeError):
+        asyncio.run(make().run())
+    assert log["outline"] == 1 and log["sections"] == [1, 2, 3]
+    assert lw.saved_outline("t-9") is not None
+
+    w = make()
+    assert asyncio.run(w.run()) is not None, w.report
+    assert log["outline"] == 1                    # the plan was not asked for again
+    assert log["sections"] == [1, 2, 3, 4, 5, 6]  # only the missing parts were written
+    assert any("earlier attempt" in r for r in w.report)
+
+
+def test_every_part_is_cited_and_an_unmapped_sentence_flags_without_blocking(
+        tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch, unsupported={4})
+    w = make()
+    assert asyncio.run(w.run()) is not None, w.report
+    # The fake sections carry checkable sentences in sections 2 and 4 only;
+    # both are sent, tagged with their section, in one batch.
+    assert log["cited"][0] == ["p2-c1", "p4-c1"]
+    assert log["sections"].count(4) == 2          # section 4 was sent back once
+    assert log["cited"][1] == ["p4-c1"]           # and only it was checked again
+    status, notes = log["reviews"][-1]
+    assert status == "flagged" and "not in the note" in notes
+
+
+def test_model_text_in_a_heading_is_escaped() -> None:
+    s = lw.SectionPlan(heading="Why p99 < p50 & more", concept="c1", covers="x")
+    assert lw._h2(1, s) == '<h2 data-concept="c1">Why p99 &lt; p50 &amp; more</h2>'
+
+
+def test_the_writer_is_told_the_charter_first() -> None:
+    text = lw.section_instructions()
+    assert text.startswith("# Mission HQ charter")
+    assert len(lw.bundle_sha()) == 12

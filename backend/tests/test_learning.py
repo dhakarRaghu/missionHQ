@@ -1444,13 +1444,16 @@ def test_one_row_per_course_phase_and_a_revision_is_unread_again() -> None:
     assert "read_at = NULL" in inspect.getsource(learning_tools.record_lesson_row)
 
 
-def test_the_gate_waits_for_a_revision_and_a_failed_review() -> None:
+def test_only_his_failed_review_holds_the_course_back() -> None:
     import inspect
 
+    from hq.api import learning as api_learning
     from hq.tools import learning_tools
 
-    src = inspect.getsource(learning_tools.start_course_study)
-    assert "review_status IN ('revise', 'failed')" in src
+    for fn in (learning_tools.start_course_study, api_learning):
+        src = inspect.getsource(fn)
+        assert "'revise'" not in src
+    assert "review_status = 'failed'" in inspect.getsource(learning_tools.start_course_study)
 
 
 def load_tutor_tools() -> list[str]:

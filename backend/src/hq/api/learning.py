@@ -453,13 +453,12 @@ async def teach_phase(course: str, slug: str, force: bool = False) -> dict:
 
     unread = None if force else await db.fetchone(
         "SELECT title, review_status FROM hq.lessons WHERE kind = 'course'"
-        " AND (read_at IS NULL OR review_status IN ('revise', 'failed'))"
+        " AND (read_at IS NULL OR review_status = 'failed')"
         " ORDER BY lesson_date DESC LIMIT 1",
         (),
     )
     if unread:
-        why = {"revise": "is being revised after review",
-               "failed": "failed review and needs a decision"}.get(
+        why = {"failed": "failed review and needs a decision"}.get(
             str(unread["review_status"]), "is still unread — mark it read first")
         return {"started": False, "reason": f"{unread['title']} {why}"}
 

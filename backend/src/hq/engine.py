@@ -435,7 +435,7 @@ async def run_task(task_id: str) -> str:
         return f"blocked: {reason}"
 
     await runner.apply_step(task_id, "status_changed", status="running")
-    run_id = await _start_run(task_id, spec)
+    run_id = await _start_run(task_id, spec, lesson_writer.handles(spec, task["payload"]))
     deps = runner.HQDeps(
         agent=agent_name, task_id=task_id, run_id=run_id,
         session_id=task["origin_session_id"],
@@ -1965,12 +1965,14 @@ async def _deliver_task_result_step(
 
 
 @DBOS.step()
-async def _start_run(task_id: str | None, spec: AgentSpec) -> str:
+async def _start_run(task_id: str | None, spec: AgentSpec, staged: bool = False) -> str:
+    # A staged-writer run is told the writer's files, not the agent's card.
+    bundle = lesson_writer.bundle_sha() if staged else bundle_sha(spec)
     row = await db.fetchone(
         "INSERT INTO hq.runs (task_id, wf_id, agent, model, job_hash, bundle_sha)"
         " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id::text",
         (task_id, DBOS.workflow_id, spec.name, llm.registry().canonical(spec.model),
-         spec.job_hash, bundle_sha(spec)),
+         spec.job_hash, bundle),
     )
     assert row is not None
     await runner.emit_step("run.started", run_id=row["id"], task_id=task_id, agent=spec.name)

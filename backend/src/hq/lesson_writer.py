@@ -22,16 +22,22 @@ stage runs:
    section. Each part is checked as it is written and rewritten alone.
 3. ASSEMBLY: the parts are joined and the page contract runs. A refusal is
    traced to the parts it quotes and only those are rewritten.
-4. CITATION PASS: a cheap judge maps every checkable sentence to the study
-   note; unsupported sentences send their section back once. Whatever still
-   does not map is recorded on the lesson for revision.
+4. CITATION PASS: a cheap judge maps every checkable sentence of every
+   part to the study note; unsupported sentences send their part back once.
+   Parts rewritten by the page check are checked again. Whatever still does
+   not map is listed on the lesson, which is marked "flagged"; a clean page
+   is "passed". Neither stops the course: only his own "failed" does.
 
-Every model call is its own DBOS step, so a restart resumes where it was.
+Every model call is its own DBOS step, so a restart of the same workflow
+resumes where it was. A requeued task resumes too: the plan and every
+finished part are kept on disk per task until the lesson is recorded.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import html as html_lib
 import json
 import logging
 import re
@@ -145,15 +151,31 @@ def _writer_file(name: str) -> str:
     return (settings().agents_dir / "tutor" / WRITER_DIR / name).read_text()
 
 
+def _charter() -> str:
+    return (settings().agents_dir / "_shared" / "charter.md").read_text()
+
+
+def writer_prompt(*names: str) -> str:
+    """The charter first, as every agent gets it, then the writer's own files."""
+    return "\n\n".join([_charter().strip(), *(_writer_file(n).strip() for n in names)])
+
+
 def outline_instructions(article: bool, page: str = "") -> str:
     if page:
-        return _writer_file("teacher.md") + "\n\n" + _writer_file("outline-page.md")
-    return _writer_file("teacher.md") + "\n\n" + _writer_file(
-        "outline-article.md" if article else "outline-course.md")
+        return writer_prompt("teacher.md", "outline-page.md")
+    return writer_prompt("teacher.md", "outline-article.md" if article else "outline-course.md")
 
 
 def section_instructions() -> str:
-    return "\n\n".join(_writer_file(n) for n in ("teacher.md", "section.md", "page-kit.md"))
+    return writer_prompt("teacher.md", "section.md", "page-kit.md")
+
+
+def bundle_sha() -> str:
+    """What the writer is told, hashed like an agent's bundle, so a lesson's
+    run names the exact instructions its calls were sent."""
+    names = sorted(p.name for p in writer_dir().glob("*.md"))
+    text = _charter() + "".join(_writer_file(n) for n in names)
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
 
 
 # --- the model calls, each a durable step -------------------------------------
@@ -434,13 +456,17 @@ def _slugify(title: str) -> str:
     return "-".join(words[:8]) or "article"
 
 
+def _esc(text: str) -> str:
+    return html_lib.escape(text.strip(), quote=True)
+
+
 def _h2(i: int, s: SectionPlan) -> str:
-    attr = f'data-concept="{s.concept}"' if s.concept else f'data-kind="{s.kind}"'
-    return f'<h2 {attr}>{s.heading.strip()}</h2>'
+    attr = f'data-concept="{_esc(s.concept)}"' if s.concept else f'data-kind="{_esc(s.kind)}"'
+    return f'<h2 {attr}>{_esc(s.heading)}</h2>'
 
 
 def _concept_list(outline: Outline) -> str:
-    items = "".join(f'<li id="{c.id}"><b>{c.claim.strip()}</b><span>{c.lets_him.strip()}</span></li>'
+    items = "".join(f'<li id="{_esc(c.id)}"><b>{_esc(c.claim)}</b><span>{_esc(c.lets_him)}</span></li>'
                     for c in outline.concepts)
     return f'<ol class="concepts">{items}</ol>'
 
@@ -476,12 +502,51 @@ def _section_prompt(m: Material, outline: Outline, i: int, s: SectionPlan, previ
     return prompt
 
 
+def _outline_file(task_id: str) -> Path:
+    owner = re.sub(r"[^a-z0-9-]+", "-", task_id.lower())[:40]
+    return settings().learning_dir / "lessons" / lt.DRAFTS_SUBDIR / f"{owner}.outline.json"
+
+
+def saved_outline(task_id: str | None) -> Outline | None:
+    if not task_id:
+        return None
+    try:
+        return Outline.model_validate_json(_outline_file(task_id).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def save_outline(task_id: str | None, outline: Outline) -> None:
+    if task_id:
+        f = _outline_file(task_id)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(outline.model_dump_json())
+
+
+def drop_outline(task_id: str | None) -> None:
+    if task_id:
+        _outline_file(task_id).unlink(missing_ok=True)
+
+
+def saved_parts(task_id: str | None, slug: str) -> dict[int, str]:
+    """Finished parts of this task's page, by part number (1 = the opening)."""
+    if not task_id:
+        return {}
+    folder = lt._draft_dir(task_id, lt._clean_slug(slug))
+    out: dict[int, str] = {}
+    for page in sorted(folder.glob("*.html")) if folder.is_dir() else []:
+        if page.stem.isdigit() and page.read_text().strip():
+            out[int(page.stem)] = page.read_text()
+    return out
+
+
 class Writer:
     def __init__(self, spec: AgentSpec, deps: HQDeps, m: Material) -> None:
         self.spec, self.deps, self.m = spec, deps, m
         self.outline: Outline | None = None
         self.parts: list[str] = []            # html per part, part 1 = the opening
         self.report: list[str] = []
+        self.review_status = "passed"
 
     # Parts: 1 is the opening (story + concept list); section k is part k + 1.
     async def _save(self, part: int, html: str) -> dict[str, Any]:
@@ -582,52 +647,93 @@ class Writer:
                     await self.write_section(i, [f"the whole-page check said: {message}"])
         raise AssertionError("unreachable")
 
-    async def cite(self) -> list[dict[str, Any]]:
-        """Sentences the note does not support, after one round of repairs."""
+    def _claims(self, parts: list[int]) -> list[dict[str, Any]]:
+        """Every checkable sentence of these parts, tagged with its part."""
+        out: list[dict[str, Any]] = []
+        for i in parts:
+            for c in lt.new_claims(self.m.source, self.parts[i]):
+                out.append({**c, "id": f"p{i}-{c['id']}", "part": i})
+        return out
+
+    async def _unsupported(self, claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        found: list[dict[str, Any]] = []
+        for at in range(0, len(claims), CITATION_BATCH):
+            batch = claims[at:at + CITATION_BATCH]
+            sent = [{k: c[k] for k in ("id", "section", "claim", "urls")} for c in batch]
+            verdict = CitationVerdict.model_validate(await _citation_step(self.m.note, sent))
+            reasons = dict(zip(verdict.unsupported, verdict.reasons, strict=False))
+            found += [{**c, "why": reasons.get(c["id"], "")} for c in batch
+                      if c["id"] in set(verdict.unsupported)]
+        return found
+
+    async def cite(self, parts: list[int] | None = None, *, repair: bool = True
+                   ) -> list[dict[str, Any]]:
+        """Sentences the note does not support, after one round of repairs.
+        Every sentence of every part is checked, in batches."""
         assert self.outline is not None
+        todo = parts if parts is not None else list(range(1, len(self.parts)))
         unsupported: list[dict[str, Any]] = []
         for round_ in range(REPAIR_ROUNDS + 1):
-            html = "\n".join(self.parts)
-            claims = lt.new_claims(self.m.source, html)[:CITATION_BATCH]
+            claims = self._claims(todo)
             if not claims:
                 return []
-            verdict = CitationVerdict.model_validate(await _citation_step(self.m.note, claims))
-            reasons = dict(zip(verdict.unsupported, verdict.reasons, strict=False))
-            unsupported = [{**c, "why": reasons.get(c["id"], "")} for c in claims
-                           if c["id"] in set(verdict.unsupported)]
-            if not unsupported or round_ == REPAIR_ROUNDS:
+            unsupported = await self._unsupported(claims)
+            if not unsupported or not repair or round_ == REPAIR_ROUNDS:
                 break
             by_part: dict[int, list[str]] = {}
             for c in unsupported:
-                for i, sp in enumerate(self.outline.sections, start=1):
-                    if sp.heading.strip()[:60].lower() == c["section"].strip().lower():
-                        by_part.setdefault(i, []).append(f"“{c['claim'][:200]}” ({c['why']})")
+                by_part.setdefault(c["part"], []).append(f"“{c['claim'][:200]}” ({c['why']})")
             for i, sentences in by_part.items():
                 await self.write_section(i, [
                     "these sentences are not supported by the study note; remove each, or"
                     " state only what the note supports: " + "; ".join(sentences)])
+            todo = sorted(by_part)
         return unsupported
 
     async def run(self) -> tuple[str, str, str] | None:
         """Returns (md_path, html_path, lesson_id), or None when not written."""
-        self.outline = await self.plan()
-        if self.outline is None:
-            return None
+        task_id = self.deps.task_id
+        self.outline = saved_outline(task_id)
+        if self.outline is not None:
+            self.report.append("resumed from the plan saved by an earlier attempt")
+        else:
+            self.outline = await self.plan()
+            if self.outline is None:
+                return None
+            save_outline(task_id, self.outline)
         if self.m.article and not self.m.slug:
             self.m.slug = _slugify(self.outline.title)
-        await self.opening()
+        done = saved_parts(task_id, self.m.slug)
+        if done:
+            self.report.append(f"kept {len(done)} part(s) written by an earlier attempt")
+        if 1 in done:
+            self.parts = [done[1]]
+        else:
+            await self.opening()
         for i in range(1, len(self.outline.sections) + 1):
-            await self.write_section(i)
+            if i + 1 in done:
+                self.parts.append(done[i + 1])
+            else:
+                await self.write_section(i)
         unsupported = await self.cite()
+        before = list(self.parts)
         md_path, html_path = await self.assemble()
+        changed = [i for i in range(1, len(self.parts)) if self.parts[i] != before[i]]
+        if changed:
+            # Parts the page check had rewritten are checked again; what they
+            # add that the note does not carry is listed, not rewritten again.
+            unsupported = ([c for c in unsupported if c["part"] not in changed]
+                           + await self.cite(changed, repair=False))
         lesson_id = await self.record(md_path, html_path)
         if unsupported:
-            notes = "\n".join(f"- {c['claim'][:200]} ({c['why']})" for c in unsupported)
-            await db.execute(
-                "UPDATE hq.lessons SET review_status = 'revise', review_notes = %s WHERE id = %s",
-                ("Sentences the study note does not support:\n" + notes, lesson_id))
+            self.review_status = "flagged"
             self.report.append(f"{len(unsupported)} sentence(s) the note does not support;"
-                               " the lesson is marked for revision")
+                               " listed on the lesson")
+        notes = ("Sentences the study note does not support:\n"
+                 + "\n".join(f"- {c['claim'][:200]} ({c['why']})" for c in unsupported)
+                 if unsupported else "")
+        await lt.set_review(lesson_id, self.review_status, notes)
+        drop_outline(task_id)
         if self.m.article and self.m.kind == learning.FRONTIER and self.outline.frontier:
             await self._frontier(self.outline.frontier)
         return md_path, html_path, lesson_id
@@ -676,16 +782,21 @@ async def gather_page(task: dict[str, Any], payload: dict[str, Any]) -> Material
     brief = str(task.get("brief") or "")
     task_part = brief.split("## This task", 1)[-1]
     parts = []
-    for path in dict.fromkeys(_LESSON_REF_RE.findall(brief)):
-        text = await asyncio.to_thread(lt._read_lesson_text, path)
-        if text:
-            parts.append(f"## Lesson: {path}\n\n{text[:12_000]}")
     source = ""
     phase_slug = str(payload.get("phase_slug") or "")
     if page == "lab" and phase_slug:
         source = await asyncio.to_thread(lt.read_course_source_text, phase_slug)
         if source:
             parts.append(f"## His phase, with its lab\n\n{source[:SOURCE_CHARS]}")
+    # Every lesson the brief names gets an equal share of what is left, so
+    # the older lessons a week review asks recall questions from are not the
+    # ones cut when the material runs long.
+    paths = list(dict.fromkeys(_LESSON_REF_RE.findall(brief)))
+    share = max(3_000, (NOTE_CHARS - sum(len(x) for x in parts)) // max(1, len(paths)))
+    for path in paths:
+        text = await asyncio.to_thread(lt._read_lesson_text, path)
+        if text:
+            parts.append(f"## Lesson: {path}\n\n{text[:share]}")
     note = "\n\n".join(parts)
     slug = f"lab-{phase_slug}" if page == "lab" else f"week-review-{lt._today():%G-w%V}"
     prompt = f"# The task\n\n{task_part.strip()}\n\n# The material\n\n{note[:NOTE_CHARS]}"
@@ -723,7 +834,7 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
         return RunOutcome(output="", outcome="blocked", input_tokens=0, output_tokens=0,
                           cost_usd=0.0, error=f"no lesson at {md_path or '(none given)'}")
     brief = str(task.get("brief") or "")
-    instructions = _writer_file("teacher.md") + "\n\n# This task\n\n" + brief.split(
+    instructions = writer_prompt("teacher.md") + "\n\n# This task\n\n" + brief.split(
         "## This task", 1)[-1].strip()
     problems: list[str] = []
     with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent=spec.name):

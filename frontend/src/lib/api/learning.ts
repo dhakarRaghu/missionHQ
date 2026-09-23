@@ -47,7 +47,7 @@ export interface Lesson {
 }
 
 /** What an independent reviewer made of a lesson after running its lab. */
-export type ReviewStatus = "pending" | "passed" | "revise" | "failed";
+export type ReviewStatus = "pending" | "passed" | "flagged" | "failed" | "none";
 
 /** How a daily article relates to the course phase it orbits. */
 export type ArticleRelationship =

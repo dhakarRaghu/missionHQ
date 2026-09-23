@@ -393,6 +393,19 @@ _CONFLICTS = {
 }
 
 
+REVIEW_STATUSES = ("pending", "passed", "flagged", "failed", "none")
+
+
+async def set_review(lesson_id: str, status: str, notes: str = "") -> None:
+    """Record the citation pass on a lesson. "flagged" lists what the note
+    does not support and holds nothing back; only his "failed" does."""
+    if status not in REVIEW_STATUSES:
+        raise ValueError(f"review status must be one of {REVIEW_STATUSES}")
+    await db.execute(
+        "UPDATE hq.lessons SET review_status = %s, review_notes = %s WHERE id = %s",
+        (status, notes, lesson_id))
+
+
 def _conflict_for(kind: str) -> str:
     return _CONFLICTS.get(kind, _CONFLICTS["topic"])
 
@@ -409,6 +422,9 @@ async def record_lesson_row(
     title = title.strip()
     if not title:
         raise LessonRefused("title is required: the lesson's own headline")
+    # The row's kind is the conflict target's kind: a lab card stored as
+    # "topic" missed its own unique index on a retry and hit the topic one.
+    lesson_kind = kind.strip().lower() if kind.strip().lower() in _CONFLICTS else "topic"
     if not md_path.strip():
         raise LessonRefused("md_path is required: where you wrote the lesson")
     # The page is what he opens. On 2026-09-20 tutor recorded Phase 2B with
@@ -480,7 +496,7 @@ async def record_lesson_row(
         (_today().date(), title[:300], one_liner.strip()[:400], topic.strip()[:120],
          md_path.strip()[:300], html_path.strip()[:300], score, json.dumps(urls[:12]),
          path_step.strip()[:120],
-         'course' if kind.strip().lower() == 'course' else 'topic',
+         lesson_kind,
          course_slug.strip()[:200], phase_slug.strip()[:200], relationship, review,
          article_kind),
     )
@@ -2101,17 +2117,15 @@ async def start_course_study(ctx: RunContext[HQDeps], course: str = "") -> str:
     unread = await db.fetchone(
         "SELECT title, to_char(lesson_date, 'YYYY-MM-DD') AS d, review_status,"
         " read_at IS NULL AS unread FROM hq.lessons"
-        " WHERE kind = 'course' AND (read_at IS NULL OR review_status IN ('revise', 'failed'))"
+        " WHERE kind = 'course' AND (read_at IS NULL OR review_status = 'failed')"
         " ORDER BY lesson_date DESC LIMIT 1",
         (),
     )
     if unread:
-        # Reading a lesson that is still being revised, or that failed review,
-        # is not finishing it. Starting the next phase on top of either is how
-        # a course moves on from material nobody has checked.
-        if unread["review_status"] == "revise":
-            return (f"not starting a new phase: {unread['title']!r} is being revised"
-                    " after review; the next phase waits for the fixed version.")
+        # Only his own "failed" holds a read lesson back. Sentences the
+        # citation pass could not map are listed on the lesson ("flagged"),
+        # and nothing in the system revises it later, so waiting on them
+        # stopped the course for good.
         if unread["review_status"] == "failed":
             return (f"not starting a new phase: {unread['title']!r} failed review;"
                     " its findings are on the Courses page and need a decision.")

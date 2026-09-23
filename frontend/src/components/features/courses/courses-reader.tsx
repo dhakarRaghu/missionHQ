@@ -460,11 +460,11 @@ function PlannedNotice({ course }: { course: string }) {
 }
 
 /**
- * The independent reviewer's verdict, after it ran the lab.
- *
- * The self-score beside it is tutor marking its own work; this is the check
- * that did not. A taught phase from before the reviewer existed has no status
- * at all and shows nothing rather than a review that never happened.
+ * The citation pass: every checkable sentence of the page mapped to the study
+ * note it was written from. "flagged" lists the sentences it could not map on
+ * the lesson and holds nothing back; only "failed", his own call, does. A
+ * phase from before the pass existed shows nothing rather than a check that
+ * never happened.
  */
 function ReviewBadge({ phase }: { phase: CoursePhase }) {
   switch (phase.lesson_review_status) {
@@ -473,13 +473,13 @@ function ReviewBadge({ phase }: { phase: CoursePhase }) {
         <Badge variant="secondary" className="shrink-0 tabular-nums">
           {phase.lesson_review_score != null
             ? `reviewed · ${phase.lesson_review_score}/${SCORE_OUT_OF.course}`
-            : "reviewed"}
+            : "sources checked"}
         </Badge>
       );
-    case "revise":
+    case "flagged":
       return (
         <Badge variant="outline" className="shrink-0">
-          sent back for revision
+          sentences flagged
         </Badge>
       );
     case "failed":
