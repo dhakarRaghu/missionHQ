@@ -87,7 +87,7 @@ Copy `backend/.env.example` to `backend/.env` and set:
 | `CRON_TZ` | Your time zone, for example `Asia/Kolkata` |
 | `DAILY_SPEND_CAP_USD`, `NOTIFICATIONS_PER_DAY` | Keep the defaults until you have a reason to change them |
 | `HEALTHCHECKS_PING_URL` | Optional. A healthchecks.io ping URL. The backend pings it so you are told when the box is down |
-| `CORS_ORIGINS` | Leave empty for this setup. Only used when the console is hosted on another origin. See section 11 |
+| `CORS_ORIGINS` | Leave empty for this setup. Only used when a page on another origin calls the API: the console on Vercel (section 11) or the phone reader's sync (section 12) |
 | `BIND_HOST`, `BIND_PORT` | Keep `127.0.0.1` and `8000`. Caddy and Tailscale Serve reach the backend on the same box |
 
 `API_BEARER_TOKEN` must not be empty in production. An empty token turns
@@ -504,9 +504,12 @@ as before.
    is compiled into the JavaScript the browser downloads, so the secret would
    be published rather than checked.
 
-3. Leave `NEXT_PUBLIC_API_BASE` and `BACKEND_ORIGIN` unset. The reader calls
-   no API.
-4. Open `https://<your-project>.vercel.app/read` on the phone and add it to
+3. Leave `NEXT_PUBLIC_API_BASE` and `BACKEND_ORIGIN` unset. The reader
+   reads its own files; the only request it makes to the backend is the
+   optional sync below.
+4. Optional, to send "Mark read" and concept taps back: set
+   `NEXT_PUBLIC_READER_SYNC_URL` (see "Sending reads and taps back").
+5. Open `https://<your-project>.vercel.app/read` on the phone and add it to
    the home screen.
 
 The gate has no matcher, on purpose. The lessons are static files:
@@ -518,21 +521,61 @@ Vercel's own Deployment Protection does the same job without any code, and
 the two can be used together. This project uses the variable instead, so the
 credential lives with the repo's other secrets.
 
+### Sending reads and taps back
+
+Reading on the phone has to move the course along: the evening run will not
+start the next phase while the last course lesson is unread, and topic
+articles wait the same way. So the lesson page on `/read` has a **Mark read**
+button under the lesson, and each **Got it / Lost me** tap under a concept is
+sent too. Both go to the backend on your tailnet, with no secret anywhere in
+the deployment.
+
+How it works: the page posts to `NEXT_PUBLIC_READER_SYNC_URL`, your backend's
+tailnet address, with `credentials: "omit"` and no token. Tailscale Serve adds
+the `Tailscale-User-Login` header on the way in, and the backend accepts it
+because it equals `TAILSCALE_OWNER_LOGIN` (section 6). The two endpoints are
+`POST /api/reader/read {file}` and `POST /api/reader/signal {file, concept,
+verdict}`, where `file` is the lesson's page name from `index.json`. A read
+goes through the same function as the console's buttons, so a course lesson
+marks its phase read as well; a tap is stored in `hq.concept_signals` with
+`via = 'phone'`, where the next outline reads it.
+
+To turn it on:
+
+1. **Vercel**, Settings → Environment Variables:
+
+   | Variable | Set it to |
+   | --- | --- |
+   | `NEXT_PUBLIC_READER_SYNC_URL` | Your backend's tailnet origin, e.g. `https://mac.tail1234.ts.net` (no path, no trailing slash). `tailscale serve status` shows it |
+
+   It is public by design (compiled into the page) and is not a secret: it
+   only answers devices on your tailnet, signed in as you. Redeploy after
+   setting it; `NEXT_PUBLIC_*` values are fixed at build time.
+2. **Backend** `.env`: add the reader's Vercel origin to `CORS_ORIGINS`
+   (comma-separated, exact, scheme and host, no path), e.g.
+   `CORS_ORIGINS=https://your-reader.vercel.app`. Without it the browser
+   blocks the request. Add each origin you open the reader from (a custom
+   domain as well as the `.vercel.app` one). The backend reads this at start,
+   so it applies from its next restart.
+3. `TAILSCALE_OWNER_LOGIN` must be set (section 3) and Tailscale must be on,
+   signed in as you, on the phone. If the phone's browser asks whether the
+   page may reach devices on your network, allow it for the reader's site.
+
+When the phone is off the tailnet, the Mac is asleep, or the variable is not
+set, nothing is lost: the event waits in an outbox in the phone browser's
+storage, and is sent on the next page load of `/read` and whenever the
+browser comes back online. Next to the button, **saved** means the backend has
+it and **will sync** means it is waiting. A tap on a page the backend has no
+lesson for (**refused**) is dropped rather than retried. The read tick in the
+library shows at once on that phone; everywhere else it follows from the
+backend with the next export.
+
 ### What the phone cannot do
 
-Everything that writes. There is no Mark as read, no Build enhanced version,
-no board and no chat, because each of those is a request to a machine that is
-not in the picture. The read ticks come from the export and are true as of
-the push. The console on your laptop stays the place that changes anything.
-
-The one exception is **Got it / Lost me** under each concept of a lesson. The
-lesson page cannot store or send anything (no network, no storage in its
-frame), so it tells the `/read` page around it, which keeps your answer in
-the phone browser's own storage and shows it on the buttons and in the bar at
-the top. It is never sent anywhere: the phone has no credential for the
-backend, and none is added to Vercel for it. Taps you make in the console
-(Learn, Courses) are written to `hq.concept_signals`, and the next phase's
-outline reads the "lost me" ones from earlier phases of the same course.
+Everything else that writes. There is no Build enhanced version, no board and
+no chat, because each of those needs the console and its credential. The
+console on your laptop stays the place that changes anything beyond "I read
+this" and "this concept landed / lost me".
 
 The console routes are deployed too, and they have no backend to talk to:
 the `/api/*` rewrite lands on the serverless function's own localhost, so

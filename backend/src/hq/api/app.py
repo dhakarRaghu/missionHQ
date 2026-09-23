@@ -86,8 +86,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Mission HQ", lifespan=lifespan)
 
-# CORS only when the console is served from another origin (e.g. Vercel).
-# Exact origins, no credentials: the browser sends the bearer token itself.
+# CORS only when a page on another origin calls this API: the console on
+# Vercel, or the phone reader's /api/reader sync (its Vercel origin goes in
+# CORS_ORIGINS; see docs/deploy.md §12). Exact origins, no credentials: the
+# console sends the bearer token itself, the reader sends none (Tailscale
+# identity authenticates it).
 _cors_origins = [o.strip() for o in settings().cors_origins.split(",") if o.strip()]
 if _cors_origins:
     app.add_middleware(
@@ -103,6 +106,7 @@ from hq.api.agents_admin import router as agents_admin_router
 from hq.api.chat import router as chat_router
 from hq.api.events import router as events_router
 from hq.api.learning import router as learning_router
+from hq.api.reader import router as reader_router
 from hq.api.rest import router as rest_router
 from hq.api.vault import router as vault_router
 
@@ -111,4 +115,5 @@ app.include_router(events_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(vault_router, prefix="/api")
 app.include_router(learning_router, prefix="/api")
+app.include_router(reader_router, prefix="/api")
 app.include_router(agents_admin_router, prefix="/api")

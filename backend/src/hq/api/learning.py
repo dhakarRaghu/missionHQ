@@ -227,13 +227,44 @@ async def mark_lesson_read(lesson_date: str, kind: str = "course") -> dict:
     a new phase while the previous course lesson is unread, so this button is
     the thing that advances the course.
     """
-    row = await db.fetchone(
-        "UPDATE hq.lessons SET read_at = now()"
-        " WHERE lesson_date = %s::date AND kind = %s AND read_at IS NULL"
-        " RETURNING title",
+    rows = await db.fetch(
+        "SELECT id::text FROM hq.lessons"
+        " WHERE lesson_date = %s::date AND kind = %s AND read_at IS NULL",
         (lesson_date, kind),
     )
-    return {"ok": row is not None, "title": (row or {}).get("title", "")}
+    marked = [row for r in rows if (row := await mark_read(str(r["id"])))]
+    return {"ok": bool(marked), "title": marked[0]["title"] if marked else ""}
+
+
+async def mark_read(lesson_id: str) -> dict[str, Any] | None:
+    """The one way a lesson becomes read, wherever he read it.
+
+    Sets `hq.lessons.read_at`, and for a course lesson the phase's `read_at`
+    too: the gates read one or the other (`coalesce(p.read_at, l.read_at)`,
+    or the lesson alone), so a read that reached only one of them used to
+    leave half the chain still waiting. The console's two buttons and the
+    phone reader all come through here. A second call keeps the first time.
+    Returns the lesson (id, title, kind), or None when there is no such lesson.
+    """
+    if not signals.is_uuid(lesson_id):
+        return None
+    row = await db.fetchone(
+        "UPDATE hq.lessons SET read_at = coalesce(read_at, now()) WHERE id = %s::uuid"
+        " RETURNING id::text, title, kind, course_slug",
+        (lesson_id,),
+    )
+    if row is None:
+        return None
+    if row["kind"] == "course":
+        # The phase names its lesson once taught; the lesson names its phase
+        # by slug from the start. Either link is enough.
+        slug = str(row.get("course_slug") or "").strip()
+        await db.execute(
+            "UPDATE hq.course_phases SET read_at = coalesce(read_at, now())"
+            " WHERE lesson_id = %s::uuid" + (" OR slug = %s" if slug else ""),
+            (lesson_id, slug) if slug else (lesson_id,),
+        )
+    return {"id": row["id"], "title": str(row["title"] or ""), "kind": str(row["kind"])}
 
 
 class SignalBody(BaseModel):
@@ -488,10 +519,7 @@ async def mark_phase_read(course: str, slug: str) -> dict:
     if not row:
         raise HTTPException(404, f"no phase {slug!r} in {course!r}")
     if row["lesson_id"]:
-        await db.execute(
-            "UPDATE hq.lessons SET read_at = coalesce(read_at, now()) WHERE id = %s::uuid",
-            (row["lesson_id"],),
-        )
+        await mark_read(str(row["lesson_id"]))
     return {"ok": True, "title": row["title"]}
 
 

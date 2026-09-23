@@ -17,9 +17,10 @@ the backend. No study notes, no review notes, no task or run history. The
 bundle is what he reads, and it goes on a Vercel deployment, so the less that
 leaves this machine the better.
 
-The read flags are true as of the export. Marking something read is a write,
-and this bundle is read-only, so the phone shows them and the console remains
-the place that changes them.
+The read flags are true as of the export. The bundle itself stays read-only:
+"Mark read" and concept taps on the phone go straight to the backend through
+`hq.api.reader` (when the phone is on his tailnet), and the next export
+carries the new flags.
 """
 
 from __future__ import annotations

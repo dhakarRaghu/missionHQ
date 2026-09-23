@@ -3,8 +3,9 @@
 Every lesson page opens with its concepts, and each carries "Got it" and
 "Lost me". The page runs in a sandboxed frame with no network and no storage,
 so the tap is a `postMessage` to the page around it. The console sends it
-here; the phone reader keeps it in its own storage, because the phone never
-holds a credential for this backend.
+here; the phone reader sends it through `hq.api.reader` when the phone is on
+his tailnet (no credential, only his Tailscale identity) and keeps it in an
+outbox until then. `via` says which.
 
 The rows are answers, not a score. Their one consumer today is the next
 outline of the same course: a concept from an earlier phase that he marked
