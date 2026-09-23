@@ -320,17 +320,6 @@ def post_payload(lesson: Mapping[str, Any], section: str) -> dict[str, Any]:
     }
 
 
-def tutor_craft(*names: str) -> str:
-    """Tutor's craft, from the one place it lives (agents/tutor/writer/).
-
-    The staged writer reads these files for phases and articles; the lab
-    card, the week review and a post carry the same text in their brief, so
-    tutor has one set of rules instead of a skill per object that drifts.
-    """
-    base = settings().agents_dir / "tutor" / "writer"
-    return "\n\n".join((base / n).read_text().strip() for n in names if (base / n).exists())
-
-
 def post_brief(payload: Mapping[str, Any]) -> str:
     """Tutor: turn one lesson into a post for his own site.
 
@@ -345,12 +334,9 @@ def post_brief(payload: Mapping[str, Any]) -> str:
     return f"""Prepare {kind} for his own site, from the lesson
 `{payload.get("md_path")}` ("{payload.get("title")}").
 
-{tutor_craft("teacher.md")}
-
 ## This task
 
-Read the lesson first with `read_lesson`. Then rewrite it for a reader who
-has none of his context:
+The lesson is below. Rewrite it for a reader who has none of his context:
 
 - **Cut every private reference.** No course phase, no study note, no agent
   names, no "the phase you are on", no Mission HQ internals. If a point only
@@ -365,12 +351,10 @@ has none of his context:
 - **Never name his employer**, past or present.
 - **Add no new links.** Only urls already in the lesson.
 
-Then call `publish_post` with the section `{section}`, a slug, the title, a
-one-line summary, three to six tags, and the markdown. It runs the checks and
-writes the file into his site. It does not commit and does not publish: he
-reads it, edits it, and pushes it himself.
-
-Report the path it wrote, what you cut, and anything you were unsure about.
+Return the post as the format asks: a slug, the title, a one-line summary,
+three to six tags, and the markdown. Code runs the checks and writes it into
+his site's `{section}` section as a draft. Nothing is committed or published:
+he reads it, edits it, and pushes it himself.
 """
 
 
@@ -382,14 +366,15 @@ def week_review_payload() -> dict[str, Any]:
     return {"workflow": WORKFLOW, "stage": WEEK_REVIEW_STAGE}
 
 
-def lab_card_brief(payload: Mapping[str, Any], articles: Sequence[Mapping[str, Any]]) -> str:
+def lab_card_brief(payload: Mapping[str, Any], articles: Sequence[Mapping[str, Any]],
+                   phase_lesson: str = "") -> str:
     """Tutor: Saturday. The card he builds from, not another thing to read."""
     slug = str(payload.get("phase_slug") or "")
     week = "\n".join(f"- {a.get('title')} (`{a.get('md_path')}`)" for a in articles) or "- none"
+    lesson = (f"The phase's enhanced page: `{phase_lesson}`" if phase_lesson
+              else "The phase has no enhanced page yet.")
     return f"""Write the lab card for **{payload.get("phase_title")}** (`{slug}`) in course
 `{payload.get("phase_course")}`.
-
-{tutor_craft("teacher.md", "page-kit.md")}
 
 ## This task
 
@@ -397,16 +382,16 @@ Saturday and Sunday are his building days, and he has time then. This is not
 an article. It is one page he works from: what to build or break, the exact
 commands, what to measure, and how he knows he is done.
 
-Build it from three things:
+Build it from three things, all in the material below:
 
-1. `read_course_source` for this phase: its Hands-on lab, its exercises with
-   their exact commands and expected output, and its Check-it-yourself
-   section. Copy commands character for character.
-2. `read_lesson` on the phase's enhanced page, for anything the lab needs
-   that the source did not have.
-3. This week's articles, listed below. If one showed a failure worth
-   reproducing or a number worth checking on his own machine, add it as one
-   extra exercise at the end, and say which article it came from.
+1. His phase: its Hands-on lab, its exercises with their exact commands and
+   expected output, and its Check-it-yourself section. Copy commands
+   character for character.
+2. The phase's enhanced page, for anything the lab needs that the phase did
+   not have. {lesson}
+3. This week's articles. If one showed a failure worth reproducing or a
+   number worth checking on his own machine, add it as one extra exercise at
+   the end, and say which article it came from.
 
 {week}
 
@@ -422,9 +407,6 @@ The card, in this order:
 - **Measure**: the numbers to write down, and where each one comes from.
 - **Done when**: the check that decides it, not a feeling.
 - **If you have more time**: one harder extension.
-
-Write it with `write_lesson_part` and `write_lesson` as usual, then
-`record_lesson` with `kind` "lab" and `course_slug` "{slug}".
 """
 
 
@@ -444,13 +426,11 @@ def week_review_brief(
     shortlist = frontier.strip() or "(the frontier file is empty)"
     return f"""Write the week review.
 
-{tutor_craft("teacher.md", "page-kit.md")}
-
 ## This task
 
 It is Sunday and he has time. This is ten minutes of reading that makes the
-week stick, then points at next week. Read every piece below with
-`read_lesson` before you write a word about it.
+week stick, then points at next week. Every piece below is in the material;
+read it before you write a word about it.
 
 **This week:**
 {read}
@@ -477,9 +457,6 @@ Write these sections:
    the one thing he should do first.
 
 Keep it short. No new subject is taught here.
-
-Write it with `write_lesson_part` and `write_lesson`, then `record_lesson`
-with `kind` "review".
 """
 
 

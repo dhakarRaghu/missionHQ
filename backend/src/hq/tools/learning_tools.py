@@ -2480,11 +2480,15 @@ async def _start_lab_card(ctx: RunContext[HQDeps]) -> str:
         " ORDER BY lesson_date",
         (),
     )
+    lesson = await db.fetchone(
+        "SELECT md_path FROM hq.lessons WHERE kind = 'course' AND course_slug = %s",
+        (phase["slug"],),
+    )
     payload = lab_card_payload(phase)
     task_id = await engine.dispatch(
         agent="tutor",
         title=f"Lab card: {str(phase['title'])[:56]}",
-        brief=lab_card_brief(payload, week),
+        brief=lab_card_brief(payload, week, str((lesson or {}).get("md_path") or "")),
         source="agent",
         parent_task_id=ctx.deps.task_id,
         origin_session_id=ctx.deps.session_id,

@@ -1856,11 +1856,20 @@ def test_the_weekend_builds_instead_of_reading() -> None:
 
     phase = {"slug": "c-phase-02-x", "course": "c", "title": "Queues",
              "question": "q", "sections": [], "gaps": []}
-    card = lab_card_brief(lab_card_payload(phase), [{"title": "An outage", "md_path": "a.md"}])
-    assert "lab card" in card and "Break it" in card and '"lab"' in card
+    card = lab_card_brief(lab_card_payload(phase), [{"title": "An outage", "md_path": "a.md"}],
+                          "learning/lessons/2026-09-20-c-phase-02-x.md")
+    assert "lab card" in card and "Break it" in card
     assert "An outage" in card  # the week's reading can add one exercise
+    assert "`learning/lessons/2026-09-20-c-phase-02-x.md`" in card  # the writer reads it
     review = week_review_brief({}, [], [], "- 2026-09-18 · dst · course · …")
     assert "five things worth keeping" in review and "dst" in review
+    # The writer's calls have no tools: a brief that names one asks for the impossible.
+    from hq.learning_pipeline import post_brief, post_payload
+    post = post_brief(post_payload({"md_path": "a.md", "title": "T"}, "writing"))
+    for brief in (card, review, post):
+        for tool in ("read_lesson", "write_lesson", "record_lesson", "publish_post",
+                     "read_course_source"):
+            assert tool not in brief, tool
     run = inspect.getsource(lt.start_learning_run)
     assert "_start_lab_card" in run and "_start_week_review" in run
 
