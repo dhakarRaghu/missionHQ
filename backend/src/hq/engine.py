@@ -944,9 +944,13 @@ async def _cap_overrunning_tasks() -> None:
     back to the queue.
     """
     limit = hang_after_s()
+    # The staged lesson writer makes model calls with no tool events between
+    # them, so a finished model call counts as a sign of life too.
     live = (
         " greatest(t.updated_at, coalesce((SELECT max(e.ts) FROM hq.events e"
-        " JOIN hq.runs r ON r.id = e.run_id WHERE r.task_id = t.id), t.updated_at))"
+        " JOIN hq.runs r ON r.id = e.run_id WHERE r.task_id = t.id), t.updated_at),"
+        " coalesce((SELECT max(m.started_at + make_interval(secs => m.ms / 1000.0))"
+        " FROM hq.model_calls m WHERE m.task_id = t.id), t.updated_at))"
     )
     stale = await db.fetch(
         "SELECT t.id::text FROM hq.tasks t WHERE t.status = 'running'"
@@ -960,7 +964,9 @@ async def _cap_overrunning_tasks() -> None:
         "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now(),"
         f" {safety.CALLS_COSTED}"
         " WHERE r.ended_at IS NULL AND greatest(r.started_at, coalesce("
-        "   (SELECT max(e.ts) FROM hq.events e WHERE e.run_id = r.id), r.started_at))"
+        "   (SELECT max(e.ts) FROM hq.events e WHERE e.run_id = r.id), r.started_at),"
+        "   coalesce((SELECT max(m.started_at + make_interval(secs => m.ms / 1000.0))"
+        "   FROM hq.model_calls m WHERE m.run_id = r.id), r.started_at))"
         "   < now() - make_interval(secs => %s)"
         " RETURNING r.id::text",
         (limit,),

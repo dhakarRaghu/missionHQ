@@ -89,3 +89,9 @@ def test_a_refusal_is_not_retried_as_a_network_failure() -> None:
     assert registry._worth_retrying(ModelRetry("fix the args")) is False
     assert registry._worth_retrying(PermissionError("blocked host")) is False
     assert registry._worth_retrying(ConnectionError("reset")) is True
+
+
+def test_a_model_call_counts_as_a_sign_of_life() -> None:
+    """The staged writer calls models with no tool events between them."""
+    src = inspect.getsource(engine._cap_overrunning_tasks)
+    assert src.count("hq.model_calls") == 2
