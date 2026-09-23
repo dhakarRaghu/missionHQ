@@ -419,22 +419,70 @@ the machine that runs the backend is asleep. `providers.tsx` exempts the path
 from the auth guard and from the event stream, both of which would otherwise
 try to reach a backend the phone cannot see.
 
-### The loop
+### The loop: nightly, on the `reader` branch
+
+Nothing to do by hand. Every night, right after the 03:00 vault reindex (or
+its catch-up when the machine was asleep at 03:00), the backend builds the
+bundle and commits it to a branch named **`reader`**, then runs
+`git push origin reader`. Vercel deploys that branch. New lessons are on the
+phone by morning.
+
+How it stays out of your way:
+
+- **`main` and your working tree are never touched.** The bundle is built in a
+  temporary folder, hashed into git's object store, and committed with
+  `git commit-tree` from a throwaway index (`GIT_INDEX_FILE` in a temp dir).
+  Nothing is checked out, nothing is staged in your index, HEAD does not
+  move, and your uncommitted files are never read.
+- **The tree is `origin/main` plus the bundle.** Each `reader` commit is the
+  app as you last pushed it, with `frontend/public/reader` replaced by
+  tonight's bundle. Only already-pushed code goes out, and app changes reach
+  the phone with the next lesson change after you push `main`.
+- **A commit only when the library changed.** The commit carries a
+  `Reader-Fingerprint:` line, a hash of every file in the bundle with
+  `index.json`'s `built_at` left out. Same fingerprint as last night means no
+  commit, no push and no Vercel build. A lesson written, rebuilt or marked
+  read changes it.
+- **A failed push is logged, not raised.** No network or no credential: the
+  commit stays on your local `reader` branch, a `reader.published` event
+  records the error, and the next night pushes it. The push runs with
+  `GIT_TERMINAL_PROMPT=0`, so it can never hang waiting for a password; the
+  https remote needs the macOS keychain credential helper (or an SSH remote)
+  to push unattended.
+
+Run the same thing by hand, for example after a lesson you want now:
 
 ```bash
-uv run python -m hq.cli export-reader   # in backend/, writes frontend/public/reader
-git add frontend/public/reader && git commit && git push
+uv run python -m hq.cli publish-reader   # in backend/
 ```
 
-Vercel builds on the push. That is the whole publishing model: write a lesson
-on the machine, export, push, read it on the phone.
+`uv run python -m hq.cli export-reader` still writes `frontend/public/reader`
+in your working tree, for `next dev` on your own machine; you no longer need
+to commit it.
 
-The export writes `index.json` (the catalogue) and one file per lesson under
-`lessons/`. It rebuilds the folder every time, so a lesson you deleted or
-rebuilt under a new date does not linger in the copy you push. Each page gets
-the same content policy and `<base target="_blank">` that
-`/api/learning/page` injects for the console, because here there is no
-endpoint to inject them.
+The bundle is `index.json` (the catalogue) and one file per lesson under
+`lessons/`, rebuilt from scratch each time, so a lesson you deleted or
+rebuilt under a new date does not linger. Each page gets the same content
+policy and `<base target="_blank">` that `/api/learning/page` injects for the
+console, because here there is no endpoint to inject them.
+
+### Point Vercel at `reader`
+
+Once, after the first nightly run has pushed the branch (or after
+`publish-reader`):
+
+1. Vercel dashboard → the project → **Settings → Git**.
+2. Under **Production Branch**, change `main` to `reader` and save.
+3. Optional, to stop a preview build on every push to `main`: **Settings →
+   Git → Ignored Build Step**, command
+   `[ "$VERCEL_GIT_COMMIT_REF" = "reader" ] && exit 1 || exit 0`. Vercel
+   builds when the command exits 1, so only `reader` builds.
+4. **Deployments → Redeploy** the latest `reader` commit once, so production
+   switches now rather than at the next lesson.
+
+Root Directory stays `frontend`: the `reader` branch is the whole repo as of
+`origin/main`, so the app, `src/proxy.ts` and its password gate build exactly
+as before.
 
 ### Vercel settings
 
@@ -476,6 +524,15 @@ Everything that writes. There is no Mark as read, no Build enhanced version,
 no board and no chat, because each of those is a request to a machine that is
 not in the picture. The read ticks come from the export and are true as of
 the push. The console on your laptop stays the place that changes anything.
+
+The one exception is **Got it / Lost me** under each concept of a lesson. The
+lesson page cannot store or send anything (no network, no storage in its
+frame), so it tells the `/read` page around it, which keeps your answer in
+the phone browser's own storage and shows it on the buttons and in the bar at
+the top. It is never sent anywhere: the phone has no credential for the
+backend, and none is added to Vercel for it. Taps you make in the console
+(Learn, Courses) are written to `hq.concept_signals`, and the next phase's
+outline reads the "lost me" ones from earlier phases of the same course.
 
 The console routes are deployed too, and they have no backend to talk to:
 the `/api/*` rewrite lands on the serverless function's own localhost, so

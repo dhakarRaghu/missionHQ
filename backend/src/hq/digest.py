@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from hq import db, engagement, runner, safety
+from hq import db, engagement, runner, safety, value
 from hq.config import settings
 from hq.dbos_app import DBOS
 from hq.obs import emit
@@ -102,6 +102,11 @@ async def _build(since: datetime | None, *, now: datetime | None = None
 
     if not sections:
         return "", counts
+    # The week in numbers rides along when there is a digest anyway; on its
+    # own it is not a reason to send one.
+    week = await _value_section(now)
+    if week:
+        sections.append(week)
 
     header = f"Mission HQ digest — {now:%Y-%m-%d}"
     week_line = await _value_week_line(now)
@@ -122,6 +127,16 @@ async def _value_week_line(now: datetime) -> str:
         log.warning("value week status unavailable for the digest", exc_info=True)
         return ""
     return engagement.format_status(status) if status["active"] else ""
+
+
+async def _value_section(now: datetime) -> str:
+    """The weekly value report, five lines. Empty on failure: the report must
+    not cost the owner the digest."""
+    try:
+        return value.format_report(await value.week_report(now))
+    except Exception:
+        log.warning("value report unavailable for the digest", exc_info=True)
+        return ""
 
 
 async def last_sent() -> datetime | None:

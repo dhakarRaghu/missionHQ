@@ -331,6 +331,7 @@ export function CoursesReader({
           key={phase.lesson_html_path}
           path={phase.lesson_html_path}
           title={phase.lesson_title ?? title}
+          lessonId={phase.lesson_id}
         />
       ) : published ? (
         <NotBuilt
@@ -349,6 +350,7 @@ export function CoursesReader({
         <LessonPageFrame
           path={phase.lesson_html_path}
           title={phase.lesson_title ?? phase.title}
+          lessonId={phase.lesson_id}
         />
       ) : phase.lesson_md_path ? (
         // A lesson written but not rendered: the markdown is the whole lesson,

@@ -19,7 +19,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from hq import db
+from hq import db, lesson_kit, signals
 from hq.api.deps import require_auth
 from hq.config import settings
 from hq.learning_pipeline import LESSON_DIR
@@ -60,8 +60,12 @@ def harden_page(html: str) -> str:
     * A leading vault frontmatter block, stripped. Tutor stamps one on notes,
       and before `<!DOCTYPE html>` it renders as stray text and drops the page
       into quirks mode.
+
+    And one addition: the "Got it / Lost me" script on a page that has a
+    concept list but was written before the kit carried it. It only posts to
+    the parent frame; the policy above still blocks every load.
     """
-    html = _FRONTMATTER_RE.sub("", html, count=1)
+    html = lesson_kit.with_taps(_FRONTMATTER_RE.sub("", html, count=1))
     head = f'<meta http-equiv="Content-Security-Policy" content="{CSP}">' \
            '<base target="_blank">'
     match = _HEAD_RE.search(html)
@@ -230,6 +234,38 @@ async def mark_lesson_read(lesson_date: str, kind: str = "course") -> dict:
         (lesson_date, kind),
     )
     return {"ok": row is not None, "title": (row or {}).get("title", "")}
+
+
+class SignalBody(BaseModel):
+    """One "Got it" / "Lost me" tap on a concept of a lesson page. The page is
+    model-written markup, so the values are checked, never trusted."""
+
+    concept: str = Field(max_length=8)
+    verdict: str = Field(max_length=16)
+
+
+@router.post("/lessons/{lesson_id}/signals", operation_id="addConceptSignal", status_code=201)
+async def add_concept_signal(lesson_id: str, body: SignalBody) -> dict[str, Any]:
+    """Record how one concept landed. The next outline of the same course reads
+    the "lost me" answers."""
+    try:
+        signals.validate(body.concept, body.verdict)
+    except signals.SignalRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not signals.is_uuid(lesson_id):
+        raise HTTPException(400, "lesson id must be a uuid")
+    row = await signals.record(lesson_id, body.concept, body.verdict, via="console")
+    if row is None:
+        raise HTTPException(404, "no such lesson")
+    return row
+
+
+@router.get("/lessons/{lesson_id}/signals", operation_id="listConceptSignals")
+async def list_concept_signals(lesson_id: str) -> dict[str, Any]:
+    """Every tap on one lesson, and his current answer per concept."""
+    if not signals.is_uuid(lesson_id):
+        raise HTTPException(400, "lesson id must be a uuid")
+    return await signals.for_lesson(lesson_id)
 
 
 ACTIVE_COURSE_KEY = "learning:active_course"

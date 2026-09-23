@@ -29,7 +29,18 @@ from pydantic_ai import Agent, DeferredToolRequests
 from pydantic_ai.durable_exec.dbos import DBOSDurability, StepConfig
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-from hq import board, db, digest, lesson_writer, llm, memory, obs, runner, safety
+from hq import (
+    board,
+    db,
+    digest,
+    lesson_writer,
+    llm,
+    memory,
+    obs,
+    reader_export,
+    runner,
+    safety,
+)
 from hq import learning_pipeline as learning
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -1820,6 +1831,20 @@ async def store_history(conversation_id: str, agent: str, messages_json: bytes,
 async def _reindex_vault_tick(scheduled: datetime, context: Any) -> None:
     n = await memory.reindex_all()   # makes the vault's one commit of the day first
     await runner.emit_step("vault.reindexed", payload={"chunks": n})
+    await _publish_reader()
+
+
+async def _publish_reader() -> None:
+    """Last night's lessons onto the `reader` branch, so they are on the phone by
+    morning. Runs after the reindex; commits only when the library changed and
+    never touches `main` or the working tree. It cannot fail the tick:
+    `publish_nightly` never raises, and the event is best effort too."""
+    result = await reader_export.publish_nightly()
+    try:
+        await runner.emit_step("reader.published", payload={
+            k: result.get(k) for k in ("branch", "committed", "pushed", "error", "pages")})
+    except Exception:
+        log.warning("reader.published event not recorded", exc_info=True)
 
 
 CATCH_UP_WINDOW = timedelta(hours=12)
@@ -1869,6 +1894,7 @@ async def _catch_up_missed(now_utc: datetime) -> None:
                 (db.jsonb(f"{now:%Y-%m-%d}"),),
             )
             await runner.emit_step("vault.reindexed", payload={"chunks": n, "via": "catch-up"})
+            await _publish_reader()
 
 
 # --- dead-man per cron entry -------------------------------------------------

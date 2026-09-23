@@ -1,13 +1,19 @@
 "use client";
 
-import { use } from "react";
+import { use, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 import { ErrorState } from "@/components/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { readerApi, readerKeys } from "@/lib/reader";
+import { useConceptTaps } from "@/hooks/use-concept-taps";
+import {
+  byConcept,
+  VERDICT_LABEL,
+  type ConceptVerdict,
+} from "@/lib/concept-taps";
+import { loadTaps, readerApi, readerKeys, saveTap } from "@/lib/reader";
 
 /**
  * One lesson on the phone.
@@ -23,6 +29,11 @@ import { readerApi, readerKeys } from "@/lib/reader";
  * Never point the tab straight at `/reader/lessons/<slug>.html`. That file is
  * served from this origin, so opening it directly is exactly the same-origin
  * rendering the sandbox exists to prevent.
+ *
+ * "Got it" / "Lost me" under each concept arrive as messages from the frame,
+ * checked by `useConceptTaps`, and are kept in THIS page's storage (the frame
+ * has none). Nothing is sent anywhere: the phone has no credential for the
+ * backend, and that is on purpose.
  */
 export default function ReadLessonPage({
   params,
@@ -35,6 +46,15 @@ export default function ReadLessonPage({
     queryFn: () => readerApi.page(slug),
     staleTime: 60_000,
   });
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [verdicts, setVerdicts] = useState<Record<string, ConceptVerdict>>(
+    () => loadTaps(slug),
+  );
+  useConceptTaps(frame, verdicts, ({ concept, verdict }) => {
+    saveTap(slug, concept, verdict);
+    setVerdicts((prev) => ({ ...prev, [concept]: verdict }));
+  });
+  const answered = Object.keys(verdicts).sort(byConcept);
 
   return (
     <div className="flex h-dvh flex-col">
@@ -46,6 +66,16 @@ export default function ReadLessonPage({
           <ChevronLeft aria-hidden className="size-4" />
           Library
         </Link>
+        {page.data && answered.length ? (
+          <p
+            className="text-muted-foreground ml-auto truncate px-2 text-xs"
+            title="Your answers, kept on this phone"
+          >
+            {answered
+              .map((c) => `${c} ${VERDICT_LABEL[verdicts[c]].toLowerCase()}`)
+              .join(" · ")}
+          </p>
+        ) : null}
       </div>
 
       {page.isPending ? (
@@ -60,6 +90,7 @@ export default function ReadLessonPage({
         </div>
       ) : (
         <iframe
+          ref={frame}
           title="Lesson"
           srcDoc={page.data}
           sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"

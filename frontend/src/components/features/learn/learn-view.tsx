@@ -264,7 +264,11 @@ export function LearnView() {
       </header>
 
       {mode === "page" && current.html_path ? (
-        <LessonPageFrame path={current.html_path} title={current.title} />
+        <LessonPageFrame
+          path={current.html_path}
+          title={current.title}
+          lessonId={current.id}
+        />
       ) : (
         <LessonText path={current.md_path} />
       )}
