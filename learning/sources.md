@@ -619,8 +619,10 @@ day, and he keeps writing.
 
 - New sources go under the course they serve, with the date of the newest
   post seen. A source that serves two courses is listed in both.
-- The weekly hunt adds verified names AND reports sources gone quiet; tutor
-  moves those to the rejected list with their real last date.
+- The weekly hunt adds verified names AND reports sources gone quiet; code
+  merges them (`learning_pipeline.merge_roster`): a new name lands under the
+  course its topic names, or under "Found by the source hunt", and a quiet
+  one moves to the rejected list with its real last date.
 - An article should draw on at least two sites. A course section with fewer
   than ten active sources is the next hunt's target.
 - When the unread backlog drops below six, a hunt starts on its own.
