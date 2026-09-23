@@ -162,8 +162,10 @@ NOT because level two is a target. It is not: he has about two months of
 full-time experience behind an eleven-month internship, so SDE-2 and
 Engineer II are the wrong rung and will not screen through.
 
-For each search, read the result list: the first page, and the second
-(`&start=25`) when the first is still turning up good matches. A card shows
+Page budget for this task: at most eight page loads, all on LinkedIn (a
+detail pane opens on the same page and does not count). For each search,
+read the result list: the first page, and the second (`&start=25`) when the
+first is still turning up good matches. A card shows
 company, title, location and posted date, which is enough to screen on.
 
 Then, for the strongest candidates only — at most eight across all four

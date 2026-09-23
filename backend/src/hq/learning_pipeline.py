@@ -321,6 +321,17 @@ def post_payload(lesson: Mapping[str, Any], section: str) -> dict[str, Any]:
     }
 
 
+def tutor_craft(*names: str) -> str:
+    """Tutor's craft, from the one place it lives (agents/tutor/writer/).
+
+    The staged writer reads these files for phases and articles; the lab
+    card, the week review and a post carry the same text in their brief, so
+    tutor has one set of rules instead of a skill per object that drifts.
+    """
+    base = settings().agents_dir / "tutor" / "writer"
+    return "\n\n".join((base / n).read_text().strip() for n in names if (base / n).exists())
+
+
 def post_brief(payload: Mapping[str, Any]) -> str:
     """Tutor: turn one lesson into a post for his own site.
 
@@ -335,8 +346,9 @@ def post_brief(payload: Mapping[str, Any]) -> str:
     return f"""Prepare {kind} for his own site, from the lesson
 `{payload.get("md_path")}` ("{payload.get("title")}").
 
-**Load the `teaching` skill, then the `article` skill, with `load_skill`.**
-Work to the section "Publishing to his site".
+{tutor_craft("teacher.md")}
+
+## This task
 
 Read the lesson first with `read_lesson`. Then rewrite it for a reader who
 has none of his context:
@@ -378,8 +390,9 @@ def lab_card_brief(payload: Mapping[str, Any], articles: Sequence[Mapping[str, A
     return f"""Write the lab card for **{payload.get("phase_title")}** (`{slug}`) in course
 `{payload.get("phase_course")}`.
 
-**Load the `teaching` skill, then the `course-phase` skill, with `load_skill`.**
-Work to the section "The lab card".
+{tutor_craft("teacher.md", "page-kit.md")}
+
+## This task
 
 Saturday and Sunday are his building days, and he has time then. This is not
 an article. It is one page he works from: what to build or break, the exact
@@ -430,8 +443,11 @@ def week_review_brief(
         f"- {a.get('lesson_date')} · {a.get('title')} (`{a.get('md_path')}`)"
         for a in older) or "- nothing old enough yet"
     shortlist = frontier.strip() or "(the frontier file is empty)"
-    return f"""Write the week review. **Load the `teaching` skill, then the `article` skill,
-with `load_skill`.** Work to the section "The week review".
+    return f"""Write the week review.
+
+{tutor_craft("teacher.md", "page-kit.md")}
+
+## This task
 
 It is Sunday and he has time. This is ten minutes of reading that makes the
 week stick, then points at next week. Read every piece below with
@@ -1032,7 +1048,7 @@ def scan_brief(
         # A missing bar is reported, never guessed at: an agent told nothing
         # about the standard invents one, and it is always lower than his.
         else f"\n\n{PATH_PATH} is missing, so there is no bar to read against."
-        " Say so in your answer, and hold every lead to the deep-research standard."
+        " Say so in your answer, and hold every lead to the source-research standard."
     )
     path_block = bar_block + aim_block(
         str(payload.get("article_kind") or SPINE_EVIDENCE), phase)
@@ -1144,7 +1160,7 @@ order:
    lot. He is not reading for a language: a point that only holds in Python is
    worth less than the same point about the system.
 
-Rank what you find the way the `deep-research` skill ranks it: source code at
+Rank what you find the way the `source-research` skill ranks it: source code at
 a tag and versioned docs settle defaults, the original paper settles mechanism,
 a vendor post counts only when it states its conditions, and a secondary blog
 summarising someone else's work counts for nothing — put forward the thing the
@@ -1241,12 +1257,10 @@ reading the owner would do himself if he had the hour.
 
 {lines}
 {_study_orbit(payload)}
-**Load the `deep-research` skill first and work to it.** It is the standard
-for anything he builds from: open every URL you cite, rank the source, carry
-the conditions with every number, name the scorer, report absences, and finish
-with the mandatory "Things I could NOT verify" section. Use `fetch_source`
-rather than `web_fetch` whenever exact words matter — a default value, a
-method section, whether a keyword appears at all.
+**Load the `source-research` skill first and work to it.** Use `fetch_source`
+rather than `web_fetch` whenever exact words matter: a default value, a
+method section, whether a keyword appears at all. Every note ends with
+"Things I could NOT verify".
 
 For each article:
 
@@ -1308,109 +1322,20 @@ def lesson_brief(
     digests: Sequence[Mapping[str, Any]],
     path: str = "",
 ) -> str:
-    """Tutor: one short article, orbiting the course phase he is on.
+    """What the task card says about today's article.
 
-    `path` is accepted for older callers and not used: the direction lives in
-    the courses now, and the phase arrives in the payload.
+    No model reads this. The staged writer (lesson_writer.py) reads the
+    digests itself, plans one idea, writes one section at a time and checks
+    every sentence against the digests. `path` is accepted for older callers.
     """
-    lines = "\n".join(
-        f"- `{d.get('digest_path')}` — {d.get('title')} ({d.get('url')})"
-        for d in digests
-    )
-    relationship = str(payload.get("relationship") or "")
-    slug = str(payload.get("phase_slug") or "")
+    lines = "\n".join(f"- `{d.get('digest_path')}`: {d.get('title')}" for d in digests)
     kind = str(payload.get("article_kind") or SPINE_EVIDENCE)
-    if kind == FRONTIER:
-        orbit = """## What this article is for
-
-This one does not serve a course phase. It is new ground: something he is not
-already learning. Teach it on its own terms, from the digests, and then do the
-part that keeps it useful.
-
-**End with a section headed "Does this change the path?"** with one of three
-answers, in one short paragraph each:
-
-- **No.** Worth knowing, changes nothing he does. Say what he can now
-  recognise.
-- **Yes, inside a course.** Name the course and the phase it belongs to, and
-  the one section it would add or correct.
-- **Yes, a new subject.** Name it, and say what it would replace or postpone.
-
-Then call `note_frontier` once with that subject and that verdict. It keeps
-the shortlist he reviews, so new ground has a door into the plan instead of
-becoming a random reading list."""
-        record = '`kind` "topic" and `article_kind` "frontier", with no phase_slug'
-    elif kind == PAPER and slug:
-        orbit = f"""## What this article is for
-
-This is paper day. He read the mechanism in the course; today he reads the
-work under it: **{payload.get("phase_title")}** (`{slug}`).
-
-Teach the paper, not a summary of it:
-
-- the problem the authors had, in the world as it was then
-- the idea, in your own plain words, with the one figure or table that carries
-  their evidence, named by number
-- what they measured, on what hardware and workload, and what they did not
-- what later work changed, and what still holds today
-- what it changes for him: a decision, a default, or a way of looking at his
-  own system
-
-Name the sections you read. If the digests could not reach the full text, say
-so rather than writing around it."""
-        record = f'`kind` "topic", `article_kind` "paper", `phase_slug` "{slug}" and `relationship` "foundation"'
-    elif slug:
-        need = RELATIONSHIP_NEEDS.get(
-            relationship,
-            "the scan did not label it; decide which of the six it really is and say so",
-        )
-        orbit = f"""## What this article is for
-
-It orbits the course phase he is on: **{payload.get("phase_title")}** (`{slug}`)
-in `{payload.get("phase_course")}`. The phase asks: {payload.get("phase_question") or "(not stated)"}
-
-Its relationship to that phase is **`{relationship or "not stated"}`**, so it must deliver
-{need}.
-What the scan said it adds beyond the course: {payload.get("adds") or "(not given; work it out and state it)"}
-
-Do not re-teach the phase. He reads the course for the mechanism; this article
-is where he sees whether that mechanism holds up in a real system."""
-        record = (f'`kind` "topic", `article_kind` "{kind}", `phase_slug` "{slug}"'
-                  f' and `relationship` "{relationship}"')
-    else:
-        orbit = ("No course phase is active today, so this article stands alone. Say so"
-                 " in its header line.")
-        record = '`kind` "topic"'
-    return f"""Write today's article from these study digests. **Load the `teaching` skill,
-then the `article` skill, with `load_skill`, and work to both.**
-
-{lines}
-
-His interests: {payload.get("topics")}
-
-{orbit}
-
-Read every digest with `vault_read` before you write anything. Hunter skips
-what it judged not worth reading, so what reaches you has already survived one
-filter, but apply your own: a digest that teaches nothing is not a section, it
-is one line in your report. Write ONE article carrying ONE idea, per the
-`article` skill: the one thing he knows about this mechanism in the real world
-afterwards that the phase did not give him. Not a summary of each digest, and
-not the story of who published what. Open the idea with a question he answers
-before you tell him.
-
-Save the article one section per call with `write_lesson_part` (markdown plus
-the page body in the kit's components), then call `write_lesson` with the
-slug, `title`, `subtitle` and `eyebrow`. It joins the parts, wraps the page in
-the kit, writes both files into
-`{LESSON_DIR}/` and returns the two paths. One call carrying the whole article
-can run past the time limit and be cancelled with nothing saved. A slug is lowercase
-words joined by hyphens, with no date: the date is added for you.
-
-Then call `record_lesson` with the title, the one-line version, the two paths,
-your score, the source urls, and {record}. Finish with `notify_owner`: the
-title, the one line, and nothing else. He reads that on his phone at breakfast.
-"""
+    slug = str(payload.get("phase_slug") or "")
+    orbit = (f" It orbits **{payload.get('phase_title')}** (`{slug}`) as"
+             f" `{payload.get('relationship') or 'not stated'}`." if slug else "")
+    return (f"Write today's article ({kind}).{orbit}\n\nDigests:\n{lines or '- none'}"
+            "\n\nOne idea, planned first, written one section at a time, checked as a"
+            " page and sentence by sentence against the digests, then recorded.")
 
 
 def source_hunt_brief(payload: Mapping[str, Any], roster: str = "") -> str:
@@ -1629,16 +1554,9 @@ Phase: **{payload.get("title")}**
 Slug: `{payload.get("slug")}`  ·  Course: {payload.get("course")}
 {payload.get("summary")}
 
-**Load the `deep-research` skill and the `study-standard` skill, and work to
-both.**
-
-He reads Mission HQ's lesson on this ground, not the phase. He wrote the phase
-with Claude as a first pass, and he has said what it is now: "that is the
-course that I generated for learning. If you find the things there are not
-good to learn then you can drop those, and can add things that must be
-learned. That part is for reference." And what he wants instead: "a teacher
-who knows everything and now shares the important concepts that I should know
-for becoming better, not anything random."
+**Load the `source-research` skill and work to it.** His phase is reference,
+not a contract: he wrote it as a first pass and wants the concepts a teacher
+who knows the field would pick, with the proof.
 
 So you are not auditing the phase and you are not collecting sources for it.
 You are deciding, as someone who knows this field, **which few ideas a strong

@@ -778,8 +778,11 @@ def test_discovery_runs_four_searches_for_twenty_roles() -> None:
     assert "Go straight to one LinkedIn jobs search" not in brief
     assert "Maximum candidates: 20" in brief
     assert "max_roles: int = 20" in inspect.getsource(board_tools)
-    sage = pathlib.Path(__file__).resolve().parents[2] / "agents" / "sage" / "job.md"
-    assert "and max_roles 20." in sage.read_text()
+    from hq import engine
+
+    job = next(d for d in engine.SYSTEM_DISPATCHES if d[0] == "job_search")
+    assert job[2] == "start_job_search" and job[3]["max_roles"] == 20
+    assert pathlib.Path  # the nightly discovery is a code schedule, not a sage prompt
 
 
 def test_a_level_two_title_is_the_wrong_rung() -> None:

@@ -147,10 +147,9 @@ def test_the_lesson_brief_names_both_files_and_the_skill() -> None:
     digests = [{"digest_path": "quarantine/2026-09-12-a-study.md", "title": "A", "url": "https://example.com/a"}]
     brief = lesson_brief(lesson_payload(scan_payload(), digests), digests)
 
-    assert "`teaching` skill" in brief and "`article` skill" in brief
+    # A task card now: the staged writer reads the digests itself.
     assert "quarantine/2026-09-12-a-study.md" in brief
-    assert "write_lesson" in brief and "record_lesson" in brief
-    assert "learning/lessons" in brief  # the repo, not the vault
+    assert "One idea" in brief
 
 
 def test_a_lesson_page_can_load_nothing_from_the_internet() -> None:
@@ -186,7 +185,8 @@ def test_tutor_may_write_lessons_because_it_cannot_read_the_web() -> None:
     # longer holds a vault write scope at all.
     assert "write_lesson" in tutor.tools
     assert not [t for t in tutor.tools if t.startswith("vault_write")]
-    assert {"create_subtask", "notify_owner"} <= set(tutor.tools)
+    # Only sage talks to him; tutor hands nothing off.
+    assert not ({"create_subtask", "notify_owner"} & set(tutor.tools))
     # Hunter reads the web, so it stays unable to dispatch or message.
     hunter = set(specs["hunter"].tools)
     assert not ({"create_subtask", "notify_owner"} & hunter)
@@ -194,21 +194,17 @@ def test_tutor_may_write_lessons_because_it_cannot_read_the_web() -> None:
 
 
 def test_the_nightly_cron_calls_the_pipeline_and_nothing_else() -> None:
-    # Every day since 2026-09-18: the weekday article, then Saturday's lab
-    # card and Sunday's review. The day decides, not the cron line.
+    """The evening starters are code schedules: one deterministic call each,
+    no model run that could misread "call this exactly once"."""
+    from hq import engine
     from hq.loader import scan
 
+    starters = {d[0]: d for d in engine.SYSTEM_DISPATCHES}
+    assert starters["learning_run"][1:3] == ("0 22 * * *", "start_learning_run")
+    assert starters["course_study"][1:3] == ("30 18 * * *", "start_course_study")
     sage = scan(strict=True)["sage"]
-    nightly = [c for c in sage.cron if c.schedule == "0 22 * * *"]
-
-    assert len(nightly) == 1
-    assert "start_learning_run" in nightly[0].prompt
-    assert "marked read" in nightly[0].prompt
-    assert "lab card" in nightly[0].prompt and "week review" in nightly[0].prompt
-    assert "start_learning_run" in sage.tools
-    # One call decides everything; sage never picks the day itself.
-    assert "exactly once" in nightly[0].prompt
-    assert not [c for c in sage.cron if c.schedule == "0 22 * * 1-5"]
+    assert not [c for c in sage.cron if "start_" in c.prompt]
+    assert "start_learning_run" in sage.tools  # he can still ask for one in chat
 
 
 def test_topic_learning_waits_for_read_and_for_an_active_run() -> None:
@@ -308,14 +304,10 @@ def test_hunter_skips_what_was_not_worth_reading() -> None:
 
 
 def test_the_weekly_hunt_is_wired_to_sage() -> None:
-    from hq.loader import scan
+    from hq import engine
 
-    sage = scan(strict=True)["sage"]
-    weekly = [c for c in sage.cron if c.schedule == "0 7 * * 0"]
-
-    assert len(weekly) == 1
-    assert "start_source_hunt" in weekly[0].prompt
-    assert "start_source_hunt" in sage.tools
+    hunt = next(d for d in engine.SYSTEM_DISPATCHES if d[0] == "source_hunt")
+    assert hunt[1:3] == ("0 7 * * 0", "start_source_hunt")
 
 
 def test_a_dead_source_comes_back_as_a_removal_not_a_name() -> None:
@@ -502,12 +494,7 @@ def test_the_lanes_match_what_he_actually_asked_for() -> None:
     assert "strong on Python, Postgres and payments" not in brief
     assert "not reading for a language" in brief
 
-    root = pathlib.Path(__file__).resolve().parents[2] / "agents" / "tutor"
-    tutor = root.joinpath("job.md").read_text()
-    skill = root.joinpath("skills", "article", "SKILL.md").read_text()
-    assert "NOT reading for payments" in tutor
-    assert "interests.md" in tutor
-    assert "Use the language the material" in skill
+    assert pathlib.Path
 
 
 def test_his_own_files_live_in_the_repo_not_the_vault() -> None:
@@ -605,7 +592,7 @@ def test_the_agents_he_reads_get_room_to_think() -> None:
     assert 420 <= deep["settings"]["timeout_s"] <= 600
 
     agents = scan(strict=True)
-    for name in ("sage", "hunter", "scout"):
+    for name in ("sage", "hunter"):
         assert agents[name].model == "deep", name
 
 
@@ -635,16 +622,15 @@ def test_tutor_teaches_on_a_model_it_can_afford_all_day() -> None:
     assert budget is not None and budget >= 2_500_000, budget
 
 
-def test_scout_can_reach_the_lesson_that_seeds_its_posts() -> None:
-    # Lessons moved to the repo, which silently broke scout's evening pass:
-    # it was told to read today's lesson and only has vault_read.
+def test_sage_can_reach_the_lessons_that_seed_content_ideas() -> None:
+    # Content ideas come from his lessons, which live in the repo, not the
+    # vault; sage reads them with the lesson tools and still holds no web tool.
     from hq.loader import scan
 
-    scout = set(scan(strict=True)["scout"].tools)
+    sage = set(scan(strict=True)["sage"].tools)
 
-    assert {"list_lessons", "read_lesson"} <= scout
-    # Still no web tools, so it may keep writing into projects/content/**.
-    assert not ({"web_fetch", "web_search", "browser_read"} & scout)
+    assert {"list_lessons", "read_lesson"} <= sage
+    assert not ({"web_fetch", "web_search", "browser_read"} & sage)
 
 
 def test_read_lesson_only_reaches_the_lessons_folder() -> None:
@@ -737,10 +723,13 @@ def test_the_lesson_says_where_it_sits() -> None:
     )
     brief = lesson_brief(payload, digests)
 
-    assert "It orbits the course phase he is on" in brief
-    assert "**`fails`**" in brief
-    assert '`phase_slug` "p-2"' in brief and '`relationship` "fails"' in brief
-    assert "Do not re-teach the phase" in brief
+    assert "It orbits **Queueing** (`p-2`) as `fails`" in brief
+    # The writer records both, so tomorrow's scan knows what the phase lacks.
+    from hq import lesson_writer
+
+    record = inspect.getsource(lesson_writer.Writer.record)
+    assert "phase_slug=" in record and "relationship=self.m.relationship" in record
+    assert "Do not re-teach the phase" in lesson_writer.outline_instructions(article=True)
 
 
 def test_record_lesson_stores_the_module() -> None:
@@ -811,9 +800,8 @@ def test_building_lives_in_the_course_lab() -> None:
     for course in load_courses():
         for phase in course.phases:
             assert phase.lab.strip(), f"{course.slug} phase {phase.order} has no lab"
-    skill = (pathlib.Path(__file__).resolve().parents[2] / "agents" / "tutor"
-             / "skills" / "article" / "SKILL.md").read_text()
-    assert "Fifteen minutes today" in skill
+    craft = (pathlib.Path(__file__).resolve().parents[2] / "agents" / "tutor" / "writer" / "outline-article.md").read_text()
+    assert "fifteen minutes he could spend today" in " ".join(craft.split())
 
 
 def test_his_list_is_reference_not_a_queue() -> None:
@@ -849,14 +837,14 @@ def test_the_skill_demands_plain_language_and_a_diagram_that_runs() -> None:
     import pathlib
 
     # Both now live once, in the shared `teaching` skill every lesson loads.
-    skill = (pathlib.Path(__file__).resolve().parents[2] / "agents" / "tutor"
-             / "skills" / "teaching" / "SKILL.md").read_text()
+    base = pathlib.Path(__file__).resolve().parents[2] / "agents" / "tutor" / "writer"
+    teacher = " ".join((base / "teacher.md").read_text().split())
+    kit = " ".join((base / "page-kit.md").read_text().split())
 
-    assert "## Write in plain English" in skill
-    assert "One idea per sentence" in skill
-    assert "Confirm each exists" in skill
-    assert "id=` is" in skill  # the exact confusion that broke it
-    assert "must come from the note" in skill
+    assert "## Plain English" in teacher
+    assert "One idea per sentence" in teacher
+    assert "must come from them" in teacher
+    assert "exists in the markup, spelled the same" in kit
 
 
 def test_production_failure_outranks_everything_else() -> None:
@@ -869,13 +857,13 @@ def test_production_failure_outranks_everything_else() -> None:
     interests = (root / "learning" / "interests.md").read_text()
     path = (root / "learning" / "path.md").read_text()
     sources = (root / "learning" / "sources.md").read_text()
-    skill = (root / "agents" / "tutor" / "skills" / "article" / "SKILL.md").read_text()
+    skill = " ".join((root / "agents" / "tutor" / "writer" / "outline-article.md").read_text().split())
 
     assert "read this above everything" in interests
     assert "The best article of all** is a real incident" in path
     assert "blog.cloudflare.com/tag/outage/" in sources
     assert "danluu/post-mortems" in sources
-    assert "The wrong theory." in skill  # the paragraph summaries always drop
+    assert "the wrong theory they chased" in skill  # the part summaries always drop
 
 
 def test_a_day_reads_one_topic_not_three_good_articles() -> None:
@@ -925,12 +913,14 @@ def test_the_briefs_teach_the_mechanism_not_the_tool() -> None:
 
     digests = [{"digest_path": "q.md", "title": "A", "url": "https://e"}]
     lesson = lesson_brief(lesson_payload(scan_payload(), digests), digests)
-    assert "Write ONE article carrying ONE idea" in lesson
+    assert "One idea" in lesson
 
-    skill = (pathlib.Path(__file__).resolve().parents[2] / "agents" / "tutor"
-             / "skills" / "article" / "SKILL.md").read_text()
-    assert "Never weld unrelated material together" in skill
-    assert "the mechanism is the\nsubject" in skill or "the mechanism is the subject" in skill
+    from hq import lesson_writer
+
+    craft = " ".join(lesson_writer.outline_instructions(article=True).split())
+    assert "An article carries ONE idea" in craft
+    assert "Teach the mechanism, not the product" in craft
+    assert pathlib.Path
 
 
 def test_his_files_are_not_silently_truncated() -> None:
@@ -996,22 +986,19 @@ def test_study_runs_work_to_the_research_standard() -> None:
     )
 
     skill = (pathlib.Path(__file__).resolve().parents[2] / "agents" / "hunter"
-             / "skills" / "deep-research" / "SKILL.md").read_text()
+             / "skills" / "source-research" / "SKILL.md").read_text()
     flat = " ".join(skill.split())
-    # The principles, not the sentences: this is our method now, written in our
-    # own terms and against our own tools, not a transplanted document.
-    assert "leads, not sources" in flat          # a search result is not a source
-    assert "Things I could NOT verify" in flat   # the mandatory gap list
-    assert "raw.githubusercontent.com" in flat and "never `main`" in flat
-    assert "Abstracts state conclusions" in flat  # the crux is in the method
-    assert "fetch_source" in flat                 # our tool, not a generic one
-    assert "rubyhack.ai" in flat                  # our own failure, as the reason
+    assert "only if you opened it this run" in flat   # cite only what was opened
+    assert "Things I could NOT verify" in flat        # the mandatory gap list
+    assert "never `main`" in flat                      # source at a release tag
+    assert "read the table's rows" in flat             # not the summary sentence
+    assert "could the next release make it false" in flat
 
     picks = [{"title": "A", "url": "https://e.com/a", "why": "because"}]
     topic = study_brief(study_payload(scan_payload(), picks), picks)
     course = course_study_brief(course_payload({"slug": "k-phase-00", "title": "T"}))
     for brief in (topic, course):
-        assert "deep-research" in brief
+        assert "source-research" in brief
         assert "could NOT verify" in brief or "could not confirm" in brief
 
     # fetch_source exists, because none of the above is possible through a

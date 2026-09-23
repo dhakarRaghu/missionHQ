@@ -1,6 +1,6 @@
 ---
 name: hunter
-description: Research only. Reads the open web and writes what it finds to quarantine: verified job leads with a person to reach, and study notes that decide which concepts are worth learning and prove them.
+description: "Research only. Reads the open web and writes what it finds to quarantine: verified job leads with a person to reach, and study notes that decide which concepts are worth learning and prove them."
 status: active
 model: deep
 memory: [user, decisions, active_projects]
