@@ -35,6 +35,7 @@ from hq import learning_pipeline as learning
 from hq.config import settings
 from hq.dbos_app import DBOS
 from hq.job_pipeline import (
+    SWEEP_PROMPT,
     extract_discovery_leads,
     extract_referral_people,
     is_browser_discovery,
@@ -668,6 +669,22 @@ async def _newest_slot_step(schedule: str) -> str:
     return croniter(schedule, now).get_prev(datetime).isoformat()
 
 
+@DBOS.step()
+async def _cron_brief_step(agent_name: str, prompt: str) -> str:
+    """The brief a cron entry dispatches with.
+
+    Almost always the entry's own prompt. A few entries are a name for a brief
+    that code builds at dispatch, because what it needs (the ledger, today's
+    rotation, the back-off list) changes every night and a model asked to
+    remember it does not. A step, so a recovered workflow reuses the brief it
+    built the first time."""
+    if prompt.strip() == SWEEP_PROMPT:
+        from hq.tools.job_tools import build_sweep_brief
+
+        return await build_sweep_brief()
+    return prompt
+
+
 def _make_cron(agent_name: str, idx: int, prompt: str, schedule: str):
     async def fire(scheduled: datetime, context: Any) -> None:
         local = scheduled.astimezone(ZoneInfo(settings().cron_tz))
@@ -682,7 +699,8 @@ def _make_cron(agent_name: str, idx: int, prompt: str, schedule: str):
                                             "newest": f"{newest:%Y-%m-%d %H:%M}"})
             return
         await dispatch(
-            agent=agent_name, title=cron_title(prompt), brief=prompt, source="cron",
+            agent=agent_name, title=cron_title(prompt),
+            brief=await _cron_brief_step(agent_name, prompt), source="cron",
             dedup_key=f"cron:{agent_name}:{idx}:{local:%Y-%m-%d-%H%M}",
         )
     fire.__name__ = fire.__qualname__ = f"cron_{agent_name}_{idx}"
@@ -2032,7 +2050,8 @@ async def _catch_up_missed(now_utc: datetime) -> None:
             if await db.fetchone("SELECT 1 FROM hq.tasks WHERE dedup_key = %s", (key,)):
                 continue
             await dispatch(agent=agent_name, title=cron_title(entry.prompt),
-                           brief=entry.prompt, source="cron", dedup_key=key)
+                           brief=await _cron_brief_step(agent_name, entry.prompt),
+                           source="cron", dedup_key=key)
             await runner.emit_step("cron.caught_up", agent=agent_name, payload={"slot": key})
 
     # digest: DIGEST_HOUR:DIGEST_MINUTE local, at most once per date

@@ -5,6 +5,10 @@ live in one file instead of being copied, and so an article written without
 opening `write-post` first still has them. If you update a number here,
 update it from his real posts, not from memory.
 
+The gate below is enforced in code from `agents/_shared/voice.yaml`: a
+`vault_write` under `projects/content/drafts/` that fails it is refused with
+the reasons. The numbers there are the ones that count; change both together.
+
 ## Measured from his last 10 posts (2026-09-10, quarantine/2026-09-10-operator-fc263764.md)
 
 | | His actual practice |

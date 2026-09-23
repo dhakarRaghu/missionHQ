@@ -342,6 +342,13 @@ export const JOB_STATUSES = [
 
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
+export interface JobFitPart {
+  points: number;
+  note?: string;
+  lane?: string;
+  reason?: string;
+}
+
 export interface Job {
   id: string;
   company: string;
@@ -355,8 +362,14 @@ export interface Job {
   experience_band: string;
   compensation: string;
   stack: string;
-  /** 0-10 from hunter's rubric; why_fit is the sentence justifying it. */
+  /** 0-10, computed by record_job from the row's fields; `fit_parts` holds
+   * each part that moved it, and why_fit is hunter's sentence on the role. */
   fit_score: number;
+  fit_parts?: Record<string, JobFitPart | number | string | null>;
+  /** Upper bound of the package, in lakhs per annum; null when none is named. */
+  pay_lakh?: number | null;
+  /** The candidate profile's lane: software, forward_deployed, applied_ai or "". */
+  lane?: string;
   fit_bucket: "strong" | "decent" | "stretch";
   status: JobStatus;
   why_fit: string;

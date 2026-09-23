@@ -20,7 +20,7 @@ import time
 
 from pydantic_ai import ModelRetry, RunContext
 
-from hq import memory
+from hq import memory, voice
 from hq.config import settings
 from hq.safety import ActionClass, Trust
 from hq.tools.policy_tools import _run_read_web as run_read_web
@@ -160,6 +160,16 @@ async def vault_write(ctx: RunContext[HQDeps], path: str, content: str) -> str:
         raise ModelRetry(
             f"refused: agent {ctx.deps.agent} may only write inside {scopes or ['(nothing)']}"
         )
+    # A content draft is his voice or it is not written. Checked on what the
+    # agent wrote, before frontmatter is stamped, the way publish_post checks
+    # a post before it reaches his site.
+    if voice.is_draft_path(rel):
+        off = voice.register_problems(content)
+        if off:
+            raise ModelRetry(
+                "this draft is not in his register: " + "; ".join(off)
+                + ". Rewrite it the way he writes, then call vault_write again"
+            )
     warnings: list[str] = []
     try:
         if not memory.is_memory_note(rel):
