@@ -352,8 +352,8 @@ def test_sage_reads_the_job_ledger_and_writes_a_weekly_shortlist() -> None:
     last = sage.cron[-1]
     assert last.schedule == "0 9 * * 1"
     assert last.prompt == "Load the job-shortlist skill with load_skill and follow it."
-    # Appended, never inserted: the earlier entries keep their indices.
-    assert sage.cron[0].schedule == "30 18 * * *"
+    # The daily note keeps its place at the head of the list.
+    assert sage.cron[0].schedule == "30 22 * * *"
     skill = (REPO / "agents" / "sage" / "skills" / "job-shortlist" / "SKILL.md").read_text()
     assert len(skill.split()) <= 350
     assert "list_jobs" in skill and "projects/jobs/shortlist-" in skill
