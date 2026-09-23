@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<title>Measure recall before you buy infrastructure</title>
+<style>
+  :root { color-scheme: light; }
+  body { background:#faf9f7; color:#1d2129; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; margin:0; padding:32px 16px 64px; }
+  main { max-width:70ch; margin:0 auto; }
+  h1 { font-size:1.7rem; line-height:1.25; margin:0 0 12px; }
+  h2 { font-size:1.2rem; margin:2.2em 0 0.5em; line-height:1.35; }
+  p { line-height:1.65; margin:0.9em 0; }
+  li { line-height:1.6; margin:0.4em 0; }
+  code { background:#eef0f3; padding:0.1em 0.35em; border-radius:4px; font-size:0.92em; }
+  pre { background:#111827; color:#e5e7eb; padding:16px 18px; border-radius:8px; overflow-x:auto; font-size:0.86rem; line-height:1.55; }
+  pre code { background:transparent; padding:0; }
+  pre code .cm { color:#7d8570; }
+  a { color:#1a56db; }
+  .path-note { background:#eef4ff; border-left:4px solid #3b6fd4; padding:12px 16px; border-radius:0 6px 6px 0; font-size:0.95rem; }
+  .closing { background:#f2f7f0; border-left:4px solid #4a8f3c; padding:12px 16px; border-radius:0 6px 6px 0; }
+  .diagram { background:#fff; border:1px solid #e3e5e8; border-radius:10px; padding:18px 20px 14px; margin:1.6em 0; }
+  .diagram h3 { margin:0 0 4px; font-size:1.02rem; }
+  .diagram .sub { font-size:0.85rem; color:#555; margin:0 0 10px; }
+  .controls { display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin:8px 0 12px; font-size:0.9rem; }
+  .controls label { display:flex; align-items:center; gap:6px; }
+  .modebtn { border:1px solid #c9ccd3; background:#f3f4f6; border-radius:6px; padding:4px 10px; cursor:pointer; font-size:0.85rem; }
+  .modebtn.on { background:#1a56db; border-color:#1a56db; color:#fff; }
+  #cap { font-size:0.9rem; margin:10px 0 0; min-height:2.6em; }
+  .legend { font-size:0.8rem; color:#555; display:flex; gap:18px; margin-top:6px; }
+  .sw { display:inline-block; width:12px; height:12px; border-radius:3px; vertical-align:-1px; margin-right:4px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Measure recall before you buy infrastructure</h1>
+
+<p class="path-note"><strong>Path: AI systems, topic 2 of 6 &mdash; Retrieval that works.</strong> Builds on the 09-12 lesson on judges and self-reporting evals: today we point that measurement instinct upstream, at retrieval. Next step on the path: evaluating an LLM system end to end. One note: today's two sources were a substitution. Neither is on your exemplar list for this topic. Both are by Jason Liu, and they disagree with each other in a useful way.</p>
+
+<h2>Why you are here</h2>
+
+<p>Picture the support bot you would ship for Verly. A customer asks something the knowledge base answers plainly. The bot replies with confidence and gets it wrong. You do what everyone does: you edit the prompt. Then you try a newer model. Nothing moves, because the failing part is not the part you are watching. The right chunk never made it into the prompt, so every fix downstream was decoration.</p>
+
+<p>That is the situation both of today's articles are about. One is a methodology for measuring where retrieval fails. The other is a report from a team that hit the top of the SWE-Bench Verified leaderboard (their claim, unverified in the writeup) and found that embeddings were not the bottleneck. Grep was enough. The claim below explains how both can be true.</p>
+
+<h2>What is true, and not obvious</h2>
+
+<p>RAG systems fail systematically, not randomly. The failures concentrate upstream, in retrieval, while everyone watches the final answer. And "how good is my retriever" is the wrong question once an agent loop sits on top, because a persistent agent retries and recovers. Persistence masks retriever weakness. So you measure recall at the first stage, per segment, before buying any infrastructure, and you measure end to end once an agent is in the loop.</p>
+
+<h2>The two biases that eat your week</h2>
+
+<p>Jason Liu names them. Absence bias: you cannot see what was never retrieved, so you blame the visible part, the generated answer. Intervention bias: you import every new technique from your timeline to feel in control, and end with what he calls a "Franken-system, with 80 half-tested solutions layered on top of each other", where no one can tell which layer fails. The antidote is boring: measure first, change one thing, keep only what moves the number.</p>
+
+<h2>Which number do you measure first?</h2>
+
+<p>Recall, not precision. Precision asks how many returned chunks were relevant. Recall asks what fraction of all relevant chunks came back. In RAG, recall is the headache because it is the ceiling. If your recall is 50%, half the time the answer never reaches the prompt, and no prompt fix, model upgrade, or reranker recovers it. A reranker only reorders what the first stage surfaced. Retrieval owns recall; everything downstream lives under its ceiling.</p>
+
+<h2>How do you measure recall with no labels?</h2>
+
+<p>Liu's cold-start trick: for each chunk, ask an LLM to generate 5 questions the chunk answers. Now you have question-to-chunk pairs for free. Your recall is the fraction of questions whose source chunk your retriever returns. The caveat is real and worth remembering: the generated questions paraphrase the chunk's own vocabulary, so this eval is skewed toward surface words. Real users ask questions whose words are not in the chunk. Synthetic recall is a first pass, blended with real queries later.</p>
+
+<h2>Does the average hide the failure?</h2>
+
+<p>Always. A headline recall of 70% can sit on 5% recall for the segment that matters, his example being multi-hop or date-filtered queries. So you tag every eval question by topic, by complexity, by user role, and you read recall per segment. The numbers here (70%, 5%) are his illustrations, not measurements, but the mechanism is arithmetic: averages sum away the very failures you need to see.</p>
+
+<h2>Is the data missing, or just unsurfaced?</h2>
+
+<p>This is the cheapest diagnostic in both articles, and the highest leverage. When a segment fails, the fork is: inventory problem or capability problem. Inventory means the data is not in the system, the subfolder was never ingested, the edit history column was never indexed. No embedding fix touches that; you fix the pipeline. Capability means the data is there but retrieval does not surface it. Teams burn weeks fine-tuning embeddings against inventory problems. Ask the fork first.</p>
+
+<h2>Where do the two articles disagree?</h2>
+
+<p>On what to measure first. Liu says measure the retrieval component: recall, segmented, before anything else. Colin Flaherty (founding engineer at Augment, per the post) says start with 5 to 10 real examples, end to end, vibe checks before quantitative evals. His reason is the mechanism that reconciles both: for agentic systems, component metrics stop predicting end-to-end outcomes, because the agent's persistence already compensates for a mediocre retriever. If per-attempt retrieval succeeds 60% of the time and the agent tries 5 times, end-to-end success is 1 - 0.4^5, about 99%. Moving the retriever from 60 to 75 changes the visible component number a lot and the task outcome almost not at all. The agent loop masks the weakness.</p>
+
+<div class="diagram">
+  <h3>Persistence is a retrieval strategy: 1 - (1 - r)<sup>k</sup></h3>
+  <p class="sub">Drag per-attempt retrieval success r. Bars show end-to-end task success after k attempts in agent mode; in single-shot mode there is only attempt 1.</p>
+  <div class="controls">
+    <label>per-attempt recall r
+      <input type="range" id="rslider" min="0.3" max="0.9" step="0.05" value="0.6">
+      <strong id="rval">0.60</strong>
+    </label>
+    <label>system shape
+      <button class="modebtn on" id="mode-agent" type="button">agent, 5 retries</button>
+      <button class="modebtn" id="mode-solo" type="button">single-shot RAG</button>
+    </label>
+  </div>
+  <svg id="chart" viewBox="0 0 560 230" width="100%" role="img" aria-label="end-to-end success by number of attempts">
+    <g id="axes">
+      <line x1="46" y1="200" x2="546" y2="200" stroke="#9aa0a6" stroke-width="1"/>
+      <line x1="46" y1="200" x2="46" y2="14" stroke="#9aa0a6" stroke-width="1"/>
+      <text x="20" y="24" font-size="11" fill="#666">100%</text>
+      <text x="26" y="204" font-size="11" fill="#666">0%</text>
+      <line x1="46" y1="20" x2="546" y2="20" stroke="#e0e0e0" stroke-width="1"/>
+      <line x1="46" y1="110" x2="546" y2="110" stroke="#e0e0e0" stroke-width="1"/>
+      <text x="20" y="114" font-size="11" fill="#666">50%</text>
+    </g>
+    <line id="rline" x1="46" y1="92" x2="546" y2="92" stroke="#d97706" stroke-width="1.5" stroke-dasharray="6 4"/>
+    <g id="bars"></g>
+    <g id="blabels"></g>
+  </svg>
+  <div class="legend">
+    <span><span class="sw" style="background:#1a56db"></span>end-to-end task success</span>
+    <span><span class="sw" style="background:#d97706"></span>per-attempt retrieval recall (dashed)</span>
+  </div>
+  <p id="cap"></p>
+</div>
+
+<p>So the order depends on the shape of your system. Single-shot RAG: component recall is the bound, measure it first. Agent in the loop: measure end to end first, and instrument components only to explain failures.</p>
+
+<h2>When does grep actually beat embeddings?</h2>
+
+<p>Augment's agent used grep and find, reformulating searches until it found what it needed, and embeddings added nothing end to end. But Colin scopes it himself: SWE-Bench is "somewhat artificial", with small repos and (his claim, unsourced) 90% of problems solvable in under an hour. Code is structured and keyword-rich: function names, class names, error strings. That is exactly what grep is strong on. His honest limits: it does not scale to large codebases, it struggles with unstructured text like docs and Slack, and the retry loop burns LLM tokens, the hidden price of "no infrastructure". His decision heuristic: if a tireless human would want the second search tool, the agent probably does too. The recommended end state is hybrid: keep your tuned retriever, expose it to the agent as a tool, and let the loop supply the retry layer.</p>
+
+<h2>A recall harness you can run tonight</h2>
+
+<p>This is Liu's 2.3 method as runnable code. It works with any retriever you pass in; a lexical one is included so it runs with zero infrastructure, and your future pgvector query slots into the same function signature.</p>
+
+<pre><code>import re
+from collections import Counter
+
+<span class="cm"># --- a minimal lexical retriever (swap for pgvector later) ---</span>
+def tokenize(text):
+    return Counter(re.findall(r"[a-z0-9]+", text.lower()))
+
+def make_retriever(chunks):
+    vecs = [tokenize(c) for c in chunks]
+    def retrieve(query, k=5):
+        q = tokenize(query)
+        scores = [sum(min(v[t], q[t]) for t in q) for v in vecs]
+        return sorted(range(len(chunks)), key=lambda i: -scores[i])[:k]
+    return retrieve
+
+<span class="cm"># --- build the synthetic eval set (call your LLM here) ---</span>
+def make_eval_set(chunks, llm):
+    pairs = []  <span class="cm"># (question, source_chunk_index, segment_tag)</span>
+    for i, chunk in enumerate(chunks):
+        prompt = ("Generate 5 questions that can be answered "
+                  f"by this text:\n\n{chunk}")
+        for q in llm(prompt):            <span class="cm"># one question per line</span>
+            tag = "single-hop"           <span class="cm"># tag by topic/complexity here</span>
+            pairs.append((q.strip(), i, tag))
+    return pairs
+
+<span class="cm"># --- measure recall, overall and per segment ---</span>
+def recall_at_k(pairs, retrieve, k=5):
+    by_seg = {}
+    for q, src, tag in pairs:
+        by_seg.setdefault(tag, []).append(src in retrieve(q, k))
+    return {tag: sum(hits) / len(hits) for tag, hits in by_seg.items()}</code></pre>
+
+<p>Run it, and the per-segment dict is your dashboard. When a segment is low, you ask the fork: is the answer chunk even in the corpus (inventory), or is it there and unretrieved (capability)? Only the second is a retrieval problem.</p>
+
+<h2>Where this breaks</h2>
+
+<p>Three places. The synthetic eval lies gently, since generated questions share vocabulary with their chunks, so your recall number is optimistic for real users. The grep agent breaks at corpus scale: on a large monorepo or unstructured text, the retry loop turns slow and expensive, Liu cites 2 to 10 seconds of latency for multi-step queries as a felt UX range, not a measurement. And the whole discipline breaks if you skip segmentation, because the failing 5% segment is what your users actually hit while the dashboard reads 70%.</p>
+
+<h2>Fifteen minutes today</h2>
+
+<p>Take one knowledge corpus you already have, Mission HQ's project notes or any docs folder. Split it into chunks by header. Write the <code>make_eval_set</code> prompt against 20 chunks with whatever model you already call, and run the harness with the toy retriever. You will have a real recall number with conditions you can state, and you will know whether your failures are inventory or capability before you have spent a rupee on a vector database.</p>
+
+<h2>Two things you could post</h2>
+
+<ol>
+  <li>"My agent's retriever scored 60% and the agent still won. Persistence is a retrieval strategy." The claim is the masking math, 1 - (1-r)^k, and it is yours because you can show it on your own agent's action log.</li>
+  <li>"I almost bought a vector database. A 40-line script with no dependencies told me I did not need one yet." The angle is the inventory vs capability fork, told from your own corpus.</li>
+</ol>
+
+<h2>Sources</h2>
+
+<ul>
+  <li>Jason Liu, <em>Systematically Improving RAG Applications</em> &mdash; <a href="https://jxnl.co/writing/2025/01/24/systematically-improving-rag-applications/">jxnl.co/writing/2025/01/24/systematically-improving-rag-applications</a> &mdash; digest at <code>quarantine/2026-09-13-systematically-improving-rag-study.md</code></li>
+  <li>Jason Liu with Colin Flaherty, <em>Why Grep Beat Embeddings in Our SWE-Bench Agent</em> &mdash; <a href="https://jxnl.co/writing/2025/09/11/why-grep-beat-embeddings-in-our-swe-bench-agent-lessons-from-augment/">jxnl.co/writing/2025/09/11/why-grep-beat-embeddings-in-our-swe-bench-agent-lessons-from-augment</a> &mdash; digest at <code>quarantine/2026-09-13-grep-beat-embeddings-swebench-agent-study.md</code></li>
+</ul>
+
+<p class="closing">This feeds your AI systems build: the hybrid retrieval pipeline with the judge harness written first. Today's harness is the "write the judge before tuning" half of that. Where are you on the build itself? Your rule is that reading must not outrun building, and this is the lesson where that question bites.</p>
+
+</main>
+
+<script>
+(function () {
+  var svgNS = "http://www.w3.org/2000/svg";
+  var plot = { x: 46, w: 500, top: 20, h: 180 }; // y=200 is 0%, y=20 is 100%
+  var K = 6, mode = "agent";
+  var slider = document.getElementById("rslider");
+  var rval = document.getElementById("rval");
+  var barsG = document.getElementById("bars");
+  var labG = document.getElementById("blabels");
+  var rline = document.getElementById("rline");
+  var cap = document.getElementById("cap");
+  var bAgent = document.getElementById("mode-agent");
+  var bSolo = document.getElementById("mode-solo");
+
+  function y(p) { return plot.top + plot.h * (1 - p); }
+
+  function draw() {
+    var r = parseFloat(slider.value);
+    rval.textContent = r.toFixed(2);
+    barsG.textContent = ""; labG.textContent = "";
+    var bw = plot.w / K;
+    for (var k = 1; k <= K; k++) {
+      var p = (mode === "agent") ? 1 - Math.pow(1 - r, k) : r;
+      var hgt = plot.top + plot.h - y(p);
+      var rect = document.createElementNS(svgNS, "rect");
+      rect.setAttribute("x", plot.x + (k - 1) * bw + 10);
+      rect.setAttribute("y", y(p));
+      rect.setAttribute("width", bw - 20);
+      rect.setAttribute("height", hgt);
+      rect.setAttribute("rx", 3);
+      rect.setAttribute("fill", (mode === "solo" && k > 1) ? "#d3d7dd" : "#1a56db");
+      barsG.appendChild(rect);
+      var t = document.createElementNS(svgNS, "text");
+      t.setAttribute("x", plot.x + (k - 1) * bw + bw / 2);
+      t.setAttribute("y", 216);
+      t.setAttribute("text-anchor", "middle");
+      t.setAttribute("font-size", "11");
+      t.setAttribute("fill", "#666");
+      t.textContent = "try " + k;
+      labG.appendChild(t);
+      var v = document.createElementNS(svgNS, "text");
+      v.setAttribute("x", plot.x + (k - 1) * bw + bw / 2);
+      v.setAttribute("y", y(p) - 5);
+      v.setAttribute("text-anchor", "middle");
+      v.setAttribute("font-size", "10.5");
+      v.setAttribute("fill", "#1a56db");
+      v.textContent = Math.round(p * 100) + "%";
+      labG.appendChild(v);
+    }
+    rline.setAttribute("y1", y(r));
+    rline.setAttribute("y2", y(r));
+    if (mode === "agent") {
+      cap.innerHTML = "Agent mode: each attempt is independent at r = " + r.toFixed(2) +
+        ". After 5 tries, end-to-end success is 1 - " + (1 - r).toFixed(2) + "^5 = " +
+        Math.round((1 - Math.pow(1 - r, 5)) * 100) + "%. " +
+        "Retuning r from 0.60 to 0.75 moves the bare component number 15 points and the task outcome less than 3.";
+    } else {
+      cap.innerHTML = "Single-shot mode: one attempt, so end-to-end success equals recall, exactly " +
+        Math.round(r * 100) + "%. Here the dashed line is the ceiling: every prompt fix and reranker lives under it.";
+    }
+  }
+  slider.addEventListener("input", draw);
+  bAgent.addEventListener("click", function () { mode = "agent"; bAgent.classList.add("on"); bSolo.classList.remove("on"); draw(); });
+  bSolo.addEventListener("click", function () { mode = "solo"; bSolo.classList.add("on"); bAgent.classList.remove("on"); draw(); });
+  draw();
+})();
+</script>
+</body>
+</html>

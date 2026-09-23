@@ -1,0 +1,23 @@
+.env
+.env.local
+node_modules/
+__pycache__/
+.venv/
+# Runtime state at the repo root: logs hold chat text and vault paths,
+# snapshots hold dumps. Anchored so a source folder named "data" is trackable.
+/data/
+# Lesson sections saved one call at a time, joined by write_lesson.
+learning/lessons/.drafts/
+# His older platform courses name a former employer; the local copy is a
+# build source only and stays out of git.
+learning/study-material/kubernetes/
+HALT
+*.sqlite
+.next/
+
+# macOS
+.DS_Store
+
+# The root vault is its own git repo (own history, own private remote). Anchor
+# this rule so frontend feature folders named "vault" remain trackable.
+/vault/

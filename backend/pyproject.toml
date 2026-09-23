@@ -1,0 +1,38 @@
+[project]
+name = "hq"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "raghvendra.dhakar", email = "raghvendra.dhakar@juspay.in" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.141.1",
+    "logfire>=4.41.0",
+    "playwright>=1.62.0",
+    "psycopg-pool>=3.3.1",
+    "psycopg[binary]>=3.3.5",
+    "pydantic-ai-slim[dbos,openai]>=2.37.0",
+    "pydantic-evals>=2.37.0",
+    "pydantic-settings>=2.15.0",
+    "python-telegram-bot>=22.8",
+    "pyyaml>=6.0.3",
+    "uvicorn>=0.52.4",
+]
+
+[project.scripts]
+hq = "hq.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.12.8,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.5",
+    "types-pyyaml>=6.0.12.20260815",
+]

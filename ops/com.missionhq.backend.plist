@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template. `ops/supervise.sh install` substitutes __UV__, __REPO__ and
+  __HOME__ for this machine and writes the result to ~/Library/LaunchAgents.
+  Nothing here may name a user: the repo is cloned onto other machines.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.missionhq.backend</string>
+
+  <!--
+    launchd must supervise the backend itself, with nothing in between: a
+    wrapper here would take the job's pid, and restarting the job would kill
+    only the wrapper while the real process kept the port. The machine is
+    held awake from inside the process instead (see api/app.py).
+  -->
+  <!--
+    The venv's python directly, not `uv run python`. uv spawns python as a
+    child, so launchd would supervise uv: killing the job would kill uv while
+    the python it started kept the port and kept polling Telegram, and the
+    replacement could never bind. Restarting then silently did nothing.
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PYTHON__</string>
+    <string>-m</string>
+    <string>hq</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__/backend</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd starts with almost no PATH. Anything the backend shells out
+         to (uv, git, the claude CLI) has to be reachable from here. -->
+    <key>PATH</key>
+    <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <!-- Start at login and restart whenever the process exits, crash or not. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- Back off so a crash loop cannot hammer the database. -->
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+
+  <key>StandardOutPath</key>
+  <string>__REPO__/data/logs/backend.log</string>
+  <key>StandardErrorPath</key>
+  <string>__REPO__/data/logs/backend.log</string>
+</dict>
+</plist>

@@ -1,0 +1,15 @@
+-- Deliberately empty.
+--
+-- This migration used to insert 24 of his curated essays into hq.readings so
+-- the morning would walk them in order. He rejected that twice, and the second
+-- time precisely: "don't add these, these are only for reference".
+--
+-- The essays are reference material — examples of what an article worth his
+-- hour looks like. They live in learning/path.md, where he can read and edit
+-- them, and nowhere else. Nothing seeds them into the ledger: a row in
+-- hq.readings means "the system found this and may read it", which is exactly
+-- the claim he did not want made on his behalf.
+--
+-- Left as a numbered no-op rather than deleted, so the sequence stays intact
+-- and the reversal is visible. Migration 022 removes what this one created.
+SELECT 1;

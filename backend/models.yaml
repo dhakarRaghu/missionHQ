@@ -1,0 +1,129 @@
+# The ONLY place a provider or model id is named. Agent code passes a role
+# ("deep" / "default" / "cheap") or a registry name; never a provider.
+#
+# The gateway (Juspay Grid, https://grid.ai.juspay.net) is a LiteLLM proxy
+# speaking OpenAI-compatible /v1, so adding a model later is one entry here and
+# nothing else. `uv run python -m hq.cli models` lists everything the gateway
+# serves and flags entries it no longer has.
+#
+# Pricing is per 1M tokens and drives our own cost accounting: gateway aliases
+# cannot be priced by any public pricing library, so these numbers are the
+# source of truth. Set them to 0 if internal usage is not billed to you.
+
+models:
+  kimi:
+    provider: gateway
+    model: kimi-latest    # 256k context
+    input_per_mtok: 0.60
+    output_per_mtok: 2.50
+    # kimi-latest is a reasoning model. "low" answered in tens of seconds and
+    # was the default while cost was the constraint. On 2026-09-10 the owner
+    # said the constraint is value, not money: "use the model with high or
+    # extra high efforts ... i want value don't care about the money for now".
+    # High effort spends thousands of hidden reasoning tokens per call, so the
+    # per-call timeout goes up with it, and max_tokens rises so a long note or
+    # a big tool argument is not cut off mid-sentence.
+    settings:
+      reasoning_effort: high
+      max_tokens: 16000
+      timeout_s: 300
+    # When the gateway answers kimi with a timeout or a connection error,
+    # try these instead rather than failing the run. Ten of twenty-three run
+    # failures in the week to 2026-09-08 were exactly that, and every role
+    # pointed at this one model, so one flaky model stopped everything.
+    fallback: [sonnet, glm]
+
+  # Fallback spares. They are priced at their public list price, which the
+  # gateway may not match; that only matters if an agent declares one as its
+  # own model, because a run is costed at the model its manifest names.
+  sonnet:
+    provider: gateway
+    model: claude-sonnet-4-6
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    settings:
+      max_tokens: 16000
+      timeout_s: 300
+
+  glm:
+    provider: gateway
+    model: glm-latest
+    input_per_mtok: 0.60
+    output_per_mtok: 2.20
+    settings:
+      max_tokens: 16000
+      timeout_s: 300
+
+# Roles are what agents declare. All three point at one model for now; split
+# them (deep -> a stronger model, cheap -> a faster one) by editing these three
+# lines, with no change to any agent or any code.
+  # More room to think, for the agents whose output he actually reads.
+  #
+  # Measured on 2026-09-12, one sample each on an identical queueing problem:
+  # effort "low" answered in 26.8s with 517 output tokens, "high" in 61.4s
+  # with 1458. So the parameter does something. "xhigh" took 199.5s and
+  # produced FEWER tokens (842), with a different input-token count — that
+  # request was served by a fallback model, not kimi. And the gateway accepts
+  # "ultra" and "extra_high" without complaint, so it validates nothing:
+  # acceptance is not evidence of effect.
+  #
+  # So depth comes from the levers that demonstrably work — the proven effort
+  # value, twice the token budget, and a timeout that lets a long answer
+  # finish — rather than from a magic string nobody honours.
+  kimi_deep:
+    provider: gateway
+    model: kimi-latest
+    input_per_mtok: 0.60
+    output_per_mtok: 2.50
+    settings:
+      reasoning_effort: high
+      # 64k output. Probed on 2026-09-12: the gateway accepted 32k, 64k and
+      # 128k. It also accepts nonsense reasoning-effort values, so acceptance
+      # proves little — 64k is chosen because it is far past any lesson or
+      # digest, not because 128k failed.
+      max_tokens: 64000
+      # Eight minutes, from measurement, not fifteen. Over the week to
+      # 2026-09-23, 1,073 model steps: p50 23s, p90 119s, p99 408s, and the
+      # p99 includes retries. A request still silent at 480s is hung, and
+      # every extra minute it is allowed is a minute the whole lane waits.
+      timeout_s: 480
+    fallback: [sonnet, glm]
+
+  # The teacher. He asked for tutor's reasoning to go higher, then on
+  # 2026-09-23 ruled opus out: the gateway caps it at $5 a day, and one phase
+  # on it cost $17.71, which is why the next article run stalled at 11:52 with
+  # no tool calls and was blocked by the watchdog. "Use kimi with higher
+  # reasoning." Probed the same day, one sample each, tutor's shape of run:
+  # kimi-k3 high 49.2s/574 out, xhigh 22.7s/435 out; kimi-latest high
+  # 12.0s/225, xhigh 33.3s/513. All correct, none ordered: the effort string
+  # past "high" is still not a lever anyone can show working. So "higher" is
+  # the newer model, kimi-k3, at the effort value that is known to work.
+  kimi_k3:
+    provider: gateway
+    model: kimi-k3        # 256k context
+    input_per_mtok: 0.60
+    output_per_mtok: 2.50
+    settings:
+      reasoning_effort: high
+      max_tokens: 64000
+      timeout_s: 480      # see kimi_deep: p99 of a real step is 408s
+    # Spares on other providers. When kimi-k3 hangs, kimi-latest on the same
+    # backend is the likeliest to hang with it.
+    fallback: [sonnet, glm]
+
+roles:
+  deep: kimi_deep
+  teacher: kimi_k3
+  default: kimi
+  cheap: kimi
+
+# Vault semantic search (memory.py). One model, no pricing: embedding calls
+# are not billed to our cost accounting. `dimensions` is sent as the OpenAI
+# `dimensions` parameter; the gateway truncates gemini-embedding-001's native
+# 3072-dim vector to 768 so it fits a pgvector HNSW index (max 2000 dims).
+# Changing it requires a new migration (the column is vector(768)) and a
+# full reindex. Verified 2026-09-02: the gateway honors dimensions=768.
+embeddings:
+  provider: gateway
+  model: gemini-embedding-001
+  dimensions: 768

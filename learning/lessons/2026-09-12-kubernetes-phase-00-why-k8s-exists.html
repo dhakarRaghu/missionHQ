@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kubernetes Phase 0 — Why K8s Exists</title>
+<style>
+  body { background:#ffffff; color:#1c2733; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; margin:0; padding:2rem 1rem; line-height:1.55; }
+  main { max-width:720px; margin:0 auto; }
+  h1 { font-size:1.7rem; line-height:1.2; margin:0 0 0.5rem; }
+  h2 { font-size:1.25rem; margin-top:2.2rem; border-top:1px solid #d8dee5; padding-top:1.2rem; }
+  h3 { font-size:1.05rem; margin-top:1.5rem; }
+  code, pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:0.85em; }
+  code { background:#f1f4f7; padding:0.1em 0.35em; border-radius:3px; }
+  pre { background:#f6f8fa; border:1px solid #dfe4ea; padding:0.9rem; overflow-x:auto; line-height:1.45; }
+  .claim { font-size:1.05rem; background:#fff8e0; border:1px solid #e8d48a; padding:0.9rem 1rem; border-radius:4px; }
+  .fig { border:1px solid #d8dee5; border-radius:6px; padding:1rem; margin:1.4rem 0; background:#fcfdfe; }
+  .fig h4 { margin:0 0 0.6rem; font-size:0.95rem; }
+  .fig svg { width:100%; height:auto; display:block; }
+  .controls { display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; margin-top:0.6rem; }
+  button { font:inherit; padding:0.3rem 0.9rem; border:1px solid #47617a; background:#ffffff; color:#1c2733; border-radius:4px; cursor:pointer; }
+  button:hover { background:#eef3f8; }
+  .steptext { margin-top:0.6rem; min-height:3.2em; font-size:0.92rem; }
+  .steptext b { color:#0b5cad; }
+  .legend { display:flex; gap:1.2rem; flex-wrap:wrap; font-size:0.8rem; color:#445; margin-top:0.4rem; }
+  .legend span i { display:inline-block; width:12px; height:12px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+  .src { font-size:0.85rem; color:#5a6570; }
+  table { border-collapse:collapse; width:100%; font-size:0.92rem; }
+  td, th { border:1px solid #d8dee5; padding:0.4rem 0.6rem; text-align:left; vertical-align:top; }
+</style>
+</head>
+<body>
+<main>
+<h1>Kubernetes Phase 0 — Why K8s Exists (taught version)</h1>
+
+<p class="claim"><b>The claim.</b> Kubernetes is three things: one database (etcd), one gatekeeper in front of it (the API server), and many small loops that only read and write that database. No component ever calls another. Everything you rely on, self-healing, rolling deploys, service discovery, falls out of that single decision.</p>
+
+<p>Two things make this non-obvious. First, the watch streams those loops use are lossy. Events get dropped. The system stays correct anyway, because each loop periodically re-reads the current state and re-derives what to do. Second, that exact property is why Reddit's whole fleet failed for 314 minutes in 2023 while every controller was working perfectly. Level-triggered loops are only as right as the state they reconcile against.</p>
+
+<p>You wrote this module to study from. This version keeps its shape, goes to the mechanism underneath, adds the failure, and corrects three things that moved.</p>
+
+<h2>The mental model</h2>
+<p>Hold Kubernetes as one versioned store plus many thermostats.</p>
+<p>The store (etcd) keeps two columns for every object: what you asked for (spec) and what it observes (status). Each thermostat (a controller) reads both, decides one small correction, and writes it back. Then it sleeps until the store changes again.</p>
+<p>The thermostat analogy is the project's own, and it earns its place. A thermostat does not remember a sequence of instructions. It reads the current temperature and the target, and acts on the difference. Time passing does not corrupt it. That is the whole design: no commands, only targets; no calls, only reads and writes on shared rows.</p>
+<p>The harder shift is what you name. Before orchestration you name machines: "nginx lives on box 14". Kubernetes asks you to name applications: "3 replicas of web". The orchestrator owes you admission (will it fit), scheduling (where), healing (keep it there), and identity (how anyone finds it). Box 14 stops being an addressable concept.</p>
+
+<h2>0.1 The problem: what you would build without it</h2>
+<p>Your module asks: how many people does it take to run ~1400 services on raw EC2? Run the thought experiment properly, because the answer tells you what an orchestrator actually is.</p>
+
+<h3>The registry you would write</h3>
+<p>Without Kubernetes you would write three things:</p>
+<ol>
+<li>A registry table: <code>service, host, port, health</code>. Some Postgres table or a Consul cluster.</li>
+<li>A health-checker cron that updates it.</li>
+<li>Deploy scripts that read the registry, SSH to a host, swap the process, update the row.</li>
+</ol>
+<p>This works. Real companies ran on exactly this for years. It breaks in three specific places:</p>
+<ul>
+<li><b>A machine dies at 3am.</b> Who moves the service? Your scripts know how to deploy; they do not know how to <i>want</i>. Nothing in the system holds the sentence "web needs 3 replicas", so nothing notices the count dropped to 2.</li>
+<li><b>Packing.</b> Two services need RAM on the same night. Human judgment picks boxes, and humans pack badly. This is where the money goes.</li>
+<li><b>The row goes stale.</b> The move script crashed between killing the old process and updating the registry. Now service A connects to a dead IP. Nobody's deploy failed; the system's <i>memory of reality</i> is wrong. This is the network identity problem, and it is a failure class of its own (Checkpoint Q3 lives here).</li>
+</ul>
+
+<h3>Why Google built Borg (the numbers)</h3>
+<p>The honest postmortem of this era is the Borg paper (Verma et al., EuroSys 2015). Your module points at it; here is the quantitative core it gestures at.</p>
+<p>Borg runs hundreds of thousands of jobs across clusters of tens of thousands of machines. The paper's central claim is economic. The features that matter are admission control (refuse work that does not fit), task packing (fill machines), over-commitment (reclaim resources a job reserved but is not using), and machine sharing with process-level isolation (unrelated jobs on one box, safely).</p>
+<p>Why "manage applications, not machines" wins: the moment the unit of accounting is the machine, utilization is a human discipline problem and humans lose. The moment the unit is the application, utilization is a packing algorithm and algorithms win. The declaration, "this job needs 2 CPU and 4GB, run 500 copies", becomes the versioned artifact, and the cluster becomes a function of the artifact.</p>
+<p>Kubernetes is the third iteration of that lineage: Borg taught the model, Omega rebuilt the control-plane around a shared store, Kubernetes is the open version of the store design. That history matters because it explains Phase 0's whole architecture: the shared store came <i>first</i>, and the controllers came after as clients of it.</p>
+
+<h3>Keep in your head</h3>
+<p>The orchestrator is not a deploy tool. It is the thing that answers three questions continuously: what should be running, where, and how does everyone find it. All three answers live in one database. That database is Phase 0.</p>
+
+<h2>0.2 Desired state: declarations do not decay</h2>
+<h3>Commands decay, declarations do not</h3>
+<p>A command's effect is tied to the moment it ran. <code>ssh box-14; start nginx</code> creates a fact in the world and remembers nothing. Tomorrow box 14 dies, and the universe no longer contains any trace that nginx was supposed to exist.</p>
+<p>A declaration stores the intent itself in durable storage: "spec: 3 replicas of web, image X". The effect derived from it (3 running pods) is recomputed constantly. When a pod dies, the difference between spec (3) and observed (2) reappears, and a loop closes it. The system does not remember the command; it re-derives the consequence.</p>
+<h3>What <code>kubectl apply</code> actually is</h3>
+<p>Your module's framing is exact, so keep it: <code>kubectl apply</code> is an UPDATE on a row in a database.</p>
+<p>When you run it, the request goes through the API server's chain: authenticate (who are you), RBAC (may you write this kind of object), admission (mutating and validating webhooks, quotas, defaults), then store (write to etcd). The command returns after the etcd write succeeds, typically in tens of milliseconds.</p>
+<p>What is true at that moment: the desired state is durably stored. Because etcd is raft-replicated, that fact survives API server restarts and even the loss of a minority of etcd members.</p>
+<p>What is NOT yet true: anything about the real world. No pod exists. No image was pulled. The rollout happens later, as the side effect of controllers that were watching. This is why <code>apply</code> returning success guarantees nothing about your deploy, and why <code>kubectl rollout status</code> exists as a separate command: it watches the <i>status</i> side of the same row until observed matches desired.</p>
+<h3>The claim your module leaves unproved</h3>
+<p>Section 0.2 of the module says missed events cannot cause drift. That is not true because watches are reliable. Watches are not. It is true because of a specific mechanism, and you should know it cold before Phase 1. It gets its own section below (0.4, depth).</p>
+
+<h2>0.3 The architecture: one database, one gatekeeper, only watchers</h2>
+<div class="fig">
+<h4>Figure 1 — What happens in the first 60 seconds after <code>kubectl apply</code></h4>
+<svg id="flowSvg" viewBox="0 0 860 400" role="img" aria-label="Step through of a deploy: kubectl, API server, etcd, watch cache, controllers"></svg>
+<div class="controls">
+  <button id="prevBtn" type="button">Prev</button>
+  <button id="nextBtn" type="button">Next</button>
+  <span id="stepTime" style="font-size:0.9rem;color:#0b5cad;"></span>
+</div>
+<div class="steptext" id="stepText"></div>
+<div class="legend">
+  <span><i style="background:#ffe08a"></i>active component</span>
+  <span><i style="background:#cfe3f5"></i>idle component</span>
+  <span><i style="background:#ffffff;border:1px solid #93a5b8"></i>watch-only client</span>
+</div>
+</div>
+<p>The module's t=0 to t=60s choreography, with the mechanism filled in:</p>
+<ul>
+<li><b>t=0.0s</b> — <code>kubectl apply -f deploy.yaml</code>. The request hits the API server: authN, RBAC, admission, then a transactional write to etcd. etcd bumps its cluster-wide revision counter and persists the object.</li>
+<li><b>t=0.1s</b> — Every controller that watches Deployments gets an event. Not from etcd directly. The API server runs a watch cache: roughly one watch per resource <i>type</i> to etcd, a sliding window of recent events in memory, and fan-out to the thousands of client watches. This is why thousands of controllers do not melt etcd.</li>
+<li><b>t=0.2s–1s</b> — The Deployment controller reads the new object, computes the diff, and writes a ReplicaSet. The ReplicaSet controller writes Pod objects (just rows; nothing runs yet). The scheduler sees Pods with no node assignment, picks nodes by resource fit and constraints, and writes <code>pod.spec.nodeName</code> back. Still nothing running. Only rows.</li>
+<li><b>t=1s–10s</b> — The kubelet on each chosen node sees a Pod assigned to it. It pulls the image, asks the container runtime to start it, and writes status back: <code>pod.status.phase = Running</code>.</li>
+<li><b>t=10s–60s</b> — The EndpointSlice controller sees ready Pods and writes EndpointSlice objects naming their IPs. kube-proxy, watching EndpointSlices on every node, programs DNAT rules so the Service's virtual IP reaches those pod IPs. Traffic flows.</li>
+</ul>
+<p>Note what never happened: the API server never called the scheduler. The scheduler never called the kubelet. Every arrow is a read or a write on etcd, fanned out through the API server's watch cache. That is why the control plane degrades by restarting a component and catching up, not by corrupted half-conversations.</p>
+
+<h3>Two updates, because this section has drifted since the module was written</h3>
+<p><b>1. Endpoints are EndpointSlices now.</b> The module says "the endpoints controller adds the IP to the Service endpoints". The modern path: the endpointslice controller populates EndpointSlice objects (grouped, sharded slices of pod IPs per Service), and kube-proxy watches those. The legacy Endpoints API is deprecated and survives only as a compatibility mirror. Same mental model, different objects. If you run <code>kubectl get endpointslices</code> on any current cluster, that is what kube-proxy is actually consuming.</p>
+<p><b>2. kube-proxy's "programs iptables" needs a footnote.</b> Still the default: as of Kubernetes 1.37, the default Linux kube-proxy mode is iptables, installing per-Service, per-endpoint DNAT rules. But: nftables mode is GA since 1.33 (needs kernel &gt;= 5.13), ipvs mode is deprecated since v1.35 and scheduled for removal in v1.43, and a future release flips the default to nftables. Also, since v1.28 iptables mode applies only changed rules per sync, so the old advice to raise <code>minSyncPeriod</code> is mostly outdated (defaults: <code>syncPeriod</code> 30s, <code>minSyncPeriod</code> 1s). The mental model (kube-proxy turns EndpointSlice changes into local forwarding rules) survives all three backends. The backend names are what your debugging commands will reference.</p>
+
+<h2>0.4 The control loop: level, not edge</h2>
+<h3>The loop</h3>
+<p>Every controller runs the same shape:</p>
+<pre>for {
+    desired := observe(spec rows)
+    actual  := observe(status rows and the world)
+    if desired != actual { makeOneCorrection() }
+    sleep until the store changes
+}</pre>
+<p>Level-triggered means it acts on the <i>current level</i> of state, not on the history of events. Edge-triggered means it acts on each event as it arrives. Kubernetes chose level, and the official controllers doc says why in its own words: prefer many simple loops over one interlinked monolith, and design each loop to tolerate its own death and restart.</p>
+<p>Edge-triggered systems have a fatal property: a missed event is lost forever. If your provisioning script crashed during the event, the state you missed never gets made. Level-triggered systems have a different fatal property: a wrong <i>level</i> is faithfully executed, forever, by every loop. You will meet both. Reddit met the second.</p>
+<h3>Composability: the HPA stack</h3>
+<p>The module's HPA example is the composability proof. Horizontal Pod Autoscaler writes <code>replicas</code> on the Deployment row. Deployment controller writes ReplicaSet. ReplicaSet controller writes Pods. Scheduler writes node assignments. Kubelet writes status. Six loops, none aware of the others, coordinating only through the database. You can replace any one of them (your own operator instead of the Deployment controller) because the interface is rows, not APIs.</p>
+
+<h3>Depth: how "it was WATCHING" actually works</h3>
+<p>This is the mechanism the module skips, and it is where interview answers and production debugging live.</p>
+<p><b>etcd is MVCC.</b> Every write increments a cluster-wide revision counter. Nothing is overwritten in place; a write appends a new revision of the key. Old revisions are deleted by a background job called compaction. After compaction, history before that revision is gone for good. The default auto-compaction retention is about 5 minutes of history.</p>
+<p><b>resourceVersion.</b> Every Kubernetes object carries a <code>resourceVersion</code>, which maps to etcd's revision. The official docs warn twice: treat it as an opaque string. Do not parse it as a number, do not compare two of them.</p>
+<p><b>List-then-watch.</b> The standard controller pattern is: LIST the current objects, which returns a consistent snapshot plus the resourceVersion of that snapshot, then open a WATCH starting at that resourceVersion. Together that yields "everything that happened after a known-consistent point". This is what a client-go informer does the moment you start it.</p>
+<div class="fig">
+<h4>Figure 2 — Why missed watch events do not cause drift</h4>
+<svg id="tlSvg" viewBox="0 0 860 150" role="img" aria-label="Timeline of watch history retention and the compaction cutoff"></svg>
+<div class="controls">
+  <label for="downSlider" style="font-size:0.9rem;">Controller was down / reconnecting for:</label>
+  <input type="range" id="downSlider" min="0" max="10" step="0.5" value="3" style="flex:1;min-width:160px;">
+  <span id="downVal" style="font-size:0.9rem;font-weight:600;"></span>
+</div>
+<div class="steptext" id="watchText"></div>
+<div class="legend">
+  <span><i style="background:#bfe3c0"></i>history retained: watch can resume</span>
+  <span><i style="background:#f3c1c1"></i>compacted: stream no longer exists</span>
+</div>
+</div>
+<p><b>410 Gone is the key failure mode.</b> Open a watch from a resourceVersion older than the compaction window and the API server answers <code>410 Gone</code>: "resourceVersion too old". The events between then and now were compacted; there is no stream to replay. The client must re-list current state and re-anchor. Informers do this automatically. Every watch gap is healed by re-reading the <i>current</i> state, which is exactly why drift cannot accumulate.</p>
+<p><b>Bookmarks.</b> During quiet periods a watch sends nothing. A long-idle watch could slide past the compaction window without ever receiving an event. Bookmarks are synthetic "nothing changed, latest revision is N" events (<code>AllowWatchBookmarks</code>) that re-anchor idle watches so they do not fall into 410 territory.</p>
+<p><b>Ops symptoms you will recognize later.</b> Watch storms after an API server restart (every informer re-lists at once), watch-cache memory pressure, informers stuck in repeated relist loops. Metrics: <code>apiserver_watch_cache_stale_total</code>, <code>apiserver_watch_cache_capacity</code>.</p>
+<h3>Why "missed events cannot cause drift" is true</h3>
+<p>Put the pieces together. The watch stream is an edge-triggered, lossy hint. The correctness comes from the loop around it: on every gap (410, disconnect, restart), the informer throws away event history and re-reads the current state. The controller then reconciles against the level, not the log. A missed notification is not lost forever <i>because notifications were never the source of truth</i>. The rows are.</p>
+<p>Keep both halves. The level model is what makes restarts safe. The level model is also what makes a wrong row catastrophic, executed perfectly at fleet scale.</p>
+
+<h2>0.5 The same picture in any Helm shop</h2>
+<p>Almost nobody types <code>kubectl apply</code> in production. You deploy through a pipeline, and every pipeline of this shape maps onto the vocabulary above:</p>
+<ul>
+<li><b>A values file is the desired-state source.</b> It is the declaration; git is its durability story; the diff on it is the audit log.</li>
+<li><b>The chart is the compiler.</b> It turns one service's intent into the full object set — Deployment, HPA, PodDisruptionBudget, ServiceAccount — the way a compiler expands one function call into many instructions.</li>
+<li><b><code>helm upgrade --install</code> is the write path</b>, standing in for <code>kubectl apply</code>. Helm adds one thing apply lacked: release state, its own record of what it installed. That is both a feature and a divergence risk (below).</li>
+<li><b>A namespace is the tenancy and blast-radius boundary.</b> Which cluster it sits in is the network and account boundary.</li>
+<li><b>A control plane is scoped to exactly one cluster.</b> That is a property of the design, not an oversight, and it is why a fleet of clusters has no global view for free. Anything cross-cluster — fleet dashboards, failover — is a layer you add on top (the Argo world of Phase 4).</li>
+<li><b>Config deploys and code deploys are the same mechanism.</b> An env value renders into the pod template; the template hash changes; the Deployment controller sees a new spec and rolls. One mechanism — which is why "config-only deploy" and "code deploy" share a pipeline.</li>
+</ul>
+<h3>Where the mapping breaks: drift between what Helm thinks and what is running</h3>
+<p>That leaves one question open: what breaks when Helm's release state diverges from git. Three real sources: someone runs a manual <code>kubectl edit</code> against a live object (now the cluster disagrees with the values file), a release is upgraded outside CI (now Helm disagrees with git), or the chart changes for a service that was never redeployed (now git disagrees with the cluster).</p>
+<p>All three are the same disease: two stores of desired state, no loop reconciling them. That is precisely the gap GitOps closes (Argo, Phase 4): a controller whose job is "cluster spec must equal git", reconciling continuously. You do not need Phase 4 to respect the principle: <b>there must be exactly one writable source of desired state. Every other write path is an incident seeding itself.</b></p>
+
+<h2>Where it breaks in production: Reddit, Pi Day 2023</h2>
+<p>The canonical Phase 0 incident. Walk it in order.</p>
+<p><b>What broke, as it first appeared.</b> March 14, 2023. Reddit's team upgraded the control plane of the cluster running Old Reddit from 1.23 to 1.24. Within minutes: all inter-node routes dropped cluster-wide. Metrics went dark. Internal DNS failed. Image pulls failed. Calls from the API server to an OPA admission webhook failed, which wedged the control plane itself. The symptom looked like total cluster death during a routine, well-practiced upgrade.</p>
+<p><b>What they found.</b> Kubernetes 1.24 removed the node label <code>node-role.kubernetes.io/master</code>. Reddit's Calico route reflectors (the BGP speakers that distribute pod routes between nodes) selected their peers and nodes <i>by that label</i>. The upgrade was correct. Every controller reconciled perfectly against the new state, and correctly concluded there were no route reflector nodes. So the loops tore down every peering. Desired state said "no masters"; actual state agreed; the system stayed wrong for 314 minutes. This is Checkpoint Q3 in production costume: no controller was broken, and that was the problem.</p>
+<p><b>The fix, in two layers.</b> Stop the bleeding: with no supported downgrade path, recovery meant restoring the control plane from a pre-upgrade etcd backup. This is the module's "one database is the whole cluster" claim from the recovery side. And the restore nearly failed three ways: the restore procedure had rotted (it predated their Docker to CRI-O switch), restored nodes had TLS certs that did not match AWS-generated hostnames, and AWS had no spare capacity in the region for the control-plane instance type. Stop it recurring: Reddit's own root cause was knowledge lost through attrition plus a bespoke cluster configuration that existed nowhere in code. The fix they committed to is section 0.5's discipline: cluster config as versioned, declarative artifacts, redeployable by definition.</p>
+<p><b>The detail worth remembering.</b> Bringing traffic back, they ramped 1% to 5% to 10% to 100% to avoid a thundering-herd cache collapse. Recovery is a rollout too.</p>
+<p><b>What it costs you.</b> This failure was workload-side: a network controller reacting to a label change. It applies fully on managed EKS, where AWS owns etcd backup but not your Calico config. Your concrete exposures: anything in your clusters that selects nodes by labels you did not define yourself; anything that depends on a Kubernetes API or annotation that can be removed between minor versions; any admission webhook that can wedge the control plane when it is unreachable. One check this week: <code>kubectl get nodes --show-labels</code>, and grep your network-policy and CNI config for labels starting with <code>node-role.kubernetes.io</code>. If anything depends on <code>master</code>, you are one upgrade from Reddit's afternoon.</p>
+
+<h2>Corrections to the module (it is mostly right; three things moved)</h2>
+<ol>
+<li><b>EndpointSlice, not Endpoints.</b> Kube-proxy watches EndpointSlice objects written by the endpointslice controller; the legacy Endpoints API is deprecated, a compatibility mirror only.</li>
+<li><b>kube-proxy mode landscape.</b> iptables still the default (as of 1.37), but nftables is GA since 1.33, ipvs deprecated since 1.35 and removed in 1.43, and the iptables default will flip to nftables in a future release. Since 1.28, iptables mode syncs only changed rules.</li>
+<li><b>"Level-triggered" needs its footnote.</b> Watches are lossy edge streams. The level-triggered guarantee is built from list-then-watch plus relist-on-410, not from the watch itself. Same mental model; different confidence about where correctness lives.</li>
+</ol>
+<p>Optional trivia, not a correction: since v1.32 the API can speak CBOR (alpha, feature-gated) alongside JSON, and <code>resourceVersion</code> is formally opaque.</p>
+
+<h2>Labs</h2>
+<p>The phase has no labs, so here are three. You need kind or minikube. Total time: about 40 minutes.</p>
+<h3>Lab 1 — Watch a deploy happen as object changes (15 min)</h3>
+<pre>kind create cluster --name phase0
+
+# Terminal A: watch the store change
+kubectl get pods -w
+
+# Terminal B
+kubectl create deployment web --image=nginx:1.27 --replicas=2
+kubectl rollout status deployment/web</pre>
+<p>Terminal A shows the <i>effect</i>: pods appearing with no deploy command ever touching a node. Now the level-trigger proof:</p>
+<pre>kubectl delete pod &lt;one-of-the-two&gt;</pre>
+<p>Terminal A shows the pod vanish and a replacement appear. You never asked for a replacement. The ReplicaSet controller read desired=2, observed=1, and closed the gap. That was your homegrown registry's 3am failure, deleted.</p>
+<p>Cleanup: <code>kubectl delete deployment web</code>.</p>
+<h3>Lab 2 — Do list-then-watch by hand (15 min)</h3>
+<p>See the actual mechanism rather than take 0.4 on faith.</p>
+<pre>kubectl proxy --port=8001 &amp;
+
+# LIST: get a snapshot and its resourceVersion
+RV=$(curl -s "http://localhost:8001/api/v1/namespaces/default/pods" | jq -r '.metadata.resourceVersion')
+echo $RV
+
+# WATCH from that RV (this call hangs, streaming events)
+curl -N "http://localhost:8001/api/v1/namespaces/default/pods?watch=true&amp;resourceVersion=$RV"</pre>
+<p>In another terminal: <code>kubectl create deployment web --image=nginx:1.27 --replicas=2</code>. Watch the streamed JSON events arrive: ADDED, MODIFIED, MODIFIED again as status flips to Running. Each event carries a resourceVersion. That stream is what every controller in the cluster consumes. ctrl-C to stop.</p>
+<h3>Lab 3 — Force 410 Gone (10 min)</h3>
+<p>Prove the watch is lossy and the relist is mandatory:</p>
+<pre>curl -s "http://localhost:8001/api/v1/namespaces/default/pods?watch=true&amp;resourceVersion=1"</pre>
+<p>Response: a <code>Failure</code> event, status <code>410</code>, reason <code>Gone</code>, message "too old resource version". Revision 1 is older than anything the watch cache holds, so there is no stream to give you. A controller hitting this must re-list current state and start a fresh watch. That response, not the watch stream, is the foundation of the level-triggered guarantee. Try also <code>resourceVersion=0</code> and read the API-concepts doc on what "most recent" semantics that gets you; the differences matter in Phase 1 when you write your first operator.</p>
+<p>Cleanup: <code>kind delete cluster --name phase0</code>.</p>
+
+<h2>Checkpoint</h2>
+<p>Answer from the article. If any answer needs outside reading, that section failed you; tell me which.</p>
+<ol>
+<li><code>kubectl apply -f deploy.yaml</code> returned success in 200ms. State precisely what is true at that moment, and name three things that are NOT yet true.</li>
+<li>A controller was down for 2 hours. Why can it come back and behave correctly without any event replay? Name the two mechanisms involved (what tells it to re-read, and what it re-reads). What is the failure boundary: what input would make it behave badly on restart?</li>
+<li>Every controller in the cluster is healthy, every reconcile loop is running, and cluster networking is entirely down. Explain how, in one sentence, using the Reddit incident. Then name the property of level-triggered loops that made them unable to repair it.</li>
+<li>Why does the architecture forbid components from calling each other directly? What do you give up for that property?</li>
+<li>Overnight, your pods rescheduled to new nodes. Your homegrown EC2 scripts would have broken; Kubernetes did not. Name the two mechanisms that absorbed the change, and which module section each one comes from.</li>
+</ol>
+<p>Answers, in brief: (1) desired state durably stored in etcd; no pod scheduled, no image pulled, no routing updated. (2) The watch gap (or startup) triggers a list of current state; reconciliation runs against the level. Boundary: the stored desired state itself is wrong, as with Reddit's label removal. (3) Controllers reconciled correctly against state that said "no route-reflector nodes", so they correctly tore the network down; loops fix differences, they do not judge intent. (4) Restart and failure isolation: any component can die and catch up from the store. You give up latency (coordination costs watch hops) and any notion of synchronous confirmation. (5) Service identity via virtual IP plus EndpointSlice, and the reconciliation loop re-placing pods by spec.</p>
+
+<h2>Cheatsheet</h2>
+<table>
+<tr><td><b>One database</b></td><td>etcd. MVCC, raft-replicated, revision counter, compaction (about 5 min default retention).</td></tr>
+<tr><td><b>One gatekeeper</b></td><td>API server. authN, RBAC, admission, store. Also hosts the watch cache (one etcd watch per resource type, fan-out to clients).</td></tr>
+<tr><td><b>Many loops</b></td><td>Controllers. Level-triggered. Act on spec vs status, coordinate only through rows.</td></tr>
+<tr><td><b>apply</b></td><td>UPDATE a row. Returns on etcd write. Rollout is a side effect, later.</td></tr>
+<tr><td><b>list-then-watch</b></td><td>Snapshot + resourceVersion, then stream. <b>410 Gone</b> = your RV aged out; relist. <b>Bookmarks</b> keep idle watches alive.</td></tr>
+<tr><td><b>Correctness</b></td><td>Missed events cannot drift because relist re-reads current state. Wrong state cannot self-heal for the same reason.</td></tr>
+<tr><td><b>Service identity</b></td><td>VIP to DNAT by kube-proxy, fed by EndpointSlice objects. Default backend: iptables (1.37), moving to nftables (GA 1.33); ipvs deprecated (1.35), removed (1.43).</td></tr>
+<tr><td><b>GitOps rule</b></td><td>One writable source of desired state. Manual <code>kubectl edit</code> in a track is drift seeding itself.</td></tr>
+<tr><td><b>Reddit 2023</b></td><td>Removed label + Calico selectors = correct loops destroying the network; recovery = etcd restore + 1/5/10/100% traffic ramp.</td></tr>
+</table>
+
+<h2>Two angles you could post</h2>
+<ol>
+<li>"Your Kubernetes controllers are not event-driven, they are level-driven, and the watch stream is a disposable hint." The claim, backed by the 410 Gone relist mechanism and one curl showing the failure, is the part nobody's intro tutorial says.</li>
+<li>"Reddit's Pi Day outage: every controller was healthy and that was the problem." Level-triggered loops faithfully execute wrong state; a removed node label and a Calico selector cost 314 minutes. His angle: the same exposure exists in any managed-EKS cluster that selects on label names it does not own.</li>
+</ol>
+
+<h2>Sources</h2>
+<ul class="src">
+<li>Your module: https://raghu-monitoring.vercel.app/study/kubernetes-phase-00-why-k8s-exists</li>
+<li>Borg paper: https://research.google/pubs/large-scale-cluster-management-at-google-with-borg/</li>
+<li>Controllers (official): https://kubernetes.io/docs/concepts/architecture/controller/</li>
+<li>API concepts (official): https://kubernetes.io/docs/reference/using-api/api-concepts/</li>
+<li>etcd-to-watch writeup (corroborating): https://svalle.ru/posts/kubernetes/etcd-to-watch/</li>
+<li>kube-proxy virtual IPs (official): https://kubernetes.io/docs/reference/networking/virtual-ips/</li>
+<li>nftables kube-proxy milestone: https://kubernetes.io/blog/2025/02/28/nftables-kube-proxy/</li>
+<li>Reddit Pi Day postmortem (repost of the r/RedditEng original): https://postmortem.io/incidents/reddit--2023-03-21--pi-day-outage/</li>
+<li>Study digest: quarantine/2026-09-12-kubernetes-phase-00-why-k8s-exists-study.md</li>
+</ul>
+
+<script>
+(function () {
+  var NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    parent.appendChild(n); return n;
+  }
+  function txt(x, y, s, parent, size, anchor, weight) {
+    var t = el("text", {x:x, y:y, "font-size":size||12, "text-anchor":anchor||"middle", "font-family":"inherit", fill:"#1c2733", "font-weight":weight||"normal"}, parent);
+    t.textContent = s; return t;
+  }
+
+  /* ---- Figure 1: deploy choreography step-through ---- */
+  var svg = document.getElementById("flowSvg");
+  var boxes = [
+    {id:"b-kubectl", x:20,  y:20,  w:130, h:46, l1:"kubectl apply", l2:"(you)"},
+    {id:"b-api",     x:20,  y:100, w:130, h:56, l1:"API server", l2:"authN, RBAC,", l3:"admission"},
+    {id:"b-etcd",    x:20,  y:196, w:130, h:46, l1:"etcd", l2:"MVCC store"},
+    {id:"b-wc",      x:250, y:196, w:150, h:46, l1:"watch cache", l2:"(inside API server)"},
+    {id:"b-dep",     x:480, y:20,  w:170, h:52, l1:"Deployment ctrl", l2:"writes ReplicaSet, Pod"},
+    {id:"b-sched",   x:480, y:100, w:170, h:52, l1:"scheduler", l2:"writes pod.nodeName"},
+    {id:"b-kubelet", x:480, y:180, w:170, h:52, l1:"kubelet", l2:"pulls image, writes status"},
+    {id:"b-eps",     x:480, y:260, w:170, h:52, l1:"EndpointSlice ctrl", l2:"writes pod IPs"},
+    {id:"b-proxy",   x:710, y:260, w:130, h:52, l1:"kube-proxy", l2:"programs DNAT"}
+  ];
+  var arrows = [
+    {id:"a-1", x1:85, y1:66, x2:85, y2:100},
+    {id:"a-2", x1:85, y1:156, x2:85, y2:196},
+    {id:"a-3", x1:150, y1:219, x2:250, y2:219},
+    {id:"a-4", x1:400, y1:210, x2:480, y2:46},
+    {id:"a-5", x1:400, y1:219, x2:480, y2:126},
+    {id:"a-6", x1:400, y1:228, x2:480, y2:206},
+    {id:"a-7", x1:400, y1:237, x2:480, y2:286},
+    {id:"a-8", x1:650, y1:286, x2:710, y2:286},
+    {id:"a-9", x1:565, y1:46, x2:85, y2:128}
+  ];
+  var node = {};
+  boxes.forEach(function (b) {
+    var g = el("g", {id: b.id}, svg);
+    el("rect", {x:b.x, y:b.y, width:b.w, height:b.h, rx:6, fill:"#cfe3f5", stroke:"#47617a", "stroke-width":1.5}, g);
+    txt(b.x + b.w/2, b.y + (b.l3 ? 18 : b.l2 ? 19 : 28), b.l1, g, 12.5, "middle", "600");
+    if (b.l2) txt(b.x + b.w/2, b.y + 34, b.l2, g, 10.5);
+    if (b.l3) txt(b.x + b.w/2, b.y + 48, b.l3, g, 10.5);
+    node[b.id] = g.firstChild;
+  });
+  arrows.forEach(function (a) {
+    var g = el("g", {id: a.id}, svg);
+    el("line", {x1:a.x1, y1:a.y1, x2:a.x2, y2:a.y2, stroke:"#93a5b8", "stroke-width":2}, g);
+    var ang = Math.atan2(a.y2 - a.y1, a.x2 - a.x1);
+    var hx = a.x2 - 8 * Math.cos(ang), hy = a.y2 - 8 * Math.sin(ang);
+    el("polygon", {points:a.x2+","+a.y2+" "+(hx+6*Math.sin(ang))+","+(hy-6*Math.cos(ang))+" "+(hx-6*Math.sin(ang))+","+(hy+6*Math.cos(ang)), fill:"#93a5b8"}, g);
+    node[a.id] = g.firstChild;
+  });
+  txt(708, 190, "every watcher is a", svg, 10.5, "middle");
+  txt(708, 204, "watch-only client", svg, 10.5, "middle");
+  txt(708, 218, "(no component calls", svg, 10.5, "middle");
+  txt(708, 232, "another directly)", svg, 10.5, "middle");
+
+  var steps = [
+    {t:"t = 0.0 s",   on:["b-kubectl","a-1","b-api"],       s:"kubectl apply hits the API server. The gatekeeper chain runs: authenticate, RBAC, admission webhooks. Nothing is stored yet."},
+    {t:"t = 0.05 s",  on:["b-api","a-2","b-etcd"],          s:"The row is written to etcd. The revision counter bumps. The write is raft-replicated, and now apply returns. At this instant: no pod, no image, no routing."},
+    {t:"t = 0.1 s",   on:["b-etcd","a-3","b-wc"],           s:"The API server watch cache fans the event out to every client watching Deployments. One etcd watch per resource type; thousands of clients served from memory."},
+    {t:"t = 0.2-1 s", on:["b-wc","a-4","b-dep","a-5","b-sched","a-9"], s:"Deployment controller writes a ReplicaSet; ReplicaSet controller writes Pod rows. The scheduler picks nodes and writes pod.spec.nodeName. Still only rows, nothing running."},
+    {t:"t = 1-10 s",  on:["b-wc","a-6","b-kubelet","a-9"],  s:"The kubelet on each chosen node sees a Pod assigned to it. It pulls the image, asks the container runtime to start it, and writes status back: phase = Running."},
+    {t:"t = 10-60 s", on:["b-wc","a-7","b-eps","a-8","b-proxy"], s:"EndpointSlice controller writes the ready pod IPs. kube-proxy watches EndpointSlices on every node and programs DNAT rules so the Service VIP reaches the pods. Traffic flows."}
+  ];
+  var cur = 0;
+  var stepText = document.getElementById("stepText");
+  var stepTime = document.getElementById("stepTime");
+  function draw() {
+    boxes.forEach(function (b) { node[b.id].setAttribute("fill", "#cfe3f5"); });
+    arrows.forEach(function (a) { node[a.id].setAttribute("stroke", "#93a5b8"); node[a.id].parentNode.lastChild.setAttribute("fill", "#93a5b8"); });
+    steps[cur].on.forEach(function (id) {
+      if (node[id].tagName === "rect") node[id].setAttribute("fill", "#ffe08a");
+      else { node[id].setAttribute("stroke", "#d9534f"); node[id].parentNode.lastChild.setAttribute("fill", "#d9534f"); }
+    });
+    stepTime.textContent = steps[cur].t;
+    stepText.innerHTML = "<b>" + steps[cur].t + "</b> " + steps[cur].s;
+  }
+  document.getElementById("nextBtn").addEventListener("click", function () { cur = Math.min(cur + 1, steps.length - 1); draw(); });
+  document.getElementById("prevBtn").addEventListener("click", function () { cur = Math.max(cur - 1, 0); draw(); });
+  draw();
+
+  /* ---- Figure 2: compaction window vs 410 Gone ---- */
+  var tsvg = document.getElementById("tlSvg");
+  var x0 = 60, x1 = 820, y0 = 34, y1 = 74, TMAX = 10, CUT = 5;
+  function mx(m) { return x0 + (x1 - x0) * m / TMAX; }
+  el("rect", {x:x0, y:y0, width:mx(CUT)-x0, height:y1-y0, fill:"#bfe3c0", stroke:"#5c8a5e"}, tsvg);
+  el("rect", {x:mx(CUT), y:y0, width:x1-mx(CUT), height:y1-y0, fill:"#f3c1c1", stroke:"#a65b5b"}, tsvg);
+  el("line", {x1:x0, y1:y1, x2:x1, y2:y1, stroke:"#1c2733", "stroke-width":1.5}, tsvg);
+  for (var m = 0; m <= TMAX; m++) {
+    txt(mx(m), y1 + 16, m + "", tsvg, 11, "middle");
+    el("line", {x1:mx(m), y1:y1, x2:mx(m), y2:y1+4, stroke:"#1c2733"}, tsvg);
+  }
+  txt((x0 + mx(CUT))/2, y0 - 8, "watch history retained", tsvg, 11, "middle", "600");
+  txt((mx(CUT) + x1)/2, y0 - 8, "compacted (gone forever)", tsvg, 11, "middle", "600");
+  txt(x0 - 8, (y0+y1)/2 + 4, "events", tsvg, 11, "end");
+  txt(x1 - 4, y1 + 34, "minutes of watch history", tsvg, 11, "end");
+  var marker = el("line", {x1:mx(3), y1:y0 - 4, x2:mx(3), y2:y1 + 4, stroke:"#0b5cad", "stroke-width":3}, tsvg);
+  var mlabel = txt(mx(3), y0 - 20, "reconnect here", tsvg, 11, "middle", "600");
+  mlabel.setAttribute("fill", "#0b5cad");
+
+  var slider = document.getElementById("downSlider");
+  var downVal = document.getElementById("downVal");
+  var watchText = document.getElementById("watchText");
+  function upd() {
+    var v = parseFloat(slider.value);
+    var px = mx(v);
+    marker.setAttribute("x1", px); marker.setAttribute("x2", px);
+    mlabel.setAttribute("x", Math.min(Math.max(px, x0 + 60), x1 - 60));
+    downVal.textContent = v + " min";
+    if (v < CUT) {
+      watchText.innerHTML = "<b>" + v + " min gap: watch resumes.</b> The resourceVersion the informer saved still falls inside the retained window. Missed events replay from the watch cache. No drift, because the stream itself bridges the gap.";
+    } else {
+      watchText.innerHTML = "<b>" + v + " min gap: 410 Gone.</b> The saved resourceVersion is older than the compaction cutoff (about 5 min of history, default). There is no stream to replay, so the informer re-lists the current state and reconciles the level. Drift still cannot accumulate, but now correctness came from the relist, not the watch.";
+    }
+  }
+  slider.addEventListener("input", upd);
+  upd();
+})();
+</script>
+</main>
+</body>
+</html>

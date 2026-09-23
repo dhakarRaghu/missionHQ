@@ -1,0 +1,65 @@
+# Mission HQ reverse proxy. One localhost listener in front of both servers.
+#
+#   browser --(Tailscale)--> tailscale serve --> 127.0.0.1:8080 (this file)
+#                                                  |-- /api/*  --> 127.0.0.1:8000  FastAPI (uvicorn)
+#                                                  '-- /*      --> 127.0.0.1:3000  Next.js (`next start`)
+#
+# How this is reached
+# -------------------
+# Tailscale Serve fronts port 8080 on the tailnet:
+#
+#     tailscale serve --bg 8080
+#
+# Serve terminates TLS with the machine's tailnet certificate and forwards to
+# this listener. For every request it injects identity headers, including
+# `Tailscale-User-Login`. The backend (backend/src/hq/api/deps.py) accepts a
+# request without a bearer token when that header equals TAILSCALE_OWNER_LOGIN.
+#
+# Never use `tailscale funnel`
+# ----------------------------
+# Funnel exposes the port to the public internet. Public clients are not
+# tailnet members, so Serve does not inject `Tailscale-User-Login` for them.
+# Worse, a public client could send that header itself, and nothing here
+# strips it. The header is only trustworthy while the ONLY path into port 8080
+# is Serve on the tailnet plus local processes on this machine. Keep it that way:
+#   - this site binds to 127.0.0.1 only (no LAN, no 0.0.0.0)
+#   - the backend binds to 127.0.0.1:8000 only (backend/src/hq/__main__.py)
+#   - `next start` is reached only through this proxy
+#
+# Running it
+# ----------
+#   brew install caddy                 (not done by any script here)
+#   caddy validate --config ops/Caddyfile
+#   ops/proxy.sh caddy install         (launchd, KeepAlive, logs in data/logs/caddy.log)
+
+{
+	# No admin API on 127.0.0.1:2019. launchd restarts the process instead of
+	# `caddy reload`, so the API is not needed.
+	admin off
+}
+
+http://127.0.0.1:8080 {
+	# API and the SSE stream (/api/events). flush_interval -1 disables response
+	# buffering so each SSE frame is written to the client as soon as it arrives.
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8000 {
+			flush_interval -1
+			# Long-lived stream: never cut it on a proxy timeout.
+			transport http {
+				response_header_timeout 0
+			}
+		}
+	}
+
+	# Everything else: the Next.js production server.
+	# Request headers (including Tailscale-User-Login) pass through unchanged.
+	# Caddy adds X-Forwarded-For, X-Forwarded-Proto and X-Forwarded-Host.
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	log {
+		output stderr
+		format console
+	}
+}

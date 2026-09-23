@@ -1,0 +1,359 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  /* layout.tsx loads Geist into --font-geist-sans / --font-geist-mono. */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+  --color-status-running: var(--status-running);
+  --color-status-blocked: var(--status-blocked);
+  --color-status-approval: var(--status-approval);
+  --color-status-success: var(--status-success);
+  --color-status-danger: var(--status-danger);
+  --color-status-muted: var(--status-muted);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-8: var(--chart-8);
+  --color-chart-7: var(--chart-7);
+  --color-chart-6: var(--chart-6);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  /* Warm neutral, not grey. A cream page with white cards reads as paper and
+   * keeps the eye on the content; every border is a warm hairline rather than
+   * a hard line. Chroma stays under 0.012 so text contrast is unaffected. */
+  --background: oklch(0.972 0.008 84);
+  --foreground: oklch(0.21 0.008 60);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.008 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.008 60);
+  --primary: oklch(0.24 0.008 60);
+  --primary-foreground: oklch(0.99 0.004 84);
+  --secondary: oklch(0.955 0.008 84);
+  --secondary-foreground: oklch(0.24 0.008 60);
+  --muted: oklch(0.955 0.008 84);
+  --muted-foreground: oklch(0.53 0.012 68);
+  --accent: oklch(0.945 0.01 84);
+  --accent-foreground: oklch(0.24 0.008 60);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.9 0.01 82);
+  --input: oklch(0.9 0.01 82);
+  --ring: oklch(0.72 0.012 70);
+  /* Categorical series colours, in fixed slot order. Greyscale steps cannot
+   * separate six agents in one stacked bar, so these are hues chosen and
+   * machine-checked as a set: lightness band, chroma floor, colour-blind
+   * separation and normal-vision separation on each adjacent pair, against
+   * the card surface of each theme. Assign by slot, never by rank. */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #008300;
+  --chart-7: #4a3aa7;
+  --chart-8: #e34948;
+  --radius: 0.75rem;
+  --sidebar: oklch(0.982 0.006 84);
+  --sidebar-foreground: oklch(0.21 0.008 60);
+  --sidebar-primary: oklch(0.24 0.008 60);
+  --sidebar-primary-foreground: oklch(0.99 0.004 84);
+  --sidebar-accent: oklch(0.945 0.01 84);
+  --sidebar-accent-foreground: oklch(0.24 0.008 60);
+  --sidebar-border: oklch(0.9 0.01 82);
+  --sidebar-ring: oklch(0.72 0.012 70);
+  /* Status tones: task state, run outcome, connection dot. */
+  --status-running: oklch(0.52 0.2 262);
+  --status-blocked: oklch(0.58 0.16 70);
+  --status-approval: oklch(0.52 0.22 300);
+  --status-success: oklch(0.52 0.15 155);
+  --status-danger: oklch(0.577 0.245 27.325);
+  --status-muted: oklch(0.53 0.012 68);
+}
+
+.dark {
+  /* The same warm hue, stepped for a dark surface. Not an inverted light
+   * theme: the card sits above the page, as it does in light mode. */
+  --background: oklch(0.155 0.006 70);
+  --foreground: oklch(0.965 0.004 84);
+  --card: oklch(0.198 0.006 70);
+  --card-foreground: oklch(0.965 0.004 84);
+  --popover: oklch(0.198 0.006 70);
+  --popover-foreground: oklch(0.965 0.004 84);
+  --primary: oklch(0.93 0.006 84);
+  --primary-foreground: oklch(0.2 0.008 60);
+  --secondary: oklch(0.27 0.007 70);
+  --secondary-foreground: oklch(0.965 0.004 84);
+  --muted: oklch(0.27 0.007 70);
+  --muted-foreground: oklch(0.72 0.01 78);
+  --accent: oklch(0.27 0.007 70);
+  --accent-foreground: oklch(0.965 0.004 84);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.55 0.01 70);
+  /* The same eight hues, re-stepped for the dark card surface. Not an
+   * automatic flip: each step was checked against the dark card. */
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+  --chart-6: #008300;
+  --chart-7: #9085e9;
+  --chart-8: #e66767;
+  --sidebar: oklch(0.178 0.006 70);
+  --sidebar-foreground: oklch(0.965 0.004 84);
+  --sidebar-primary: oklch(0.93 0.006 84);
+  --sidebar-primary-foreground: oklch(0.2 0.008 60);
+  --sidebar-accent: oklch(0.27 0.007 70);
+  --sidebar-accent-foreground: oklch(0.965 0.004 84);
+  --sidebar-border: oklch(1 0 0 / 11%);
+  --sidebar-ring: oklch(0.55 0.01 70);
+  --status-running: oklch(0.76 0.14 262);
+  --status-blocked: oklch(0.82 0.14 75);
+  --status-approval: oklch(0.78 0.15 300);
+  --status-success: oklch(0.8 0.15 155);
+  --status-danger: oklch(0.704 0.191 22.216);
+  --status-muted: oklch(0.72 0.01 78);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Console layout primitives.
+ *
+ * These live here, not in Tailwind arbitrary values, for two reasons. Arbitrary
+ * grid templates such as `md:grid-cols-[18rem_minmax(0,1fr)]` are generated per
+ * literal string and one of them silently failed to compile, which collapsed a
+ * two-pane page into one column. And the pane sizes are a layout decision that
+ * should be stated once, not repeated in every view.
+ * ------------------------------------------------------------------------- */
+@layer components {
+  /* Two-pane view: a fixed-width side pane and a fluid main pane. Stacks below
+   * the md breakpoint. Set --pane-width to override the default side width. */
+  .console-split {
+    display: grid;
+    min-height: 0;
+    gap: 1.25rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @media (width >= 48rem) {
+    .console-split {
+      grid-template-columns: var(--pane-width, 17rem) minmax(0, 1fr);
+      /* The row must not grow past the grid box. Without this an auto row
+       * sizes to its tallest child, so a long chat list pushed the whole page
+       * taller than the viewport and scrolled the header out of view. */
+      grid-template-rows: minmax(0, 1fr);
+      gap: 1.5rem;
+    }
+  }
+
+  /* Width of the side pane. Set as a class, not an inline style, so the
+   * layout stays in the stylesheet. */
+  .pane-narrow {
+    --pane-width: 16rem;
+  }
+
+  .pane-wide {
+    --pane-width: 18rem;
+  }
+
+  /* Three-pane reading workspace (Courses): the syllabus, the lesson itself,
+   * and a side drawer. `.console-split` only knows two columns, and a course
+   * is read a phase at a time, so where he is in the course, what he is
+   * reading and what the lesson contains are three separate things.
+   *
+   * The drawer's two widths are stated here rather than in the component
+   * because on a 13-inch screen it has to be able to give its width back to
+   * the lesson: closed it is a strip with a toggle in it. */
+  .console-workspace {
+    display: grid;
+    min-height: 0;
+    gap: 1rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @media (width >= 48rem) {
+    .console-workspace {
+      grid-template-columns:
+        var(--pane-width, 16rem) minmax(0, 1fr) var(--side-width, 2.25rem);
+      /* Same reason as `.console-split`: an auto row sizes to its tallest
+       * child and pushes the shell's header off screen. */
+      grid-template-rows: minmax(0, 1fr);
+      gap: 1rem;
+    }
+
+    .console-workspace[data-side="open"] {
+      --side-width: 17rem;
+    }
+
+    /* No side panel: the enhanced page carries its own contents rail. */
+    .console-workspace[data-side="none"] {
+      grid-template-columns: var(--pane-width, 16rem) minmax(0, 1fr);
+    }
+
+    /* Full view: no syllabus column, the reader takes the width. */
+    .console-workspace[data-focus="on"] {
+      grid-template-columns: minmax(0, 1fr) var(--side-width, 2.25rem);
+    }
+
+    .console-workspace[data-focus="on"][data-side="none"] {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* Courses left column: the course switcher above, the syllabus of the
+   * course he picked below.
+   *
+   * The switcher used to be a row of cards across the top of the page. With
+   * eight path courses, twenty-two curriculum modules and eleven platform
+   * courses that row scrolled sideways and pushed the phases below the fold,
+   * so it is a column now, capped at a little under half the height and
+   * scrolling inside itself. The cap is the point: however many courses he
+   * adds, the phase list keeps its share of the column. */
+  .courses-nav {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .courses-switcher {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 45%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* The three course panes fill the workspace row on wide screens. Stacked on
+   * a phone, the workspace scrolls instead and each pane gets a definite
+   * height of its own, so the reader still scrolls inside itself (the side
+   * panel follows that scroll) and the page never scrolls sideways. */
+  .courses-nav,
+  .reader-pane,
+  .side-pane {
+    height: 100%;
+  }
+
+  @media (width < 48rem) {
+    .console-workspace {
+      overflow-y: auto;
+      grid-auto-rows: max-content;
+    }
+
+    /* Stacked above the reader, the column still holds two sections, so it
+     * needs more room than the syllabus alone used to take. */
+    .courses-nav {
+      height: 28rem;
+    }
+
+    .reader-pane {
+      height: 85dvh;
+    }
+
+    .side-pane {
+      height: auto;
+      max-height: 24rem;
+    }
+  }
+
+  /* Board columns: one per live task state, side by side on wide screens and
+   * stacked below the md breakpoint. Column width is stated here rather than
+   * as an arbitrary Tailwind grid template. */
+  .board-columns {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  @media (width >= 48rem) {
+    .board-columns {
+      grid-template-columns: repeat(var(--board-columns, 4), minmax(0, 1fr));
+    }
+  }
+
+  /* A scrollable region inside a flex column. min-height:0 is what lets a flex
+   * child shrink below its content height so the scrollbar appears on the
+   * region instead of the page. */
+  .pane-scroll {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+/* Thin scrollbars in the console. The default macOS overlay bar is fine, but
+ * inner panes get a visible track once they scroll, which is too heavy here. */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  /* Respect the user's reduced-motion setting for every transition we add. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
