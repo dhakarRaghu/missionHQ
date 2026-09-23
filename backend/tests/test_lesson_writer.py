@@ -144,7 +144,8 @@ def test_an_article_is_written_in_stages_and_passes_the_real_page_contract(
     (learning / "lessons").mkdir(parents=True)
     monkeypatch.setattr(lt.settings(), "learning_dir", learning)
 
-    async def outline_step(model: str, article: bool, material: str, problems: list[str]):
+    async def outline_step(model: str, article: bool, material: str, problems: list[str],
+                           page: str = ""):
         return _outline()
 
     async def release_step(claims):
@@ -200,9 +201,10 @@ def test_an_article_is_written_in_stages_and_passes_the_real_page_contract(
 
 @pytest.mark.parametrize("stage,source,expected", [
     ("course_lesson", "platform", True), ("course_lesson", "local", False),
-    ("lesson_synthesis", None, True), ("lab_card", None, False),
+    ("lesson_synthesis", None, True), ("lab_card", None, True), ("week_review", None, True),
+    ("post_draft", None, True), ("source_hunt", None, False),
 ])
-def test_the_writer_takes_phases_and_articles_only(stage: str, source: str | None,
+def test_the_writer_takes_what_tutor_writes(stage: str, source: str | None,
                                                    expected: bool) -> None:
     from hq.config import settings
     from hq.loader import parse_job_md

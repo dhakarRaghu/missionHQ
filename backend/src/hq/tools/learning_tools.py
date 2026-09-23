@@ -1879,6 +1879,62 @@ def post_problems(markdown: str, source: str) -> str:
     return "; ".join(problems)
 
 
+async def save_post(section: str, slug: str, title: str, summary: str, tags: str,
+                    markdown: str, source_lesson: str = "", *, run_id: str | None = None,
+                    agent: str | None = None) -> dict[str, Any]:
+    """Check a post and write it into his site as a draft. Shared by
+    `publish_post` and the staged writer. Raises LessonRefused."""
+    section = section.strip().lower()
+    if section not in POST_SECTIONS:
+        raise LessonRefused(f"section must be one of {', '.join(POST_SECTIONS)}")
+    clean = _clean_slug(slug)
+    title, summary = title.strip(), " ".join(summary.split())
+    if not title or not summary:
+        raise LessonRefused("a post needs a title and a one-line summary")
+    if _FRONTMATTER_UNSAFE.search(title) or _FRONTMATTER_UNSAFE.search(summary):
+        raise LessonRefused('the title and summary go in frontmatter: no quotes or newlines')
+    tag_list = [t.strip().lower() for t in tags.replace("\n", ",").split(",") if t.strip()]
+    if not 2 <= len(tag_list) <= 8:
+        raise LessonRefused("give two to eight tags, comma separated")
+
+    source = ""
+    if source_lesson.strip():
+        source = await asyncio.to_thread(_read_lesson_text, source_lesson.strip())
+    gap = post_problems(markdown, source)
+    if gap:
+        raise LessonRefused(f"this is not ready for his site: {gap}. Fix it and call again")
+
+    root = settings().portfolio_dir
+    if not root.is_dir():
+        raise LessonRefused(f"his site is not at {root}; nothing was written")
+    folder = root / "content" / section
+    await asyncio.to_thread(folder.mkdir, parents=True, exist_ok=True)
+    body = markdown.strip()
+    front = "\n".join([
+        "---",
+        f'title: "{title}"',
+        f"date: {_today().date()}",
+        f'summary: "{summary}"',
+        "tags: [" + ", ".join(tag_list) + "]",
+        f"section: {section}",
+        "draft: true",
+        "---",
+        "",
+    ])
+    path = folder / f"{clean}.md"
+    await asyncio.to_thread(path.write_text, front + body + "\n")
+    await emit("post.drafted", run_id=run_id, agent=agent,
+               payload={"section": section, "slug": clean, "words": _prose_words(body)})
+    return {
+        "path": str(path),
+        "words": _prose_words(body),
+        "next": "he reads it, edits it, sets draft: false and pushes. Nothing was"
+                " committed or published from here.",
+    }
+
+
+
+
 @hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
 async def publish_post(
     ctx: RunContext[HQDeps],
@@ -1900,53 +1956,11 @@ async def publish_post(
     It writes a file and nothing else. No commit, no push, no deploy: he
     reads the file, edits what he wants, and publishes it himself.
     """
-    section = section.strip().lower()
-    if section not in POST_SECTIONS:
-        raise ModelRetry(f"section must be one of {', '.join(POST_SECTIONS)}")
-    clean = _clean_slug(slug)
-    title, summary = title.strip(), " ".join(summary.split())
-    if not title or not summary:
-        raise ModelRetry("a post needs a title and a one-line summary")
-    if _FRONTMATTER_UNSAFE.search(title) or _FRONTMATTER_UNSAFE.search(summary):
-        raise ModelRetry('the title and summary go in frontmatter: no quotes or newlines')
-    tag_list = [t.strip().lower() for t in tags.replace("\n", ",").split(",") if t.strip()]
-    if not 2 <= len(tag_list) <= 8:
-        raise ModelRetry("give two to eight tags, comma separated")
-
-    source = ""
-    if source_lesson.strip():
-        source = await asyncio.to_thread(_read_lesson_text, source_lesson.strip())
-    gap = post_problems(markdown, source)
-    if gap:
-        raise ModelRetry(f"this is not ready for his site: {gap}. Fix it and call again")
-
-    root = settings().portfolio_dir
-    if not root.is_dir():
-        raise ModelRetry(f"his site is not at {root}; nothing was written")
-    folder = root / "content" / section
-    await asyncio.to_thread(folder.mkdir, parents=True, exist_ok=True)
-    body = markdown.strip()
-    front = "\n".join([
-        "---",
-        f'title: "{title}"',
-        f"date: {_today().date()}",
-        f'summary: "{summary}"',
-        "tags: [" + ", ".join(tag_list) + "]",
-        f"section: {section}",
-        "draft: true",
-        "---",
-        "",
-    ])
-    path = folder / f"{clean}.md"
-    await asyncio.to_thread(path.write_text, front + body + "\n")
-    await emit("post.drafted", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
-               payload={"section": section, "slug": clean, "words": _prose_words(body)})
-    return {
-        "path": str(path),
-        "words": _prose_words(body),
-        "next": "he reads it, edits it, sets draft: false and pushes. Nothing was"
-                " committed or published from here.",
-    }
+    try:
+        return await save_post(section, slug, title, summary, tags, markdown, source_lesson,
+                               run_id=ctx.deps.run_id, agent=ctx.deps.agent)
+    except LessonRefused as exc:
+        raise ModelRetry(str(exc)) from exc
 
 
 @hq_tool(action=ActionClass.READ, trust=Trust.VAULT)

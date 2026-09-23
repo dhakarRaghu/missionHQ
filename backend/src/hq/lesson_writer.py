@@ -142,7 +142,9 @@ def _writer_file(name: str) -> str:
     return (settings().agents_dir / "tutor" / WRITER_DIR / name).read_text()
 
 
-def outline_instructions(article: bool) -> str:
+def outline_instructions(article: bool, page: str = "") -> str:
+    if page:
+        return _writer_file("teacher.md") + "\n\n" + _writer_file("outline-page.md")
     return _writer_file("teacher.md") + "\n\n" + _writer_file(
         "outline-article.md" if article else "outline-course.md")
 
@@ -160,13 +162,13 @@ def _model_for(spec_model: str) -> tuple[Any, Any]:
 
 @DBOS.step(name="writer.outline", **_OUTLINE_STEP)
 async def _outline_step(spec_model: str, article: bool, material: str,
-                        problems: list[str]) -> dict[str, Any]:
+                        problems: list[str], page: str = "") -> dict[str, Any]:
     model, model_settings = _model_for(spec_model)
     # The plan comes back as JSON in the text, never as a tool call: the
     # gateway does not stream tool-call arguments, and a plan generated in
     # silence for five minutes is cut as an idle connection at 300 seconds.
     agent = Agent(model, output_type=PromptedOutput(Outline),
-                  instructions=outline_instructions(article),
+                  instructions=outline_instructions(article, page),
                   model_settings=_with(model_settings, reasoning_effort=OUTLINE_EFFORT,
                                        timeout=OUTLINE_LIMIT_S))
     prompt = material
@@ -266,6 +268,7 @@ async def _articles_on(slug: str) -> str:
 
 class Material(BaseModel):
     article: bool
+    page: str = ""               # "lab" or "review" for a single page he works from
     slug: str                    # course phase slug; for an article, set after the outline
     kind: str = ""               # article kind
     relationship: str = ""
@@ -472,7 +475,8 @@ class Writer:
     async def plan(self) -> Outline | None:
         problems: list[str] = []
         for attempt in range(2):
-            raw = await _outline_step(self.spec.model, self.m.article, self.m.prompt, problems)
+            raw = await _outline_step(self.spec.model, self.m.article, self.m.prompt, problems,
+                                      self.m.page)
             outline = Outline.model_validate(raw)
             if self.m.article and outline.cannot_write.strip():
                 self.report.append(f"Not written: {outline.cannot_write.strip()}")
@@ -592,7 +596,7 @@ class Writer:
         self.outline = await self.plan()
         if self.outline is None:
             return None
-        if self.m.article:
+        if self.m.article and not self.m.slug:
             self.m.slug = _slugify(self.outline.title)
         await self.opening()
         for i in range(1, len(self.outline.sections) + 1):
@@ -617,6 +621,13 @@ class Writer:
                   "md_path": md_path, "html_path": html_path,
                   "source_urls": "\n".join(self.m.source_urls),
                   "run_id": self.deps.run_id, "agent": self.deps.agent}
+        if self.m.page == "lab":
+            return await lt.record_lesson_row(
+                **common, kind="lab",
+                course_slug=str(self.m.payload.get("phase_slug") or ""),
+                topic=str(self.m.payload.get("phase_course") or ""))
+        if self.m.page == "review":
+            return await lt.record_lesson_row(**common, kind="review", topic="week review")
         if self.m.article:
             return await lt.record_lesson_row(
                 **common, kind="topic", article_kind=self.m.kind,
@@ -637,13 +648,102 @@ class Writer:
             self.report.append(f"frontier note not filed: {exc}")
 
 
+_LESSON_REF_RE = re.compile(r"`(learning/lessons/[^`]+?\.md)`")
+
+
+async def gather_page(task: dict[str, Any], payload: dict[str, Any]) -> Material:
+    """The lab card or the week review: the task's own brief says what the
+    page is; the lessons and the lab it names are the material."""
+    stage = payload.get("stage")
+    page = "lab" if stage == learning.LAB_CARD_STAGE else "review"
+    brief = str(task.get("brief") or "")
+    task_part = brief.split("## This task", 1)[-1]
+    parts = []
+    for path in dict.fromkeys(_LESSON_REF_RE.findall(brief)):
+        text = await asyncio.to_thread(lt._read_lesson_text, path)
+        if text:
+            parts.append(f"## Lesson: {path}\n\n{text[:12_000]}")
+    source = ""
+    phase_slug = str(payload.get("phase_slug") or "")
+    if page == "lab" and phase_slug:
+        source = await asyncio.to_thread(lt.read_course_source_text, phase_slug)
+        if source:
+            parts.append(f"## His phase, with its lab\n\n{source[:SOURCE_CHARS]}")
+    note = "\n\n".join(parts)
+    slug = f"lab-{phase_slug}" if page == "lab" else f"week-review-{lt._today():%G-w%V}"
+    prompt = f"# The task\n\n{task_part.strip()}\n\n# The material\n\n{note[:NOTE_CHARS]}"
+    return Material(article=True, page=page, slug=lt._clean_slug(slug), note=note,
+                    source="", prompt=prompt, payload=payload)
+
+
+class PostDraft(BaseModel):
+    slug: str = Field(description="lowercase words joined by hyphens")
+    title: str
+    summary: str = Field(description="one line, no quotes")
+    tags: list[str] = Field(description="three to six tags")
+    markdown: str = Field(description="the whole post as markdown")
+
+
+@DBOS.step(name="writer.post", **_STEP)
+async def _post_step(spec_model: str, instructions: str, prompt: str) -> dict[str, Any]:
+    model, model_settings = _model_for(spec_model)
+    agent = Agent(model, output_type=PromptedOutput(PostDraft), instructions=instructions,
+                  model_settings=_with(model_settings, reasoning_effort=SECTION_EFFORT))
+    result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=4))
+    return result.output.model_dump()
+
+
+async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any:
+    """A post for his site from one lesson: returned as text, checked and
+    saved by code, rewritten once with what the checks said."""
+    from hq.runner import RunOutcome, emit_step
+
+    payload = dict(task.get("payload") or {})
+    md_path = str(payload.get("md_path") or "")
+    section = str(payload.get("section") or "writing")
+    lesson = await asyncio.to_thread(lt._read_lesson_text, md_path) if md_path else ""
+    if not lesson:
+        return RunOutcome(output="", outcome="blocked", input_tokens=0, output_tokens=0,
+                          cost_usd=0.0, error=f"no lesson at {md_path or '(none given)'}")
+    brief = str(task.get("brief") or "")
+    instructions = _writer_file("teacher.md") + "\n\n# This task\n\n" + brief.split(
+        "## This task", 1)[-1].strip()
+    problems: list[str] = []
+    with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent=spec.name):
+        for _ in range(2):
+            prompt = f"## The lesson ({md_path})\n\n{lesson[:NOTE_CHARS]}"
+            if problems:
+                prompt += ("\n\n## Your previous draft was sent back\n\n"
+                           + "\n".join(f"- {p}" for p in problems)
+                           + "\n\nReturn the whole post again with these fixed.")
+            draft = PostDraft.model_validate(await _post_step(spec.model, instructions, prompt))
+            try:
+                saved = await lt.save_post(
+                    section, draft.slug, draft.title, draft.summary, ", ".join(draft.tags),
+                    draft.markdown, md_path, run_id=deps.run_id, agent=deps.agent)
+            except lt.LessonRefused as exc:
+                problems = [str(exc)]
+                continue
+            await emit_step("tool.called", run_id=deps.run_id, task_id=deps.task_id,
+                            agent=spec.name, payload={"tool": "publish_post", "ok": True,
+                                                      "via": "staged_writer",
+                                                      "args": {"slug": draft.slug}})
+            return RunOutcome(
+                output=(f"Draft written to `{saved['path']}` ({saved['words']} words), marked"
+                        " draft: true. Nothing was committed or published."),
+                outcome="done", input_tokens=0, output_tokens=0, cost_usd=0.0)
+    return RunOutcome(output="", outcome="failed", input_tokens=0, output_tokens=0,
+                      cost_usd=0.0, error=f"post refused twice: {problems[0][:400]}")
+
+
 def handles(spec: AgentSpec, payload: object) -> bool:
     """The staged writer takes course phases from his platform and articles."""
     if spec.name != "tutor" or not isinstance(payload, dict):
         return False
     if learning.is_course_written(payload):
         return payload.get("source") == "platform"
-    return payload.get("stage") == learning.LESSON_STAGE
+    return payload.get("stage") in {learning.LESSON_STAGE, learning.LAB_CARD_STAGE,
+                                    learning.WEEK_REVIEW_STAGE, learning.POST_STAGE}
 
 
 async def write(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any:
@@ -651,8 +751,13 @@ async def write(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any:
     from hq.runner import RunOutcome, emit_step
 
     payload = dict(task.get("payload") or {})
+    if payload.get("stage") == learning.POST_STAGE:
+        return await write_post(task, spec, deps)
     with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent=spec.name):
-        m = await gather(payload)
+        if payload.get("stage") in {learning.LAB_CARD_STAGE, learning.WEEK_REVIEW_STAGE}:
+            m = await gather_page(task, payload)
+        else:
+            m = await gather(payload)
         if not m.note.strip():
             return RunOutcome(output="No study note to write from.", outcome="blocked",
                               input_tokens=0, output_tokens=0, cost_usd=0.0,

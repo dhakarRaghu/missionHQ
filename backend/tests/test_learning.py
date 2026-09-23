@@ -1762,13 +1762,13 @@ def test_publishing_writes_a_draft_and_nothing_else() -> None:
     from hq.learning_pipeline import POST_SECTIONS, post_brief, post_payload
     from hq.tools import learning_tools as lt
 
-    src = inspect.getsource(lt.publish_post)
+    src = inspect.getsource(lt.save_post)
     assert "draft: true" in src and "post_problems" in src
     # No git, no network, no deploy: it writes one file into his site and
     # says so. Only the docstring may use the words.
     for call in ("subprocess", "httpx", "urllib", "git "):
         assert call not in src.split('"""')[2], call
-    assert "No commit, no push, no deploy" in src
+    assert "No commit, no push, no deploy" in inspect.getsource(lt.publish_post)
     assert POST_SECTIONS == ("writing", "papershelf")
     brief = post_brief(post_payload(
         {"lesson_date": "2026-09-17", "md_path": "learning/lessons/x.md", "title": "T"},

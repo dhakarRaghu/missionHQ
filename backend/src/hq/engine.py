@@ -118,8 +118,9 @@ ARTIFACT_TOOLS = (
     # and its task showed as blocked on the board.
     "write_lesson",
     "record_lesson",
-    # A lab is an artifact.
+    # A lab is an artifact, and so is a post drafted into his site.
     "write_lab_files",
+    "publish_post",
     "vault_write",
     "record_fact",
     "create_subtask",
