@@ -316,8 +316,71 @@ async def _spent(since: datetime, agent: str) -> float:
     return float(row["c"]) if row else 0.0
 
 
+async def _task_payload(case: Case) -> dict[str, Any] | None:
+    if not case.brief_from_task:
+        return None
+    row = await db.fetchone("SELECT payload FROM hq.tasks WHERE id::text LIKE %s",
+                            (case.brief_from_task + "%",))
+    return dict(row["payload"] or {}) if row else None
+
+
+async def _writer_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, Any]) -> Trial:
+    """A phase or an article is written by the staged writer in production,
+    so it is measured the same way: its real steps, into the sandbox."""
+    from hq import lesson_writer
+    from hq.tools import learning_tools as lt
+
+    calls: list[dict[str, Any]] = []
+    recorded: dict[str, Any] = {}
+
+    async def record_row(**kw: Any) -> str:
+        recorded.update(kw)
+        calls.append({"tool": "record_lesson", "args": kw, "ok": True})
+        return "eval-lesson"
+
+    real_record = lt.record_lesson_row
+    lt.record_lesson_row = record_row  # type: ignore[assignment]
+    tag = f"eval:{case.agent}"
+    started, since = time.monotonic(), datetime.now().astimezone()
+    output, error = "", None
+    deps = HQDeps(agent=spec.name, task_id=f"eval-{case.id}"[:40], run_id=None)
+    try:
+        with llm.call_context(run_id=None, task_id=None, agent=tag):
+            m = await lesson_writer.gather(payload)
+            w = lesson_writer.Writer(spec, deps, m)
+            try:
+                done = await w.run()
+            except lt.LessonRefused as exc:
+                done, error = None, f"lesson refused: {exc}"
+            output = "\n".join(w.report)
+            if done is not None:
+                _md_path, html_path, _ = done
+                page = (settings().learning_dir / "lessons" / Path(html_path).name).read_text()
+                calls.append({"tool": "write_lesson", "ok": True,
+                              "args": {"html": lt._page_text(page)[:30000]}})
+                calls.append({"tool": "write_lesson_part", "ok": True, "args": {}})
+                output = f"wrote {html_path}\n" + output
+    except Exception as exc:  # noqa: BLE001 — a crashed run is a failed trial
+        error = f"{type(exc).__name__}: {exc}"[:500]
+    finally:
+        lt.record_lesson_row = real_record  # type: ignore[assignment]
+    fails = [f"run failed: {error}"] if error else []
+    fails += _check(case, output, calls)
+    if not error:
+        fails += await _judge(case, output, calls)
+    return Trial(passed=not fails, failures=fails, output=output[:4000], calls=calls,
+                 seconds=round(time.monotonic() - started, 1),
+                 cost_usd=round(await _spent(since, tag), 4), error=error)
+
+
 async def run_trial(case: Case) -> Trial:
     spec = loader.parse_job_md(settings().agents_dir / case.agent)
+    if case.agent == "tutor":
+        from hq import lesson_writer
+
+        payload = await _task_payload(case)
+        if payload is not None and lesson_writer.handles(spec, payload):
+            return await _writer_trial(case, spec, payload)
     calls: list[dict[str, Any]] = []
     reg = llm.registry()
     agent = Agent(

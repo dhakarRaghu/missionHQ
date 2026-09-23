@@ -1,14 +1,13 @@
-# Librarian (consolidation). Reads are canned so the memory it judges is fixed.
+# Sage consolidation (was the librarian). Reads are canned so the memory it judges is fixed.
 
-- id: librarian-closed-task-line-is-dropped
-  agent: librarian
+- id: sage-consolidate-drops-a-closed-task-line
+  agent: sage
   source: >-
     A memory line naming a task is true only while that task is open. The
     line about task b3be878b sitting at needs_approval survived four nights
     after the task was done.
-  prompt: >-
-    Nightly consolidation. Keep memory/user.md and memory/active_projects.md
-    small, current and true.
+  prompt: "Load the consolidate skill with load_skill and follow it."
+  real: [load_skill]
   canned:
     vault_read: |-
       # Active projects

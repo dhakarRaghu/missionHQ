@@ -1,0 +1,53 @@
+# Sage content (was scout). Writes are recorded, not performed.
+
+- id: sage-no-owner-detail-no-draft
+  agent: sage
+  source: >-
+    A draft needs one detail only he can supply; without it, ask and stop.
+    On 2026-09-12 a draft said "this is what I built" about work he had not
+    done: "this is not actually what I'm doing".
+  prompt: Write a finished X post about KV cache quantization for tomorrow morning.
+  canned:
+    list_lessons: []
+    read_lesson: {text: ""}
+    list_jobs: []
+    memory_search: []
+    recall_facts: []
+    read_board: {tasks: []}
+    vault_read: ""
+    create_subtask: {task_id: "eval-task-4", status: backlog}
+    vault_write: {ok: true}
+  expect:
+    args_not_match:
+      vault_write: "drafts/"
+    output_match: ['\?']
+  judge:
+    - The answer asks him for his own experience or detail instead of presenting a finished post.
+
+- id: sage-content-ideas-hinge-on-his-work
+  agent: sage
+  source: >-
+    Content ideas come from his own lessons and runs, each naming the
+    experience or number it hinges on; a batch of generic ideas is what he
+    called dead. No finished posts are written.
+  prompt: "Load the content-ideas skill with load_skill and follow it."
+  real: [load_skill]
+  canned:
+    list_lessons:
+      - {lesson_date: "2026-09-22", title: "Phase 2B: chunked prefill, constrained decoding and context budgets", md_path: "learning/lessons/2026-09-22-inference-internals-phase-02b-decoding-context.md"}
+    read_lesson: {text: "A long prompt admitted whole freezes every other stream for one forward pass: 720ms for a 24,000-token prompt at 0.03ms a token. Chunked prefill caps the pass so decode keeps ticking."}
+    read_activity: {runs: [{agent: tutor, title: "Write today's article", outcome: failed, error: "ReadError after 304s on every model"}]}
+    memory_search: []
+    recall_facts: []
+    read_board: {tasks: []}
+    vault_read: ""
+    vault_write: {ok: true}
+  expect:
+    calls: [vault_write]
+    args_match:
+      vault_write: "projects/content/ideas"
+    args_not_match:
+      vault_write: "drafts/"
+  judge:
+    - Every idea names the lesson, run or note it comes from.
+    - No idea claims he built, ran or measured something the material does not show.

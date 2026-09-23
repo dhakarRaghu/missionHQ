@@ -1,0 +1,23 @@
+# Tutor's remaining agent-loop tasks. Lesson tools write into the sandbox.
+
+- id: tutor-post-for-his-site
+  agent: tutor
+  source: >-
+    A post for his site is a rewrite of a lesson for a stranger: every private
+    reference goes, every fact and number stays with its source, no new links,
+    his employer never named.
+  prompt: >-
+    Prepare an article for his own site, from the lesson
+    learning/lessons/2026-09-20-inference-internals-phase-02a-scheduling-memory.md.
+    Read it with read_lesson, rewrite it for a reader with none of his
+    context, then call publish_post with section writing.
+  real: [read_lesson]
+  canned:
+    publish_post: {written: "site/content/writing/draft.md"}
+    recall_facts: []
+  expect:
+    calls: [read_lesson, publish_post]
+    args_not_match:
+      publish_post: "Mission HQ|study note|hunter|tutor|phase 2A"
+  judge:
+    - The post reads as written for a stranger, with no reference to his course, notes or agents.
