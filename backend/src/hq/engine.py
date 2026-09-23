@@ -302,8 +302,10 @@ async def dispatch(
     return task_id
 
 
+# The lanes with the long cap: course work, and the article, which the
+# staged writer builds in the same bounded pieces as a phase.
 _COURSE_STAGES = frozenset({
-    learning.COURSE_STAGE, learning.COURSE_WRITTEN_STAGE,
+    learning.COURSE_STAGE, learning.COURSE_WRITTEN_STAGE, learning.LESSON_STAGE,
 })
 
 

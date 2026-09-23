@@ -40,7 +40,7 @@ from typing import Any, cast
 
 import yaml
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent
+from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.usage import UsageLimits
 
 from hq import db, llm, memory, signals
@@ -67,12 +67,23 @@ JUDGE_MODEL = "cheap"
 STEP_LIMIT_S = llm.registry().longest_chain_timeout_s() + 30.0
 _STEP: dict[str, Any] = {"retries_allowed": True, "max_attempts": 2, "interval_seconds": 5.0,
          "backoff_rate": 2.0, "timeout_seconds": STEP_LIMIT_S}
-# The plan is the one call that reasons for minutes before it answers: on
-# 2026-09-23 kimi-k3 streamed its reasoning for the full 480 seconds (first
-# token at 2.5s) without finishing the plan. It gets a longer total; a hung
-# stream is still caught by the idle limit in llm.StreamingModel.
-OUTLINE_LIMIT_S = 900.0
+# Measured on this gateway, 2026-09-23: kimi streams reasoning at about 20
+# characters a second and text at about 40. At high effort the plan reasoned
+# for nine minutes before its first word. So effort is spent where it pays:
+# the plan, which decides what he learns, reasons at medium with a long
+# total; a section executes a fixed plan and reasons low.
+OUTLINE_EFFORT = "medium"
+SECTION_EFFORT = "low"
+OUTLINE_LIMIT_S = 1200.0
 _OUTLINE_STEP: dict[str, Any] = {**_STEP, "timeout_seconds": OUTLINE_LIMIT_S * 3 + 30.0}
+
+
+def _with(model_settings: Any, **extra: Any) -> Any:
+    out = dict(model_settings or {})
+    if "reasoning_effort" in extra:
+        out["openai_reasoning_effort"] = extra.pop("reasoning_effort")
+    out.update(extra)
+    return cast(Any, out)
 
 
 # --- the plan -----------------------------------------------------------------
@@ -151,9 +162,13 @@ def _model_for(spec_model: str) -> tuple[Any, Any]:
 async def _outline_step(spec_model: str, article: bool, material: str,
                         problems: list[str]) -> dict[str, Any]:
     model, model_settings = _model_for(spec_model)
-    model_settings = cast(Any, {**(model_settings or {}), "timeout": OUTLINE_LIMIT_S})
-    agent = Agent(model, output_type=Outline, instructions=outline_instructions(article),
-                  model_settings=model_settings)
+    # The plan comes back as JSON in the text, never as a tool call: the
+    # gateway does not stream tool-call arguments, and a plan generated in
+    # silence for five minutes is cut as an idle connection at 300 seconds.
+    agent = Agent(model, output_type=PromptedOutput(Outline),
+                  instructions=outline_instructions(article),
+                  model_settings=_with(model_settings, reasoning_effort=OUTLINE_EFFORT,
+                                       timeout=OUTLINE_LIMIT_S))
     prompt = material
     if problems:
         prompt += ("\n\n## Your previous plan was sent back\n\n"
@@ -167,7 +182,7 @@ async def _outline_step(spec_model: str, article: bool, material: str,
 async def _section_step(spec_model: str, prompt: str) -> str:
     model, model_settings = _model_for(spec_model)
     agent = Agent(model, output_type=str, instructions=section_instructions(),
-                  model_settings=model_settings)
+                  model_settings=_with(model_settings, reasoning_effort=SECTION_EFFORT))
     result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=2))
     return str(result.output)
 
