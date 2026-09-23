@@ -44,6 +44,9 @@ LOAD_ERRORS: dict[str, str] = {}
 class CronEntry(BaseModel):
     schedule: str
     prompt: str
+    # The skill this slot follows. Code puts its text in the brief, so the
+    # run starts with it instead of spending a round trip on load_skill.
+    skill: str = ""
 
 
 # Who else is loaded, for an agent that can delegate. Filled by scan(), read
@@ -252,6 +255,10 @@ def parse_job_md(agent_dir: Path) -> AgentSpec:
     )
     if spec.name != agent_dir.name:
         raise ValueError(f"agent folder {agent_dir.name} vs manifest name {spec.name}")
+    for entry in spec.cron:
+        if entry.skill and not (agent_dir / "skills" / entry.skill / "SKILL.md").is_file():
+            raise ValueError(f"{agent_dir.name}/job.md: cron names skill {entry.skill!r},"
+                             " which has no skills/<name>/SKILL.md")
     return spec
 
 

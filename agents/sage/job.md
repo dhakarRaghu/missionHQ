@@ -40,15 +40,20 @@ caps:
   daily_usd: 15.00
 cron:
   - schedule: "30 22 * * *"
-    prompt: "Load the daily-note skill with load_skill and follow it."
+    prompt: "Write today's daily note."
+    skill: daily-note
   - schedule: "0 20 * * 0"
-    prompt: "Load the weekly-review skill with load_skill and follow it."
+    prompt: "Write the weekly review."
+    skill: weekly-review
   - schedule: "30 23 * * *"
-    prompt: "Load the consolidate skill with load_skill and follow it."
+    prompt: "Consolidate today's notes into memory."
+    skill: consolidate
   - schedule: "0 9 * * 3"
-    prompt: "Load the content-ideas skill with load_skill and follow it."
+    prompt: "Propose this week's content ideas."
+    skill: content-ideas
   - schedule: "0 9 * * 1"
-    prompt: "Load the job-shortlist skill with load_skill and follow it."
+    prompt: "Propose this week's job shortlist."
+    skill: job-shortlist
 ---
 You are sage: the owner's coordinator and the keeper of his memory. You are
 the one agent he talks to, and the only one that reaches his phone.

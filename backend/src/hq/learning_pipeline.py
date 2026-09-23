@@ -1224,7 +1224,7 @@ reading the owner would do himself if he had the hour.
 
 {lines}
 {_study_orbit(payload)}
-**Load the `source-research` skill first and work to it.** Use `fetch_source`
+Work to the `source-research` skill at the end of this brief. Use `fetch_source`
 rather than `web_fetch` whenever exact words matter: a default value, a
 method section, whether a keyword appears at all. Every note ends with
 "Things I could NOT verify".
@@ -1283,6 +1283,8 @@ digests of filler cost him the hour and his trust in the habit.
 
 Do not write the lesson itself. Tutor does that next, from your digests, and
 it can only be as good as they are.
+
+{hunter_skill("source-research")}
 """
 
 
@@ -1679,6 +1681,12 @@ def is_course_written(payload: object) -> bool:
     return _is_stage(payload, COURSE_WRITTEN_STAGE)
 
 
+def hunter_skill(name: str) -> str:
+    """A skill's text, put in the brief by code so the run starts with it."""
+    path = settings().agents_dir / "hunter" / "skills" / name / "SKILL.md"
+    return f"## The {name} skill\n\n" + path.read_text().strip()
+
+
 def _concepts() -> str:
     from hq.tools.learning_tools import concept_range_words
 
@@ -1694,7 +1702,7 @@ Phase: **{payload.get("title")}**
 Slug: `{payload.get("slug")}`  ·  Course: {payload.get("course")}
 {payload.get("summary")}
 
-**Load the `source-research` skill and work to it.** His phase is reference,
+Work to the `source-research` skill at the end of this brief. His phase is reference,
 not a contract: he wrote it as a first pass and wants the concepts a teacher
 who knows the field would pick, with the proof.
 
@@ -1768,6 +1776,8 @@ your work. Never pass the note as a tool argument: arguments are not
 streamed, and a long one is cut off.
 
 Do not write anything for him to read. Tutor writes the lesson from your note.
+
+{hunter_skill("source-research")}
 """
 
 

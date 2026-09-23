@@ -351,7 +351,7 @@ def test_sage_reads_the_job_ledger_and_writes_a_weekly_shortlist() -> None:
     sage.validate_trifecta()
     last = sage.cron[-1]
     assert last.schedule == "0 9 * * 1"
-    assert last.prompt == "Load the job-shortlist skill with load_skill and follow it."
+    assert last.skill == "job-shortlist"  # code puts the skill in the brief
     # The daily note keeps its place at the head of the list.
     assert sage.cron[0].schedule == "30 22 * * *"
     skill = (REPO / "agents" / "sage" / "skills" / "job-shortlist" / "SKILL.md").read_text()

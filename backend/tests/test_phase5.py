@@ -153,3 +153,14 @@ def test_every_wait_fits_inside_the_cap_that_would_cancel_it() -> None:
     assert wait + settings().codex_timeout_s + 2 * runner.JUDGE_LIMIT_S <= engine.TASK_TIMEOUT_S
     for stage in (learning.LAB_CARD_STAGE, learning.WEEK_REVIEW_STAGE, learning.POST_STAGE):
         assert engine.lane_for({"stage": stage}) == "courses"
+
+
+def test_a_cron_slot_starts_with_its_skill_in_the_brief() -> None:
+    from hq.loader import scan
+
+    sage = scan()["sage"]
+    assert {e.skill for e in sage.cron} >= {"daily-note", "consolidate", "content-ideas"}
+    assert not any("load_skill" in e.prompt for e in sage.cron)
+    brief = asyncio.run(engine._cron_brief_step.__wrapped__("sage", "Write today's daily note.",
+                                                            "daily-note"))
+    assert brief.startswith("Write today's daily note.") and "## The daily-note skill" in brief

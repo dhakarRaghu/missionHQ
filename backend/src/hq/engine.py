@@ -742,7 +742,7 @@ def _register_cron() -> None:
         for i, entry in enumerate(spec.cron):
             wf_name = f"cron_{name}_{i}"
             fire = DBOS.workflow(name=wf_name)(
-                _make_cron(name, i, entry.prompt, entry.schedule)
+                _make_cron(name, i, entry.prompt, entry.schedule, entry.skill)
             )
             _schedules.append({
                 "schedule_name": wf_name, "workflow_fn": fire,
@@ -785,7 +785,7 @@ async def _newest_slot_step(schedule: str) -> str:
 
 
 @DBOS.step()
-async def _cron_brief_step(agent_name: str, prompt: str) -> str:
+async def _cron_brief_step(agent_name: str, prompt: str, skill: str = "") -> str:
     """The brief a cron entry dispatches with.
 
     Almost always the entry's own prompt. A few entries are a name for a brief
@@ -793,14 +793,18 @@ async def _cron_brief_step(agent_name: str, prompt: str) -> str:
     rotation, the back-off list) changes every night and a model asked to
     remember it does not. A step, so a recovered workflow reuses the brief it
     built the first time."""
+    brief = prompt
     if prompt.strip() == SWEEP_PROMPT:
         from hq.tools.job_tools import build_sweep_brief
 
-        return await build_sweep_brief()
-    return prompt
+        brief = await build_sweep_brief()
+    if skill:
+        path = settings().agents_dir / agent_name / "skills" / skill / "SKILL.md"
+        brief += f"\n\n## The {skill} skill\n\n" + path.read_text().strip()
+    return brief
 
 
-def _make_cron(agent_name: str, idx: int, prompt: str, schedule: str):
+def _make_cron(agent_name: str, idx: int, prompt: str, schedule: str, skill: str = ""):
     async def fire(scheduled: datetime, context: Any) -> None:
         local = scheduled.astimezone(ZoneInfo(settings().cron_tz))
         # After a restart DBOS fires every slot it missed, all at once: seven
@@ -815,7 +819,7 @@ def _make_cron(agent_name: str, idx: int, prompt: str, schedule: str):
             return
         await dispatch(
             agent=agent_name, title=cron_title(prompt),
-            brief=await _cron_brief_step(agent_name, prompt), source="cron",
+            brief=await _cron_brief_step(agent_name, prompt, skill), source="cron",
             dedup_key=f"cron:{agent_name}:{idx}:{local:%Y-%m-%d-%H%M}",
         )
     fire.__name__ = fire.__qualname__ = f"cron_{agent_name}_{idx}"
@@ -2121,7 +2125,7 @@ async def _catch_up_missed(now_utc: datetime) -> None:
             if await db.fetchone("SELECT 1 FROM hq.tasks WHERE dedup_key = %s", (key,)):
                 continue
             await dispatch(agent=agent_name, title=cron_title(entry.prompt),
-                           brief=await _cron_brief_step(agent_name, entry.prompt),
+                           brief=await _cron_brief_step(agent_name, entry.prompt, entry.skill),
                            source="cron", dedup_key=key)
             await runner.emit_step("cron.caught_up", agent=agent_name, payload={"slot": key})
 

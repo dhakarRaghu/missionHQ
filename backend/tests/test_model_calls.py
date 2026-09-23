@@ -173,7 +173,7 @@ def test_a_backfilled_cron_slot_is_skipped(monkeypatch) -> None:
     async def emit(kind, **kw) -> None:
         skipped.append(kw["payload"])
 
-    async def cron_brief(agent: str, prompt: str) -> str:
+    async def cron_brief(agent: str, prompt: str, skill: str = "") -> str:
         return prompt
 
     monkeypatch.setattr(engine, "_cron_brief_step", cron_brief)
