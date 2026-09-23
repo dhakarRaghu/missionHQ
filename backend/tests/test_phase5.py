@@ -111,3 +111,25 @@ def test_an_ideas_batch_goes_on_top_and_keeps_the_rest() -> None:
     assert ct.batch_problems("no bullets here")
     assert ct.batch_problems("- one\n  why: x\n- two\n") == []
     assert ct.batch_problems("\n".join(f"- {i}" for i in range(9)))
+
+
+def test_the_digest_carries_the_daily_note(tmp_path, monkeypatch) -> None:
+    from datetime import UTC, datetime
+
+    from hq import digest, memory
+
+    def fake_read(rel: str) -> str:
+        assert rel == "daily/2026-09-23.md"
+        return "---\ncreated: 2026-09-23\n---\n# Wednesday\n\n**Needs you:** pick a phase.\n"
+
+    monkeypatch.setattr(memory, "read", fake_read)
+    note = digest._daily_note(datetime(2026, 9, 23, 17, 20, tzinfo=UTC))
+    assert note == "Wednesday\n\nNeeds you: pick a phase."
+    assert (engine.DIGEST_HOUR, engine.DIGEST_MINUTE) > (22, 30)  # after sage's 22:30 note
+
+
+def test_one_reindex_a_night_whichever_path_starts_it() -> None:
+    src = inspect.getsource(engine._watchdog_tick) + inspect.getsource(engine._reindex_vault_tick)
+    assert "memory.reindex_all" not in src
+    assert "_nightly_reindex" in inspect.getsource(engine._reindex_vault_tick)
+    assert "IS DISTINCT FROM" in inspect.getsource(engine._claim_reindex_step)

@@ -1,7 +1,8 @@
 # Daily note
 
 Write today's note to `daily/<YYYY-MM-DD>.md` with `vault_write`. Under 300
-words. He reads it at night on his phone.
+words. It goes to his phone at the top of the evening digest, twenty minutes
+after you write it, as plain text: headings and bold are stripped.
 
 ## The one thing he did not know
 

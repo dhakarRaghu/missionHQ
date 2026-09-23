@@ -75,14 +75,14 @@ CHAT_TIMEOUT_S = 12 * 60   # a chat turn may not exceed 12 minutes (approval wai
 # other would make the catch-up either fire early every tick or never fire at
 # all. They are constants so the two cannot drift.
 #
-# The digest lands half an hour before sage's daily note, because it is the
-# outlet for what the notification cap held back and the note then summarises
-# the day that includes it. The whole nightly chain is:
+# The digest carries sage's daily note to his phone, so it goes out twenty
+# minutes after the note is written. The whole nightly chain is:
 #   18:30 course study (system) -> 21:00 hunter sweep
-#   -> 21:15 job discovery (system) -> 22:00 learning run (system) + digest
-#   -> 22:30 sage note -> 23:30 sage consolidation -> 03:00 reindex
+#   -> 21:15 job discovery (system) -> 22:00 learning run (system)
+#   -> 22:30 sage note -> 22:50 digest with the note -> 23:30 consolidation
+#   -> 03:00 reindex
 # Change an agent's cron in its job.md and these two may need to move with it.
-DIGEST_HOUR, DIGEST_MINUTE = 22, 0
+DIGEST_HOUR, DIGEST_MINUTE = 22, 50
 REINDEX_HOUR = 3
 
 MODEL_STEP_ATTEMPTS = 2
@@ -2016,10 +2016,34 @@ async def store_history(conversation_id: str, agent: str, messages_json: bytes,
     )
 
 
-async def _reindex_vault_tick(scheduled: datetime, context: Any) -> None:
+REINDEX_KEY = "reindex:last_date"
+
+
+@DBOS.step()
+async def _claim_reindex_step(day: str) -> bool:
+    """Take tonight's reindex before starting it. The 03:00 schedule and the
+    watchdog's catch-up both run it; whichever claims the date first does,
+    so a long reindex is not started again every minute it is running."""
+    row = await db.fetchone(
+        "INSERT INTO hq.control (key, value) VALUES (%s, %s)"
+        " ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()"
+        " WHERE hq.control.value IS DISTINCT FROM excluded.value RETURNING key",
+        (REINDEX_KEY, db.jsonb(day)),
+    )
+    return row is not None
+
+
+async def _nightly_reindex(via: str) -> None:
+    day = f"{datetime.now(ZoneInfo(settings().cron_tz)):%Y-%m-%d}"
+    if not await _claim_reindex_step(day):
+        return
     n = await memory.reindex_all()   # makes the vault's one commit of the day first
-    await runner.emit_step("vault.reindexed", payload={"chunks": n})
+    await runner.emit_step("vault.reindexed", payload={"chunks": n, "via": via})
     await _publish_reader()
+
+
+async def _reindex_vault_tick(scheduled: datetime, context: Any) -> None:
+    await _nightly_reindex("schedule")
 
 
 async def _publish_reader() -> None:
@@ -2110,16 +2134,7 @@ async def _catch_up_missed(now_utc: datetime) -> None:
 
     # reindex: REINDEX_HOUR:00 local, once per date
     if now.hour >= REINDEX_HOUR:
-        row = await db.fetchone("SELECT value FROM hq.control WHERE key = 'reindex:last_date'")
-        if not row or row["value"] != f"{now:%Y-%m-%d}":
-            n = await memory.reindex_all()
-            await db.execute(
-                "INSERT INTO hq.control (key, value) VALUES ('reindex:last_date', %s)"
-                " ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()",
-                (db.jsonb(f"{now:%Y-%m-%d}"),),
-            )
-            await runner.emit_step("vault.reindexed", payload={"chunks": n, "via": "catch-up"})
-            await _publish_reader()
+        await _nightly_reindex("catch-up")
 
 
 # --- dead-man per cron entry -------------------------------------------------

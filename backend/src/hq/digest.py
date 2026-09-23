@@ -12,6 +12,7 @@ The digest is NOT a budgeted notification: it never emits a ``notify`` event.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -39,6 +40,24 @@ async def build_digest(since: datetime | None, *, now: datetime | None = None) -
     return text
 
 
+NOTE_CHARS = 1800
+
+
+def _daily_note(now: datetime) -> str:
+    """Sage's note for the day, as plain text, when it has been written. The
+    note is what he reads at night; the digest is how it reaches his phone."""
+    from hq import memory
+
+    try:
+        text = memory.read(f"daily/{now:%Y-%m-%d}.md")
+    except (OSError, ValueError):
+        return ""
+    _meta, body = memory.parse_frontmatter(text)
+    lines = [ln.lstrip("#").strip() if ln.startswith("#") else ln for ln in body.splitlines()]
+    plain = "\n".join(lines).replace("**", "").strip()
+    return plain if len(plain) <= NOTE_CHARS else plain[: NOTE_CHARS - 1].rstrip() + "…"
+
+
 async def _build(since: datetime | None, *, now: datetime | None = None
                  ) -> tuple[str, dict[str, int]]:
     tz = ZoneInfo(settings().cron_tz)
@@ -48,6 +67,8 @@ async def _build(since: datetime | None, *, now: datetime | None = None
 
     sections: list[str] = []
     counts: dict[str, int] = {}
+    note = await asyncio.to_thread(_daily_note, now)
+    counts["note"] = int(bool(note))
 
     held = await _held_messages(since)
     counts["held"] = len(held)
@@ -100,7 +121,7 @@ async def _build(since: datetime | None, *, now: datetime | None = None
         cap = settings().daily_spend_cap_usd
         sections.append(f"Spend today: ${spend:.2f} of ${cap:.2f} cap")
 
-    if not sections:
+    if not sections and not note:
         return "", counts
     # The week in numbers rides along when there is a digest anyway; on its
     # own it is not a reason to send one.
@@ -112,7 +133,7 @@ async def _build(since: datetime | None, *, now: datetime | None = None
     week_line = await _value_week_line(now)
     if week_line:
         header += "\n" + week_line
-    body = header + "\n\n" + "\n\n".join(sections)
+    body = header + "\n\n" + "\n\n".join(([note] if note else []) + sections)
     if len(body) > MAX_CHARS:
         body = body[: MAX_CHARS - 1].rstrip() + "…"
     return body, counts
