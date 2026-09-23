@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic_ai import ModelRetry
 
+from hq import engine
 from hq.tools import registry
 from hq.tools.registry import HQDeps
 
