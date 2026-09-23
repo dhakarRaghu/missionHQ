@@ -1638,7 +1638,10 @@ _NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
 
 def concept_range_words() -> str:
     return f"{_NUMBER_WORDS[CONCEPTS_MIN]} to {_NUMBER_WORDS[CONCEPTS_MAX]}"
-CLAIM_MAX_WORDS = 32
+# The writer is asked for about 20 words; this is the wall, set well past the
+# target so a claim one word long does not cost a whole plan attempt.
+CLAIM_TARGET_WORDS = 20
+CLAIM_MAX_WORDS = 40
 # Apparatus: sections that are not teaching an idea and say so.
 # "limits" (Things I could not verify) is gone from the page at his request:
 # a fact too weak to state plainly is too weak to teach, and goes in the report.

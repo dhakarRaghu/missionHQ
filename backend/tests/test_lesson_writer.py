@@ -350,3 +350,19 @@ def test_a_part_that_names_an_employer_is_sent_back_alone(monkeypatch) -> None:
                                 total_words=0)
     assert any("employers" in p for p in probs)
     assert not any("Acme" in p for p in probs)   # the refusal never repeats the name
+
+
+def test_a_one_idea_plan_cannot_carry_three_concepts() -> None:
+    plan = _outline()
+    concept = {**plan["concepts"][0], "id": "c7"}
+    one = lw.ArticleOutline.model_validate(
+        {k: v for k, v in plan.items() if k != "concepts"} | {"concept": concept})
+    outline = one.as_outline()
+    assert [c.id for c in outline.concepts] == ["c1"]
+    assert "concepts" not in lw.ArticleOutline.model_json_schema()["properties"]
+
+
+def test_a_claim_a_word_past_the_target_is_not_sent_back() -> None:
+    claim = " ".join(["word"] * 33)
+    plan = lw.Outline.model_validate(_outline(concepts=[_concept(claim=claim)]))
+    assert not any("claim is" in p for p in lw.outline_problems(plan, NOTE, article=True))

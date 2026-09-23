@@ -99,7 +99,8 @@ def _with(model_settings: Any, **extra: Any) -> Any:
 
 class Concept(BaseModel):
     id: str = Field(description="c1, c2, ... in teaching order")
-    claim: str = Field(description="one sentence he could be wrong about, at most 32 words")
+    claim: str = Field(description=(
+        f"one sentence he could be wrong about, about {lt.CLAIM_TARGET_WORDS} words"))
     lets_him: str = Field(description="what it lets him predict or decide, a few words")
     wrong_belief: str
     predict: str = Field(description="the question he answers before being told; ends with ?")
@@ -133,6 +134,32 @@ class Outline(BaseModel):
         "frontier day only: 'none', 'phase' or 'course', then ': subject: what it changes'"))
     cannot_write: str = Field(default="", description=(
         "article only: set, with what the digests contain, when they cannot support it"))
+
+
+class ArticleOutline(BaseModel):
+    """The plan of a piece that carries one idea: an article, a lab card or a
+    week review. One concept is the schema, not a rule the model is told and
+    can miss: the article plan came back with three concepts on two of three
+    attempts when the schema allowed a list."""
+    title: str
+    subtitle: str = Field(description="the question the piece answers")
+    eyebrow: str
+    outcome: str = Field(description="what he can do afterwards that he could not before")
+    opening: str = Field(description="the situation where not knowing this costs him")
+    concept: Concept = Field(description="the one idea; its id is c1")
+    sections: list[SectionPlan]
+    left_out: list[str] = Field(default_factory=list)
+    added: list[str] = Field(default_factory=list)
+    frontier: str = Field(default="", description=(
+        "frontier day only: 'none', 'phase' or 'course', then ': subject: what it changes'"))
+    cannot_write: str = Field(default="", description=(
+        "set, with what the material contains, when it cannot support the piece"))
+
+    def as_outline(self) -> Outline:
+        data = self.model_dump()
+        concept = data.pop("concept")
+        concept["id"] = "c1"
+        return Outline.model_validate({**data, "concepts": [concept]})
 
 
 class ReleaseVerdict(BaseModel):
@@ -192,7 +219,7 @@ async def _outline_step(spec_model: str, article: bool, material: str,
     # The plan comes back as JSON in the text, never as a tool call: the
     # gateway does not stream tool-call arguments, and a plan generated in
     # silence for five minutes is cut as an idle connection at 300 seconds.
-    agent = Agent(model, output_type=PromptedOutput(Outline),
+    agent = Agent(model, output_type=PromptedOutput(ArticleOutline if article else Outline),
                   instructions=outline_instructions(article, page),
                   model_settings=_with(model_settings, reasoning_effort=OUTLINE_EFFORT,
                                        timeout=OUTLINE_LIMIT_S))
@@ -202,7 +229,8 @@ async def _outline_step(spec_model: str, article: bool, material: str,
                    + "\n".join(f"- {p}" for p in problems)
                    + "\n\nReturn the whole plan again with these fixed.")
     result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=4))
-    return result.output.model_dump()
+    out = result.output
+    return (out.as_outline() if isinstance(out, ArticleOutline) else out).model_dump()
 
 
 @DBOS.step(name="writer.section", **_STEP)
