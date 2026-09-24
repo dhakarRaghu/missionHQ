@@ -5,7 +5,7 @@ Agents load only at startup (DBOSDurability agents are built before
 DBOS.launch()), so a saved job.md takes effect after a restart. Saving never
 restarts by itself; ``POST /agents/{name}/apply`` schedules the restart the
 same way activation does (``factory_tools.schedule_restart``). A policy.md
-edit needs no restart: ``loader.instructions_for`` re-reads it on every run.
+edit needs no restart: the assembler (``hq.assemble``) re-reads it on every run.
 
 Validation runs the SAME code the loader runs at boot (``parse_job_md``,
 ``get_tools``, ``validate_trifecta``) against a temporary copy of the folder,
@@ -435,7 +435,7 @@ async def update_agent_config(name: str, body: AgentConfigBody) -> dict:
 
 @router.put("/{name}/policy", operation_id="updateAgentPolicy")
 async def update_agent_policy(name: str, body: PolicyBody) -> dict:
-    """Write policy.md only. No restart: ``loader.instructions_for`` reads
+    """Write policy.md only. No restart: the assembler (``hq.assemble``) reads
     policy.md at the start of every run, so the next run sees it."""
     agent_dir = _agent_dir(name)
     text = body.policy.rstrip("\n") + "\n"

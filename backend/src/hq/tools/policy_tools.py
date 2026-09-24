@@ -5,7 +5,7 @@ Flow (L2 of the plan): the owner corrects an agent -> the agent calls
 approval ticket whose arguments (rule, reason) are the review -> the owner
 approves -> the tool body appends the rule to ``agents/<agent>/policy.md``
 under ``## Rules``, as the rule alone. The date and the reason are history,
-not instruction: they go in the ``policy.added`` event, never the prompt. ``loader.instructions_for`` re-reads that file on every
+not instruction: they go in the ``policy.added`` event, never the prompt. The assembler (``hq.assemble``) re-reads that file on every
 run, so the rule applies from the next run. Policies are never auto-written:
 auto-written policies rot and can be poisoned.
 

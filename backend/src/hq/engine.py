@@ -31,6 +31,7 @@ from pydantic_ai.durable_exec.dbos import DBOSDurability, StepConfig
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from hq import (
+    assemble,
     board,
     db,
     digest,
@@ -55,7 +56,7 @@ from hq.job_pipeline import (
     verification_brief,
     verification_payload,
 )
-from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, bundle_sha, scan
+from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, scan
 
 # Doubled 2026-09-10 alongside high reasoning effort and tripled call caps: a
 # run that thinks harder and calls more tools needs the wall clock to match, or
@@ -483,7 +484,7 @@ async def run_task(task_id: str) -> str:
         return f"blocked: {reason}"
 
     await runner.apply_step(task_id, "status_changed", status="running")
-    run_id = await _start_run(task_id, spec, lesson_writer.handles(spec, task["payload"]))
+    run_id = await _start_run(task_id, spec, *_run_bundle(spec, task["payload"]))
     deps = runner.HQDeps(
         agent=agent_name, task_id=task_id, run_id=run_id,
         session_id=task["origin_session_id"],
@@ -645,7 +646,7 @@ async def chat_turn(session_id: str, text: str) -> str:
                                   idempotency_key=f"chat-blocked:{session_id}:{DBOS.workflow_id}")
         return f"blocked: {reason}"
 
-    run_id = await _start_run(None, spec)
+    run_id = await _start_run(None, spec, "agent")
     deps = runner.HQDeps(agent=agent_name, run_id=run_id, session_id=session_id,
                          vault_write_scopes=spec.vault_write_scopes())
     history = await _load_history(str(session["conversation_id"]))
@@ -2138,10 +2139,28 @@ async def _defer_if_offline_step(task_id: str, run_id: str) -> bool:
             and await _defer_step(task_id, "deferred_offline", OFFLINE_RETRIES))
 
 
+def _run_bundle(spec: AgentSpec, payload: object) -> tuple[str, bool, str]:
+    """Which bundle kind this task's run sends, with the flags that pick a
+    lesson's outline file: the same choice the writer's material makes."""
+    if spec.runtime in EXTERNAL_RUNTIMES:
+        return "external", False, ""
+    if not lesson_writer.handles(spec, payload):
+        return "agent", False, ""
+    assert isinstance(payload, dict)
+    stage = payload.get("stage")
+    if stage == learning.POST_STAGE:
+        return "writer-post", False, ""
+    if stage in {learning.LAB_CARD_STAGE, learning.WEEK_REVIEW_STAGE}:
+        return "writer-section", True, "lab" if stage == learning.LAB_CARD_STAGE else "review"
+    return "writer-section", not learning.is_course_written(payload), ""
+
+
 @DBOS.step()
-async def _start_run(task_id: str | None, spec: AgentSpec, staged: bool = False) -> str:
-    # A staged-writer run is told the writer's files, not the agent's card.
-    bundle = lesson_writer.bundle_sha() if staged else bundle_sha(spec)
+async def _start_run(task_id: str | None, spec: AgentSpec, kind: str = "agent",
+                     article: bool = False, page: str = "") -> str:
+    # The sha of the bundle this run really sends, not of the agent's card
+    # when the card is not what it reads.
+    bundle = assemble.run_sha(kind, spec, article=article, page=page)
     row = await db.fetchone(
         "INSERT INTO hq.runs (task_id, wf_id, agent, model, job_hash, bundle_sha)"
         " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id::text",

@@ -24,3 +24,6 @@ No rule of yours pre-empts an open decision.
 8. Read a page; never walk a list or build a directory of people.
 9. When the material is not there, say so and stop. An honest "nothing
    today" is a result; a padded one costs him his trust.
+
+These rules beat a card, a card beats a skill, a skill beats a brief. When
+two still conflict, stop and say which.

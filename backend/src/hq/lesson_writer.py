@@ -36,7 +36,6 @@ finished part are kept on disk per task until the lesson is recorded.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import html as html_lib
 import json
 import logging
@@ -49,7 +48,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.usage import UsageLimits
 
-from hq import db, llm, memory, signals
+from hq import assemble, db, llm, loader, memory, signals
 from hq import learning_pipeline as learning
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -59,7 +58,7 @@ from hq.tools.registry import HQDeps
 
 log = logging.getLogger(__name__)
 
-WRITER_DIR = "writer"
+WRITER_DIR = assemble.WRITER_DIR
 SECTION_RETRIES = 2          # a part is rewritten at most twice for its own findings
 PLAN_ATTEMPTS = 3            # a plan is sent back at most twice with what failed
 REPAIR_ROUNDS = 1            # whole-page and citation findings: one round of repairs
@@ -197,42 +196,20 @@ class CitationVerdict(BaseModel):
 
 # --- instructions ------------------------------------------------------------
 
-def _writer_file(name: str) -> str:
-    return (settings().agents_dir / "tutor" / WRITER_DIR / name).read_text()
-
-
-def _charter() -> str:
-    return (settings().agents_dir / "_shared" / "charter.md").read_text()
-
-
-def writer_prompt(*names: str) -> str:
-    """The charter first, as every agent gets it, then the writer's own files,
-    with the clock line the charter refers to (rule 7 says to use it)."""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    now = datetime.now(ZoneInfo(settings().cron_tz))
-    clock = (f"Current date and time: {now:%A %Y-%m-%d %H:%M} ({settings().cron_tz})."
-             " Use this date for anything you date.")
-    return "\n\n".join([clock, _charter().strip(), *(_writer_file(n).strip() for n in names)])
-
-
 def outline_instructions(article: bool, page: str = "") -> str:
-    if page:
-        return writer_prompt("teacher.md", "outline-page.md")
-    return writer_prompt("teacher.md", "outline-article.md" if article else "outline-course.md")
+    """The plan call's bundle: the charter, tutor's identity, the teacher
+    file and the outline file the material calls for (hq.assemble)."""
+    return assemble.assemble("writer-outline", _tutor(), article=article, page=page).text
 
 
 def section_instructions() -> str:
-    return writer_prompt("teacher.md", "section.md", "page-kit.md")
+    return assemble.assemble("writer-section", _tutor()).text
 
 
-def bundle_sha() -> str:
-    """What the writer is told, hashed like an agent's bundle, so a lesson's
-    run names the exact instructions its calls were sent."""
-    names = sorted(p.name for p in writer_dir().glob("*.md"))
-    text = _charter() + "".join(_writer_file(n) for n in names)
-    return hashlib.sha256(text.encode()).hexdigest()[:12]
+def _tutor() -> AgentSpec:
+    """The writer is tutor: its card gives the bundle its identity paragraph
+    and its policy.md the owner's standing rules."""
+    return loader.parse_job_md(settings().agents_dir / assemble.WRITER_AGENT)
 
 
 # --- the model calls, each a durable step -------------------------------------
@@ -1177,8 +1154,8 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
         return RunOutcome(output="", outcome="blocked", input_tokens=0, output_tokens=0,
                           cost_usd=0.0, error=f"no lesson at {md_path or '(none given)'}")
     brief = str(task.get("brief") or "")
-    instructions = writer_prompt("teacher.md") + "\n\n# This task\n\n" + brief.split(
-        "## This task", 1)[-1].strip()
+    instructions = (assemble.assemble("writer-post", spec).text + "\n\n# This task\n\n"
+                    + brief.split("## This task", 1)[-1].strip())
     problems: list[str] = []
     with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent=spec.name):
         for _ in range(2):

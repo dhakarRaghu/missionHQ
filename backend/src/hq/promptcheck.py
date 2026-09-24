@@ -4,8 +4,9 @@ An agent that resolves a conflict between two of its own instructions cannot
 report that the conflict exists: it already picked a side. So the audit runs
 on a SEPARATE zero-tool judge that receives the corpus as text to inspect,
 never as instructions to follow. The corpus is exactly what the agent gets
-at run time: ``loader.instructions_for`` (job.md body, the universal
-paragraphs, policy.md, the shared memory blocks, the skills index).
+at run time: the bundle ``hq.assemble`` sends (the charter, the job.md body, the universal
+paragraphs, policy.md, the shared memory blocks, the skills index), or for
+an external runtime the digest sent with the task plus its card.
 
 Read-only: nothing here writes to the vault, the DB, or the agent folders.
 """
@@ -24,7 +25,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModelSettings
 
-from hq import llm, loader
+from hq import assemble, llm, loader
 from hq.config import settings
 
 log = logging.getLogger(__name__)
@@ -137,7 +138,13 @@ def corpus_for(name: str) -> tuple[str, loader.AgentSpec]:
     if name not in dirs:
         raise KeyError(f"unknown agent {name!r}; have: {sorted(dirs)}")
     spec = loader.parse_job_md(dirs[name])
-    return loader.instructions_for(spec), spec
+    if spec.runtime != "hq":
+        # An external runtime reads the bundle sent with the task plus its
+        # card, never the job.md body.
+        from hq.runner import agent_card
+
+        return f"{assemble.assemble('external', spec).text}\n\n{agent_card(spec) or ''}", spec
+    return assemble.assemble("agent", spec).text, spec
 
 
 def stats(text: str) -> dict:

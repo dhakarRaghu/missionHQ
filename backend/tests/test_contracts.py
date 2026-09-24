@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from hq import engine, memory, privacy, runner
+from hq import assemble, engine, memory, privacy, runner
 from hq import learning_pipeline as learning
 from hq.config import settings
-from hq.loader import AgentSpec, instructions_for, parse_job_md, scan
+from hq.loader import AgentSpec, parse_job_md, scan
 from hq.tools.registry import TOOL_REGISTRY
 
 AGENTS = settings().agents_dir
@@ -90,12 +90,46 @@ def _instruction_files() -> list[Path]:
 
 def _assembled(spec: AgentSpec) -> str:
     """Everything the agent is told, built the way a run builds it: the
-    loader's instructions (charter, policy, card, profile, memory blocks,
-    notebook, roster, skills index) without the clock line, or, for an
-    external runtime, the suffix plus the card delivered as AGENTS.md."""
+    agent bundle (charter, card, policy, corrections, memory blocks,
+    notebook, profile, roster, skills index) without the clock line, or, for
+    an external runtime, its bundle plus the card delivered as AGENTS.md."""
     if spec.runtime != "hq":
-        return f"{runner.EXTERNAL_SYSTEM_SUFFIX}\n\n{runner.agent_card(spec) or ''}"
-    return instructions_for(spec).split("\n\n", 1)[1]
+        return f"{assemble.assemble('external', spec).body}\n\n{runner.agent_card(spec) or ''}"
+    return assemble.assemble("agent", spec).body
+
+
+def _bundles() -> dict[str, assemble.Bundle]:
+    """Every bundle a production call sends: the agent bundle of each
+    in-process agent (plain, and with each of its skills inlined), the
+    external bundle of each CLI agent, and the writer's three kinds, the
+    outline once per outline file."""
+    specs = _specs()
+    out: dict[str, assemble.Bundle] = {}
+    for name, spec in specs.items():
+        if spec.runtime != "hq":
+            out[f"external:{name}"] = assemble.assemble("external", spec)
+            continue
+        out[f"agent:{name}"] = assemble.assemble("agent", spec)
+        for skill in sorted(_skills(name)):
+            out[f"agent:{name}+{skill}"] = assemble.assemble("agent", spec, skill=skill)
+    tutor = specs[assemble.WRITER_AGENT]
+    for article, page in ((False, ""), (True, ""), (True, "lab"), (True, "review")):
+        out[f"writer-outline:{'page-' + page if page else ('article' if article else 'course')}"] = (
+            assemble.assemble("writer-outline", tutor, article=article, page=page))
+    out["writer-section"] = assemble.assemble("writer-section", tutor)
+    out["writer-post"] = assemble.assemble("writer-post", tutor)
+    return out
+
+
+def _spec_of(key: str) -> AgentSpec:
+    specs = _specs()
+    if key.startswith(("agent:", "external:")):
+        return specs[key.split(":", 1)[1].split("+", 1)[0]]
+    return specs[assemble.WRITER_AGENT]
+
+
+def _paragraphs(text: str) -> list[str]:
+    return [p.strip() for p in text.split("\n\n") if p.strip()]
 
 
 def _data_blocks(spec: AgentSpec) -> list[str]:
@@ -147,6 +181,7 @@ def _employer_leaks(texts: dict[str, str]) -> list[str]:
 def _everything_loaded() -> dict[str, str]:
     texts = {str(p): p.read_text(errors="replace") for p in _instruction_files()}
     texts.update({f"{n} (assembled)": _assembled(s) for n, s in _specs().items()})
+    texts.update({f"{k} (bundle)": b.body for k, b in _bundles().items()})
     for block in memory.BLOCK_CAPS:
         path = settings().vault_dir / block
         if path.exists():
@@ -186,6 +221,9 @@ def test_the_employer_check_sees_every_loaded_file(tmp_path, monkeypatch) -> Non
         rel = str(path) if path.is_relative_to(agents) else str(path.relative_to(vault))
         assert rel in leaks, f"{rel} was not caught"
     assert {"hunter (assembled)", "sage (assembled)"} <= set(leaks)
+    assert {"agent:hunter (bundle)", "agent:sage (bundle)"} <= set(leaks)
+    # The writer and the operator carry none of the planted files.
+    assert not [k for k in leaks if k.startswith(("writer-", "external:"))]
 
 
 def test_every_memory_block_an_agent_names_exists_in_code() -> None:
@@ -195,12 +233,156 @@ def test_every_memory_block_an_agent_names_exists_in_code() -> None:
 
 
 def test_every_card_parses_and_carries_the_charter() -> None:
-    from hq.loader import instructions_for
-
     charter = (AGENTS / "_shared" / "charter.md").read_text().strip().splitlines()[0]
     for name in ("sage", "hunter", "tutor"):
-        text = instructions_for(parse_job_md(AGENTS / name))
+        text = assemble.assemble("agent", parse_job_md(AGENTS / name)).text
         assert charter in text
+
+
+# --- every bundle, every kind (hq.assemble) -----------------------------------
+
+def test_every_bundle_keeps_the_one_order() -> None:
+    """Clock, charter, identity, standing rules, procedure, memory, context:
+    the same order on every path, so a rule has one place to be looked for."""
+    order = list(assemble.SECTIONS)
+    for key, bundle in _bundles().items():
+        names = [n for n, _ in bundle.parts]
+        assert names[:2] == ["clock", "charter"], key
+        assert names == sorted(names, key=order.index), (key, names)
+        assert len(names) == len(set(names)), (key, names)
+        assert bundle.text.startswith("Current date and time:"), key
+        assert bundle.section("clock") not in bundle.body, key
+        assert len(bundle.sha) == 12, key
+    kinds = {b.kind for b in _bundles().values()}
+    assert kinds == set(assemble.KINDS)
+
+
+def test_only_the_agent_bundle_carries_memory_and_context() -> None:
+    for key, bundle in _bundles().items():
+        names = {n for n, _ in bundle.parts}
+        if bundle.kind == "agent":
+            assert "procedure" in names, key
+        else:
+            assert not names & {"memory", "context"}, (key, names)
+        if bundle.kind == "external":
+            assert "policy" not in names, key       # the card carries the owner's rules
+
+
+def test_every_bundle_carries_the_precedence_line() -> None:
+    """The charter says what beats what, in full or in the digest, so an
+    agent that meets two rules in conflict stops instead of picking one."""
+    for key, bundle in _bundles().items():
+        charter = bundle.section("charter")
+        assert "beats" in charter and "stop and say which" in charter, key
+    charter = (AGENTS / "_shared" / "charter.md").read_text()
+    assert "These rules beat a card, a card beats a skill, a skill beats a brief" in charter
+
+
+def test_the_external_bundle_is_a_short_digest_and_the_card_pointer() -> None:
+    rules = assemble.charter_rules()
+    assert set(rules) >= set(assemble.DIGEST_RULES)
+    for key, bundle in _bundles().items():
+        if bundle.kind != "external":
+            continue
+        digest = bundle.section("charter").splitlines()
+        assert len(digest) <= 6, (key, len(digest))
+        assert [int(ln.split(".")[0]) for ln in digest[1:]] == list(assemble.DIGEST_RULES)
+        for n in assemble.DIGEST_RULES:
+            assert rules[n] in bundle.section("charter"), (key, n)
+        assert "employer" in bundle.section("charter"), key
+        assert bundle.section("identity") == assemble.EXTERNAL_SYSTEM_SUFFIX, key
+        assert len(bundle.body) < 1600, (key, len(bundle.body))
+
+
+def test_no_bundle_carries_dated_history() -> None:
+    """Past the clock line, nothing an agent is told carries a date, apart
+    from the data blocks (the in-flight list and the notebook)."""
+    for key, bundle in _bundles().items():
+        text = bundle.body
+        for block in _data_blocks(_spec_of(key)):
+            text = text.replace(block, "")
+        hit = DATE.search(text)
+        assert not hit, f"{key} carries a date: {text[hit.start()-80:hit.end()]!r}"
+
+
+def test_no_bundle_names_a_tool_its_agent_does_not_hold() -> None:
+    """An instruction to call something ungranted is invisible at run time:
+    the text and the grant come from different files. The bundle is where
+    they meet. Memory blocks are data, not instruction, and are skipped."""
+    for key, bundle in _bundles().items():
+        spec = _spec_of(key)
+        held = spec.base_tool_names() | AUTO_TOOLS if bundle.kind == "agent" else set()
+        for name, text in bundle.parts:
+            if name in {"clock", "memory"}:
+                continue
+            for tool in TOOL_REF.findall(text):
+                if tool in TOOL_REGISTRY:
+                    assert tool in held, f"{key} names {tool} in its {name}, which it does not hold"
+
+
+def test_the_same_rule_text_never_appears_twice_in_a_bundle() -> None:
+    """One home per rule: a paragraph that appears in two sections of one
+    bundle is a rule with two homes, and the two will drift apart."""
+    for key, bundle in _bundles().items():
+        seen: dict[str, str] = {}
+        for name, text in bundle.parts:
+            for para in _paragraphs(text):
+                if len(para) < 40:
+                    continue
+                assert para not in seen, f"{key}: a paragraph is in both {seen[para]} and {name}"
+                seen[para] = name
+
+
+def test_the_writer_gets_tutors_identity_and_not_its_chat_sections() -> None:
+    """Tutor's card opens with who tutor is; that paragraph travels with
+    every writer call. The headed sections below it are for chat and the
+    tool-holding fallback, which the writer never is."""
+    tutor = _specs()[assemble.WRITER_AGENT]
+    lead = assemble.card_lead(tutor)
+    assert lead.startswith("You are tutor") and "\n## " not in lead
+    card = tutor.system_prompt
+    assert "## Where you read this" in card and "## Facts" in card
+    for key, bundle in _bundles().items():
+        if not bundle.kind.startswith("writer-"):
+            continue
+        assert bundle.section("identity") == lead, key
+        assert "## Facts\n" not in bundle.text and "## Where you read this" not in bundle.text, key
+        assert "# The teacher" in bundle.section("procedure"), key
+    assert "You are tutor" in _bundles()["agent:tutor"].section("identity")
+
+
+def test_the_writer_bundles_follow_the_material() -> None:
+    b = _bundles()
+    assert "# Plan one course phase" in b["writer-outline:course"].section("procedure")
+    assert "# Plan one article" in b["writer-outline:article"].section("procedure")
+    assert "# Plan one page" in b["writer-outline:page-lab"].section("procedure")
+    section = b["writer-section"].section("procedure")
+    assert "# Write one section" in section and "# The page kit" in section
+    assert "# Plan" not in b["writer-post"].section("procedure")
+
+
+def test_a_run_records_the_sha_of_what_it_sends() -> None:
+    """A lesson run sends the plan bundle and then the section bundle, so
+    its sha covers both; a post run and a chat turn send one bundle each."""
+    specs = _specs()
+    tutor = specs[assemble.WRITER_AGENT]
+    outline = assemble.assemble("writer-outline", tutor, article=True)
+    section = assemble.assemble("writer-section", tutor)
+    lesson = assemble.run_sha("writer-section", tutor, article=True)
+    assert lesson == assemble.sha_of(outline, section)
+    assert lesson not in {outline.sha, section.sha}
+    assert lesson != assemble.run_sha("writer-section", tutor, article=False)
+    assert assemble.run_sha("writer-post", tutor) == assemble.assemble("writer-post", tutor).sha
+    assert assemble.run_sha("agent", specs["sage"]) == assemble.assemble("agent", specs["sage"]).sha
+    assert (assemble.run_sha("external", specs["operator"])
+            == assemble.assemble("external", specs["operator"]).sha)
+    for kind, flags in (("agent", {}), ("writer-outline", {"article": True}),
+                        ("writer-section", {}), ("writer-post", {}), ("external", {})):
+        spec = specs["operator"] if kind == "external" else tutor
+        a, b = assemble.assemble(kind, spec, **flags), assemble.assemble(kind, spec, **flags)
+        assert a.sha == b.sha and a.text.split("\n\n", 1)[1] == b.text.split("\n\n", 1)[1]
+    with pytest.raises(ValueError, match="unknown bundle kind"):
+        assemble.assemble("writer", tutor)
 
 
 # --- the employer gate (hq.privacy) -----------------------------------------
