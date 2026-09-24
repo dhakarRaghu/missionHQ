@@ -984,6 +984,34 @@ class Writer:
             self.report.append(f"frontier note not filed: {exc}")
 
 
+_KEEP_RE = re.compile(
+    r"""<(?:li|p)\b[^>]*class=["'](?:remember|trap|try)["'][^>]*>(.*?)</(?:li|p)>""",
+    re.IGNORECASE | re.DOTALL)
+
+
+def lesson_essentials(page_html: str) -> str:
+    """A lesson as a week review recalls it: its concepts, each section's
+    question, every key point and the checkpoint with its answers, whole."""
+    def plain(fragment: str) -> str:
+        return " ".join(html_lib.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
+
+    out: list[str] = []
+    block = re.search(r'(?is)<ol class="concepts">(.*?)</ol>', page_html)
+    if block:
+        out.append("Concepts:\n" + "\n".join(
+            f"- {plain(li)}" for li in re.findall(r"(?is)<li\b[^>]*>(.*?)</li>", block.group(1))))
+    for section in re.split(r"(?i)(?=<h2\b)", page_html)[1:]:
+        head = re.search(r"(?is)<h2\b[^>]*>(.*?)</h2>", section)
+        title = plain(head.group(1)) if head else ""
+        if re.search(r"""(?is)<h2\b[^>]*data-kind=["']checkpoint["']""", section):
+            out.append(f"### {title}\n{plain(section)[:4000]}")
+            continue
+        keys = [plain(k) for k in _KEEP_RE.findall(section)]
+        if title and keys:
+            out.append(f"### {title}\n" + "\n".join(f"- {k}" for k in keys))
+    return "\n\n".join(out)
+
+
 _LESSON_REF_RE = re.compile(r"`(learning/lessons/[^`]+?\.md)`")
 
 
@@ -1003,11 +1031,19 @@ async def gather_page(task: dict[str, Any], payload: dict[str, Any]) -> Material
             parts.append(f"## His phase, with its lab\n\n{source[:SOURCE_CHARS]}")
     # Every lesson the brief names gets an equal share of what is left, so
     # the older lessons a week review asks recall questions from are not the
-    # ones cut when the material runs long.
+    # ones cut when the material runs long. A week review recalls, so it gets
+    # each lesson's ideas whole (lesson_essentials) rather than the opening
+    # of its text: cut by length, the first review lost three lessons mid-way.
     paths = list(dict.fromkeys(_LESSON_REF_RE.findall(brief)))
     share = max(3_000, (NOTE_CHARS - sum(len(x) for x in parts)) // max(1, len(paths)))
     for path in paths:
-        text = await asyncio.to_thread(lt._read_lesson_text, path)
+        text = ""
+        if page == "review":
+            html_file = settings().learning_dir.parent / path.replace(".md", ".html")
+            if html_file.is_file():
+                text = lesson_essentials(await asyncio.to_thread(html_file.read_text))
+        if not text:
+            text = await asyncio.to_thread(lt._read_lesson_text, path)
         if text:
             parts.append(f"## Lesson: {path}\n\n{text[:share]}")
     note = "\n\n".join(parts)

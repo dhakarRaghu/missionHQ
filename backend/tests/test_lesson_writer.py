@@ -459,3 +459,14 @@ def test_a_page_is_held_to_every_check_but_the_concept_contract() -> None:
     body = "<p>" + "Run the simulator and read the queue depth every step. " * 60 + "</p>"
     page = f'<h2 data-kind="lab">The build</h2><div class="steps">{body}</div>'
     assert "concept" not in lt.page_coverage("", page, "", least=0, most=0)
+
+
+def test_a_week_review_recalls_each_lesson_whole() -> None:
+    page = ('<ol class="concepts"><li id="c1"><b>Batches rebuild each step.</b><span>x</span></li></ol>'
+            '<h2 data-concept="c1">Why?</h2><p>' + "long prose. " * 500 + '</p>'
+            '<div class="keypoints"><p class="remember">Rebuild the batch.</p>'
+            '<p class="trap">A static batch waits.</p></div>'
+            '<h2 data-kind="checkpoint">Checkpoint</h2><p>Q1?</p><details class="answer">A1</details>')
+    out = lw.lesson_essentials(page)
+    assert "Batches rebuild each step." in out and "Rebuild the batch." in out
+    assert "A1" in out and "long prose" not in out
