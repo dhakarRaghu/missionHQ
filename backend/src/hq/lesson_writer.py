@@ -135,6 +135,28 @@ class Outline(BaseModel):
         "frontier day only: 'none', 'phase' or 'course', then ': subject: what it changes'"))
     cannot_write: str = Field(default="", description=(
         "article only: set, with what the digests contain, when they cannot support it"))
+    takeaway: str = ""           # a page's one line, in place of concepts
+
+
+class PageOutline(BaseModel):
+    """The plan of a page he builds or recalls from: the lab card, the week
+    review. It teaches nothing new, so it carries no concepts, only the one
+    line it leaves him with; every section is apparatus. Planned as a lesson,
+    both pages failed three attempts on "no section teaches c1"."""
+    title: str
+    subtitle: str = Field(description="what the page is for, in one line")
+    eyebrow: str
+    outcome: str = Field(description="what he has at the end that he did not before")
+    opening: str = Field(description="why this page, this weekend")
+    takeaway: str = Field(description="the one line the page leaves him with, at most 20 words")
+    sections: list[SectionPlan] = Field(description=(
+        "the task's sections in its order; each has a kind (orientation, lab, checkpoint,"
+        " recall, cheatsheet, sources) and no concept"))
+    left_out: list[str] = Field(default_factory=list)
+
+    def as_outline(self) -> Outline:
+        data = self.model_dump()
+        return Outline.model_validate({**data, "concepts": []})
 
 
 class ArticleOutline(BaseModel):
@@ -221,7 +243,8 @@ async def _outline_step(spec_model: str, article: bool, material: str,
     # The plan comes back as JSON in the text, never as a tool call: the
     # gateway does not stream tool-call arguments, and a plan generated in
     # silence for five minutes is cut as an idle connection at 300 seconds.
-    agent = Agent(model, output_type=PromptedOutput(ArticleOutline if article else Outline),
+    schema = PageOutline if page else (ArticleOutline if article else Outline)
+    agent = Agent(model, output_type=PromptedOutput(schema),
                   instructions=outline_instructions(article, page),
                   model_settings=_with(model_settings, reasoning_effort=OUTLINE_EFFORT,
                                        timeout=OUTLINE_LIMIT_S))
@@ -238,7 +261,8 @@ async def _outline_step(spec_model: str, article: bool, material: str,
                    " was. Return the whole plan.")
     result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=4))
     out = result.output
-    return (out.as_outline() if isinstance(out, ArticleOutline) else out).model_dump()
+    return (out.as_outline() if isinstance(out, (ArticleOutline, PageOutline))
+            else out).model_dump()
 
 
 @DBOS.step(name="writer.section", **_STEP)
@@ -355,6 +379,7 @@ class Material(BaseModel):
     relationship: str = ""
     note: str                    # study note(s), with frontmatter
     source: str = ""             # his phase, for a course phase
+    lab_source: str = ""         # his phase, for a lab card: its commands are kept exactly
     prompt: str                  # everything the outline call reads
     source_urls: list[str] = Field(default_factory=list)
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -424,6 +449,30 @@ def normalize_outline(outline: Outline) -> Outline:
         if s.kind and s.concept and s.kind in lt.SECTION_KINDS:
             s.concept = ""
     return outline
+
+
+PAGE_NEEDS = {"lab": "lab", "review": "checkpoint"}
+
+
+def page_problems(outline: Outline, page: str) -> list[str]:
+    """Why a lab card or week review plan cannot be written from, or []."""
+    probs: list[str] = []
+    if outline.concepts:
+        probs.append("a page teaches no concept of its own: leave concepts out and put the"
+                     " one line it leaves him with in takeaway")
+    if not outline.takeaway.strip():
+        probs.append("takeaway is empty: the one line this page leaves him with")
+    for s in outline.sections:
+        if s.concept or s.kind not in lt.SECTION_KINDS:
+            probs.append(f"section {s.heading!r} needs a kind, one of "
+                         + ", ".join(sorted(lt.SECTION_KINDS)) + ", and no concept")
+    need = PAGE_NEEDS.get(page)
+    if need and need not in {s.kind for s in outline.sections}:
+        probs.append(f"the page has no {need} section")
+    headings = [s.heading.strip().lower() for s in outline.sections]
+    if len(set(headings)) != len(headings):
+        probs.append("two sections share a heading")
+    return probs
 
 
 def outline_problems(outline: Outline, note: str, *, article: bool) -> list[str]:
@@ -683,8 +732,9 @@ class Writer:
             if self.m.article and outline.cannot_write.strip():
                 self.report.append(f"Not written: {outline.cannot_write.strip()}")
                 return None
-            problems = outline_problems(outline, self.m.note, article=self.m.article)
-            if not problems:
+            problems = (page_problems(outline, self.m.page) if self.m.page
+                        else outline_problems(outline, self.m.note, article=self.m.article))
+            if not problems and outline.concepts:
                 verdict = ReleaseVerdict.model_validate(await _release_step(
                     [{"id": c.id, "claim": c.claim} for c in outline.concepts]))
                 problems = [f"{cid} fails the release test: {why}"
@@ -711,7 +761,7 @@ class Writer:
             html = _h2(i, s) + "\n" + clean_section(raw)
             found = section_problems(html, earlier=earlier, article=self.m.article,
                                      kind=self.m.kind, apparatus=bool(s.kind), total_words=total,
-                                     budget=budget, source=self.m.source)
+                                     budget=budget, source=self.m.source or self.m.lab_source)
             if not found:
                 break
         if found:
@@ -732,7 +782,9 @@ class Writer:
             " him something, then the question it leaves open. No heading, no list,"
             " no figure. Return the paragraphs as HTML.\n\nId prefix: s0-\n")
         raw = await _section_step(self.spec.model, prompt)
-        html = clean_section(raw) + "\n" + _concept_list(self.outline)
+        top = (_concept_list(self.outline) if self.outline.concepts else
+               f'<div class="keypoints"><p class="remember">{_esc(self.outline.takeaway)}</p></div>')
+        html = clean_section(raw) + "\n" + top
         self.parts = [html]
         await self._save(1, html)
 
@@ -765,7 +817,7 @@ class Writer:
                     self.parts[i], earlier=earlier, article=self.m.article, kind=self.m.kind,
                     apparatus=bool(self.outline.sections[i - 1].kind),
                     total_words=sum(lt._visible_words(p) for p in self.parts[:i]),
-                    budget=self.budgets.get(i, 0), source=self.m.source):
+                    budget=self.budgets.get(i, 0), source=self.m.source or self.m.lab_source):
                 out.append(i)
         return out
 
@@ -777,7 +829,9 @@ class Writer:
                     self.deps.task_id, self.m.slug, title=self.outline.title,
                     subtitle=self.outline.subtitle, eyebrow=self.outline.eyebrow,
                     article_kind=self.m.kind or None, run_id=self.deps.run_id,
-                    agent=self.deps.agent)
+                    agent=self.deps.agent, page=bool(self.m.page),
+                    material=self.m.note if self.m.page else "",
+                    lab_source=self.m.lab_source)
             except lt.LessonRefused as exc:
                 message = str(exc)
                 # Named by a quote, a url or a heading; failing that, the
@@ -868,7 +922,7 @@ class Writer:
                 kept, earlier="\n".join(self.parts[:i]), article=self.m.article,
                 kind=self.m.kind, apparatus=bool(self.outline.sections[i - 1].kind),
                 total_words=sum(lt._visible_words(p) for p in self.parts[:i]),
-                budget=self.budgets.get(i, 0), source=self.m.source)
+                budget=self.budgets.get(i, 0), source=self.m.source or self.m.lab_source)
             if kept and not stale:
                 self.parts.append(kept)
             else:
@@ -960,7 +1014,7 @@ async def gather_page(task: dict[str, Any], payload: dict[str, Any]) -> Material
     slug = f"lab-{phase_slug}" if page == "lab" else f"week-review-{lt._today():%G-w%V}"
     prompt = f"# The task\n\n{task_part.strip()}\n\n# The material\n\n{note[:NOTE_CHARS]}"
     return Material(article=True, page=page, slug=lt._clean_slug(slug), note=note,
-                    source="", prompt=prompt, payload=payload)
+                    source="", lab_source=source, prompt=prompt, payload=payload)
 
 
 class PostDraft(BaseModel):

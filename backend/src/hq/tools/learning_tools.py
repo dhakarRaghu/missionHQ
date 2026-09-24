@@ -823,8 +823,12 @@ async def finish_lesson(
     task_id: str | None, slug: str, *, markdown: str = "", html: str = "",
     title: str = "", subtitle: str = "", eyebrow: str = "",
     article_kind: str | None = None, run_id: str | None = None, agent: str | None = None,
+    page: bool = False, material: str = "", lab_source: str = "",
 ) -> tuple[str, str]:
     """Check the whole lesson, wrap its page in the kit and write both files.
+    `page`: a lab card or week review, held to every check but the concept
+    contract, with his lab (`lab_source`) kept exactly and links only from
+    the lessons it drew on (`material`).
     Returns (md_path, html_path). Raises LessonRefused naming what to fix.
     Shared by `write_lesson` and the staged writer."""
     clean = _clean_slug(slug)
@@ -904,7 +908,15 @@ async def finish_lesson(
         )
 
     shortfall = "" if source else page_shortfall(markdown, html)
-    if not source and html.strip():
+    if page and html.strip():
+        gap = page_coverage(lab_source, html, material, least=0, most=0,
+                            dated_share=ARTICLE_DATED_SHARE)
+        if gap:
+            raise LessonRefused(
+                f"the page is not ready yet: {gap}. Rewrite ONLY the parts this"
+                " names with write_lesson_part, then call write_lesson again"
+            )
+    elif not source and html.strip():
         # An article is one idea, delivered: the same contract as a phase with
         # the count set to one, plus the same plainness and repeat measures.
         # A paper-day article is about the world as it was when the paper
@@ -1647,6 +1659,8 @@ CLAIM_MAX_WORDS = 40
 # a fact too weak to state plainly is too weak to teach, and goes in the report.
 SECTION_KINDS = frozenset({
     "orientation", "lab", "checkpoint", "cheatsheet", "sources", "post",
+    # A week review's "what to keep": a short list recalled, not taught.
+    "recall",
 })
 # Sentences that are about a source rather than about the mechanism. A little
 # is honest provenance. At 11% of the page it was a literature review.
@@ -1863,6 +1877,8 @@ def sections_without_a_visual(page_html: str) -> list[str]:
         title = " ".join(html_lib.unescape(re.sub(r"<[^>]+>", " ", head.group(1))).split())
         if any(word in title.lower() for word in _NO_VISUAL_NEEDED):
             continue
+        if re.match(r"""(?is)<h2\b[^>]*\bdata-kind=["']recall["']""", part):
+            continue  # a list he recalls from; a figure would only push it apart
         if _visible_words(part) < VISUAL_SECTION_WORDS:
             continue
         low = part.lower()
@@ -1902,8 +1918,10 @@ def page_coverage(source: str, page_html: str, note: str = "", *,
     measurable = have >= MEASURABLE_SOURCE_WORDS
     problems = []
 
+    # A page he builds or recalls from (most=0) teaches no concept of its
+    # own; everything else here still holds for it.
     contract = lesson_contract(page_html, least=least, most=most, dated_share=dated_share,
-                               evidence_share=evidence_share)
+                               evidence_share=evidence_share) if most else ""
     if contract:
         problems.append(contract)
 

@@ -46,6 +46,8 @@ never more detail. Say each point once.
 - `cheatsheet`: one `<pre class="cheatsheet">`, no prose.
 - `post`: two lines, each the claim and what makes it his.
 - `sources`: `<ul class="sources">`, one line per url saying what it gave.
+- `recall`: a short `<ul>` of what to keep, one line each with where it came
+  from. Nothing new is taught.
 - `orientation`: a short paragraph per earlier idea it builds on, and what
   it leaves for later.
 

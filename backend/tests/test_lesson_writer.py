@@ -440,3 +440,22 @@ def test_an_invented_lab_command_is_sent_back_on_its_part() -> None:
                                 total_words=0, source=source)
     assert any("not in his lab" in p for p in probs)
     assert lt.lab_fidelity_problems(part, source)   # the same rule the page runs
+
+
+def test_a_page_is_planned_without_concepts() -> None:
+    plan = lw.PageOutline.model_validate({
+        "title": "Lab card", "subtitle": "s", "eyebrow": "e", "outcome": "o", "opening": "x",
+        "takeaway": "A chunked prefill keeps decode ticking.",
+        "sections": [{"heading": "What you will have", "kind": "orientation", "covers": "c"},
+                     {"heading": "The build", "kind": "lab", "covers": "c"},
+                     {"heading": "Sources", "kind": "sources", "covers": "c"}]}).as_outline()
+    assert plan.concepts == [] and lw.page_problems(plan, "lab") == []
+    assert "no checkpoint section" in " ".join(lw.page_problems(plan, "review"))
+    bad = plan.model_copy(update={"sections": [lw.SectionPlan(heading="Q", concept="c1", covers="c")]})
+    assert any("needs a kind" in p for p in lw.page_problems(bad, "lab"))
+
+
+def test_a_page_is_held_to_every_check_but_the_concept_contract() -> None:
+    body = "<p>" + "Run the simulator and read the queue depth every step. " * 60 + "</p>"
+    page = f'<h2 data-kind="lab">The build</h2><div class="steps">{body}</div>'
+    assert "concept" not in lt.page_coverage("", page, "", least=0, most=0)
