@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
 import { phaseState } from "@/components/features/courses/course-format";
@@ -54,7 +55,19 @@ export function CoursesView() {
     queryFn: () => learningApi.curriculum(),
     staleTime: 5 * 60_000,
   });
-  const [selected, setSelected] = useState<string | null>(null);
+  // A link can open one phase: /courses?course=<course>&phase=<slug>. Home's
+  // "read this lesson" uses it, so the lesson that gates the next phase is
+  // one click away. Stored as the remembered phase before the reader mounts.
+  // useSearchParams, not window.location: during an in-app navigation the
+  // new page renders before the address bar changes, so the link from Home
+  // opened the previous phase.
+  const params = useSearchParams();
+  const linkedCourse = params.get("course");
+  const linkedPhase = params.get("phase");
+  const [selected, setSelected] = useState<string | null>(() => {
+    if (linkedCourse && linkedPhase) rememberPhase(linkedCourse, linkedPhase);
+    return linkedCourse;
+  });
   // A module with no course takes the centre pane instead of the reader.
   const [openModule, setOpenModule] = useState<CurriculumModule | null>(null);
 

@@ -108,6 +108,7 @@ from hq.api.events import router as events_router
 from hq.api.learning import router as learning_router
 from hq.api.reader import router as reader_router
 from hq.api.rest import router as rest_router
+from hq.api.today import router as today_router
 from hq.api.vault import router as vault_router
 
 app.include_router(rest_router, prefix="/api")
@@ -117,3 +118,4 @@ app.include_router(vault_router, prefix="/api")
 app.include_router(learning_router, prefix="/api")
 app.include_router(reader_router, prefix="/api")
 app.include_router(agents_admin_router, prefix="/api")
+app.include_router(today_router, prefix="/api")

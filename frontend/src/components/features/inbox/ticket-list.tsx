@@ -24,7 +24,12 @@ function runHref(ticket: Ticket) {
   return ticket.run_id ? `/runs/${encodeURIComponent(ticket.run_id)}` : null;
 }
 
-export function TicketList() {
+/**
+ * `pendingOnly` is Home's mode: the tickets waiting on him, and nothing when
+ * none are. The empty state and the resolved history belong on a page he
+ * opens to look at approvals, not on the first screen of his day.
+ */
+export function TicketList({ pendingOnly = false }: { pendingOnly?: boolean } = {}) {
   const queryClient = useQueryClient();
   const tickets = useQuery({
     queryKey: qk.tickets("pending"),
@@ -58,6 +63,7 @@ export function TicketList() {
   });
 
   if (tickets.isLoading) {
+    if (pendingOnly) return null;
     return (
       <div role="status" aria-busy="true" aria-label="Loading tickets">
         <Skeleton className="h-28 w-full" />
@@ -76,6 +82,7 @@ export function TicketList() {
   }
 
   const pendingCount = tickets.data?.length ?? 0;
+  if (pendingOnly && !pendingCount) return null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -103,12 +110,12 @@ export function TicketList() {
         </EmptyState>
       )}
 
-      <ResolvedSection
+      {pendingOnly ? null : <ResolvedSection
         tickets={resolved.data}
         isLoading={resolved.isLoading}
         error={resolved.isError ? resolved.error.message : null}
         titleByTask={titleByTask}
-      />
+      />}
     </div>
   );
 }

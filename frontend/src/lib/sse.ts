@@ -57,6 +57,10 @@ function invalidateFor(queryClient: QueryClient, event: HqEvent) {
   const invRunDetail = () =>
     inv(event.run_id ? qk.runDetail(event.run_id) : ["run-detail"]);
 
+  // Home's "what needs you" and "last night" read the board, the lessons,
+  // the jobs and the tickets; any of those moving refreshes it.
+  if (/^(task|run|ticket|lesson|job|posts|reading)\./.test(type)) inv(qk.today);
+
   switch (type) {
     case "task.created":
     case "task.updated":

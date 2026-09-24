@@ -20,6 +20,7 @@ import type {
   TaskEvent,
   Ticket,
   Verdict,
+  Today,
 } from "./types";
 import { API_BASE as BASE, authHeaders, onUnauthorized } from "@/lib/auth";
 
@@ -113,6 +114,7 @@ export const qk = {
   /** Prefixed by qk.agents so an agents invalidation refreshes it too. */
   agentDrafts: ["agents", "drafts"] as const,
   costs: ["costs"] as const,
+  today: ["today"] as const,
   /** Prefixed by qk.costs so a costs invalidation refreshes it too. */
   dailyCosts: (days: number) => ["costs", "daily", days] as const,
   chatSessions: ["chat-sessions"] as const,
@@ -247,6 +249,8 @@ export const api = {
     );
     return rows.map((row) => ({ ...row, usd: Number(row.usd) }));
   },
+
+  today: (): Promise<Today> => request<Today>("/today"),
 
   costs: async (): Promise<Costs> => {
     const raw = await request<RawCosts>("/costs");
