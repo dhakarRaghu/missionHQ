@@ -59,8 +59,28 @@ _LEAD_FIELDS = (
 )
 
 
+# The role families LinkedIn is searched for, one bare title each. A night
+# runs SEARCHES_A_NIGHT of them, rotating, so every family is searched every
+# other night inside the same page budget; each search covers the last week,
+# so nothing posted in between is missed. Four fixed searches never looked
+# for applied AI, product or solutions roles, which the nightly query names.
+ROLE_FAMILIES = (
+    "Software Engineer", "AI Engineer", "Forward Deployed Engineer", "Backend Engineer",
+    "Applied AI Engineer", "Product Engineer", "Solutions Engineer", "ML Engineer",
+)
+SEARCHES_A_NIGHT = 4
+
+
+def families_for(day: date) -> list[str]:
+    """Tonight's searches: the rotation's half for this day, strongest first."""
+    n = len(ROLE_FAMILIES)
+    start = (day.toordinal() % (n // SEARCHES_A_NIGHT)) * SEARCHES_A_NIGHT
+    return [ROLE_FAMILIES[(start + i) % n] for i in range(SEARCHES_A_NIGHT)]
+
+
 def discovery_payload(
-    *, query: str, locations: str, max_roles: int, sources: str = DEFAULT_SOURCES
+    *, query: str, locations: str, max_roles: int, sources: str = DEFAULT_SOURCES,
+    families: Sequence[str] = (),
 ) -> dict[str, Any]:
     return {
         "workflow": WORKFLOW,
@@ -69,6 +89,7 @@ def discovery_payload(
         "locations": locations.strip() or "India|Bengaluru|Remote",
         "sources": sources.strip() or DEFAULT_SOURCES,
         "max_roles": max(1, min(int(max_roles), MAX_DISCOVERY_ROLES)),
+        "families": list(families) or list(ROLE_FAMILIES[:SEARCHES_A_NIGHT]),
     }
 
 
@@ -138,6 +159,9 @@ def discovery_brief(payload: Mapping[str, Any]) -> str:
     locations = str(payload.get("locations") or "India, Bengaluru, or remote")
     sources = str(payload.get("sources") or DEFAULT_SOURCES)
     max_roles = max(1, min(int(payload.get("max_roles") or 20), MAX_DISCOVERY_ROLES))
+    families = [str(f) for f in payload.get("families") or ROLE_FAMILIES[:SEARCHES_A_NIGHT]]
+    numbered = "\n".join(f"  {i}. {f}" for i, f in enumerate(families, 1))
+    count = {1: "ONE", 2: "TWO", 3: "THREE", 4: "FOUR"}.get(len(families), str(len(families)))
     return f"""Use the signed-in browser extension to discover current jobs matching:
 
 - Roles: {query}
@@ -145,17 +169,14 @@ def discovery_brief(payload: Mapping[str, Any]) -> str:
 - Sources: {sources}
 - Maximum candidates: {max_roles}
 
-Run FOUR short LinkedIn searches, one per role family, in ONE tab — reuse it
+Run {count} short LinkedIn searches, one per role family, in ONE tab — reuse it
 for each. Build each URL rather than clicking through filters:
 
   https://www.linkedin.com/jobs/search/?keywords=<ONE TITLE>&location=India&f_E=2%2C3&f_TPR=r604800
 
-The four keyword values, one per search:
+The keyword values, one per search:
 
-  1. Software Engineer
-  2. AI Engineer
-  3. Forward Deployed Engineer
-  4. Backend Engineer
+{numbered}
 
 Keep `keywords` to that bare title. LinkedIn matches keywords literally, so
 anything else you put there — years, "entry-level", "exclude X", a list of
@@ -181,7 +202,7 @@ read the result list: the first page, and the second (`&start=25`) when the
 first is still turning up good matches. A card shows
 company, title, location and posted date, which is enough to screen on.
 
-Then, for the strongest candidates only — at most eight across all four
+Then, for the strongest candidates only — at most eight across all the
 searches — click the card to open its detail pane. On LinkedIn that loads in
 the right-hand panel of the same page, not a new page, so it is cheap. Read
 the years of experience it asks for and any stated package. Those two facts

@@ -206,3 +206,20 @@ def test_an_offline_machine_defers_the_task_instead_of_failing_it() -> None:
     assert "APIConnectionError" in engine._UNREACHABLE
     # the reconciler honours not_before, so a deferred task waits its turn
     assert "not_before <= now()" in inspect.getsource(engine._orphaned_backlog_step)
+
+
+def test_a_browser_run_has_its_own_lane() -> None:
+    assert engine.lane_for({"workflow": "job_search", "stage": "browser_discovery"},
+                           "operator") == "browser"
+    assert engine.lane_for({"stage": "hunter_verification"}, "hunter") == "tasks"
+    src = inspect.getsource(engine.bootstrap_post_launch)
+    assert '"browser", worker_concurrency=1' in src
+
+
+def test_a_pipeline_stage_is_judged_by_its_own_contract_not_its_wording() -> None:
+    brief = "What makes an incident writeup worth reading. Write the note to quarantine/x.md."
+    assert engine.expects_artifact(brief)
+    assert engine.artifact_expected(brief, {"workflow": "learning_journey",
+                                            "stage": "reading_scan"}) is False
+    assert engine.artifact_expected(brief, {}) is True
+    assert engine.artifact_expected(brief, None) is True

@@ -7,7 +7,7 @@ import hashlib
 from pydantic_ai import RunContext
 
 from hq import board, db, safety
-from hq.job_pipeline import discovery_brief, discovery_payload
+from hq.job_pipeline import discovery_brief, discovery_payload, families_for
 from hq.obs import emit
 from hq.safety import ActionClass
 from hq.tools.registry import HQDeps, hq_tool
@@ -117,6 +117,7 @@ async def start_job_search(
         query=query,
         locations=locations,
         max_roles=max_roles,
+        families=families_for(_now_local().date()),
     )
     query_label = str(payload["query"])
     task_id = await engine.dispatch(

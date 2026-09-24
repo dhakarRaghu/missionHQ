@@ -181,6 +181,21 @@ def expects_artifact(text: str) -> bool:
     return "vault" in low or ".md" in low or _FOLDER_RE.search(text) is not None
 
 
+def artifact_expected(text: str, payload: Any) -> bool:
+    """Whether a finished run must show a written artifact.
+
+    A pipeline task (its payload names a stage) has a result contract that
+    code checks when it advances the stage: a scan's envelope is parsed into
+    leads, a study's note is looked up, a lesson is recorded. Guessing from
+    the brief's words overrode that: a reading scan whose brief says
+    "writeup" returned four verified leads and was blocked as empty-handed.
+    The wording rule is kept for free-form tasks, which have nothing else.
+    """
+    if isinstance(payload, dict) and payload.get("stage"):
+        return False
+    return expects_artifact(text)
+
+
 def cron_title(prompt: str) -> str:
     """Short board title for a cron prompt: the text up to the first sentence
     end ("." or ":"), cut at CRON_TITLE_CHARS with an ellipsis when shortened."""
@@ -267,13 +282,18 @@ def bootstrap_pre_launch() -> None:
 
 async def bootstrap_post_launch() -> None:
     """Queues + schedules. Both need a launched executor."""
-    # Two task workers. The gateway key allows five requests at once, shared
-    # by every lane, the judges and embeddings; the gateway transport admits
-    # at most `gateway_parallel` of them and holds a streamed answer's slot
-    # until its body closes, so a second worker waits for a slot rather than
-    # overfilling the key. A run waiting on approval blocks in recv without
-    # holding a model slot.
-    _queues["tasks"] = await DBOS.register_queue_async("tasks", worker_concurrency=2)
+    # The gateway key allows five requests at once, shared by every lane, the
+    # judges and embeddings; the transport admits at most `gateway_parallel`
+    # and holds a streamed answer's slot until its body closes, so a worker
+    # past that waits for a slot rather than overfilling the key. Three task
+    # workers + one course + one chat turn is the five. Browser runs have
+    # their own lane: they spend no gateway slot while Codex reads (only the
+    # guard's call), and two of them at once would be two sessions in his
+    # signed-in browser. On 2026-09-24 the nightly discovery's fifteen-minute
+    # browser run held one of two task workers while three sage runs and the
+    # job sweep queued behind it.
+    _queues["tasks"] = await DBOS.register_queue_async("tasks", worker_concurrency=3)
+    _queues["browser"] = await DBOS.register_queue_async("browser", worker_concurrency=1)
     # Course work gets its own lane, one at a time. On 2026-09-17 two course
     # builds the owner started waited behind a job sweep, which has run for
     # four hours. Two agent runs plus a chat turn, each one request at a
@@ -308,7 +328,7 @@ async def dispatch(
         payload=payload, dedup_key=dedup_key,
     )
     if inserted or status == "backlog":
-        await _enqueue(task_id, lane=lane_for(payload))
+        await _enqueue(task_id, lane=lane_for(payload, agent))
     return task_id
 
 
@@ -322,15 +342,23 @@ _COURSE_STAGES = frozenset({
 })
 
 
-def lane_for(payload: Any) -> str:
-    """Which queue a task runs on: course work, or everything else."""
+def lane_for(payload: Any, agent: str = "") -> str:
+    """Which queue a task runs on: a browser run, course work, or the rest."""
+    if agent and _runs_in_browser(agent):
+        return "browser"
     stage = payload.get("stage") if isinstance(payload, dict) else None
     return "courses" if stage in _COURSE_STAGES else "tasks"
 
 
+def _runs_in_browser(agent: str) -> bool:
+    entry = AGENTS.get(agent)
+    spec = entry[0] if entry else scan().get(agent)
+    return spec is not None and spec.runtime in EXTERNAL_RUNTIMES
+
+
 async def _lane_of(task_id: str) -> str:
-    row = await db.fetchone("SELECT payload FROM hq.tasks WHERE id = %s", (task_id,))
-    return lane_for((row or {}).get("payload"))
+    row = await db.fetchone("SELECT agent, payload FROM hq.tasks WHERE id = %s", (task_id,))
+    return lane_for((row or {}).get("payload"), str((row or {}).get("agent") or ""))
 
 
 async def _enqueue(task_id: str, *, attempt: int = 0, lane: str = "tasks") -> None:
@@ -500,7 +528,8 @@ async def run_task(task_id: str) -> str:
     result: str = outcome.outcome
     error: str | None = outcome.error
     if (result == "done" and not outcome.declined and task["source"] in ARTIFACT_SOURCES
-            and expects_artifact(task_text) and not await _artifact_check_step(run_id)):
+            and artifact_expected(task_text, task.get("payload"))
+            and not await _artifact_check_step(run_id)):
         result, error = "no_artifact", NO_ARTIFACT_REASON
 
     await _finish_run(run_id, result, outcome.input_tokens,

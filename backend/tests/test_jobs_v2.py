@@ -441,3 +441,20 @@ def test_vault_write_runs_the_gate_on_content_drafts(monkeypatch) -> None:
         asyncio.run(write(ctx, "projects/content/drafts/2026-09-23-retries.md", ESSAY_REGISTER))
     # Outside drafts the gate does not apply: ideas.md is a list by design.
     assert not voice.is_draft_path("projects/content/ideas.md")
+
+
+def test_linkedin_searches_rotate_through_every_role_family() -> None:
+    from datetime import date, timedelta
+
+    from hq import job_pipeline as jp
+
+    day = date(2026, 9, 24)
+    two_nights = jp.families_for(day) + jp.families_for(day + timedelta(days=1))
+    assert sorted(two_nights) == sorted(jp.ROLE_FAMILIES)       # every family, every other night
+    assert len(jp.families_for(day)) == jp.SEARCHES_A_NIGHT      # same page budget each night
+    payload = jp.discovery_payload(query="x", locations="India", max_roles=20,
+                                   families=jp.families_for(day + timedelta(days=1)))
+    brief = jp.discovery_brief(payload)
+    for family in payload["families"]:
+        assert f". {family}\n" in brief
+    assert "Run FOUR short LinkedIn searches" in brief
