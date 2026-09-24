@@ -479,3 +479,12 @@ def test_an_over_length_page_is_cut_where_the_parts_ran_over() -> None:
                "<p>" + "word " * 150 + "</p>"]
     assert w._over_budget("the article is 2829 words, which is about 14 minutes") == [2, 3]
     assert w._over_budget("some other refusal") == []
+
+
+def test_an_evidence_quote_with_a_small_edit_is_still_the_notes_words() -> None:
+    body = lw._norm("The paper reports that chunked prefill cut p99 TPOT by 2.6x on "
+                    "Mistral-7B with a 512 token budget.")
+    assert lw.quoted_from(lw._norm("chunked prefill cut p99 TPOT by 2.6x on Mistral-7B "
+                                   "with 512 token budget"), body)
+    assert not lw.quoted_from(lw._norm("speculative decoding doubled throughput on every "
+                                       "model we tried"), body)

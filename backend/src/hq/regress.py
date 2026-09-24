@@ -274,8 +274,9 @@ def _check(case: Case, output: str, calls: list[dict[str, Any]]) -> list[str]:
                    for c in calls if c["tool"] == name):
             fails.append(f"no {name} call with args matching {pattern!r}")
     for name, pattern in e.args_not_match.items():
+        # What was written: a call a gate refused wrote nothing.
         if any(re.search(pattern, json.dumps(c["args"], default=str), re.IGNORECASE | re.DOTALL)
-               for c in calls if c["tool"] == name):
+               for c in calls if c["tool"] == name and c.get("ok", True)):
             fails.append(f"a {name} call has args matching {pattern!r}")
     for pattern in e.output_match:
         if not re.search(pattern, output, re.IGNORECASE | re.DOTALL):

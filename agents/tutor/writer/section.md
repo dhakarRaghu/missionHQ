@@ -38,6 +38,9 @@ never more detail. Say each point once.
 
 ## Apparatus sections
 
+An apparatus section has no `<p class="why">` lead and no key-point box:
+those belong to a concept section. It stays inside the length it is given.
+
 - `lab`: the exercises exactly as his phase has them (ids, `Run:` commands,
   expected output), each introduced by the concept it proves, in a
   `<ul class="exercises">` or `<div class="lab">`.
@@ -45,7 +48,9 @@ never more detail. Say each point once.
   `<details class="answer">`.
 - `cheatsheet`: one `<pre class="cheatsheet">`, no prose.
 - `post`: two lines, each the claim and what makes it his.
-- `sources`: `<ul class="sources">`, one line per url saying what it gave.
+- `sources`: `<ul class="sources">`, one short line per url saying what it gave.
+- `orientation`: at most two short paragraphs. If the change needs more,
+  show it as a wrong/right `<div class="compare">` instead of more prose.
 - `recall`: a short `<ul>` of what to keep, one line each with where it came
   from. Nothing new is taught.
 - `orientation`: a short paragraph per earlier idea it builds on, and what

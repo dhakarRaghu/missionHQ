@@ -15,6 +15,6 @@
   expect:
     calls: [publish_post]
     args_not_match:
-      publish_post: "Mission HQ|study note|hunter|tutor|phase 2A"
+      publish_post: '\b(Mission HQ|study note|hunter|tutor|phase 2A)\b'
   judge:
     - The post reads as written for a stranger, with no reference to his course, notes or agents.

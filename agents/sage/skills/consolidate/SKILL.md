@@ -21,7 +21,9 @@ differently for knowing it. Then:
 
 - A line naming a task, a run or a pending state is true only while that
   thing is open. Propose dropping it when the board says it is done, failed
-  or archived.
+  or archived. Match a task by its id, not its title: a line's short id
+  (`b3be878b`) is the start of the board row's id, and the titles often
+  differ.
 - Propose dropping history ("on 09-08, X happened"). Keep what is true now.
 - Propose merging duplicates, keeping the newer wording.
 - Confidence follows the source: his own words are first-party; an agent's

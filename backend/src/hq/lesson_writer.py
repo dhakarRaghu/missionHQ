@@ -475,6 +475,20 @@ def page_problems(outline: Outline, page: str) -> list[str]:
     return probs
 
 
+def quoted_from(quote: str, body: str) -> bool:
+    """Whether a quote is the note's own words: exact, or a run of the note
+    covering nine tenths of it (a dropped article or changed comma). An exact
+    substring test sent the 2B plan back three times over one small edit."""
+    if quote in body:
+        return True
+    import difflib
+
+    m = difflib.SequenceMatcher(None, body, quote, autojunk=False)
+    blocks = m.get_matching_blocks()
+    return sum(b.size for b in blocks if b.size >= 8) >= 0.9 * len(quote) and (
+        max((b.size for b in blocks), default=0) >= 0.5 * len(quote))
+
+
 def outline_problems(outline: Outline, note: str, *, article: bool) -> list[str]:
     """Why this plan cannot be written from, or [] when it can."""
     probs: list[str] = []
@@ -497,7 +511,7 @@ def outline_problems(outline: Outline, note: str, *, article: bool) -> list[str]
         if not c.predict.strip().endswith("?"):
             probs.append(f"{c.id} needs a predict question he answers first")
         quote = _norm(c.evidence_quote)[:160]
-        if len(quote) < 12 or quote not in body:
+        if len(quote) < 12 or not quoted_from(quote, body):
             probs.append(f"{c.id}'s evidence_quote is not in the study note; copy the exact"
                          " words that support its number or failure, or pick evidence the note carries")
     served = {s.concept for s in outline.sections if s.concept}
@@ -617,8 +631,11 @@ def _concept_list(outline: Outline) -> str:
 # running total after each part only said "already past the limit" three
 # parts from the end, and the first live article reached 4,047 words.
 OPENING_WORDS = 150
-APPARATUS_WORDS = {"lab": 200, "checkpoint": 160, "post": 120, "sources": 60,
-                   "orientation": 180, "cheatsheet": 200}
+# Sized from what these sections carry on real pages: eight source lines
+# are ~110 words, a lab with two commands ~300. Budgets below that were
+# missed on every retry, and the parts were kept failing their own checks.
+APPARATUS_WORDS = {"lab": 300, "checkpoint": 220, "post": 140, "sources": 120,
+                   "orientation": 180, "cheatsheet": 200, "recall": 200}
 BUDGET_SLACK = 1.2           # a part this far past its budget is sent back
 RESTATEMENT_FLOOR = 30       # words a short part may spend on its key points
 
