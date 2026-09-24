@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import inspect
 import json
 import re
@@ -104,6 +105,11 @@ class Trial:
     seconds: float
     cost_usd: float
     error: str | None = None
+    # The instruction bundle this trial ran on (loader.bundle_sha: the
+    # agent's instructions without the clock line; the writer's own files for
+    # a staged-writer case). A compare names the cases whose bundle moved, so
+    # a flipped verdict can be read as a prompt change or as noise.
+    bundle_sha: str = ""
 
 
 @dataclass
@@ -394,7 +400,8 @@ async def _writer_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, A
         fails += await _judge(case, output, calls)
     return Trial(passed=not fails, failures=fails, output=output[:4000], calls=calls,
                  seconds=round(time.monotonic() - started, 1),
-                 cost_usd=round(await _spent(since, tag), 4), error=error)
+                 cost_usd=round(await _spent(since, tag), 4), error=error,
+                 bundle_sha=lesson_writer.bundle_sha())
 
 
 async def _post_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, Any]) -> Trial:
@@ -437,7 +444,8 @@ async def _post_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, Any
         fails += await _judge(case, output, calls)
     return Trial(passed=not fails, failures=fails, output=output[:4000], calls=calls,
                  seconds=round(time.monotonic() - started, 1),
-                 cost_usd=round(await _spent(since, tag), 4), error=error)
+                 cost_usd=round(await _spent(since, tag), 4), error=error,
+                 bundle_sha=lesson_writer.bundle_sha())
 
 
 async def run_trial(case: Case) -> Trial:
@@ -453,9 +461,13 @@ async def run_trial(case: Case) -> Trial:
             return await _writer_trial(case, spec, payload)
     calls: list[dict[str, Any]] = []
     reg = llm.registry()
+    # Built once and hashed from the same text the agent is sent, so the
+    # recorded sha is the bundle this trial ran on, not one rebuilt a clock
+    # tick later.
+    instructions = loader.instructions_for(spec)
     agent = Agent(
         reg.resolve(spec.model),
-        instructions=loader.instructions_for(spec),
+        instructions=instructions,
         tools=_tools(case, spec, calls),
         model_settings=reg.model_settings_for(spec.model),
         output_type=str,
@@ -478,11 +490,27 @@ async def run_trial(case: Case) -> Trial:
         fails += await _judge(case, output, calls)
     return Trial(passed=not fails, failures=fails, output=output[:4000], calls=calls,
                  seconds=round(time.monotonic() - started, 1),
-                 cost_usd=round(await _spent(since, tag), 4), error=error)
+                 cost_usd=round(await _spent(since, tag), 4), error=error,
+                 bundle_sha=instructions_sha(instructions))
 
 
-async def run(label: str, agent: str | None = None, case_id: str | None = None) -> Path:
-    """Run the set and write evals/results/<label>.json. Returns its path."""
+def instructions_sha(instructions: str) -> str:
+    """loader.bundle_sha's hash of instructions already in hand: everything
+    after the first paragraph, which is the clock line."""
+    text = instructions.split("\n\n", 1)[-1]
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+def case_lines(cases: list[Case]) -> list[str]:
+    """One line per case: its id, its agent, and the incident it holds."""
+    width = max((len(c.id) for c in cases), default=0)
+    return [f"{c.id:{width}}  {c.agent:8} {' '.join(c.source.split())}" for c in cases]
+
+
+async def run(label: str, agent: str | None = None, case_id: str | None = None,
+              k: int | None = None) -> Path:
+    """Run the set and write evals/results/<label>.json. Returns its path.
+    ``k`` runs every case that many times (pass^k); None keeps each case's own."""
     cases = load_cases(agent, case_id)
     results: list[CaseResult] = []
     with _sandboxed_learning():
@@ -494,7 +522,7 @@ async def run(label: str, agent: str | None = None, case_id: str | None = None) 
         learning_tools.emit = _no_emit  # type: ignore[assignment]  # no live-feed noise
         for case in cases:
             res = CaseResult(case.id, case.agent, case.source, case.known_failure)
-            for _ in range(max(1, case.k)):
+            for _ in range(max(1, k or case.k)):
                 res.trials.append(await run_trial(case))
             results.append(res)
             mark = "PASS" if res.passed else ("known" if case.known_failure else "FAIL")
@@ -512,9 +540,16 @@ async def run(label: str, agent: str | None = None, case_id: str | None = None) 
     return path
 
 
+def _bundles(result: dict[str, Any]) -> set[str]:
+    return {t.get("bundle_sha") or "" for t in result.get("trials", [])}
+
+
 def compare(before: str, after: str) -> list[str]:
     """What changed between two labelled runs. A case that passed before and
-    fails after is a regression; the rewrite may not ship with one."""
+    fails after is a regression; the rewrite may not ship with one. A case
+    whose instruction bundle differs between the runs says "bundle changed",
+    so a flipped verdict is read against the prompt that moved. The last line
+    is the summary: passes before and after, and what each run cost."""
     def load(label: str) -> dict[str, dict[str, Any]]:
         data = json.loads((RESULTS_DIR / f"{label}.json").read_text())
         return {r["id"]: r for r in data["results"]}
@@ -534,7 +569,19 @@ def compare(before: str, after: str) -> list[str]:
             verdict = "same"
         else:
             verdict = "new" if was is None else "dropped"
-        lines.append(f"{verdict:10} {cid}  ${cost_a:.3f} → ${cost_b:.3f}")
+        line = f"{verdict:10} {cid}  ${cost_a:.3f} → ${cost_b:.3f}"
+        # Only when both runs recorded a bundle: an older result file has
+        # none, and "changed" from nothing would say more than is known.
+        shas_a, shas_b = _bundles(a.get(cid, {})) - {""}, _bundles(b.get(cid, {})) - {""}
+        if shas_a and shas_b and shas_a != shas_b:
+            line += "  bundle changed"
+        lines.append(line)
+    passed_a = sum(1 for r in a.values() if r.get("passed"))
+    passed_b = sum(1 for r in b.values() if r.get("passed"))
+    total_a = sum(t["cost_usd"] for r in a.values() for t in r.get("trials", []))
+    total_b = sum(t["cost_usd"] for r in b.values() for t in r.get("trials", []))
+    lines.append(f"{passed_a}/{len(a)} pass → {passed_b}/{len(b)} pass;"
+                 f" ${total_a:.3f} → ${total_b:.3f}")
     return lines
 
 
@@ -547,19 +594,25 @@ def main(argv: list[str]) -> int:
     r.add_argument("label")
     r.add_argument("--agent")
     r.add_argument("--case")
+    r.add_argument("--k", type=int, help="run every case this many times (pass^k)")
     c = sub.add_parser("compare")
     c.add_argument("before")
     c.add_argument("after")
+    ls = sub.add_parser("cases", help="list case ids with the incident each holds")
+    ls.add_argument("--agent")
     args = p.parse_args(argv)
     if args.cmd == "compare":
         lines = compare(args.before, args.after)
         print("\n".join(lines))
         return 1 if any(ln.startswith("REGRESSION") for ln in lines) else 0
+    if args.cmd == "cases":
+        print("\n".join(case_lines(load_cases(args.agent))))
+        return 0
 
     async def go() -> None:
         await db.open_pool()
         try:
-            path = await run(args.label, args.agent, args.case)
+            path = await run(args.label, args.agent, args.case, args.k)
             print(f"results: {path}")
         finally:
             await db.close_pool()
