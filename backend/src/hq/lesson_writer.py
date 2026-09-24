@@ -513,6 +513,14 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
             continue  # the part's own budget below is the length rule
         probs.append(note)
     words = lt._visible_words(html)
+    # The page's restatement ceiling, held on every part: parts that each
+    # passed added up to 14% of a page whose ceiling is 12%, and a page-wide
+    # refusal names no part to rewrite.
+    said_again = lt._restatement_words(html)
+    allowed = max(RESTATEMENT_FLOOR, int(words * lt.RESTATEMENT_SHARE))
+    if said_again > allowed:
+        probs.append(f"the key-point box and the lead here are {said_again} words; keep them"
+                     f" under {allowed}: one short sentence each, a point said once")
     if budget and words > budget * BUDGET_SLACK:
         probs.append(f"this section is {words} words; its share of the page is about"
                      f" {budget}. Cut it to that: keep the mechanism and the one piece of"
@@ -549,6 +557,7 @@ OPENING_WORDS = 150
 APPARATUS_WORDS = {"lab": 200, "checkpoint": 160, "post": 120, "sources": 60,
                    "orientation": 180, "cheatsheet": 200}
 BUDGET_SLACK = 1.35          # a part this far past its budget is sent back
+RESTATEMENT_FLOOR = 30       # words a short part may spend on its key points
 
 
 def word_budgets(outline: Outline, limit: int) -> dict[int, int]:
@@ -732,6 +741,19 @@ class Writer:
                 hits.append(i)
         return hits
 
+    def _failing_parts(self) -> list[int]:
+        assert self.outline is not None
+        out = []
+        for i in range(1, len(self.parts)):
+            earlier = "\n".join(self.parts[:i])
+            if section_problems(
+                    self.parts[i], earlier=earlier, article=self.m.article, kind=self.m.kind,
+                    apparatus=bool(self.outline.sections[i - 1].kind),
+                    total_words=sum(lt._visible_words(p) for p in self.parts[:i]),
+                    budget=self.budgets.get(i, 0)):
+                out.append(i)
+        return out
+
     async def assemble(self) -> tuple[str, str]:
         assert self.outline is not None
         for round_ in range(REPAIR_ROUNDS + 1):
@@ -743,7 +765,9 @@ class Writer:
                     agent=self.deps.agent)
             except lt.LessonRefused as exc:
                 message = str(exc)
-                parts = self._parts_quoting(message)
+                # Named by a quote, a url or a heading; failing that, the
+                # parts that fail their own checks, which mirror the page's.
+                parts = self._parts_quoting(message) or self._failing_parts()
                 self.report.append(f"page check: {message[:300]}"
                                    + (f" (sections {parts})" if parts else ""))
                 if round_ == REPAIR_ROUNDS or not parts:

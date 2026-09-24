@@ -411,3 +411,13 @@ def test_the_part_check_and_the_page_check_agree_on_figures() -> None:
     assert bool(page_says) == bool(part_says) == True
     short = '<h2 data-kind="orientation">What this changes</h2><p>It changes one thing.</p>'
     assert not lt.sections_without_a_visual(short)
+
+
+def test_a_part_that_restates_too_much_is_sent_back_alone() -> None:
+    body = "<p>" + "The scheduler rebuilds the batch every step. " * 30 + "</p>"
+    heavy = ('<h2 data-concept="c1">Why?</h2><p class="why">' + "It matters because. " * 20
+             + "</p>" + body + '<div class="keypoints"><p class="remember">'
+             + "Rebuild the batch every step. " * 12 + "</p></div>")
+    probs = lw.section_problems(heavy, earlier="", article=True, kind="", apparatus=False,
+                                total_words=0)
+    assert any("key-point box and the lead here" in p for p in probs)
