@@ -115,6 +115,9 @@ class RunOutcome:
     error: str | None = None
     messages_json: bytes | None = None
     stall_count: int = 0
+    # The browser could not be driven (extension down or dropped mid-read).
+    # A condition of the machine, not of the task: worth another try later.
+    retry_later: bool = False
     # A reasoned "nothing to write today" (charter rule 9). Code sets it when
     # the writer's plan says the material cannot carry the piece; it is a
     # result, not a missing artifact.
@@ -799,6 +802,7 @@ async def _execute_external(
             error=(f"the {runtime} browser extension is not connected or not"
                    " signed in, so nothing was read. Open Chrome, sign in to"
                    f" the {runtime} extension, and allow it to use Chrome"),
+            retry_later=True,
         )
     return RunOutcome(
         output=text,

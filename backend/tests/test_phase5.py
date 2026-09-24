@@ -223,3 +223,14 @@ def test_a_pipeline_stage_is_judged_by_its_own_contract_not_its_wording() -> Non
                                             "stage": "reading_scan"}) is False
     assert engine.artifact_expected(brief, {}) is True
     assert engine.artifact_expected(brief, None) is True
+
+
+def test_a_browser_that_could_not_be_driven_is_tried_again_later() -> None:
+    from hq import board, runner
+
+    assert "retry_later" in runner.RunOutcome.__dataclass_fields__
+    assert "retry_later=True" in inspect.getsource(runner)
+    src = inspect.getsource(engine)
+    assert '_defer_step(task_id, "deferred_browser", BROWSER_RETRIES)' in src
+    # blocked -> backlog is a legal move, so the deferral can land
+    assert "backlog" in board.ALLOWED["blocked"]

@@ -534,6 +534,14 @@ async def run_task(task_id: str) -> str:
 
     await _finish_run(run_id, result, outcome.input_tokens,
                       outcome.output_tokens, outcome.cost_usd, error=error)
+    if (result == "blocked" and outcome.retry_later
+            and await _defer_step(task_id, "deferred_browser", BROWSER_RETRIES)):
+        await runner.apply_step(task_id, "run_blocked", status="blocked",
+                                data={"output": outcome.output[:TASK_OUTPUT_CHARS],
+                                      "reason": error or "browser unavailable"})
+        await runner.apply_step(task_id, "deferred_browser", status="backlog",
+                                data={"retry_in_min": int(OFFLINE_RETRY_AFTER_S // 60)})
+        return "deferred: browser unavailable"
     status = {"done": "done", "blocked": "blocked", "no_artifact": "blocked"}.get(result, "failed")
     data: dict[str, Any] = {"output": outcome.output[:TASK_OUTPUT_CHARS]}
     if result == "no_artifact":
@@ -2018,26 +2026,39 @@ OFFLINE_RETRIES = 4
 _UNREACHABLE = ("APIConnectionError", "ConnectError", "ConnectTimeout")
 
 
+BROWSER_RETRIES = 2
+
+
 @DBOS.step()
-async def _defer_if_offline_step(task_id: str, run_id: str) -> bool:
-    """True, with the task's start pushed back, when the run's last model
-    attempts all failed to connect at all. That is the machine off the
-    network, not a model or a task failing, and a retry in five seconds
-    meets the same outage. At most OFFLINE_RETRIES times per task."""
-    calls = await db.fetch(
-        "SELECT error_class FROM hq.model_calls WHERE run_id = %s"
-        " ORDER BY started_at DESC LIMIT 3", (run_id,))
-    if len(calls) < 3 or any(c["error_class"] not in _UNREACHABLE for c in calls):
-        return False
+async def _defer_step(task_id: str, event: str, limit: int) -> bool:
+    """Push the task's start back OFFLINE_RETRY_AFTER_S, at most `limit` times
+    per task for this reason; False once the retries are spent."""
     row = await db.fetchone(
         "SELECT count(*) AS n FROM hq.events WHERE task_id = %s AND kind = 'task.updated'"
-        " AND payload->>'event' = 'deferred_offline'", (task_id,))
-    if int((row or {}).get("n") or 0) >= OFFLINE_RETRIES:
+        " AND payload->>'event' = %s", (task_id, event))
+    if int((row or {}).get("n") or 0) >= limit:
         return False
     await db.execute(
         "UPDATE hq.tasks SET not_before = now() + make_interval(secs => %s) WHERE id = %s",
         (OFFLINE_RETRY_AFTER_S, task_id))
     return True
+
+
+@DBOS.step()
+async def _unreachable_step(run_id: str) -> bool:
+    calls = await db.fetch(
+        "SELECT error_class FROM hq.model_calls WHERE run_id = %s"
+        " ORDER BY started_at DESC LIMIT 3", (run_id,))
+    return len(calls) == 3 and all(c["error_class"] in _UNREACHABLE for c in calls)
+
+
+async def _defer_if_offline_step(task_id: str, run_id: str) -> bool:
+    """True, with the task's start pushed back, when the run's last model
+    attempts all failed to connect at all. That is the machine off the
+    network, not a model or a task failing, and a retry in five seconds
+    meets the same outage. At most OFFLINE_RETRIES times per task."""
+    return (await _unreachable_step(run_id)
+            and await _defer_step(task_id, "deferred_offline", OFFLINE_RETRIES))
 
 
 @DBOS.step()
