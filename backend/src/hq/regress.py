@@ -175,7 +175,7 @@ def _brief(case: Case, spec: loader.AgentSpec) -> str:
 
 # Tools that file the text of the reply that calls them. Their arguments are
 # a title and a url; what they write is the reply, so that is what is kept.
-REPLY_TEXT_TOOLS = frozenset({"file_ideas", "file_study_note"})
+REPLY_TEXT_TOOLS = frozenset({"file_posts", "file_study_note"})
 
 
 async def _task_prompt(case: Case, spec: loader.AgentSpec) -> str:

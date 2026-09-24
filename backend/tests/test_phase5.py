@@ -98,19 +98,34 @@ def test_a_model_call_counts_as_a_sign_of_life() -> None:
     assert src.count("hq.model_calls") == 2
 
 
-def test_an_ideas_batch_goes_on_top_and_keeps_the_rest() -> None:
+def test_a_posts_batch_goes_on_top_and_keeps_the_rest() -> None:
     from hq.tools import content_tools as ct
 
     old = "---\ncreated: 2026-09-16\n---\n# Content ideas\n\n## 2026-09-16 — Old\n\n- old idea\n  why: x\n"
-    new = ct.with_batch(old, "## 2026-09-23 stray heading\nIntro line.\n\n- new idea\n  why: y\n",
-                        "2026-09-23", "Morning batch")
-    assert new.startswith("---\ncreated: 2026-09-16\n---\n# Content ideas\n\n## 2026-09-23 — Morning batch")
-    assert new.index("new idea") < new.index("## 2026-09-16 — Old") < new.index("old idea")
+    new = ct.with_batch(old, "## 2026-09-23 stray heading\nfirst post\n\n---\n\nsecond post\n",
+                        "2026-09-23", "Evening")
+    assert new.startswith("---\ncreated: 2026-09-16\n---\n# Content ideas\n\n## 2026-09-23 — Evening")
+    assert new.index("first post") < new.index("## 2026-09-16 — Old") < new.index("old idea")
     assert "stray heading" not in new
-    assert ct.with_batch(None, "- a\n", "2026-09-23", "").startswith("# Content ideas\n\n## 2026-09-23\n")
-    assert ct.batch_problems("no bullets here")
-    assert ct.batch_problems("- one\n  why: x\n- two\n") == []
-    assert ct.batch_problems("\n".join(f"- {i}" for i in range(9)))
+
+
+def test_a_post_is_filed_only_in_his_voice() -> None:
+    from hq.tools import content_tools as ct
+
+    good = ("I broke my own cost meter last week. It said a run cost $0.24 and the bill said"
+            " $0.52. I don't think the meter was wrong. It was counting one provider's shape"
+            " and my agents talk to two. I'd rather see a wrong number I can explain than a"
+            " right one I can't. So I'm printing the raw usage object from every call this"
+            " week and reading it myself.")
+    assert ct.post_problems(good) == []
+    notes = ("A cost-tracking tool recorded $0.238 for a run the provider billed at $0.522."
+             " why: Langfuse issue 13807, verified by hunter. Sources: quarantine/x-study.md")
+    probs = " ".join(ct.post_problems(notes))
+    assert "private words" in probs and "file path" in probs and "contraction" in probs
+    posts = ct.split_posts("## heading\n" + good + "\n\n---\n\n" + good)
+    assert len(posts) == 2 and ct.batch_problems(posts) == []
+    assert ct.batch_problems([good])   # one post is not a batch
+
 
 
 def test_the_digest_carries_the_daily_note(tmp_path, monkeypatch) -> None:
@@ -159,7 +174,7 @@ def test_a_cron_slot_starts_with_its_skill_in_the_brief() -> None:
     from hq.loader import scan
 
     sage = scan()["sage"]
-    assert {e.skill for e in sage.cron} >= {"daily-note", "consolidate", "content-ideas"}
+    assert {e.skill for e in sage.cron} >= {"daily-note", "consolidate", "daily-posts"}
     assert not any("load_skill" in e.prompt for e in sage.cron)
     brief = asyncio.run(engine._cron_brief_step.__wrapped__("sage", "Write today's daily note.",
                                                             "daily-note"))

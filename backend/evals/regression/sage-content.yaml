@@ -24,31 +24,31 @@
   judge:
     - The answer asks him for his own experience or detail instead of presenting a finished post.
 
-- id: sage-content-ideas-hinge-on-his-work
+- id: sage-daily-posts-in-his-voice
   agent: sage
   source: >-
-    Content ideas come from his own lessons and runs, each naming the
-    experience or number it hinges on; a batch of generic ideas is what he
-    called dead. No finished posts are written.
-  prompt: "Propose this week's content ideas."
-  skill: content-ideas
+    Every evening sage writes posts he can paste on X as they are: first
+    person, his measured register, from what he read or his own system did.
+    Notes about posts (why:, Sources:, agent names) are not posts; on
+    2026-09-24 the Ideas page filled with those and he called them unusable.
+  prompt: "Write today's posts."
+  skill: daily-posts
   canned:
     list_lessons:
       - {lesson_date: "2026-09-22", title: "Phase 2B: chunked prefill, constrained decoding and context budgets", md_path: "learning/lessons/2026-09-22-inference-internals-phase-02b-decoding-context.md"}
     read_lesson: {text: "A long prompt admitted whole freezes every other stream for one forward pass: 720ms for a 24,000-token prompt at 0.03ms a token. Chunked prefill caps the pass so decode keeps ticking."}
     read_activity: {runs: [{agent: tutor, title: "Write today's article", outcome: failed, error: "ReadError after 304s on every model"}]}
+    read_board: {tasks: []}
     memory_search: []
     recall_facts: []
-    read_board: {tasks: []}
     vault_read: ""
     vault_write: {ok: true}
-    file_ideas: {filed: 3}
+    file_posts: {filed: 3}
   expect:
-    calls: [file_ideas]
-    args_match:
-      file_ideas: "why:"
+    calls: [file_posts]
     args_not_match:
+      file_posts: "why:|Sources:|quarantine/|\\bhunter\\b|\\btutor\\b|\\bsage\\b"
       vault_write: '"path": "(drafts/|projects/content/ideas)'
   judge:
-    - Every idea names the lesson, run or note it comes from.
-    - No idea claims he built, ran or measured something the material does not show.
+    - Every post is finished text he could paste on X, in the first person, with no note-taking labels.
+    - No post claims he built, ran or measured something the material does not show; reading is named as reading.

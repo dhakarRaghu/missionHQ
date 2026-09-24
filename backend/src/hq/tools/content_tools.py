@@ -1,10 +1,15 @@
-"""Content ideas, filed by code.
+"""His daily X posts, checked and filed by code.
 
-The ideas file is newest-first and grows every week; it passed 38k characters
-in September 2026. Rewriting it through `vault_write` meant either sending the
-whole file as one tool argument, which the gateway does not stream, or
-sending only the new batch and wiping the rest. So sage writes the batch as
-the text of its reply and this tool puts it at the top of the file.
+The posts file is newest-first and grows every day. Rewriting it through
+`vault_write` meant either sending the whole file as one tool argument, which
+the gateway does not stream, or sending only the new batch and wiping the
+rest. So sage writes the posts as the text of its reply and this tool checks
+each one against his measured voice and puts the batch at the top.
+
+What reaches the file is paste-ready: his register (hq.voice), no private
+words, no file paths, no employer. When the retired scout's posts became
+weekly "idea" notes with why/Sources lines, the page he reads to post from
+filled with notes about posts instead of posts.
 """
 
 from __future__ import annotations
@@ -14,26 +19,14 @@ import re
 
 from pydantic_ai import ModelRetry, RunContext
 
-from hq import memory
+from hq import memory, privacy, voice
 from hq.obs import emit
 from hq.safety import ActionClass
+from hq.tools import learning_tools as lt
 from hq.tools.learning_tools import _today, reply_text
 from hq.tools.registry import HQDeps, hq_tool
 
 IDEAS_PATH = "projects/content/ideas.md"
-MAX_IDEAS = 8
-_IDEA = re.compile(r"^(?:- |\d+\. )", re.MULTILINE)
-
-
-def batch_problems(text: str) -> list[str]:
-    n = len(_IDEA.findall(text))
-    if n == 0:
-        return ["no ideas found: write each idea as a top-level '- ' bullet"]
-    if n > MAX_IDEAS:
-        return [f"{n} ideas; keep the {MAX_IDEAS} strongest at most, two real ones beat five"]
-    return []
-
-
 def with_batch(existing: str | None, batch: str, day: str, title: str) -> str:
     """The file with `batch` as the newest dated section, under the title."""
     lines = batch.strip().splitlines()
@@ -52,44 +45,94 @@ def with_batch(existing: str | None, batch: str, day: str, title: str) -> str:
     return head + top + section + ("\n" + rest + "\n" if rest else "")
 
 
-@hq_tool(action=ActionClass.VAULT_WRITE)
-async def file_ideas(ctx: RunContext[HQDeps], title: str = "") -> str:
-    """File the batch of content ideas you wrote in this same reply.
+POSTS_MIN, POSTS_MAX = 2, 5
+POST_WORDS = (25, 200)
+SOURCES_PATH = "projects/content/post-sources.md"
+_POST_SPLIT = re.compile(r"^\s*-{3,}\s*$", re.MULTILINE)
+_PATHISH = re.compile(r"\b[\w./-]+\.md\b|\bquarantine/|\bwhy:|\bsources?:", re.IGNORECASE)
 
-    Write the ideas as plain markdown text in your reply, one top-level `- `
-    bullet each, then call this in that same reply after them, with a short
-    `title` for the batch. Code adds today's dated heading and puts the batch
-    at the top of projects/content/ideas.md; nothing already there changes.
+
+def split_posts(text: str) -> list[str]:
+    body = "\n".join(ln for ln in text.strip().splitlines() if not ln.startswith("## "))
+    return [p.strip() for p in _POST_SPLIT.split(body) if p.strip()]
+
+
+def post_problems(post: str) -> list[str]:
+    """Why this post is not something he can paste as it is, or []."""
+    probs = list(voice.register_problems(post))
+    words = len(post.split())
+    if not POST_WORDS[0] <= words <= POST_WORDS[1]:
+        probs.append(f"{words} words; his posts run {POST_WORDS[0]} to {POST_WORDS[1]}"
+                     " (87 is his median)")
+    private = sorted({w for w in lt.PRIVATE_WORDS
+                      if re.search(rf"(?<!\w){re.escape(w)}(?!\w)", post, re.IGNORECASE)})
+    if private:
+        probs.append("private words a reader cannot follow: " + ", ".join(private))
+    if _PATHISH.search(post):
+        probs.append("a file path or a note label (why:, Sources:); a post carries neither")
+    if privacy.problem(post):
+        probs.append("it names one of his employers")
+    return probs
+
+
+def batch_problems(posts: list[str]) -> list[str]:
+    if not POSTS_MIN <= len(posts) <= POSTS_MAX:
+        return [(f"{len(posts)} posts; write {POSTS_MIN} to {POSTS_MAX}, separated by a line"
+                 " holding only ---")]
+    out = []
+    for i, post in enumerate(posts, 1):
+        found = post_problems(post)
+        if found:
+            out.append(f"post {i} (\u201c{post[:50]}\u2026\u201d): " + "; ".join(found))
+    return out
+
+
+def _read(path: str) -> str | None:
+    try:
+        return memory.read(path)
+    except FileNotFoundError:
+        return None
+
+
+@hq_tool(action=ActionClass.VAULT_WRITE)
+async def file_posts(ctx: RunContext[HQDeps], sources: list[str], title: str = "") -> str:
+    """File today's posts, which you wrote as the text of this same reply.
+
+    Write only the posts in your reply, each exactly as he would paste it on
+    X, separated by a line holding only `---`. Then, in that same reply, call
+    this with `sources`: for each post in order, the lesson, note or board row
+    it rests on. Code checks every post against his voice and files them at
+    the top of projects/content/ideas.md; a post that fails is named with why.
     """
     if not memory.in_scope(IDEAS_PATH, ctx.deps.vault_write_scopes):
         raise ModelRetry(f"refused: agent {ctx.deps.agent} may not write {IDEAS_PATH}")
-    text = reply_text(ctx.messages)
-    problems = batch_problems(text)
+    posts = split_posts(reply_text(ctx.messages))
+    problems = batch_problems(posts)
+    if len(sources) != len(posts):
+        problems.append(f"{len(sources)} sources for {len(posts)} posts; one per post, in order")
     if problems:
         raise ModelRetry(
-            "; ".join(problems) + ". Write the batch as the text of your reply, then call"
-            " file_ideas in that same reply")
+            "; ".join(problems) + ". Rewrite what is named and send the whole batch again as"
+            " your reply's text, then call file_posts in that same reply")
     day = f"{_today():%Y-%m-%d}"
-
-    def _read() -> str | None:
-        try:
-            return memory.read(IDEAS_PATH)
-        except FileNotFoundError:
-            return None
-
-    existing = await asyncio.to_thread(_read)
+    existing = await asyncio.to_thread(_read, IDEAS_PATH)
     if existing and re.search(rf"^## {day}\b", existing, re.MULTILINE):
-        raise ModelRetry(f"today's batch ({day}) is already filed; say so and stop")
+        raise ModelRetry(f"today's posts ({day}) are already filed; say so and stop")
+    batch = "\n\n---\n\n".join(posts)
     content = memory.stamp_frontmatter(
-        with_batch(existing, text, day, title), author=ctx.deps.agent, provenance="agent")
+        with_batch(existing, batch, day, title), author=ctx.deps.agent, provenance="agent")
     problem = memory.write_problem(IDEAS_PATH, content, actor=ctx.deps.agent, existing=existing)
     if problem:
         raise ModelRetry(problem)
+    where = "\n".join(f"- post {i}: {s}" for i, s in enumerate(sources, 1))
+    prior = await asyncio.to_thread(_read, SOURCES_PATH)
     try:
         await memory.write(IDEAS_PATH, content, actor=ctx.deps.agent)
+        await memory.write(SOURCES_PATH, memory.stamp_frontmatter(
+            with_batch(prior, where, day, title).replace("# Content ideas", "# Post sources", 1),
+            author=ctx.deps.agent, provenance="agent"), actor=ctx.deps.agent)
     except memory.WriteRefused as exc:
         raise ModelRetry(str(exc)) from None
-    n = len(_IDEA.findall(text))
-    await emit("ideas.filed", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
-               payload={"ideas": n, "day": day})
-    return f"filed {n} ideas under ## {day} at the top of {IDEAS_PATH}"
+    await emit("posts.filed", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
+               payload={"posts": len(posts), "day": day})
+    return f"filed {len(posts)} posts under ## {day} at the top of {IDEAS_PATH}"

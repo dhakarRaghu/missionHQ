@@ -54,12 +54,13 @@ export function splitBatches(markdown: string): Batch[] {
     const text = lines.join("\n").trim();
     if (!heading || !text) return;
     const match = HEADING_DATE_RE.exec(heading);
+    const posts = splitPosts(text).length;
     batches.push({
       heading,
       body: text,
       date: match?.[1] ?? "",
       title: (match?.[2] ?? heading).trim() || heading,
-      count: text.split("\n").filter((l) => NUMBERED_IDEA_RE.test(l.trim()))
+      count: posts || text.split("\n").filter((l) => NUMBERED_IDEA_RE.test(l.trim()))
         .length,
     });
   };
@@ -157,6 +158,35 @@ function CopyButton({ text }: { text: string }) {
       )}
       {copied ? "Copied" : "Copy"}
     </Button>
+  );
+}
+
+/** Posts in a batch: the text between lines holding only `---`. */
+export function splitPosts(body: string): string[] {
+  const posts = body
+    .split(/^\s*-{3,}\s*$/m)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return posts.length > 1 ? posts : [];
+}
+
+/**
+ * A daily batch is paste-ready posts, one card each with its own Copy, so
+ * what he copies is exactly one post and nothing else. An older batch (ideas
+ * as bullets) has no separators and renders as one block.
+ */
+function BatchBody({ body }: { body: string }) {
+  const posts = splitPosts(body);
+  if (!posts.length) return <Markdown content={body} />;
+  return (
+    <ul className="flex flex-col gap-3">
+      {posts.map((post, i) => (
+        <li key={i} className="bg-muted/40 flex gap-2 rounded-lg border px-4 py-3">
+          <p className="min-w-0 flex-1 text-sm leading-6 whitespace-pre-wrap">{post}</p>
+          <CopyButton text={post} />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -346,7 +376,7 @@ function BatchSection({
                   </div>
                   {expanded ? (
                     <div className="border-t px-4 py-3">
-                      <Markdown content={batch.body} />
+                      <BatchBody body={batch.body} />
                     </div>
                   ) : null}
                 </article>
@@ -398,7 +428,7 @@ export function IdeasView() {
         label="Posts to publish"
         itemNoun="post"
         defaultOpen={1}
-        emptyHint="Scout writes five paste-ready posts in your voice each evening. Nothing yet."
+        emptyHint="Sage writes three to five paste-ready posts in your voice every evening at 22:40. Nothing yet."
       />
     </div>
   );

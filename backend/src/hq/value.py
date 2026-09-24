@@ -6,8 +6,8 @@ Seven days, counted from the tables, no model call:
 - concept taps, got it vs lost me (`hq.concept_signals`),
 - jobs he moved (`job.updated` events that changed a status; only the
   console's `update_job` emits them, so every one is his),
-- content ideas vs drafts vs posts (ideas are counted in the dated batches
-  sage's content-ideas skill appends to `projects/content/ideas.md`, drafts
+- posts written vs drafts (posts are counted in the dated batches sage's
+  daily-posts skill puts at the top of `projects/content/ideas.md`, drafts
   from `post.drafted` events;
   nothing records a post going out, so that one says "not recorded"),
 - model spend (`hq.model_calls`) and tutor's spend per lesson written.
@@ -58,27 +58,35 @@ def _at(value: Any) -> datetime | None:
 
 
 def count_ideas(markdown: str | None, since: date, until: date) -> int | None:
-    """Ideas in the dated `## YYYY-MM-DD` batches inside the window.
-
-    A batch heading may carry a title (`## 2026-09-23 — Morning batch`); an
-    idea is a top-level `- ` bullet or numbered item under it. None when the
-    file could not be read."""
+    """Posts (or, in older batches, ideas) in the dated `## YYYY-MM-DD`
+    batches inside the window. A daily posts batch separates its posts with a
+    line holding only `---`; an older ideas batch lists one top-level `- ` or
+    numbered item per idea. None when the file could not be read."""
     if markdown is None:
         return None
-    n, inside = 0, False
+    batches: list[tuple[bool, list[str]]] = []
     for line in markdown.splitlines():
         head = _BATCH_RE.match(line)
         if head:
             try:
                 day = date.fromisoformat(head.group(1))
             except ValueError:
-                inside = False
+                batches.append((False, []))
                 continue
-            inside = since <= day <= until
+            batches.append((since <= day <= until, []))
         elif line.startswith("## "):
-            inside = False
-        elif inside and _IDEA_RE.match(line):
-            n += 1
+            batches.append((False, []))
+        elif batches:
+            batches[-1][1].append(line)
+    n = 0
+    for inside, lines in batches:
+        if not inside:
+            continue
+        separators = sum(1 for ln in lines if ln.strip() == "---")
+        if separators:
+            n += separators + 1
+        else:
+            n += sum(1 for ln in lines if _IDEA_RE.match(ln))
     return n
 
 

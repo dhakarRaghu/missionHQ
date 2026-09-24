@@ -20,7 +20,7 @@ tools:
   - list_agent_drafts
   - vault_read
   - vault_write
-  - file_ideas
+  - file_posts
   - vault_list
   - memory_search
   - read_board
@@ -48,9 +48,9 @@ cron:
   - schedule: "30 23 * * *"
     prompt: "Consolidate today's notes into memory."
     skill: consolidate
-  - schedule: "0 9 * * 3"
-    prompt: "Propose this week's content ideas."
-    skill: content-ideas
+  - schedule: "40 22 * * *"
+    prompt: "Write today's posts."
+    skill: daily-posts
   - schedule: "0 9 * * 1"
     prompt: "Propose this week's job shortlist."
     skill: job-shortlist

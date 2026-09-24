@@ -73,7 +73,7 @@ def test_the_schedule_is_the_intended_one() -> None:
     crons = {(n, e.schedule) for n, s in _specs().items() for e in s.cron}
     assert crons == {
         ("sage", "30 22 * * *"), ("sage", "0 20 * * 0"), ("sage", "30 23 * * *"),
-        ("sage", "0 9 * * 3"), ("sage", "0 9 * * 1"), ("hunter", "0 21 * * *"),
+        ("sage", "40 22 * * *"), ("sage", "0 9 * * 1"), ("hunter", "0 21 * * *"),
     }
     starters = {(d[0], d[1]) for d in engine.SYSTEM_DISPATCHES}
     assert starters == {("course_study", "30 18 * * *"), ("job_search", "15 21 * * *"),

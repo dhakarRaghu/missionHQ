@@ -244,7 +244,8 @@ async def _outline_step(spec_model: str, article: bool, material: str,
     # gateway does not stream tool-call arguments, and a plan generated in
     # silence for five minutes is cut as an idle connection at 300 seconds.
     schema = PageOutline if page else (ArticleOutline if article else Outline)
-    agent = Agent(model, output_type=PromptedOutput(schema),
+    # Three tries at well-formed JSON: one malformed plan ended a whole run.
+    agent = Agent(model, output_type=PromptedOutput(schema), retries=3,
                   instructions=outline_instructions(article, page),
                   model_settings=_with(model_settings, reasoning_effort=OUTLINE_EFFORT,
                                        timeout=OUTLINE_LIMIT_S))
@@ -1096,6 +1097,7 @@ class PostDraft(BaseModel):
 async def _post_step(spec_model: str, instructions: str, prompt: str) -> dict[str, Any]:
     model, model_settings = _model_for(spec_model)
     agent = Agent(model, output_type=PromptedOutput(PostDraft), instructions=instructions,
+                  retries=3,
                   model_settings=_with(model_settings, reasoning_effort=SECTION_EFFORT))
     result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=4))
     return result.output.model_dump()
