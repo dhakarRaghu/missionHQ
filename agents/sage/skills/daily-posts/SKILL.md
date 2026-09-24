@@ -11,7 +11,9 @@ Only what is true of him today:
   it as reading or learning ("I was reading how vLLM..."), never as a thing
   he built or measured;
 - what his own agent system did: `read_activity`, `read_board`, today's
-  daily note. He built it, so a real run, cost or failure there is his;
+  daily note. He built it, so a real run, cost or failure there is his. Say
+  who did the work: "my job sweep found", "my writing pipeline refused", not
+  "I checked" for a thing an agent did;
 - his job search: what the board shows, never a company he has not applied
   to named as if he had.
 

@@ -32,7 +32,8 @@ def with_batch(existing: str | None, batch: str, day: str, title: str) -> str:
     lines = batch.strip().splitlines()
     if lines and lines[0].startswith("## "):
         lines = lines[1:]
-    heading = f"## {day}" + (f" — {title.strip()}" if title.strip() else "")
+    title = re.sub(r"^\d{4}-\d{2}-\d{2}\s*[—–-]?\s*", "", title.strip())  # the date is added here
+    heading = f"## {day}" + (f" — {title}" if title else "")
     section = heading + "\n\n" + "\n".join(lines).strip() + "\n"
     if not existing:
         return "# Content ideas\n\n" + section
