@@ -470,3 +470,12 @@ def test_a_week_review_recalls_each_lesson_whole() -> None:
     out = lw.lesson_essentials(page)
     assert "Batches rebuild each step." in out and "Rebuild the batch." in out
     assert "A1" in out and "long prose" not in out
+
+
+def test_an_over_length_page_is_cut_where_the_parts_ran_over() -> None:
+    w = lw.Writer.__new__(lw.Writer)
+    w.budgets = {1: 100, 2: 100, 3: 100}
+    w.parts = ["", "<p>" + "word " * 90 + "</p>", "<p>" + "word " * 300 + "</p>",
+               "<p>" + "word " * 150 + "</p>"]
+    assert w._over_budget("the article is 2829 words, which is about 14 minutes") == [2, 3]
+    assert w._over_budget("some other refusal") == []

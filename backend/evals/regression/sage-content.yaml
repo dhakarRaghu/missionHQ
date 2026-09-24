@@ -48,7 +48,7 @@
     args_match:
       file_ideas: "why:"
     args_not_match:
-      vault_write: "drafts/|projects/content/ideas"
+      vault_write: '"path": "(drafts/|projects/content/ideas)'
   judge:
     - Every idea names the lesson, run or note it comes from.
     - No idea claims he built, ran or measured something the material does not show.

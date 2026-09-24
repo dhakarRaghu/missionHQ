@@ -619,7 +619,7 @@ def _concept_list(outline: Outline) -> str:
 OPENING_WORDS = 150
 APPARATUS_WORDS = {"lab": 200, "checkpoint": 160, "post": 120, "sources": 60,
                    "orientation": 180, "cheatsheet": 200}
-BUDGET_SLACK = 1.35          # a part this far past its budget is sent back
+BUDGET_SLACK = 1.2           # a part this far past its budget is sent back
 RESTATEMENT_FLOOR = 30       # words a short part may spend on its key points
 
 
@@ -808,6 +808,16 @@ class Writer:
                 hits.append(i)
         return hits
 
+    def _over_budget(self, message: str) -> list[int]:
+        """For a page over its word limit: the parts furthest past their own
+        budgets, which is where the cut belongs."""
+        if not self.budgets or "words, which is about" not in message:
+            return []
+        over = sorted(((lt._visible_words(self.parts[i]) / b, i)
+                       for i, b in self.budgets.items() if i < len(self.parts) and b),
+                      reverse=True)
+        return sorted(i for ratio, i in over[:3] if ratio > 1.0)
+
     def _failing_parts(self) -> list[int]:
         assert self.outline is not None
         out = []
@@ -836,13 +846,17 @@ class Writer:
                 message = str(exc)
                 # Named by a quote, a url or a heading; failing that, the
                 # parts that fail their own checks, which mirror the page's.
-                parts = self._parts_quoting(message) or self._failing_parts()
+                parts = (self._parts_quoting(message) or self._over_budget(message)
+                         or self._failing_parts())
                 self.report.append(f"page check: {message[:300]}"
                                    + (f" (sections {parts})" if parts else ""))
                 if round_ == REPAIR_ROUNDS or not parts:
                     raise
                 for i in parts:
-                    await self.write_section(i, [f"the whole-page check said: {message}"])
+                    note = f"the whole-page check said: {message}"
+                    if i in self.budgets:
+                        note += f" This section's share is about {self.budgets[i]} words."
+                    await self.write_section(i, [note])
         raise AssertionError("unreachable")
 
     def _material(self) -> str:

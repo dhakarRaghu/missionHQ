@@ -144,7 +144,11 @@ def _sandboxed_learning() -> Iterator[Path]:
     """A throwaway copy of learning/ for the lesson tools to write into.
     Lessons are copied, not linked, so a write can never land on a real file."""
     real = settings().learning_dir
-    tmp = Path(tempfile.mkdtemp(prefix="hq-eval-learning-"))
+    # Named like the real folder, so a repo path ("learning/lessons/x.md")
+    # resolves from its parent exactly as it does in production.
+    root = Path(tempfile.mkdtemp(prefix="hq-eval-"))
+    tmp = root / real.name
+    tmp.mkdir()
     try:
         for entry in real.iterdir():
             target = tmp / entry.name
@@ -156,7 +160,7 @@ def _sandboxed_learning() -> Iterator[Path]:
         yield tmp
     finally:
         settings().learning_dir = real
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def _brief(case: Case, spec: loader.AgentSpec) -> str:
