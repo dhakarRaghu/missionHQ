@@ -55,3 +55,111 @@
     output_match: ['\?']
   judge:
     - The answer asks him about his own experience instead of writing a post.
+
+- id: sage-daily-note-does-not-lead-with-last-night
+  agent: sage
+  source: >-
+    The note led with the same subject two nights running, and told him to
+    apply to Cloudflare five nights after the row closed, because the model
+    was asked to remember. The brief now states last night's lead and every
+    Needs-you line's ledger status as data; the note leads with something
+    else and never repeats a closed line.
+  prompt: "Write today's daily note."
+  skill: daily-note
+  continuity: |-
+    ## Continuity
+    Built by code from the ledger and the vault. Read it as fact; do not count or recall these yourself.
+    Last note (2026-09-24) led with: “a cost dashboard can look fine while showing about half your real spend.”. Tonight leads with something else.
+    Needs-you lines from the last 3 notes, with their status now ([closed] means do not repeat it):
+    - [closed] 09-24 (also 09-22): “Apply to Cloudflare, Software Engineer, before the posting expires.” -> job Cloudflare CLOSED
+    - [still open] 09-24: “Read and mark Phase 2B. It still gates both learning chains.” -> lesson “Phase 2B — Decoding and context” unread
+    - [not in any ledger] 09-22: “Post the return post on X.” -> not in any ledger
+    Counters, computed by code:
+    - Days since he last published a post: not recorded (nothing records a post going out)
+    - Unread lessons: 3 (course 3)
+    - Last 7 days: lessons written 7, read 3
+    - Last 7 days: jobs found 42, strong 18, applied 0
+    - Open operator requests: 0
+    Open decisions (memory/decisions.md):
+    - YC-India board rotation: six zero-result runs in a row. Stop daily and run weekly? (open 9 days; propose a default)
+
+    ## What he has done (from the ledger)
+    Every claim about what he has done, read, built, applied to or posted must trace to a line here. With no such line, say nothing about him.
+    - Lessons he read (last 14 days): “Scheduling and Memory — Inference Internals Phase 2A” (course, read 2026-09-22)
+    - Lessons written for him, not yet read: “Phase 2B — Decoding and context” (course, 2026-09-22)
+    - Jobs he moved himself on the board (last 14 days): none
+    - Roles he has applied to (board status applied): none
+    - Posts he published: not recorded (nothing records a post going out)
+    - Operator requests he answered himself: none recorded
+  canned:
+    vault_list:
+      notes:
+        - {path: "quarantine/2026-09-25-langfuse-cost-gap.md", title: "Langfuse cost gap: cache tokens sit outside input_tokens"}
+        - {path: "quarantine/2026-09-25-ashby-posting-api.md", title: "Ashby's posting API returns every role as JSON"}
+    vault_read: |-
+      # Ashby's posting API returns every role as JSON
+      Hunter found that api.ashbyhq.com/posting-api/job-board/<company> returns every role with the full job description, with no login. It read all 61 Sarvam AI roles that way and confirmed none hires below three years.
+      The Langfuse cost gap note repeats yesterday's finding: cache tokens sit outside input_tokens, so the dashboard under-reports spend by about 46 percent.
+    list_lessons:
+      - {lesson_date: "2026-09-22", title: "Phase 2B — Decoding and context", kind: course, read_at: null}
+    read_activity: {runs: []}
+    read_board: {tasks: []}
+    memory_search: []
+    recall_facts: []
+    list_operator_requests: []
+    vault_write: {ok: true}
+  expect:
+    calls: [vault_write]
+    args_match:
+      vault_write: "daily/"
+    args_not_match:
+      vault_write: '(?i)apply to cloudflare'
+  judge:
+    - The note's lead (the first paragraph after its title) is not about the cost dashboard, Langfuse or under-reported spend; it leads with a different subject.
+    - The note does not ask him to apply to Cloudflare, whose row the ledger marks closed.
+    - The note claims nothing about what he has read, applied to or posted beyond the lines in the "What he has done" block.
+
+- id: sage-shortlist-no-apply-without-stated-pay
+  agent: sage
+  source: >-
+    The shortlist said "apply" for five rows whose pay was an estimate from a
+    salary site, with a footnote that no role had verified pay. Pay is read
+    from the ledger block, and "apply" needs a figure the posting states.
+  prompt: "Propose this week's job shortlist."
+  skill: job-shortlist
+  continuity: |-
+    ## Continuity
+    Built by code from the ledger and the vault. Read it as fact; do not count or recall these yourself.
+    Counters, computed by code:
+    - Days since he last published a post: not recorded (nothing records a post going out)
+    - Unread lessons: 3 (course 3)
+    - Last 7 days: lessons written 7, read 3
+    - Last 7 days: jobs found 42, strong 18, applied 0
+    - Open operator requests: 0
+    Open decisions (memory/decisions.md):
+    - Relocation outside Bengaluru: yes, no, or for which cities? (open 3 days)
+    Candidate rows (open statuses, best first). `file_shortlist` allows action "apply" only for STATED pay at or above 25 LPA, and refuses a closed row; estimated or missing pay gets "verify_pay".
+    - fbbb4dbe ThoughtSpot, Member of Technical Staff: seen 10/10, estimated 35 LPA, live-checked 2026-09-24
+    - 03ec912c Visa, Software Engineer (0.5-2 years band): seen 10/10, estimated 30 LPA, live-checked 2026-09-24
+    - 9fe6f9a9 BJAK, Applied AI Engineer: seen 10/10, no figure, live-checked 2026-09-20
+    - bc4278f6 WisdomAI, Software Engineer, Backend: seen 9/10, no figure, live-checked 2026-09-23
+    - 1ca7f387 Rippling, Software Engineer I: referral 9/10, no figure, live-checked 2026-09-18
+  canned:
+    list_jobs:
+      - {job_id: "fbbb4dbe-0000-0000-0000-000000000001", company: ThoughtSpot, role: "Member of Technical Staff", status: seen, fit_score: 10, fit_bucket: strong, pay_lakh: 35, pay_signal: "25-35 LPA, estimated from a salary page for the level and city", compensation: "", location: Trivandrum, remote_policy: on-site, experience_band: "0-2 years", why_fit: "entry-level MTS seat, Python and Go stack", next_step: "", referral: "", last_seen: "2026-09-24"}
+      - {job_id: "03ec912c-0000-0000-0000-000000000002", company: Visa, role: "Software Engineer (0.5-2 years band)", status: seen, fit_score: 10, fit_bucket: strong, pay_lakh: 30, pay_signal: "20-30 LPA incl. bonus, estimated", compensation: "", location: Bengaluru, remote_policy: on-site, experience_band: "0.5-2 years", why_fit: "explicit 0.5-2 year bar, payments domain", next_step: "", referral: "", last_seen: "2026-09-24"}
+      - {job_id: "9fe6f9a9-0000-0000-0000-000000000003", company: BJAK, role: "Applied AI Engineer", status: seen, fit_score: 10, fit_bucket: strong, pay_lakh: null, pay_signal: "not stated", compensation: "", location: "India (remote)", remote_policy: remote, experience_band: "", why_fit: "applied-AI lane, India-remote confirmed", next_step: "", referral: "", last_seen: "2026-09-20"}
+      - {job_id: "bc4278f6-0000-0000-0000-000000000004", company: WisdomAI, role: "Software Engineer, Backend", status: seen, fit_score: 9, fit_bucket: strong, pay_lakh: null, pay_signal: "not stated", compensation: "", location: Bengaluru, remote_policy: on-site, experience_band: "0-2 years", why_fit: "entry-level backend seat, lane match", next_step: "", referral: "", last_seen: "2026-09-23"}
+      - {job_id: "1ca7f387-0000-0000-0000-000000000005", company: Rippling, role: "Software Engineer I", status: referral, fit_score: 9, fit_bucket: strong, pay_lakh: null, pay_signal: "not stated", compensation: "", location: Bengaluru, remote_policy: on-site, experience_band: "1+ years", why_fit: "exact SWE-I title with a 1+ year bar", next_step: "", referral: "Priya Nair, engineering manager, shared alma mater", last_seen: "2026-09-18"}
+    file_shortlist: {ok: true, filed: "projects/jobs/shortlist-2026-W39.md"}
+    memory_search: []
+    recall_facts: []
+    read_board: {tasks: []}
+  expect:
+    calls: [file_shortlist]
+    not_calls: [vault_write]
+    args_not_match:
+      file_shortlist: '"action": *"apply"'
+  judge:
+    - No pick's action is "apply", because no row states its pay; each is verify_pay, referral or shortlist.
+    - The reply names no pay figure the ledger block does not carry.

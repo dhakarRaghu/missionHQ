@@ -746,7 +746,8 @@ async def list_jobs(
 
     Check this BEFORE researching a company, so you do not spend a run
     rediscovering something already recorded. Pass `company` to see what is
-    known about one, or `status` to see a stage of the pipeline.
+    known about one, or `status` to see a stage of the pipeline. Each row's
+    `job_id` is what `file_shortlist` takes.
     """
     where: list[str] = ["true"]
     params: list[object] = []
@@ -760,8 +761,8 @@ async def list_jobs(
         params.append(f"%{company.strip()}%")
     params.append(LIST_LIMIT)
     return await db.fetch(
-        "SELECT company, role, url, linkedin_url, source, provider, external_id, location,"
-        " remote_policy, experience_band, compensation, pay_signal,"
+        "SELECT id::text AS job_id, company, role, url, linkedin_url, source, provider,"
+        " external_id, location, remote_policy, experience_band, compensation, pay_signal,"
         " pay_lakh::float8 AS pay_lakh, lane, stack, fit_score,"
         " fit_bucket, status, why_fit, next_step, referral, seen_count, last_seen"
         f" FROM hq.jobs WHERE {' AND '.join(where)}"

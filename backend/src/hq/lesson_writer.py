@@ -389,11 +389,17 @@ class Material(BaseModel):
     source: str = ""             # his phase, for a course phase
     lab_source: str = ""         # his phase, for a lab card: its commands are kept exactly
     prompt: str                  # everything the outline call reads
+    # What he has done, from the ledger (hq.owner_state): the only source a
+    # "why it matters to you" sentence may name him from.
+    owner_state: str = ""
     source_urls: list[str] = Field(default_factory=list)
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
 async def gather(payload: dict[str, Any]) -> Material:
+    from hq import owner_state
+
+    his = await owner_state.block()
     if learning.is_course_written(payload):
         slug = str(payload.get("slug") or "")
         source = await asyncio.to_thread(lt.read_course_source_text, slug)
@@ -410,10 +416,10 @@ async def gather(payload: dict[str, Any]) -> Material:
             + (f"He has already read these articles on this phase; do not retell"
                f" them:\n{articles}\n\n" if articles else "")
             + f"## Hunter's study note ({note_path})\n\n{note[:NOTE_CHARS]}\n\n"
-            f"## His phase, as he wrote it\n\n{source[:SOURCE_CHARS]}"
+            f"## His phase, as he wrote it\n\n{source[:SOURCE_CHARS]}\n\n{his}"
         )
         return Material(article=False, slug=slug, note=note, source=source, prompt=prompt,
-                        source_urls=_source_urls(note), payload=payload)
+                        owner_state=his, source_urls=_source_urls(note), payload=payload)
 
     digests = [str(d) for d in payload.get("digests") or []]
     notes = [(d, await _read_vault(d)) for d in digests]
@@ -434,10 +440,10 @@ async def gather(payload: dict[str, Any]) -> Material:
         f"# Today's article\n\nKind: {kind}. Relationship to the phase: "
         f"{relationship or 'not stated'}.\nWhat the scan said it adds: "
         f"{payload.get('adds') or '(not given)'}\nHis interests: {payload.get('topics') or ''}\n\n"
-        f"{phase}\n\n## Hunter's digests\n\n{note[:NOTE_CHARS]}"
+        f"{phase}\n\n## Hunter's digests\n\n{note[:NOTE_CHARS]}\n\n{his}"
     )
     return Material(article=True, slug="", kind=kind, relationship=relationship, note=note,
-                    prompt=prompt, source_urls=urls, payload=payload)
+                    prompt=prompt, owner_state=his, source_urls=urls, payload=payload)
 
 
 # --- checks -------------------------------------------------------------------
@@ -693,6 +699,7 @@ def _section_prompt(m: Material, outline: Outline, i: int, s: SectionPlan, previ
         + (f"## The end of the section above\n\n{previous[-PREVIOUS_CHARS:]}\n\n" if previous else "")
         + f"## The study note\n\n{m.note[:NOTE_CHARS]}\n\n"
         + (f"## His phase, the parts this section draws on\n\n{drawn}\n\n" if drawn else "")
+        + (f"{m.owner_state}\n\n" if m.owner_state else "")
     )
     if budget:
         prompt += (f"## Length\n\nAbout {budget} words of prose; figures, tables and code"

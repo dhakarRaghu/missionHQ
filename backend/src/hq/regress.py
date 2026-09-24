@@ -80,6 +80,7 @@ class Case(BaseModel):
     source: str                      # the incident or rule this case holds
     prompt: str | None = None
     skill: str = ""                  # a cron slot's skill: code puts its text in the brief
+    continuity: str = ""             # a canned continuity block, appended as production would
     payload: dict[str, Any] | None = None   # a staged-writer task, inline
     brief_from_task: str | None = None
     canned: dict[str, Any] = Field(default_factory=dict)
@@ -176,7 +177,12 @@ def _brief(case: Case, spec: loader.AgentSpec) -> str:
     if not case.skill:
         return case.prompt
     path = settings().agents_dir / spec.name / "skills" / case.skill / "SKILL.md"
-    return case.prompt + f"\n\n## The {case.skill} skill\n\n" + path.read_text().strip()
+    brief = case.prompt + f"\n\n## The {case.skill} skill\n\n" + path.read_text().strip()
+    if case.continuity.strip():
+        # Production appends hq.continuity's block from the live ledger; a
+        # case carries the block it wants judged, so the state is fixed.
+        brief += "\n\n" + case.continuity.strip()
+    return brief
 
 
 # Tools that file the text of the reply that calls them. Their arguments are

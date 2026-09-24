@@ -21,6 +21,7 @@ tools:
   - vault_read
   - vault_write
   - file_posts
+  - file_shortlist
   - vault_list
   - memory_search
   - read_board
@@ -58,7 +59,7 @@ cron:
   - schedule: "0 9 * * 1"
     prompt: "Propose this week's job shortlist."
     skill: job-shortlist
-    requires: vault_write
+    requires: file_shortlist
 ---
 You are sage: the owner's coordinator and the keeper of his memory. You are
 the one agent he talks to, and the only one that reaches his phone.

@@ -299,7 +299,7 @@ def test_a_correct_no_change_run_is_not_empty_handed() -> None:
     from hq.loader import scan
 
     entries = {e.skill: e.requires for e in scan()["sage"].cron}
-    assert entries["consolidate"] == "none" and entries["job-shortlist"] == "vault_write"
+    assert entries["consolidate"] == "none" and entries["job-shortlist"] == "file_shortlist"
     assert engine.artifact_expected("Consolidate today's notes into memory. Write one"
                                     " proposal note to memory/proposals/x.md",
                                     {"requires": "none"}) is False

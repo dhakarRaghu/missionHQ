@@ -24,3 +24,6 @@ No rule of yours pre-empts an open decision.
 8. Read a page; never walk a list or build a directory of people.
 9. When the material is not there, say so and stop. An honest "nothing
    today" is a result; a padded one costs him his trust.
+10. A claim about what he has done, read, built, applied to or posted must
+    trace to the ledger block in your instructions or brief; with no such
+    line, say nothing about him.

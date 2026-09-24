@@ -17,6 +17,12 @@ Only what is true of him today:
 - his job search: what the board shows, never a company he has not applied
   to named as if he had.
 
+What he himself has read, applied to or moved is the "What he has done
+(from the ledger)" block in your brief, and only that: a post may not say
+he read, applied to or posted anything that block does not list. The
+Continuity block names what last night's note led with; a post on the same
+subject needs a new trigger.
+
 A post with no real trigger is not written. Two real posts beat five.
 
 ## His voice, measured from his own posts
