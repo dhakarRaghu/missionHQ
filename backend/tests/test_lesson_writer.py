@@ -505,3 +505,22 @@ def test_plainness_is_measured_on_teaching_prose_alone() -> None:
                + "https://a.dev/a-very-long-url-with-many-words-in-it and what it gave " * 12
                + "</li></ul>")
     assert lt.reading_ease(lt.teaching_prose(prose + sources)) == lt.reading_ease(lt._page_text(prose))
+
+
+def test_the_release_test_is_a_flag_on_the_last_attempt(tmp_path: Path, monkeypatch) -> None:
+    calls = {"plans": 0}
+
+    async def outline_step(*a: Any, **k: Any):
+        calls["plans"] += 1
+        return _outline()
+
+    async def release_step(claims):
+        return {"fails": ["c1"], "reasons": ["a default value"]}
+
+    monkeypatch.setattr(lw, "_outline_step", outline_step)
+    monkeypatch.setattr(lw, "_release_step", release_step)
+    material = lw.Material(article=True, slug="", kind="paper", note=NOTE, prompt="m")
+    spec = type("Spec", (), {"model": "teacher", "name": "tutor"})()
+    w = lw.Writer(spec, HQDeps(agent="tutor", task_id=None, run_id=None), material)  # type: ignore[arg-type]
+    assert asyncio.run(w.plan()) is not None
+    assert calls["plans"] == lw.PLAN_ATTEMPTS and w.release_flags

@@ -746,6 +746,7 @@ class Writer:
         self.parts: list[str] = []            # html per part, part 1 = the opening
         self.report: list[str] = []
         self.review_status = "passed"
+        self.release_flags: list[str] = []
         self.budgets: dict[int, int] = {}
 
     # Parts: 1 is the opening (story + concept list); section k is part k + 1.
@@ -772,6 +773,15 @@ class Writer:
                 problems = [f"{cid} fails the release test: {why}"
                             for cid, why in zip(verdict.fails, verdict.reasons + [""] * 9,
                                                 strict=False)]
+                if problems and attempt == PLAN_ATTEMPTS - 1:
+                    # The judge's doubt on the last try is recorded, not
+                    # fatal: a phase about knobs (2B) had a concept refused
+                    # three times and the whole phase was lost for it. The
+                    # lesson is written and flagged, as an unmapped citation
+                    # is, so he sees the doubt without losing the run.
+                    self.release_flags = problems
+                    self.report.append("release test, kept with doubts: " + "; ".join(problems))
+                    return outline
             if not problems:
                 return outline
             self.report.append(f"plan attempt {attempt + 1} sent back: " + "; ".join(problems))
@@ -1011,9 +1021,15 @@ class Writer:
             self.review_status = "flagged"
             self.report.append(f"{len(unsupported)} sentence(s) the note does not support;"
                                " listed on the lesson")
-        notes = ("Sentences the study note does not support:\n"
-                 + "\n".join(f"- {c['claim'][:200]} ({c['why']})" for c in unsupported)
-                 if unsupported else "")
+        if self.release_flags:
+            self.review_status = "flagged"
+        notes = "\n\n".join(part for part in (
+            ("Sentences the study note does not support:\n"
+             + "\n".join(f"- {c['claim'][:200]} ({c['why']})" for c in unsupported)
+             if unsupported else ""),
+            ("Concepts the release test doubted:\n"
+             + "\n".join(f"- {f}" for f in self.release_flags) if self.release_flags else ""),
+        ) if part)
         await _once("review", lesson_id, self.review_status, notes)
         drop_outline(task_id)
         if self.m.article and self.m.kind == learning.FRONTIER and self.outline.frontier:
