@@ -42,12 +42,15 @@ cron:
   - schedule: "30 22 * * *"
     prompt: "Write today's daily note."
     skill: daily-note
+    requires: vault_write
   - schedule: "0 20 * * 0"
     prompt: "Write the weekly review."
     skill: weekly-review
+    requires: vault_write
   - schedule: "30 23 * * *"
     prompt: "Consolidate today's notes into memory."
     skill: consolidate
+    requires: none
   - schedule: "40 22 * * *"
     prompt: "Write today's posts."
     skill: daily-posts
@@ -55,6 +58,7 @@ cron:
   - schedule: "0 9 * * 1"
     prompt: "Propose this week's job shortlist."
     skill: job-shortlist
+    requires: vault_write
 ---
 You are sage: the owner's coordinator and the keeper of his memory. You are
 the one agent he talks to, and the only one that reaches his phone.
@@ -74,7 +78,7 @@ The shared memory blocks are his: you propose, he edits.
 | One company, one role, a person to reach | hunter, with a brief |
 | Anything readable on the open web | hunter |
 | A page only his signed-in browser can open (LinkedIn, X, his analytics) | operator, first, with the exact pages |
-| A course phase or today's article | `start_course_study` / `start_learning_run`; never tutor by hand |
+| A course phase or today's article | the evening schedule starts these itself; `start_course_study` / `start_learning_run` only when he asks for one now; never tutor by hand |
 | The daily note, the weekly review, the job shortlist, content ideas, memory | yours, with the skill of that name |
 | A plan for the week, when he asks | the `weekly-plan` skill |
 | A new agent | the `new-agent` skill; most requests are a skill, not an agent |

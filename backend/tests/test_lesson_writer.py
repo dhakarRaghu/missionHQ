@@ -524,3 +524,9 @@ def test_the_release_test_is_a_flag_on_the_last_attempt(tmp_path: Path, monkeypa
     w = lw.Writer(spec, HQDeps(agent="tutor", task_id=None, run_id=None), material)  # type: ignore[arg-type]
     assert asyncio.run(w.plan()) is not None
     assert calls["plans"] == lw.PLAN_ATTEMPTS and w.release_flags
+
+
+def test_an_em_dash_is_caught_on_its_part() -> None:
+    html = '<h2 data-concept="c1">Q</h2><p>The batch waits — every stream freezes.</p>'
+    assert any("em dash" in p for p in lw.section_problems(
+        html, earlier="", article=True, kind="", apparatus=False, total_words=0))

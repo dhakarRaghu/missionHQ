@@ -49,12 +49,12 @@ those belong to a concept section. It stays inside the length it is given.
 - `cheatsheet`: one `<pre class="cheatsheet">`, no prose.
 - `post`: two lines, each the claim and what makes it his.
 - `sources`: `<ul class="sources">`, one short line per url saying what it gave.
-- `orientation`: at most two short paragraphs. If the change needs more,
-  show it as a wrong/right `<div class="compare">` instead of more prose.
 - `recall`: a short `<ul>` of what to keep, one line each with where it came
   from. Nothing new is taught.
 - `orientation`: a short paragraph per earlier idea it builds on, and what
   it leaves for later.
+  At most two short paragraphs; if the change needs more, show it as a
+  wrong/right `<div class="compare">`, not more prose.
 
 ## What you return
 

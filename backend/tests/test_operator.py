@@ -91,7 +91,9 @@ def test_the_prompt_points_at_the_card_instead_of_repeating_it(workdir, codex_tu
     prompt = codex_turns[0]["prompt"]
 
     suffix = runner.EXTERNAL_SYSTEM_SUFFIX
-    assert prompt == f"{suffix}\n\n[operator — reads]\nTask: Read one page"
+    # The task arrives with the clock its contract refers to, then the card pointer.
+    assert prompt.startswith(f"{suffix}\n\nCurrent date and time:")
+    assert prompt.endswith("[operator — reads]\nTask: Read one page")
     assert len(suffix.splitlines()) == 4
     assert "AGENTS.md" in suffix
     # The rules live once, in the card: none of them is restated here.

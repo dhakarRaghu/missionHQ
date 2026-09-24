@@ -193,7 +193,9 @@ def artifact_expected(text: str, payload: Any) -> bool:
     The wording rule is kept for free-form tasks, which have nothing else.
     """
     if isinstance(payload, dict) and payload.get("requires"):
-        return True   # the cron entry names the tool its run must call
+        # The cron entry says: the tool its run must call, or "none" when a
+        # correct run may write nothing (a consolidation with no changes).
+        return payload["requires"] != "none"
     if isinstance(payload, dict) and payload.get("stage"):
         return False
     return expects_artifact(text)
@@ -1665,7 +1667,6 @@ async def _phase_articles_step(phase_slug: str) -> list[dict[str, Any]]:
 
 
 @DBOS.step()
-@DBOS.step()
 async def _untaught_digests_step(phase_slug: str) -> list[dict[str, Any]]:
     phase_filter = " AND phase_slug = %s" if phase_slug else ""
     params: tuple[Any, ...] = (phase_slug, learning.MAX_STUDY) if phase_slug else (learning.MAX_STUDY,)
@@ -1677,6 +1678,7 @@ async def _untaught_digests_step(phase_slug: str) -> list[dict[str, Any]]:
     )
 
 
+@DBOS.step()
 async def _digested_readings_step(urls: list[str]) -> list[dict[str, Any]]:
     return await db.fetch(
         "SELECT url, title, digest_path FROM hq.readings"

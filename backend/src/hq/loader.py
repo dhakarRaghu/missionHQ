@@ -274,7 +274,8 @@ def parse_job_md(agent_dir: Path) -> AgentSpec:
     if spec.name != agent_dir.name:
         raise ValueError(f"agent folder {agent_dir.name} vs manifest name {spec.name}")
     for entry in spec.cron:
-        if entry.requires and entry.requires not in {t.split(":")[0] for t in spec.tools}:
+        if entry.requires and entry.requires != "none" and entry.requires not in {
+                t.split(":")[0] for t in spec.tools}:
             raise ValueError(f"{agent_dir.name}/job.md: cron requires {entry.requires!r},"
                              " a tool the agent does not hold")
         if entry.skill and not (agent_dir / "skills" / entry.skill / "SKILL.md").is_file():

@@ -755,6 +755,17 @@ EXTERNAL_SYSTEM_SUFFIX = "\n".join(_SUFFIX_LINES).format(where="AGENTS.md in thi
 CLAUDE_SYSTEM_SUFFIX = "\n".join(_SUFFIX_LINES).format(where="the card below")
 
 
+def _external_prompt(prompt: str) -> str:
+    """The task with the clock its contract refers to. Codex gets AGENTS.md
+    and these lines only, so the date has to arrive with the task."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    now = datetime.now(ZoneInfo(settings().cron_tz))
+    return (f"Current date and time: {now:%A %Y-%m-%d %H:%M} ({settings().cron_tz})."
+            f" Use this date for anything you date.\n\n{prompt}")
+
+
 async def execute_external(
     spec: AgentSpec, *, prompt: str, deps: HQDeps,
 ) -> RunOutcome:
@@ -780,7 +791,8 @@ async def _execute_external(
         if runtime == "codex":
             workdir = await asyncio.to_thread(deliver_card, spec, card)
             payload = await codex_turn_step(
-                prompt, system_suffix=EXTERNAL_SYSTEM_SUFFIX, workdir=str(workdir),
+                _external_prompt(prompt), system_suffix=EXTERNAL_SYSTEM_SUFFIX,
+                workdir=str(workdir),
             )
         else:
             payload = await claude_turn_step(

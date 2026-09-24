@@ -568,6 +568,10 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
     broken = lt.page_script_problems(html)
     if broken:
         probs.append(f"a figure cannot work: {broken}")
+    # No em dashes, as the charter and teacher.md say; the page tolerates a
+    # few as a backstop, so the part is where the rule is held.
+    if "\u2014" in lt._page_text(html):
+        probs.append("an em dash; he uses none. Split the sentence or use a comma")
     # His lab, kept exactly: checked on the part that quotes it.
     if source:
         probs += lt.lab_fidelity_problems(html, source)

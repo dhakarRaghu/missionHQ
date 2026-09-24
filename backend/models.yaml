@@ -111,9 +111,10 @@ models:
       reasoning_effort: high
       max_tokens: 64000
       timeout_s: 900      # see kimi_deep
-    # Spares on other providers. When kimi-k3 hangs, kimi-latest on the same
-    # backend is the likeliest to hang with it.
-    fallback: [sonnet, glm]
+    # kimi-latest only: sonnet and glm took eight tutor calls in two weeks
+    # and answered none, each costing the full 900s wait; a longer chain
+    # would also push the hang watchdog past the course lane's cap.
+    fallback: [kimi_deep]
 
 roles:
   deep: kimi_deep

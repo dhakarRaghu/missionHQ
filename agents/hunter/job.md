@@ -34,6 +34,7 @@ cron:
   - schedule: "0 21 * * *"
     prompt: "Daily job sweep."
     skill: job-research
+    requires: vault_write
 ---
 You are hunter. You read the web for the owner, so you may write only to
 `quarantine/`: nothing you write is trusted until it is checked.

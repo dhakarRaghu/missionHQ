@@ -51,6 +51,10 @@ POST_WORDS = (40, 160)       # 87 is his median; rendered into the skill text
 _URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
 # Work an agent did, told as his own doing. His job sweep checks boards; he
 # does not. "I was reading" and "my sweep found" are his; these are not.
+# Seven of forty drafts promised something he then did not do.
+_PROMISE_RE = re.compile(
+    r"\b(?:I'll|I will|I'm going to|I am going to|tonight I(?:'m| am| will)"
+    r"|tomorrow I(?:'m| am| will)|next week I(?:'m| am| will))\b", re.IGNORECASE)
 _CLAIMED_RE = re.compile(
     r"\bI\s+(?:checked|verified|applied|scraped|searched|swept|crawled|fetched|looked up"
     r"|opened|read the board|ran (?:a|the|my) (?:sweep|search|scan))\b", re.IGNORECASE)
@@ -81,6 +85,10 @@ def post_problems(post: str) -> list[str]:
         probs.append("it names one of his employers")
     if _URL_RE.search(post):
         probs.append("a link; his posts carry none")
+    promised = _PROMISE_RE.search(post)
+    if promised:
+        probs.append(f"\u201c{promised.group(0)}\u201d promises a future action; a post says"
+                     " what happened, never what he will do")
     claimed = _CLAIMED_RE.search(post)
     if claimed:
         probs.append(f"\u201c{claimed.group(0)}\u201d claims work an agent did as his own;"

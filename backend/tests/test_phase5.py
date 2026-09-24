@@ -293,3 +293,30 @@ def test_a_post_may_not_claim_an_agents_work_as_his() -> None:
     assert any("claims work an agent did" in p for p in ct.post_problems(post))
     fixed = post.replace("I checked", "My job sweep checked")
     assert not any("claims work" in p for p in ct.post_problems(fixed))
+
+
+def test_a_correct_no_change_run_is_not_empty_handed() -> None:
+    from hq.loader import scan
+
+    entries = {e.skill: e.requires for e in scan()["sage"].cron}
+    assert entries["consolidate"] == "none" and entries["job-shortlist"] == "vault_write"
+    assert engine.artifact_expected("Consolidate today's notes into memory. Write one"
+                                    " proposal note to memory/proposals/x.md",
+                                    {"requires": "none"}) is False
+
+
+def test_a_post_may_not_promise_a_future_action() -> None:
+    from hq.tools import content_tools as ct
+
+    post = ("I'm going to rewrite my cost meter tonight. I don't think it counts cached"
+            " tokens right. I'd rather fix it than trust it. It's been wrong for a week"
+            " and nobody noticed, which is the part that bothers me the most right now.")
+    assert any("promises a future action" in p for p in ct.post_problems(post))
+
+
+def test_a_long_source_is_not_cut_to_forty_thousand() -> None:
+    from hq.tools import web_tools
+
+    html = "<p>" + "word " * 60_000 + "</p>"
+    assert len(web_tools._strip_html(html, web_tools.SOURCE_MAX_CHARS)) > web_tools.MAX_CHARS
+    assert len(web_tools._strip_html(html)) == web_tools.MAX_CHARS
