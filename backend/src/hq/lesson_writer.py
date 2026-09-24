@@ -503,7 +503,11 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
         evidence_share=lt.PAPER_EVIDENCE_SHARE if kind == learning.PAPER else lt.EVIDENCE_SHARE,
         total_words=total_words)
     for note in notes:
-        if apparatus and note.startswith("nothing to look at"):
+        # The page check's rule, not a looser one: apparatus needs nothing to
+        # look at only while it is short. Skipping it here outright let a
+        # long orientation section pass its part and fail the page, twice.
+        if (apparatus and note.startswith("nothing to look at")
+                and lt._visible_words(html) < lt.VISUAL_SECTION_WORDS):
             continue
         if budget and note.startswith("the article is already"):
             continue  # the part's own budget below is the length rule
@@ -543,7 +547,7 @@ def _concept_list(outline: Outline) -> str:
 # parts from the end, and the first live article reached 4,047 words.
 OPENING_WORDS = 150
 APPARATUS_WORDS = {"lab": 200, "checkpoint": 160, "post": 120, "sources": 60,
-                   "orientation": 220, "cheatsheet": 200}
+                   "orientation": 180, "cheatsheet": 200}
 BUDGET_SLACK = 1.35          # a part this far past its budget is sent back
 
 

@@ -399,3 +399,15 @@ def test_a_sent_back_plan_is_repaired_from_the_previous_one(tmp_path: Path, monk
     assert asyncio.run(w.plan()) is not None
     assert seen[0] == ([], None)
     assert seen[1][0] and seen[1][1] == plans[0]   # the problems AND the plan they are about
+
+
+def test_the_part_check_and_the_page_check_agree_on_figures() -> None:
+    long = " ".join(["The course said the batch was fixed; this run shows it is rebuilt."] * 30)
+    part = f'<h2 data-kind="orientation">What this changes in the course</h2><p>{long}</p>'
+    page_says = lt.sections_without_a_visual(part)
+    part_says = [p for p in lw.section_problems(part, earlier="", article=True, kind="",
+                                                apparatus=True, total_words=0)
+                 if p.startswith("nothing to look at")]
+    assert bool(page_says) == bool(part_says) == True
+    short = '<h2 data-kind="orientation">What this changes</h2><p>It changes one thing.</p>'
+    assert not lt.sections_without_a_visual(short)
