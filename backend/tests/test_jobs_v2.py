@@ -52,6 +52,9 @@ class _Recorder:
         self.sql.append((sql, params))
         return [{"id": "job-1", "seen_count": 1, "status": params[17] if len(params) > 17 else "seen"}]
 
+    async def fetchone(self, sql: str, params: tuple = ()) -> dict | None:
+        return None  # no earlier row for this role
+
     async def emit(self, kind: str, **kw) -> int:
         self.events.append((kind, kw.get("payload") or {}))
         return 1
@@ -61,6 +64,7 @@ class _Recorder:
 def recorder(monkeypatch) -> _Recorder:
     rec = _Recorder()
     monkeypatch.setattr(job_tools.db, "fetch", rec.fetch)
+    monkeypatch.setattr(job_tools.db, "fetchone", rec.fetchone)
     monkeypatch.setattr(job_tools, "emit", rec.emit)
     return rec
 
@@ -465,3 +469,13 @@ def test_the_verification_brief_carries_its_skill() -> None:
 
     brief = jp.verification_brief({"query": "x"}, [])
     assert "## The job-research skill" in brief
+
+
+def test_a_read_without_years_keeps_the_band_that_had_them() -> None:
+    from hq.tools.job_tools import strongest_band
+
+    stated = "5-10 years stated in posting"
+    assert strongest_band("No year floor visible: board feed", stated) == stated
+    assert strongest_band("0.5-2 years", stated) == "0.5-2 years"   # new evidence wins
+    assert strongest_band("not stated", "") == "not stated"
+    assert strongest_band("", "3+ yrs") == "3+ yrs"

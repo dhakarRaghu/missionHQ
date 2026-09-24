@@ -455,6 +455,22 @@ def _dedupe_key(
     return f"fallback:{_normal(company)}|{_normal(role)}|{_normal(location)}"
 
 
+def strongest_band(new: str, prior: str) -> str:
+    """The band to score and gate on: a read that saw no year figure never
+    replaces one that did. A role closed on "5-10 years stated in posting" was
+    re-read from a board feed with no description, and the row then said "no
+    floor visible" beside its closed note and was rescored 10; the next run
+    took the ledger for the mistake."""
+    if min_years_required(new) is None and min_years_required(prior) is not None:
+        return prior
+    return new or prior
+
+
+async def _strongest_band(key: str, band: str) -> str:
+    row = await db.fetchone("SELECT experience_band FROM hq.jobs WHERE dedupe_key = %s", (key,))
+    return strongest_band(band, str((row or {}).get("experience_band") or ""))
+
+
 @hq_tool(action=ActionClass.VAULT_WRITE, trust=Trust.TOOL, owner_only=False)
 async def record_job(
     ctx: RunContext[HQDeps],
@@ -549,6 +565,8 @@ async def record_job(
     if fit_adjust and not adjust_reason.strip():
         raise ModelRetry("fit_adjust needs adjust_reason: one sentence the fields cannot show")
 
+    key = _dedupe_key(company, role, location, provider, external_id)
+    experience_band = await _strongest_band(key, experience_band)
     fit = fit_score_for(
         role, experience_band=experience_band, compensation=compensation,
         pay_signal=pay_signal, stack=stack, location=location,
@@ -560,7 +578,6 @@ async def record_job(
         parts["model_score"] = int(fit_score)
     score = fit.score
     bucket = "strong" if score >= 8 else ("decent" if score >= DIG_SCORE else "stretch")
-    key = _dedupe_key(company, role, location, provider, external_id)
 
     # Seniority is a hard fact about the owner, not a preference to weigh, so
     # it is applied here rather than trusted to the prompt. The row is still
@@ -660,7 +677,7 @@ async def record_job(
             key,
             location.strip()[:120],
             remote_policy.strip()[:80],
-            experience_band.strip()[:60],
+            experience_band.strip()[:200],
             compensation.strip()[:120],
             stack.strip()[:200],
             score,

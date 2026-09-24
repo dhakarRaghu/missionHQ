@@ -214,7 +214,8 @@ def _model_for(spec_model: str) -> tuple[Any, Any]:
 
 @DBOS.step(name="writer.outline", **_OUTLINE_STEP)
 async def _outline_step(spec_model: str, article: bool, material: str,
-                        problems: list[str], page: str = "") -> dict[str, Any]:
+                        problems: list[str], page: str = "",
+                        previous: dict[str, Any] | None = None) -> dict[str, Any]:
     model, model_settings = _model_for(spec_model)
     # The plan comes back as JSON in the text, never as a tool call: the
     # gateway does not stream tool-call arguments, and a plan generated in
@@ -225,9 +226,15 @@ async def _outline_step(spec_model: str, article: bool, material: str,
                                        timeout=OUTLINE_LIMIT_S))
     prompt = material
     if problems:
-        prompt += ("\n\n## Your previous plan was sent back\n\n"
+        # A repair, not a fresh plan. Sent only the problems, the model wrote
+        # a new plan each time and each one failed on something new: the 3A
+        # plan fixed a missing question, then broke a quote, then a claim.
+        prompt += (("\n\n## Your previous plan\n\n```json\n"
+                    + json.dumps(previous, ensure_ascii=False) + "\n```" if previous else "")
+                   + "\n\n## What was sent back\n\n"
                    + "\n".join(f"- {p}" for p in problems)
-                   + "\n\nReturn the whole plan again with these fixed.")
+                   + "\n\nChange only what is named above and keep every other field as it"
+                   " was. Return the whole plan.")
     result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=4))
     out = result.output
     return (out.as_outline() if isinstance(out, ArticleOutline) else out).model_dump()
@@ -474,7 +481,7 @@ def clean_section(raw: str) -> str:
 
 
 def section_problems(html: str, *, earlier: str, article: bool, kind: str,
-                     apparatus: bool, total_words: int) -> list[str]:
+                     apparatus: bool, total_words: int, budget: int = 0) -> list[str]:
     """What the page check would say about this one part, as refusals."""
     probs: list[str] = []
     if not html.strip():
@@ -498,7 +505,14 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
     for note in notes:
         if apparatus and note.startswith("nothing to look at"):
             continue
+        if budget and note.startswith("the article is already"):
+            continue  # the part's own budget below is the length rule
         probs.append(note)
+    words = lt._visible_words(html)
+    if budget and words > budget * BUDGET_SLACK:
+        probs.append(f"this section is {words} words; its share of the page is about"
+                     f" {budget}. Cut it to that: keep the mechanism and the one piece of"
+                     " evidence, drop restatement and history")
     return probs
 
 
@@ -524,8 +538,28 @@ def _concept_list(outline: Outline) -> str:
     return f'<ol class="concepts">{items}</ol>'
 
 
+# An article's words, set out by code before a part is written. Checking the
+# running total after each part only said "already past the limit" three
+# parts from the end, and the first live article reached 4,047 words.
+OPENING_WORDS = 150
+APPARATUS_WORDS = {"lab": 200, "checkpoint": 160, "post": 120, "sources": 60,
+                   "orientation": 220, "cheatsheet": 200}
+BUDGET_SLACK = 1.35          # a part this far past its budget is sent back
+
+
+def word_budgets(outline: Outline, limit: int) -> dict[int, int]:
+    """Words per section (1-based) so the page lands under `limit`: apparatus
+    gets its fixed share, the teaching sections split the rest evenly."""
+    target = int(limit * 0.9) - OPENING_WORDS
+    fixed = {i: APPARATUS_WORDS.get(s.kind, 150)
+             for i, s in enumerate(outline.sections, 1) if s.kind}
+    teaching = [i for i, s in enumerate(outline.sections, 1) if not s.kind]
+    share = max(250, (target - sum(fixed.values())) // max(1, len(teaching)))
+    return {**fixed, **{i: share for i in teaching}}
+
+
 def _section_prompt(m: Material, outline: Outline, i: int, s: SectionPlan, previous: str,
-                    problems: list[str]) -> str:
+                    problems: list[str], budget: int = 0) -> str:
     plan = outline.model_dump(include={"title", "outcome", "concepts", "sections"})
     this = {"number": i, **s.model_dump()}
     concept = next((c.model_dump() for c in outline.concepts if c.id == s.concept), None)
@@ -548,6 +582,10 @@ def _section_prompt(m: Material, outline: Outline, i: int, s: SectionPlan, previ
         + f"## The study note\n\n{m.note[:NOTE_CHARS]}\n\n"
         + (f"## His phase, the parts this section draws on\n\n{drawn}\n\n" if drawn else "")
     )
+    if budget:
+        prompt += (f"## Length\n\nAbout {budget} words of prose; figures, tables and code"
+                   f" do not count. The whole page has a budget and this is this section's"
+                   f" share: past {int(budget * BUDGET_SLACK)} it is sent back.\n\n")
     if problems:
         prompt += ("## Your previous version of this section was sent back\n\n"
                    + "\n".join(f"- {p}" for p in problems)
@@ -600,6 +638,7 @@ class Writer:
         self.parts: list[str] = []            # html per part, part 1 = the opening
         self.report: list[str] = []
         self.review_status = "passed"
+        self.budgets: dict[int, int] = {}
 
     # Parts: 1 is the opening (story + concept list); section k is part k + 1.
     async def _save(self, part: int, html: str) -> dict[str, Any]:
@@ -608,9 +647,11 @@ class Writer:
 
     async def plan(self) -> Outline | None:
         problems: list[str] = []
+        previous: dict[str, Any] | None = None
         for attempt in range(PLAN_ATTEMPTS):
             raw = await _outline_step(self.spec.model, self.m.article, self.m.prompt, problems,
-                                      self.m.page)
+                                      self.m.page, previous)
+            previous = raw
             outline = normalize_outline(Outline.model_validate(raw))
             if self.m.article and outline.cannot_write.strip():
                 self.report.append(f"Not written: {outline.cannot_write.strip()}")
@@ -636,12 +677,14 @@ class Writer:
         total = sum(lt._visible_words(p) for p in self.parts[:i])
         found = list(problems or [])
         html = ""
+        budget = self.budgets.get(i, 0)
         for _ in range(SECTION_RETRIES + 1):
-            raw = await _section_step(self.spec.model,
-                                      _section_prompt(self.m, self.outline, i, s, previous, found))
+            raw = await _section_step(self.spec.model, _section_prompt(
+                self.m, self.outline, i, s, previous, found, budget))
             html = _h2(i, s) + "\n" + clean_section(raw)
             found = section_problems(html, earlier=earlier, article=self.m.article,
-                                     kind=self.m.kind, apparatus=bool(s.kind), total_words=total)
+                                     kind=self.m.kind, apparatus=bool(s.kind), total_words=total,
+                                     budget=budget)
             if not found:
                 break
         if found:
@@ -667,16 +710,21 @@ class Writer:
         await self._save(1, html)
 
     def _parts_quoting(self, message: str) -> list[int]:
-        """Section numbers whose text contains what a page-wide refusal quotes."""
+        """Section numbers a page-wide refusal points at: by a quote from the
+        part's text, a url in it, or the section's heading named outright."""
         quoted = re.findall(r"[“\"]([^”\"]{12,})[”\"]", message)
         urls = re.findall(r"https?://\S+", message)
         needles = [_norm(q.rstrip("…. "))[:40] for q in quoted] + [u.rstrip(".,;)") for u in urls]
+        said = _norm(message)
+        outline = getattr(self, "outline", None)
         hits = []
         for i, html in enumerate(self.parts):
             if i == 0:
                 continue
             text = _norm(lt._page_text(html)) + " " + html
-            if any(n and n in text for n in needles):
+            heading = (_norm(outline.sections[i - 1].heading)
+                       if outline and i <= len(outline.sections) else "")
+            if any(n and n in text for n in needles) or (len(heading) > 8 and heading in said):
                 hits.append(i)
         return hits
 
@@ -756,6 +804,8 @@ class Writer:
             save_outline(task_id, self.outline)
         if self.m.article and not self.m.slug:
             self.m.slug = _slugify(self.outline.title)
+        if self.m.article and not self.m.page:
+            self.budgets = word_budgets(self.outline, lt.ARTICLE_MAX_WORDS)
         done = saved_parts(task_id, self.m.slug)
         if done:
             self.report.append(f"kept {len(done)} part(s) written by an earlier attempt")
@@ -764,10 +814,17 @@ class Writer:
         else:
             await self.opening()
         for i in range(1, len(self.outline.sections) + 1):
-            if i + 1 in done:
-                self.parts.append(done[i + 1])
+            kept = done.get(i + 1, "")
+            stale = kept and section_problems(
+                kept, earlier="\n".join(self.parts[:i]), article=self.m.article,
+                kind=self.m.kind, apparatus=bool(self.outline.sections[i - 1].kind),
+                total_words=sum(lt._visible_words(p) for p in self.parts[:i]),
+                budget=self.budgets.get(i, 0))
+            if kept and not stale:
+                self.parts.append(kept)
             else:
-                await self.write_section(i)
+                # Missing, or written before the checks it now fails.
+                await self.write_section(i, list(stale or []) or None)
         unsupported = await self.cite()
         before = list(self.parts)
         md_path, html_path = await self.assemble()

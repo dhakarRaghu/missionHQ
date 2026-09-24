@@ -145,7 +145,7 @@ def test_an_article_is_written_in_stages_and_passes_the_real_page_contract(
     monkeypatch.setattr(lt.settings(), "learning_dir", learning)
 
     async def outline_step(model: str, article: bool, material: str, problems: list[str],
-                           page: str = ""):
+                           page: str = "", previous: Any = None):
         return _outline()
 
     async def release_step(claims):
@@ -366,3 +366,36 @@ def test_a_claim_a_word_past_the_target_is_not_sent_back() -> None:
     claim = " ".join(["word"] * 33)
     plan = lw.Outline.model_validate(_outline(concepts=[_concept(claim=claim)]))
     assert not any("claim is" in p for p in lw.outline_problems(plan, NOTE, article=True))
+
+
+def test_an_article_page_is_budgeted_before_it_is_written() -> None:
+    outline = lw.Outline.model_validate(_outline())
+    budgets = lw.word_budgets(outline, lt.ARTICLE_MAX_WORDS)
+    assert set(budgets) == set(range(1, len(outline.sections) + 1))
+    assert sum(budgets.values()) + lw.OPENING_WORDS <= lt.ARTICLE_MAX_WORDS
+    long = "<h2 data-concept=\"c1\">Q</h2><p>" + "word " * 700 + "</p>"
+    probs = lw.section_problems(long, earlier="", article=True, kind="", apparatus=False,
+                                total_words=3000, budget=400)
+    assert any("its share of the page is about 400" in p for p in probs)
+    assert not any(p.startswith("the article is already") for p in probs)
+
+
+def test_a_sent_back_plan_is_repaired_from_the_previous_one(tmp_path: Path, monkeypatch) -> None:
+    seen: list[Any] = []
+    plans = [_outline(concepts=[_concept(claim=" ".join(["word"] * 45))]), _outline()]
+
+    async def outline_step(model, article, material, problems, page="", previous=None):
+        seen.append((list(problems), previous))
+        return plans[len(seen) - 1]
+
+    async def release_step(claims):
+        return {"fails": [], "reasons": []}
+
+    monkeypatch.setattr(lw, "_outline_step", outline_step)
+    monkeypatch.setattr(lw, "_release_step", release_step)
+    material = lw.Material(article=True, slug="", kind="paper", note=NOTE, prompt="m")
+    spec = type("Spec", (), {"model": "teacher", "name": "tutor"})()
+    w = lw.Writer(spec, HQDeps(agent="tutor", task_id=None, run_id=None), material)  # type: ignore[arg-type]
+    assert asyncio.run(w.plan()) is not None
+    assert seen[0] == ([], None)
+    assert seen[1][0] and seen[1][1] == plans[0]   # the problems AND the plan they are about
