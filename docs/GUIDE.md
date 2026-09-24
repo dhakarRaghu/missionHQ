@@ -254,6 +254,34 @@ uv run python -m hq.cli evals run hunter      # score it against the stored answ
 uv run python -m hq.cli evals history hunter  # how the score moved over time
 ```
 
+### The regression set
+
+Real failures, one case each, in `backend/evals/regression/*.yaml`. A case
+gives an agent the input it was given on the day and grades what it does
+with its production instructions: which tools it called, with what, what it
+wrote. Every run calls the model, so it costs money and needs the gateway;
+CI does not run it (CI runs `tests/test_regression_cases.py`, the same
+failures against the gates in code, with no model).
+
+```bash
+uv run python -m hq.cli regress cases                 # every case id and the incident it holds
+uv run python -m hq.cli regress run before-$(git rev-parse --short HEAD)
+uv run python -m hq.cli regress run after-$(git rev-parse --short HEAD) --k 2   # each case twice
+uv run python -m hq.cli regress compare before-abc1234 after-abc1234
+```
+
+A result file records, per trial, the sha of the instruction bundle the
+agent was sent (the same `bundle_sha` a run row carries). `compare` prints
+one line per case, `bundle changed` on the ones whose bundle differs between
+the two runs, and a last line with passes and cost: `9/12 pass → 11/12 pass;
+$0.812 → $0.790`. It exits 1 on a `REGRESSION`: a case the first run passed
+and the second failed. `--k` runs every case that many times; a case passes
+only when every trial does.
+
+`scripts/regress-nightly.sh` runs the set as `nightly-<date>` and compares
+it with the newest `after-*` result. `docs/deploy.md` says how to schedule
+it on the Mac.
+
 `./ops/backup.sh run` dumps the database and pushes the vault.
 `./ops/backup.sh restore-drill` proves the backup actually restores.
 

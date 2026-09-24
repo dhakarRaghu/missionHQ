@@ -135,6 +135,69 @@ Each script also has `status`, `logs`, `uninstall`, and (for the servers)
 `restart`. Logs go to `data/logs/<service>.log`. `KeepAlive` restarts a server
 after any exit, including a crash.
 
+### The nightly regression run (Mac, optional)
+
+`scripts/regress-nightly.sh` runs the model-backed regression set
+(`hq.cli regress run nightly-<date>`) and compares it with the newest
+`after-*` result. It calls the models for real, so it runs here, where
+`backend/.env` has the gateway key, and never in CI. Nothing installs it for
+you; to schedule it at 04:30, after the backup, write a LaunchAgent:
+
+```bash
+cat > ~/Library/LaunchAgents/com.missionhq.regress.plist <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.missionhq.regress</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/path/to/missionHq/scripts/regress-nightly.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/path/to/missionHq</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>/path/to/missionHq/data/logs/regress.log</string>
+  <key>StandardErrorPath</key>
+  <string>/path/to/missionHq/data/logs/regress.log</string>
+</dict>
+</plist>
+EOF
+sed -i '' "s#/path/to/missionHq#$(pwd)#g" ~/Library/LaunchAgents/com.missionhq.regress.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missionhq.regress.plist
+```
+
+Run it from the repo root so `$(pwd)` fills the path, and check that `uv` is
+on the `PATH` the plist names (`which uv`). Then:
+
+```bash
+launchctl kickstart gui/$(id -u)/com.missionhq.regress     # run one now
+tail -f data/logs/regress.log                              # PASS/FAIL per case, then the compare
+launchctl bootout gui/$(id -u)/com.missionhq.regress       # remove it
+```
+
+The compare's last line is the night's summary (`N/M pass → N/M pass; $a →
+$b`); a `REGRESSION` line means a case the accepted run passed and tonight's
+failed. The spend lands on the daily cap like any other run, under agents
+named `eval:<name>`, so size `--k` (add it to `ProgramArguments`) with that
+in mind.
+
 ### Linux (systemd)
 
 Install as system units in `/etc/systemd/system/`. Replace `hq` and
