@@ -865,7 +865,39 @@ def _make_cron(agent_name: str, idx: int, prompt: str, schedule: str, skill: str
     return fire
 
 
+TICK_STALE_S = 150          # a tick older than this is a backfill, not a minute
+SLEEP_GAP_S = 10 * 60       # a gap between ticks this long means the host slept
+TICK_KEY = "watchdog:last_tick"
+
+
+async def _backfilled(scheduled: datetime) -> bool:
+    """After the host wakes, DBOS fires every minute it missed at once: fifteen
+    watchdog ticks blocked the same task in one second on 2026-09-25. Only
+    the current minute's tick does the work; the rest return."""
+    now = datetime.now(UTC)
+    if scheduled.tzinfo is None:
+        scheduled = scheduled.replace(tzinfo=UTC)
+    return (now - scheduled).total_seconds() > TICK_STALE_S
+
+
+async def _host_slept() -> bool:
+    """True when the previous tick was long enough ago that the host was
+    asleep in between; records this tick either way."""
+    row = await db.fetchone(
+        "INSERT INTO hq.control (key, value, updated_at) VALUES (%s, %s, now())"
+        " ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()"
+        " RETURNING (SELECT extract(epoch FROM now() - c.updated_at)"
+        "           FROM hq.control c WHERE c.key = %s) AS gap",
+        (TICK_KEY, db.jsonb(datetime.now(UTC).isoformat()), TICK_KEY),
+    )
+    gap = float((row or {}).get("gap") or 0.0)
+    return gap > SLEEP_GAP_S
+
+
 async def _watchdog_tick(scheduled: datetime, context: Any) -> None:
+    if await _backfilled(scheduled):
+        return
+    slept = await _host_slept()
     if safety.halted():
         row = await db.fetchone("SELECT value FROM hq.control WHERE key = 'halt_notified'")
         if not (row and row["value"]):
@@ -883,7 +915,7 @@ async def _watchdog_tick(scheduled: datetime, context: Any) -> None:
     await _catch_up_missed(scheduled)
     await _reconcile_backlog()
     await _deadman_check(scheduled)
-    await _cap_overrunning_tasks()
+    await _cap_overrunning_tasks(slept=slept)
     await _archive_old_tasks()
     await _close_stale_finds()
 
@@ -989,7 +1021,7 @@ async def _release_workflow(task_id: str) -> None:
         log.warning("could not cancel workflow %s for task %s: %s", wf_id, task_id, exc)
 
 
-async def _cap_overrunning_tasks() -> None:
+async def _cap_overrunning_tasks(slept: bool = False) -> None:
     """Block a running task that has shown no sign of life for too long.
 
     Liveness, not age. It used to measure from when the task started, with a
@@ -1036,6 +1068,16 @@ async def _cap_overrunning_tasks() -> None:
 
     for row in stale:
         await _release_workflow(row["id"])
+        if slept:
+            # The silence was the host asleep, not a hung model: the run is
+            # queued again and picks up where its saved steps left it. Left
+            # blocked, four scheduled runs and their alarms greeted him one
+            # morning for a night the laptop spent asleep.
+            await board.apply(row["id"], "stopped_by_sleep", status="blocked",
+                              data={"reason": "the host slept mid-run"})
+            await board.apply(row["id"], "requeued_after_sleep", status="backlog",
+                              data={"reason": "queued again after the host woke"})
+            continue
         await board.apply(
             row["id"],
             "timed_out",
@@ -1053,6 +1095,8 @@ async def _cap_overrunning_tasks() -> None:
 
 async def _drain_outbox_tick(scheduled: datetime, context: Any) -> None:
     from hq.channels import telegram
+    if await _backfilled(scheduled):
+        return
     await telegram.drain_outbox()
 
 

@@ -320,3 +320,13 @@ def test_a_long_source_is_not_cut_to_forty_thousand() -> None:
     html = "<p>" + "word " * 60_000 + "</p>"
     assert len(web_tools._strip_html(html, web_tools.SOURCE_MAX_CHARS)) > web_tools.MAX_CHARS
     assert len(web_tools._strip_html(html)) == web_tools.MAX_CHARS
+
+
+def test_backfilled_ticks_do_nothing_and_a_sleep_requeues_silent_runs() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    assert asyncio.run(engine._backfilled(datetime.now(UTC) - timedelta(minutes=10))) is True
+    assert asyncio.run(engine._backfilled(datetime.now(UTC) - timedelta(seconds=20))) is False
+    src = inspect.getsource(engine._cap_overrunning_tasks)
+    assert '"requeued_after_sleep", status="backlog"' in src
+    assert "_backfilled(scheduled)" in inspect.getsource(engine._drain_outbox_tick)
