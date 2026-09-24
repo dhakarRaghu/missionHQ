@@ -1082,6 +1082,19 @@ async def reap() -> None:
         " AND workflow_uuid LIKE 'task-%%'",
         (DBOS.application_version, DBOS.application_version),
     )
+    # A scheduled tick (watchdog, outbox, digest, a cron slot) queued under
+    # an older version never runs either, and nothing needs it to: the next
+    # tick's catch-up covers what it would have done. 5,890 of them had piled
+    # up in DBOS's internal queue by 2026-09-24, scanned on every dequeue.
+    stale_ticks = [r["workflow_uuid"] for r in await db.fetch(
+        "SELECT workflow_uuid FROM dbos.workflow_status WHERE status = 'ENQUEUED'"
+        " AND application_version IS DISTINCT FROM %s AND workflow_uuid LIKE 'sched-%%'",
+        (DBOS.application_version,),
+    )]
+    for at in range(0, len(stale_ticks), 500):
+        await DBOS.cancel_workflows_async(stale_ticks[at:at + 500])
+    if stale_ticks:
+        await obs.emit("reap.stale_ticks", payload={"cancelled": len(stale_ticks)})
     # The same jam, but from before this fix existed: a workflow still PENDING
     # for a task the board has already blocked or failed. Nothing will ever
     # finish it, and until it is cancelled it holds its queue's worker slot.
