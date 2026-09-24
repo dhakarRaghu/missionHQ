@@ -334,10 +334,13 @@ def test_model_text_in_a_heading_is_escaped() -> None:
 
 
 def test_the_writer_is_told_the_charter_first() -> None:
+    from hq import assemble
+
     text = lw.section_instructions()
     assert text.startswith("Current date and time:")          # charter rule 7 refers to it
     assert text.split("\n\n")[1].startswith("# Mission HQ charter")
-    assert len(lw.bundle_sha()) == 12
+    assert text == assemble.assemble("writer-section", lw._tutor()).text
+    assert len(assemble.assemble("writer-section", lw._tutor()).sha) == 12
 
 
 def test_a_part_that_names_an_employer_is_sent_back_alone(monkeypatch) -> None:

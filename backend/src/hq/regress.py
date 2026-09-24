@@ -47,7 +47,7 @@ from pydantic_ai import Agent, Tool
 from pydantic_ai.usage import UsageLimits
 
 import hq.tools  # noqa: F401  # registers every tool
-from hq import db, llm, loader
+from hq import assemble, db, llm, loader
 from hq.config import BACKEND_DIR, settings
 from hq.safety import ActionClass
 from hq.tools.registry import TOOL_REGISTRY, HQDeps
@@ -104,6 +104,9 @@ class Trial:
     seconds: float
     cost_usd: float
     error: str | None = None
+    # The sha of the instructions this trial was sent (hq.assemble), so a
+    # compare between two labels can say when the prompt itself changed.
+    bundle_sha: str = ""
 
 
 @dataclass
@@ -366,11 +369,12 @@ async def _writer_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, A
     lt.record_lesson_row = record_row  # type: ignore[assignment]
     tag = f"eval:{case.agent}"
     started, since = time.monotonic(), datetime.now().astimezone()
-    output, error = "", None
+    output, error, sha = "", None, ""
     deps = HQDeps(agent=spec.name, task_id=f"eval-{case.id}"[:40], run_id=None)
     try:
         with llm.call_context(run_id=None, task_id=None, agent=tag):
             m = await lesson_writer.gather(payload)
+            sha = assemble.run_sha("writer-section", spec, article=m.article, page=m.page)
             w = lesson_writer.Writer(spec, deps, m)
             try:
                 done = await w.run()
@@ -394,7 +398,8 @@ async def _writer_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, A
         fails += await _judge(case, output, calls)
     return Trial(passed=not fails, failures=fails, output=output[:4000], calls=calls,
                  seconds=round(time.monotonic() - started, 1),
-                 cost_usd=round(await _spent(since, tag), 4), error=error)
+                 cost_usd=round(await _spent(since, tag), 4), error=error,
+                 bundle_sha=sha)
 
 
 async def _post_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, Any]) -> Trial:
@@ -421,6 +426,7 @@ async def _post_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, Any
     tag = f"eval:{case.agent}"
     started, since = time.monotonic(), datetime.now().astimezone()
     output, error = "", None
+    sha = assemble.assemble("writer-post", spec).sha
     deps = HQDeps(agent=spec.name, task_id=None, run_id=None)
     try:
         with llm.call_context(run_id=None, task_id=None, agent=tag):
@@ -437,7 +443,8 @@ async def _post_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, Any
         fails += await _judge(case, output, calls)
     return Trial(passed=not fails, failures=fails, output=output[:4000], calls=calls,
                  seconds=round(time.monotonic() - started, 1),
-                 cost_usd=round(await _spent(since, tag), 4), error=error)
+                 cost_usd=round(await _spent(since, tag), 4), error=error,
+                 bundle_sha=sha)
 
 
 async def run_trial(case: Case) -> Trial:
@@ -453,9 +460,10 @@ async def run_trial(case: Case) -> Trial:
             return await _writer_trial(case, spec, payload)
     calls: list[dict[str, Any]] = []
     reg = llm.registry()
+    bundle = assemble.assemble("agent", spec)
     agent = Agent(
         reg.resolve(spec.model),
-        instructions=loader.instructions_for(spec),
+        instructions=bundle.text,
         tools=_tools(case, spec, calls),
         model_settings=reg.model_settings_for(spec.model),
         output_type=str,
@@ -478,7 +486,8 @@ async def run_trial(case: Case) -> Trial:
         fails += await _judge(case, output, calls)
     return Trial(passed=not fails, failures=fails, output=output[:4000], calls=calls,
                  seconds=round(time.monotonic() - started, 1),
-                 cost_usd=round(await _spent(since, tag), 4), error=error)
+                 cost_usd=round(await _spent(since, tag), 4), error=error,
+                 bundle_sha=bundle.sha)
 
 
 async def run(label: str, agent: str | None = None, case_id: str | None = None) -> Path:
@@ -512,9 +521,15 @@ async def run(label: str, agent: str | None = None, case_id: str | None = None) 
     return path
 
 
+def _bundle_shas(result: dict[str, Any]) -> set[str]:
+    return {t.get("bundle_sha") or "" for t in result.get("trials", [])} - {""}
+
+
 def compare(before: str, after: str) -> list[str]:
     """What changed between two labelled runs. A case that passed before and
-    fails after is a regression; the rewrite may not ship with one."""
+    fails after is a regression; the rewrite may not ship with one. A line
+    says "bundle changed" when the two runs sent different instructions, so
+    a changed verdict can be tied to the prompt edit or cleared of it."""
     def load(label: str) -> dict[str, dict[str, Any]]:
         data = json.loads((RESULTS_DIR / f"{label}.json").read_text())
         return {r["id"]: r for r in data["results"]}
@@ -534,7 +549,11 @@ def compare(before: str, after: str) -> list[str]:
             verdict = "same"
         else:
             verdict = "new" if was is None else "dropped"
-        lines.append(f"{verdict:10} {cid}  ${cost_a:.3f} → ${cost_b:.3f}")
+        line = f"{verdict:10} {cid}  ${cost_a:.3f} → ${cost_b:.3f}"
+        shas_a, shas_b = _bundle_shas(a.get(cid, {})), _bundle_shas(b.get(cid, {}))
+        if shas_a and shas_b and shas_a != shas_b:
+            line += "  bundle changed"
+        lines.append(line)
     return lines
 
 

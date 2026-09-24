@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from hq import engine, job_pipeline, llm, loader, runner
+from hq import assemble, engine, job_pipeline, llm, loader, runner
 from hq import learning_pipeline as learning
 from hq.config import settings
 from hq.runtimes import codex_cli
@@ -90,10 +90,15 @@ def test_the_prompt_points_at_the_card_instead_of_repeating_it(workdir, codex_tu
     _run_external(spec, "[operator — reads]\nTask: Read one page")
     prompt = codex_turns[0]["prompt"]
 
-    suffix = runner.EXTERNAL_SYSTEM_SUFFIX
-    # The task arrives with the clock its contract refers to, then the card pointer.
-    assert prompt.startswith(f"{suffix}\n\nCurrent date and time:")
-    assert prompt.endswith("[operator — reads]\nTask: Read one page")
+    suffix = assemble.EXTERNAL_SYSTEM_SUFFIX
+    # The task arrives behind its bundle: the clock its contract refers to,
+    # the charter digest, then the card pointer (hq.assemble).
+    bundle = assemble.assemble("external", spec)
+    assert prompt == f"{bundle.text}\n\n[operator — reads]\nTask: Read one page"
+    assert prompt.startswith("Current date and time:")
+    assert [n for n, _ in bundle.parts] == ["clock", "charter", "identity"]
+    assert bundle.section("identity") == suffix
+    assert "His employer" in bundle.section("charter")
     assert len(suffix.splitlines()) == 4
     assert "AGENTS.md" in suffix
     # The rules live once, in the card: none of them is restated here.
