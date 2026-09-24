@@ -2422,3 +2422,12 @@ def test_a_study_note_is_filed_from_the_text_of_the_reply() -> None:
     day = datetime(2026, 9, 23, tzinfo=UTC)
     assert lt.study_note_path("inference-3a", "", day) == "quarantine/2026-09-23-inference-3a-study.md"
     assert lt.study_note_path("", "https://a.dev/X y", day).startswith("quarantine/2026-09-23-https-a-dev")
+
+
+def test_a_quantity_is_not_a_year() -> None:
+    from hq.tools.learning_tools import _YEAR_RE
+
+    for text in ("the 2048 default", "a 2000 ms timeout", "2030 tokens per step", "1024 rows"):
+        assert not _YEAR_RE.search(text), text
+    for text in ("in 2024 they measured it", "the 2019 paper", "since 1998"):
+        assert _YEAR_RE.search(text), text

@@ -1683,7 +1683,12 @@ _CONCEPTS_RE = re.compile(
 _H2_RE = re.compile(r"<h2\b([^>]*)>(.*?)</h2>", re.DOTALL | re.IGNORECASE)
 _ATTR_RE = re.compile(r"\bdata-(concept|kind)=[\"']([^\"']+)[\"']", re.IGNORECASE)
 _ISO_DATE_RE = re.compile(r"\b20\d\d-\d\d-\d\d\b")
-_YEAR_RE = re.compile(r"\b(?:19|20)\d\d\b")
+# A calendar year, not a quantity: 2048 is a token budget and "2000 ms" a
+# latency. Phase 2B was refused for "naming a year" on its 2048 default.
+_YEAR_RE = re.compile(
+    r"\b(?:19[5-9]\d|20[0-3]\d)\b(?!\s*(?:tokens?|ms|s\b|seconds?|mb|gb|kb|k\b|x\b|%"
+    r"|requests?|words?|lines?|rows?|bytes?|chars?|characters?|users?|calls?))",
+    re.IGNORECASE)
 _EVIDENCE_TALK_RE = re.compile(
     r"\b(?:paper|study|studies|authors?|researchers?|benchmark(?:ed)?|et al|"
     r"abstract|rebuttal|appendix|preprint|arxiv|EMNLP|OSDI|NeurIPS|"
