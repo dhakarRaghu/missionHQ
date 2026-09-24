@@ -24,10 +24,11 @@ evening, after your own day is done, so the work is waiting when you wake up:
 |---|---|
 | 18:30 | The next phase of your course is studied by hunter and written by tutor, once you have read the last one |
 | 21:00 | Hunter sweeps company boards for new roles, verifies them, and scores them into the job ledger |
-| 21:15 | Operator searches LinkedIn in your signed-in browser; hunter verifies what it finds |
-| 22:00 | The learning run starts today's article (or Saturday's lab card, Sunday's week review); the digest goes out |
+| 21:15 | Operator runs four LinkedIn searches in your signed-in browser, rotating through eight role families so each is searched every other night; hunter verifies what it finds. If the browser cannot be reached, it tries again twice, 15 minutes apart, before hunter falls back to the public boards |
+| 22:00 | The learning run starts today's article (or Saturday's lab card, Sunday's week review) |
 | 22:30 | Sage writes the day's note: one thing you did not know, what needs you, and one action |
-| 23:30 | Sage folds the day into your memory blocks, dropping what is no longer true |
+| 22:50 | The digest goes to your phone, with the day's note at the top |
+| 23:30 | Sage checks your memory blocks against the day and writes what should change to `memory/proposals/`; you promote what is right |
 | 03:00 | The vault commits once for the day, the search index is rebuilt, and new lessons are published to your phone |
 | Monday 09:00 | Sage proposes five roles to act on, with the next step for each |
 | Wednesday 09:00 | Sage adds three to five content ideas from what you learned and built |
