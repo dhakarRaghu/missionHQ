@@ -481,7 +481,8 @@ def clean_section(raw: str) -> str:
 
 
 def section_problems(html: str, *, earlier: str, article: bool, kind: str,
-                     apparatus: bool, total_words: int, budget: int = 0) -> list[str]:
+                     apparatus: bool, total_words: int, budget: int = 0,
+                     source: str = "") -> list[str]:
     """What the page check would say about this one part, as refusals."""
     probs: list[str] = []
     if not html.strip():
@@ -494,6 +495,9 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
     broken = lt.page_script_problems(html)
     if broken:
         probs.append(f"a figure cannot work: {broken}")
+    # His lab, kept exactly: checked on the part that quotes it.
+    if source:
+        probs += lt.lab_fidelity_problems(html, source)
     # Caught on the part that has it, so only that part is rewritten.
     named = lt.employer_problem(html)
     if named:
@@ -705,7 +709,7 @@ class Writer:
             html = _h2(i, s) + "\n" + clean_section(raw)
             found = section_problems(html, earlier=earlier, article=self.m.article,
                                      kind=self.m.kind, apparatus=bool(s.kind), total_words=total,
-                                     budget=budget)
+                                     budget=budget, source=self.m.source)
             if not found:
                 break
         if found:
@@ -733,7 +737,8 @@ class Writer:
     def _parts_quoting(self, message: str) -> list[int]:
         """Section numbers a page-wide refusal points at: by a quote from the
         part's text, a url in it, or the section's heading named outright."""
-        quoted = re.findall(r"[“\"]([^”\"]{12,})[”\"]", message)
+        quoted = (re.findall(r"[“\"]([^”\"]{12,})[”\"]", message)
+                  + re.findall(r"`([^`]{12,})`", message))
         urls = re.findall(r"https?://\S+", message)
         needles = [_norm(q.rstrip("…. "))[:40] for q in quoted] + [u.rstrip(".,;)") for u in urls]
         said = _norm(message)
@@ -758,7 +763,7 @@ class Writer:
                     self.parts[i], earlier=earlier, article=self.m.article, kind=self.m.kind,
                     apparatus=bool(self.outline.sections[i - 1].kind),
                     total_words=sum(lt._visible_words(p) for p in self.parts[:i]),
-                    budget=self.budgets.get(i, 0)):
+                    budget=self.budgets.get(i, 0), source=self.m.source):
                 out.append(i)
         return out
 
@@ -855,7 +860,7 @@ class Writer:
                 kept, earlier="\n".join(self.parts[:i]), article=self.m.article,
                 kind=self.m.kind, apparatus=bool(self.outline.sections[i - 1].kind),
                 total_words=sum(lt._visible_words(p) for p in self.parts[:i]),
-                budget=self.budgets.get(i, 0))
+                budget=self.budgets.get(i, 0), source=self.m.source)
             if kept and not stale:
                 self.parts.append(kept)
             else:

@@ -1816,6 +1816,42 @@ _NO_VISUAL_NEEDED = ("exercise", "answer", "source", "cheat", "reference",
                      "before you start", "recap", "check it yourself", "question")
 
 
+def lab_fidelity_problems(page_html: str, source: str) -> list[str]:
+    """What he keeps from the lab, he keeps exactly. An exercise may be left
+    out; it may not be invented or reworded into a command nobody ran. One
+    rule for the page and for each part, so a part is sent back for it."""
+    out: list[str] = []
+    known_ids = set(_EXERCISE_ID_RE.findall(source))
+    invented = sorted(set(_PAGE_EXERCISE_RE.findall(page_html)) - known_ids,
+                      key=lambda e: int(e[1:])) if known_ids else []
+    if invented:
+        out.append("exercise ids that his lab does not have: " + _listed(invented)
+                        + ". Use his exercises under their own ids, or none")
+    employers = [name.lower() for name in settings().private_employers]
+    ran = {" ".join(c.split()) for c in _RUN_CMD_RE.findall(source)}
+    # A path that names an employer cannot be copied: the employer rule wins,
+    # and the skill says to rename that path. So such a command matches with
+    # the offending word left open, and with nothing else changed.
+    renamed = [
+        re.compile(r"\s+".join(
+            r"\S+" if any(name in word.lower() for name in employers) else re.escape(word)
+            for word in real.split()))
+        for real in ran if any(name in real.lower() for name in employers)
+    ]
+    if ran:
+        on_page = [" ".join(_plain(c).split()) for c in _PAGE_RUN_RE.findall(page_html)]
+        altered = [c for c in on_page if c and not any(c in real or real in c for real in ran)
+                   and not any(rx.fullmatch(c) for rx in renamed)]
+        if altered:
+            out.append(
+                "these Run: commands are not in his lab, so nobody has run them: "
+                + _listed([f"`{c}`" for c in altered])
+                + ". Copy the command character for character, or leave the exercise out"
+            )
+
+    return out
+
+
 def sections_without_a_visual(page_html: str) -> list[str]:
     """Section headings whose text runs long with nothing to look at."""
     parts = re.split(r"(?i)(?=<h2\b)", page_html)
@@ -1910,35 +1946,7 @@ def page_coverage(source: str, page_html: str, note: str = "", *,
             " box he can move a number in"
         )
 
-    # What he keeps from the lab, he keeps exactly. An exercise may be left
-    # out; it may not be invented or reworded into a command nobody ran.
-    known_ids = set(_EXERCISE_ID_RE.findall(source))
-    invented = sorted(set(_PAGE_EXERCISE_RE.findall(page_html)) - known_ids,
-                      key=lambda e: int(e[1:])) if known_ids else []
-    if invented:
-        problems.append("exercise ids that his lab does not have: " + _listed(invented)
-                        + ". Use his exercises under their own ids, or none")
-    employers = [name.lower() for name in settings().private_employers]
-    ran = {" ".join(c.split()) for c in _RUN_CMD_RE.findall(source)}
-    # A path that names an employer cannot be copied: the employer rule wins,
-    # and the skill says to rename that path. So such a command matches with
-    # the offending word left open, and with nothing else changed.
-    renamed = [
-        re.compile(r"\s+".join(
-            r"\S+" if any(name in word.lower() for name in employers) else re.escape(word)
-            for word in real.split()))
-        for real in ran if any(name in real.lower() for name in employers)
-    ]
-    if ran:
-        on_page = [" ".join(_plain(c).split()) for c in _PAGE_RUN_RE.findall(page_html)]
-        altered = [c for c in on_page if c and not any(c in real or real in c for real in ran)
-                   and not any(rx.fullmatch(c) for rx in renamed)]
-        if altered:
-            problems.append(
-                "these Run: commands are not in his lab, so nobody has run them: "
-                + _listed([f"`{c}`" for c in altered])
-                + ". Copy the command character for character, or leave the exercise out"
-            )
+    problems += lab_fidelity_problems(page_html, source)
 
     allowed = source + "\n" + note
     # SVG and XHTML namespace strings look like links and are not ones. With

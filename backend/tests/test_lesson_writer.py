@@ -430,3 +430,13 @@ def test_a_dated_teaching_sentence_is_caught_on_its_part() -> None:
                                 total_words=0)
     assert any("carries a date" in p for p in probs)
     assert "at most\n15 words" in (lw.writer_dir() / "section.md").read_text()
+
+
+def test_an_invented_lab_command_is_sent_back_on_its_part() -> None:
+    source = "**E1** Run: `python phase02/sim.py --turns 4`\n"
+    part = ('<h2 data-kind="lab">Lab</h2><ul class="exercises"><li><b>E1</b> Run: '
+            '<code>python phase02/sim.py --turns 12 --inject-overflow 5</code></li></ul>')
+    probs = lw.section_problems(part, earlier="", article=False, kind="", apparatus=True,
+                                total_words=0, source=source)
+    assert any("not in his lab" in p for p in probs)
+    assert lt.lab_fidelity_problems(part, source)   # the same rule the page runs
