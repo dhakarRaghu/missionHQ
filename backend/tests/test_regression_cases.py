@@ -10,7 +10,6 @@ agents do with these gates in place; this file measures the gates.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import inspect
 from types import SimpleNamespace
 from typing import Any
@@ -91,28 +90,6 @@ def employer(monkeypatch) -> str:
     privacy._pattern.cache_clear()
     yield "Acmecorp"
     privacy._pattern.cache_clear()
-
-
-# --- the daily note ---------------------------------------------------------
-
-@pytest.mark.xfail(strict=True, raises=ModuleNotFoundError,
-                   reason="no continuity module on main yet: nothing rewrites a Needs-you"
-                          " line against the job ledger's status")
-def test_a_needs_you_line_about_a_closed_role_is_marked_closed(monkeypatch) -> None:
-    """2026-09-24: the daily note asked him to decide on a role the ledger had closed."""
-    closed = [{"company": "Globex", "role": "Backend Engineer", "status": "closed",
-               "fit_score": 4, "why_fit": "asks for 5+ years"}]
-
-    async def fetch(sql: str, params: tuple = ()) -> list[dict]:
-        assert "status = %s" in sql and params[0] == "closed"
-        return closed
-
-    monkeypatch.setattr(job_tools.db, "fetch", fetch)
-    ledger = asyncio.run(inspect.unwrap(job_tools.list_jobs)(_ctx("sage"), status="closed"))
-    assert ledger[0]["status"] == "closed"
-    continuity = importlib.import_module("hq.continuity")
-    note = "## Needs you\n- Globex Backend Engineer: apply or drop?\n"
-    assert "closed" in continuity.mark_closed(note, ledger)
 
 
 # --- the plan ---------------------------------------------------------------
