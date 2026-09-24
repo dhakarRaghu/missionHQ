@@ -58,3 +58,78 @@ def test_every_case_file_loads() -> None:
     cases = regress.load_cases()
     assert len({c.id for c in cases}) == len(cases)
     assert {c.agent for c in cases} >= {"tutor", "hunter", "sage"}
+
+
+def _result(label: str, results: list[dict], where) -> None:
+    import json
+
+    (where / f"{label}.json").write_text(json.dumps({"label": label, "results": results}))
+
+
+def _case_result(cid: str, passed: bool, sha: str, cost: float = 0.1) -> dict:
+    return {"id": cid, "passed": passed,
+            "trials": [{"passed": passed, "cost_usd": cost, "bundle_sha": sha}]}
+
+
+def test_compare_names_the_cases_whose_bundle_moved_and_sums_the_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr(regress, "RESULTS_DIR", tmp_path)
+    _result("before", [_case_result("a", True, "111", 0.2), _case_result("b", True, "222"),
+                       _case_result("c", False, "333")], tmp_path)
+    _result("after", [_case_result("a", False, "999", 0.3), _case_result("b", True, "222"),
+                      _case_result("c", True, "333")], tmp_path)
+    lines = regress.compare("before", "after")
+    assert lines[0].startswith("REGRESSION a") and lines[0].endswith("bundle changed")
+    assert lines[1].startswith("same       b") and "bundle changed" not in lines[1]
+    assert lines[2].startswith("fixed      c") and "bundle changed" not in lines[2]
+    assert lines[-1] == "2/3 pass → 2/3 pass; $0.400 → $0.500"
+
+
+def test_compare_says_nothing_about_a_bundle_an_old_result_never_recorded(tmp_path, monkeypatch):
+    monkeypatch.setattr(regress, "RESULTS_DIR", tmp_path)
+    _result("before", [{"id": "a", "passed": True, "trials": [{"passed": True, "cost_usd": 0}]}],
+            tmp_path)
+    _result("after", [_case_result("a", True, "999")], tmp_path)
+    assert "bundle changed" not in regress.compare("before", "after")[0]
+
+
+def test_the_bundle_sha_drops_the_clock_line_only() -> None:
+    same = regress.instructions_sha("Current date and time: Monday.\n\n# Rules\n\nno em dashes")
+    later = regress.instructions_sha("Current date and time: Tuesday.\n\n# Rules\n\nno em dashes")
+    edited = regress.instructions_sha("Current date and time: Monday.\n\n# Rules\n\nno dashes")
+    assert same == later != edited and len(same) == 12
+
+
+def test_cases_are_listed_with_their_source_line() -> None:
+    cases = [regress.Case(id="short", agent="sage", source="one\n  line\n", prompt="p"),
+             regress.Case(id="a-longer-id", agent="hunter", source="two", prompt="p")]
+    lines = regress.case_lines(cases)
+    assert lines == ["short        sage     one line", "a-longer-id  hunter   two"]
+
+
+def test_k_overrides_each_cases_own_count_and_the_file_carries_each_bundle(tmp_path,
+                                                                            monkeypatch):
+    import asyncio
+    import contextlib
+    import json
+
+    from hq.tools import learning_tools
+
+    monkeypatch.setattr(regress, "RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(learning_tools, "emit", learning_tools.emit)   # run() swaps it; undo
+    cases = [regress.Case(id="twice", agent="sage", source="s", prompt="p", k=2),
+             regress.Case(id="once", agent="sage", source="s", prompt="p")]
+    monkeypatch.setattr(regress, "load_cases", lambda agent=None, case_id=None: cases)
+    monkeypatch.setattr(regress, "_sandboxed_learning",
+                        lambda: contextlib.nullcontext(tmp_path))
+
+    async def trial(case: regress.Case) -> regress.Trial:
+        return regress.Trial(passed=True, failures=[], output="", calls=[], seconds=0.0,
+                             cost_usd=0.01, bundle_sha="abc123")
+
+    monkeypatch.setattr(regress, "run_trial", trial)
+    own = json.loads(asyncio.run(regress.run("own")).read_text())
+    assert [len(r["trials"]) for r in own["results"]] == [2, 1]
+    three = json.loads(asyncio.run(regress.run("three", k=3)).read_text())
+    assert [len(r["trials"]) for r in three["results"]] == [3, 3]
+    assert {t["bundle_sha"] for r in three["results"] for t in r["trials"]} == {"abc123"}
+    assert all(r["passed"] for r in three["results"])

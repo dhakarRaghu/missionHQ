@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import inspect
 import json
 import re
@@ -490,8 +491,23 @@ async def run_trial(case: Case) -> Trial:
                  bundle_sha=bundle.sha)
 
 
-async def run(label: str, agent: str | None = None, case_id: str | None = None) -> Path:
-    """Run the set and write evals/results/<label>.json. Returns its path."""
+def instructions_sha(instructions: str) -> str:
+    """loader.bundle_sha's hash of instructions already in hand: everything
+    after the first paragraph, which is the clock line."""
+    text = instructions.split("\n\n", 1)[-1]
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+def case_lines(cases: list[Case]) -> list[str]:
+    """One line per case: its id, its agent, and the incident it holds."""
+    width = max((len(c.id) for c in cases), default=0)
+    return [f"{c.id:{width}}  {c.agent:8} {' '.join(c.source.split())}" for c in cases]
+
+
+async def run(label: str, agent: str | None = None, case_id: str | None = None,
+              k: int | None = None) -> Path:
+    """Run the set and write evals/results/<label>.json. Returns its path.
+    ``k`` runs every case that many times (pass^k); None keeps each case's own."""
     cases = load_cases(agent, case_id)
     results: list[CaseResult] = []
     with _sandboxed_learning():
@@ -503,7 +519,7 @@ async def run(label: str, agent: str | None = None, case_id: str | None = None) 
         learning_tools.emit = _no_emit  # type: ignore[assignment]  # no live-feed noise
         for case in cases:
             res = CaseResult(case.id, case.agent, case.source, case.known_failure)
-            for _ in range(max(1, case.k)):
+            for _ in range(max(1, k or case.k)):
                 res.trials.append(await run_trial(case))
             results.append(res)
             mark = "PASS" if res.passed else ("known" if case.known_failure else "FAIL")
@@ -554,6 +570,12 @@ def compare(before: str, after: str) -> list[str]:
         if shas_a and shas_b and shas_a != shas_b:
             line += "  bundle changed"
         lines.append(line)
+    passed_a = sum(1 for r in a.values() if r.get("passed"))
+    passed_b = sum(1 for r in b.values() if r.get("passed"))
+    total_a = sum(t["cost_usd"] for r in a.values() for t in r.get("trials", []))
+    total_b = sum(t["cost_usd"] for r in b.values() for t in r.get("trials", []))
+    lines.append(f"{passed_a}/{len(a)} pass → {passed_b}/{len(b)} pass;"
+                 f" ${total_a:.3f} → ${total_b:.3f}")
     return lines
 
 
@@ -566,19 +588,25 @@ def main(argv: list[str]) -> int:
     r.add_argument("label")
     r.add_argument("--agent")
     r.add_argument("--case")
+    r.add_argument("--k", type=int, help="run every case this many times (pass^k)")
     c = sub.add_parser("compare")
     c.add_argument("before")
     c.add_argument("after")
+    ls = sub.add_parser("cases", help="list case ids with the incident each holds")
+    ls.add_argument("--agent")
     args = p.parse_args(argv)
     if args.cmd == "compare":
         lines = compare(args.before, args.after)
         print("\n".join(lines))
         return 1 if any(ln.startswith("REGRESSION") for ln in lines) else 0
+    if args.cmd == "cases":
+        print("\n".join(case_lines(load_cases(args.agent))))
+        return 0
 
     async def go() -> None:
         await db.open_pool()
         try:
-            path = await run(args.label, args.agent, args.case)
+            path = await run(args.label, args.agent, args.case, args.k)
             print(f"results: {path}")
         finally:
             await db.close_pool()
