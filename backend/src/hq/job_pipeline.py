@@ -24,6 +24,7 @@ from datetime import date
 from typing import Any
 
 from hq import privacy
+from hq.config import settings
 
 WORKFLOW = "job_search"
 DISCOVERY_STAGE = "browser_discovery"
@@ -160,6 +161,7 @@ def discovery_brief(payload: Mapping[str, Any]) -> str:
     sources = str(payload.get("sources") or DEFAULT_SOURCES)
     max_roles = max(1, min(int(payload.get("max_roles") or 20), MAX_DISCOVERY_ROLES))
     families = [str(f) for f in payload.get("families") or ROLE_FAMILIES[:SEARCHES_A_NIGHT]]
+    bar = settings().job_max_min_years
     numbered = "\n".join(f"  {i}. {f}" for i, f in enumerate(families, 1))
     count = {1: "ONE", 2: "TWO", 3: "THREE", 4: "FOUR"}.get(len(families), str(len(families)))
     return f"""Use the signed-in browser extension to discover current jobs matching:
@@ -181,9 +183,7 @@ The keyword values, one per search:
 Keep `keywords` to that bare title. LinkedIn matches keywords literally, so
 anything else you put there — years, "entry-level", "exclude X", a list of
 titles — narrows the search to postings that happen to contain those words.
-The previous version of this brief pasted the whole target description into
-one keywords field and read a single page, and it surfaced ten leads when the
-week's market held far more. The filters do the filtering: `f_E=2,3` is
+The filters do the filtering: `f_E=2,3` is
 entry-level plus associate, `f_TPR=r604800` is the last week.
 `location=India` is one place, and it covers Bengaluru, other Indian cities
 and remote-in-India together. Never pass a list of places: LinkedIn's
@@ -192,9 +192,8 @@ location field takes one.
 Note what is NOT in the experience filter: `1` is internship, and the
 candidate is employed, so internships are noise. `3` (associate) is in
 because some companies label a level-one role "Associate Software Engineer" —
-NOT because level two is a target. It is not: he has about two months of
-full-time experience behind an eleven-month internship, so SDE-2 and
-Engineer II are the wrong rung and will not screen through.
+NOT because level two is a target. It is not: he is early in his career, so
+SDE-2 and Engineer II are the wrong rung and will not screen through.
 
 Page budget for this task: at most eight page loads, all on LinkedIn (a
 detail pane opens on the same page and does not count). For each search,
@@ -224,9 +223,8 @@ short after two searches, stop and emit the JSON envelope with what you have.
 
 Two filters, applied while you search rather than afterwards:
 
-- **Level one, under three years, not a fresher role.** He is an employed
-  Product Engineer-I with about thirteen months of engineering behind him,
-  two of them full-time. Skip anything whose floor is three years or more,
+- **Level one, under {bar:g} years, not a fresher role.** He is employed at
+  level one. Skip anything whose floor is {bar:g} years or more,
   skip internships and fresher-only postings, and skip SDE-2 / Engineer II —
   all three are the wrong rung in different directions. Target: SDE-1, AI
   Engineer-1, Forward Deployed Engineer-1, Product Engineer-1 or equivalent.
