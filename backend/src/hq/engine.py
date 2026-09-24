@@ -1269,7 +1269,8 @@ async def _advance_job_search(
                 f" exclude, for '{query}' in"
                 f" {payload.get('locations') or 'India|Bengaluru|Remote'}."
                 f" Score and record every verified role. Say in the note"
-                f" that this sweep read boards only, not LinkedIn."
+                f" that this sweep read boards only, not LinkedIn.\n\n"
+                + learning.hunter_skill("job-research")
             ),
             source="agent",
             parent_task_id=task_id,

@@ -458,3 +458,10 @@ def test_linkedin_searches_rotate_through_every_role_family() -> None:
     for family in payload["families"]:
         assert f". {family}\n" in brief
     assert "Run FOUR short LinkedIn searches" in brief
+
+
+def test_the_verification_brief_carries_its_skill() -> None:
+    from hq import job_pipeline as jp
+
+    brief = jp.verification_brief({"query": "x"}, [])
+    assert "## The job-research skill" in brief
