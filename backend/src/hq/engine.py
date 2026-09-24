@@ -133,6 +133,7 @@ ARTIFACT_TOOLS = (
     "file_study_note",
     "record_reading",
     "file_posts",
+    "file_shortlist",
     "record_fact",
     "create_subtask",
     "start_job_search",
@@ -839,6 +840,15 @@ async def _cron_brief_step(agent_name: str, prompt: str, skill: str = "") -> str
     if skill:
         path = settings().agents_dir / agent_name / "skills" / skill / "SKILL.md"
         brief += f"\n\n## The {skill} skill\n\n" + path.read_text().strip()
+        if agent_name == "sage":
+            # State as data: what last night led with, the status of every
+            # "Needs you" line, the open decisions and the counters, built
+            # by code so the model never re-derives or repeats them.
+            from hq import continuity
+
+            block = await continuity.for_skill(skill)
+            if block:
+                brief += "\n\n" + block
     return brief
 
 

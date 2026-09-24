@@ -19,7 +19,9 @@ earlier sections said; one clause reconnects an idea.
    measured it, where) goes in `<details class="evidence">` under it.
 5. Use it: the exercise from his lab that exercises this idea, or the file
    in Mission HQ where the same mechanism lives, with a question that
-   reading it answers.
+   reading it answers. What he has done comes only from the "What he has
+   done (from the ledger)" block or his phase; with no line there, name
+   the exercise, not him.
 6. Close with `<div class="keypoints">` holding `<p class="remember">` (the
    claim, as he would say it to a colleague), `<p class="trap">` (the wrong
    belief and what it costs) and `<p class="try">` (one thing under five

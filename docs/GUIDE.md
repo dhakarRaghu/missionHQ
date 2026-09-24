@@ -263,6 +263,11 @@ wrote. Every run calls the model, so it costs money and needs the gateway;
 CI does not run it (CI runs `tests/test_regression_cases.py`, the same
 failures against the gates in code, with no model).
 
+A sage case with a `skill` may carry a `continuity:` block: the text
+`hq.continuity` would build from the ledger at dispatch, fixed here as
+data, so the case judges what the agent does with a stated last-night lead
+or a closed row rather than with whatever the live ledger holds that day.
+
 ```bash
 uv run python -m hq.cli regress cases                 # every case id and the incident it holds
 uv run python -m hq.cli regress run before-$(git rev-parse --short HEAD)
