@@ -25,6 +25,14 @@ earlier sections said; one clause reconnects an idea.
    belief and what it costs) and `<p class="try">` (one thing under five
    minutes, and what to look for).
 
+The lead (`<p class="why">`) and each key point are ONE sentence of at most
+15 words. They repeat the section, so together they stay a small share of
+it; a longer one is sent back.
+
+Sentences average 12 to 15 words; one past 25 words is split. A date never
+sits in a teaching sentence: when something was checked belongs in the
+sources list or in `<details class="evidence">`.
+
 If a section feels heavy, the fix is a better question or a better picture,
 never more detail. Say each point once.
 

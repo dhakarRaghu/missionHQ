@@ -513,6 +513,14 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
             continue  # the part's own budget below is the length rule
         probs.append(note)
     words = lt._visible_words(html)
+    # A checked-on date inside a teaching sentence: the page refuses it, so
+    # the part that carries it is sent back now, not the whole page later.
+    if not apparatus:
+        prose = lt._ASIDE_RE.sub(" ", html)
+        stamped = [s for s in lt._sentences(lt._page_text(prose)) if lt._ISO_DATE_RE.search(s)]
+        if stamped:
+            probs.append(f"a teaching sentence carries a date (“{stamped[0][:70]}…”); move"
+                         ' when it was checked into the sources or <details class="evidence">')
     # The page's restatement ceiling, held on every part: parts that each
     # passed added up to 14% of a page whose ceiling is 12%, and a page-wide
     # refusal names no part to rewrite.

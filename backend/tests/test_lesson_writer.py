@@ -421,3 +421,12 @@ def test_a_part_that_restates_too_much_is_sent_back_alone() -> None:
     probs = lw.section_problems(heavy, earlier="", article=True, kind="", apparatus=False,
                                 total_words=0)
     assert any("key-point box and the lead here" in p for p in probs)
+
+
+def test_a_dated_teaching_sentence_is_caught_on_its_part() -> None:
+    html = ('<h2 data-concept="c1">Q</h2><p>The read multiplier is 0.1x of the base input'
+            ' price, verified on 2026-09-23 against the pricing page today.</p>')
+    probs = lw.section_problems(html, earlier="", article=True, kind="", apparatus=False,
+                                total_words=0)
+    assert any("carries a date" in p for p in probs)
+    assert "at most\n15 words" in (lw.writer_dir() / "section.md").read_text()
