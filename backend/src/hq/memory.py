@@ -543,7 +543,15 @@ async def _replace_chunks(conn: psycopg.AsyncConnection, rel_path: str,
     """Make the rows for ``rel_path`` equal ``chunks``. Rows whose
     (chunk_no, heading, body) are unchanged are left alone so they keep their
     embedding; only changed or new chunks are rewritten (embedding NULL until
-    ``_embed_missing`` fills it). Returns the number of rows rewritten."""
+    ``_embed_missing`` fills it). Returns the number of rows rewritten.
+
+    One writer per path at a time: two runs writing the same note in the same
+    minute (the daily note and consolidation, 2026-09-24 05:15) both read the
+    old rows, both inserted chunk 0, and the second failed its workflow on a
+    unique violation. The lock is held to the end of the caller's transaction.
+    """
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtext('memory_chunks:' || %s))",
+                       (rel_path,))
     cur = await conn.execute(
         "SELECT chunk_no, heading, body FROM hq.memory_chunks WHERE path = %s", (rel_path,)
     )
@@ -559,7 +567,8 @@ async def _replace_chunks(conn: psycopg.AsyncConnection, rel_path: str,
         async with conn.cursor() as cur2:
             await cur2.executemany(
                 "INSERT INTO hq.memory_chunks (path, chunk_no, heading, body)"
-                " VALUES (%s, %s, %s, %s)",
+                " VALUES (%s, %s, %s, %s) ON CONFLICT (path, chunk_no) DO UPDATE"
+                " SET heading = EXCLUDED.heading, body = EXCLUDED.body, embedding = NULL",
                 changed,
             )
     return len(changed)
