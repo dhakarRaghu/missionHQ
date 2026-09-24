@@ -1,6 +1,6 @@
 ---
 name: operator
-description: "Everything the Codex CLI can reach: the browser you are signed into, the shell, files and dashboards. Reads only, and every run needs your approval."
+description: "Everything the Codex CLI can reach: the browser you are signed into, the shell, files and dashboards. Reads only. A run needs your approval unless you approved one like it in the last twelve hours, or the guard finds it read-only and bounded."
 status: active
 runtime: codex
 model: default

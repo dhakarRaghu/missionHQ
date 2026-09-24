@@ -131,6 +131,7 @@ ARTIFACT_TOOLS = (
     # skipped: "nothing here was worth his hour" is a valid result.
     "file_study_note",
     "record_reading",
+    "file_posts",
     "record_fact",
     "create_subtask",
     "start_job_search",
@@ -191,6 +192,8 @@ def artifact_expected(text: str, payload: Any) -> bool:
     "writeup" returned four verified leads and was blocked as empty-handed.
     The wording rule is kept for free-form tasks, which have nothing else.
     """
+    if isinstance(payload, dict) and payload.get("requires"):
+        return True   # the cron entry names the tool its run must call
     if isinstance(payload, dict) and payload.get("stage"):
         return False
     return expects_artifact(text)
@@ -327,6 +330,14 @@ async def dispatch(
         parent_id=parent_task_id, origin_session_id=origin_session_id,
         payload=payload, dedup_key=dedup_key,
     )
+    if not inserted and status in ("blocked", "failed"):
+        # One liveness rule for every chain: a task under this key that
+        # stopped is run again, not handed back. A study that failed, a
+        # referral hunt whose approval expired and a discovery that blocked
+        # were each handed back night after night while nothing ran.
+        await board.apply(task_id, "retried", status="backlog",
+                          data={"reason": "asked for again under the same key"})
+        status = "backlog"
     if inserted or status == "backlog":
         await _enqueue(task_id, lane=lane_for(payload, agent))
     return task_id
@@ -594,32 +605,12 @@ async def run_task(task_id: str) -> str:
         task_id, run_id, agent_name, result, delivered_output
     )
     await enqueue_agent_tasks(run_id)
-    # One owner-facing voice. A scheduled run that went well is in the daily
-    # note and the digest; it was the largest source of the notifications the
-    # daily cap held back. His phone hears from the engine only when a
-    # scheduled run failed, was blocked, or claimed done and wrote nothing.
-    if (task["source"] == "cron" and result != "done"
-            and await safety.notification_budget_left()):
-        # A card, not a paste. The answer is the agent's own markdown, and
-        # Telegram renders a small HTML subset — sent raw it arrived as
-        # literal ** and ## around the words meant to stand out, which is a
-        # wall of punctuation to read on a phone.
-        from hq.channels import cards
-
-        icon = "⚠️"
-        footer = f"{outcome.cost_usd:.4f} USD"
-        if result == "no_artifact":
-            footer = f"claimed done but wrote nothing · {footer}"
-        await runner.queue_outbound_step(
-            {"kind": "text", "html": True, "text": cards.answer_card(
-                agent=agent_name, title_text=task["title"], body=outcome.output,
-                icon=icon, footer=footer,
-            )},
-            idempotency_key=f"task-done:{task_id}",
-        )
-        await runner.emit_step("notify", task_id=task_id, agent=agent_name,
-                               payload={"text": task["title"]})
-        await runner.flush_outbox_step()
+    # One owner-facing voice. A scheduled run's failure is in the daily note
+    # and the digest's "blocked or failed" list; only sage reaches his phone.
+    # The engine's own failure card was a third channel for the same fact.
+    if task["source"] == "cron" and result != "done":
+        await runner.emit_step("notify_digested", task_id=task_id, agent=agent_name,
+                               payload={"text": task["title"], "result": result})
     return result
 
 
@@ -786,7 +777,7 @@ def _register_cron() -> None:
         for i, entry in enumerate(spec.cron):
             wf_name = f"cron_{name}_{i}"
             fire = DBOS.workflow(name=wf_name)(
-                _make_cron(name, i, entry.prompt, entry.schedule, entry.skill)
+                _make_cron(name, i, entry.prompt, entry.schedule, entry.skill, entry.requires)
             )
             _schedules.append({
                 "schedule_name": wf_name, "workflow_fn": fire,
@@ -848,7 +839,8 @@ async def _cron_brief_step(agent_name: str, prompt: str, skill: str = "") -> str
     return brief
 
 
-def _make_cron(agent_name: str, idx: int, prompt: str, schedule: str, skill: str = ""):
+def _make_cron(agent_name: str, idx: int, prompt: str, schedule: str, skill: str = "",
+               requires: str = ""):
     async def fire(scheduled: datetime, context: Any) -> None:
         local = scheduled.astimezone(ZoneInfo(settings().cron_tz))
         # After a restart DBOS fires every slot it missed, all at once: seven
@@ -864,6 +856,7 @@ def _make_cron(agent_name: str, idx: int, prompt: str, schedule: str, skill: str
         await dispatch(
             agent=agent_name, title=cron_title(prompt),
             brief=await _cron_brief_step(agent_name, prompt, skill), source="cron",
+            payload={"requires": requires} if requires else None,
             dedup_key=f"cron:{agent_name}:{idx}:{local:%Y-%m-%d-%H%M}",
         )
     fire.__name__ = fire.__qualname__ = f"cron_{agent_name}_{idx}"
@@ -921,6 +914,12 @@ async def _archive_old_tasks() -> None:
     which the task list leaves out. Nothing is deleted: the row, its runs and
     its events all stay, and asking for status=archived still returns it.
     """
+    # A browser request nobody routed within three days is not coming: expire
+    # it, so hunter's identical question tomorrow is not refused as "pending".
+    await db.execute(
+        "UPDATE hq.operator_requests SET status = 'expired', decided_by = 'system',"
+        " decided_note = 'not routed within 3 days', decided_at = now()"
+        " WHERE status = 'pending' AND created_at < now() - interval '3 days'")
     days = settings().board_archive_days
     if days <= 0:  # 0 switches archiving off
         return
@@ -1584,7 +1583,9 @@ async def _pending_readings_step(limit: int, phase_slug: str = "") -> list[dict[
 
     A 'queued' row older than a day comes back: the study run that claimed it
     never finished, and a candidate stranded in queued is one the ledger would
-    never offer again.
+    never offer again. A 'digested' row with no lesson comes first of all:
+    the reading is paid for and its note is on disk; nine such rows sat
+    unoffered after failed articles.
     """
     # While a phase is active the filter belongs in the query. Taking the top
     # rows by score first and filtering after let old, higher-scoring leads
@@ -1664,6 +1665,18 @@ async def _phase_articles_step(phase_slug: str) -> list[dict[str, Any]]:
 
 
 @DBOS.step()
+@DBOS.step()
+async def _untaught_digests_step(phase_slug: str) -> list[dict[str, Any]]:
+    phase_filter = " AND phase_slug = %s" if phase_slug else ""
+    params: tuple[Any, ...] = (phase_slug, learning.MAX_STUDY) if phase_slug else (learning.MAX_STUDY,)
+    return await db.fetch(
+        "SELECT url, title, digest_path FROM hq.readings"
+        " WHERE status = 'digested' AND digest_path <> '' AND lesson_id IS NULL"
+        + phase_filter + " ORDER BY last_seen DESC LIMIT %s",
+        params,
+    )
+
+
 async def _digested_readings_step(urls: list[str]) -> list[dict[str, Any]]:
     return await db.fetch(
         "SELECT url, title, digest_path FROM hq.readings"
@@ -1851,6 +1864,11 @@ async def _advance_learning(
     if learning.is_deep_study(payload):
         urls = [str(u) for u in (payload.get("urls") or [])]
         digests = await _digested_readings_step(urls)
+        if not digests:
+            # Nothing new was digested today, but a reading digested on an
+            # earlier day whose article failed is paid for and on disk; ten
+            # such rows sat unused. Write today's article from those.
+            digests = await _untaught_digests_step(str(payload.get("phase_slug") or ""))
         if not digests:
             return None
         lesson = learning.lesson_payload({**payload, "topics": topics}, digests)
@@ -2226,6 +2244,7 @@ async def _catch_up_missed(now_utc: datetime) -> None:
                 continue
             await dispatch(agent=agent_name, title=cron_title(entry.prompt),
                            brief=await _cron_brief_step(agent_name, entry.prompt, entry.skill),
+                           payload={"requires": entry.requires} if entry.requires else None,
                            source="cron", dedup_key=key)
             await runner.emit_step("cron.caught_up", agent=agent_name, payload={"slot": key})
 
@@ -2288,6 +2307,13 @@ async def _deadman_check(now_utc: datetime) -> None:
             state = await _slot_state(key)
             if state["completed"]:
                 continue
+            # A slot is missed when nothing ran, or its task has sat past the
+            # grace without finishing. One created a minute ago by the catch-up,
+            # or still running, is not missed: that alarm fired one minute
+            # after the task started.
+            if state["status"] in ("running", "backlog", "needs_approval") and (
+                    state["created_at"] is None or now - state["created_at"] < DEADMAN_GRACE):
+                continue
             await _deadman_mark(key)
             detail = f"task is {state['status']}" if state["status"] else "no task was created"
             text = (f"⚠ {agent_name} did not complete its {entry.schedule} run"
@@ -2322,21 +2348,18 @@ async def _deadman_check(now_utc: datetime) -> None:
 
 
 async def _deadman_due(now_utc: datetime) -> bool:
-    """Hourly guard on hq.control; also records this check as the latest."""
-    row = await db.fetchone("SELECT value FROM hq.control WHERE key = %s", (DEADMAN_LAST_KEY,))
-    if row and isinstance(row["value"], str):
-        try:
-            last = datetime.fromisoformat(row["value"])
-        except ValueError:
-            last = None
-        if last is not None and now_utc - last < DEADMAN_INTERVAL:
-            return False
-    await db.execute(
+    """Hourly guard on hq.control, claimed in one statement. A read then a
+    write let ~30 backfilled watchdog ticks after a restart all pass at once
+    (2026-09-24 05:14), each sending an alarm: the day's notification budget
+    was gone by 05:15 and every real alert after it was held back."""
+    cutoff = (now_utc - DEADMAN_INTERVAL).isoformat()
+    row = await db.fetchone(
         "INSERT INTO hq.control (key, value, updated_at) VALUES (%s, %s, now())"
-        " ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()",
-        (DEADMAN_LAST_KEY, db.jsonb(now_utc.isoformat())),
+        " ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()"
+        " WHERE (hq.control.value #>> '{}') < %s RETURNING key",
+        (DEADMAN_LAST_KEY, db.jsonb(now_utc.isoformat()), cutoff),
     )
-    return True
+    return row is not None
 
 
 async def _deadman_seen(slot_key: str) -> bool:
@@ -2356,7 +2379,7 @@ async def _slot_state(slot_key: str) -> dict[str, Any]:
     """{completed, status, outcome} for the task behind one cron slot."""
     row = await db.fetchone(
         """
-        SELECT t.status,
+        SELECT t.status, t.created_at,
                (SELECT r.outcome FROM hq.runs r WHERE r.task_id = t.id
                 ORDER BY r.started_at DESC LIMIT 1) AS outcome,
                EXISTS (SELECT 1 FROM hq.runs r WHERE r.task_id = t.id
@@ -2366,6 +2389,6 @@ async def _slot_state(slot_key: str) -> dict[str, Any]:
         (list(DEADMAN_COMPLETED), slot_key),
     )
     if row is None:
-        return {"completed": False, "status": None, "outcome": None}
+        return {"completed": False, "status": None, "outcome": None, "created_at": None}
     return {"completed": bool(row["completed"]), "status": row["status"],
-            "outcome": row["outcome"]}
+            "outcome": row["outcome"], "created_at": row["created_at"]}

@@ -70,7 +70,7 @@ Your brief carries the skill it needs. Load one yourself only when it does not.
 2. `record_job` files senior, level-two and three-plus-year roles closed by
    itself. The profile and `memory/decisions.md` say what fits.
 3. Free before paid: name the URL and fetch it; search only when you cannot
-   name it; guess a URL once; retry a failed fetch once, then record what you
+   name it; guess a URL once; a fetch that fails is retried by the tool itself; when it still fails, record what you
    have and say what would not load.
 4. LinkedIn and X are closed to your tools. A wall there is one
    `request_operator`: one fact, one line, what you already tried. Your run

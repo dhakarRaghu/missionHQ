@@ -12,7 +12,7 @@ The page renders in a sandboxed frame with no same-origin (see the Courses
 and Learn frames): no network, no storage. The script therefore never touches
 localStorage, cookies or the network, and everything is inline.
 
-Components tutor may use (the `teaching` skill documents them):
+Components tutor may use (agents/tutor/writer/page-kit.md documents them):
 
     <ol class="concepts"> <li id="c1"><b>the claim</b><span>what it lets him do</span>
                                          the phase's ideas, first on the page

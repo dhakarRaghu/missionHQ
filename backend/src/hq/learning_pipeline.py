@@ -1086,8 +1086,8 @@ How to work:
 2. `web_fetch` the roster's blog index pages directly. An index page lists
    titles and dates, which is all you need to decide, and it costs nothing.
 3. Use `web_search` only for a topic where you do not know who publishes on
-   it. It is metered and shared with every other agent — forty calls a day for
-   the whole system — so **spend at most four in this run**. Fetches of
+   it. It is metered and shared with every other agent ({_search_cap()} calls a
+   day for the whole system) so **spend at most four in this run**. Fetches of
    index pages do nearly all the useful work and are free; reach for them
    first, and search only when you cannot name the page you want.
 4. Prefer the primary source. A newsletter summarising a paper is worth less
@@ -1677,6 +1677,10 @@ def is_course_study(payload: object) -> bool:
 def is_course_written(payload: object) -> bool:
     """Tutor writes the phase: the staged writer takes it from here."""
     return _is_stage(payload, COURSE_WRITTEN_STAGE)
+
+
+def _search_cap() -> int:
+    return int(settings().brightdata_daily_calls)
 
 
 def hunter_skill(name: str) -> str:

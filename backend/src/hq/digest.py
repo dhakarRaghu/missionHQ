@@ -26,7 +26,7 @@ from hq.obs import emit
 log = logging.getLogger(__name__)
 
 LAST_SENT_KEY = "digest:last_sent"
-MAX_CHARS = 3500
+MAX_CHARS = 3900
 MAX_ITEMS = 8           # per list; the rest collapses into "…and N more"
 ITEM_TEXT_CHARS = 160
 
@@ -40,7 +40,8 @@ async def build_digest(since: datetime | None, *, now: datetime | None = None) -
     return text
 
 
-NOTE_CHARS = 1800
+NOTE_CHARS = 2200            # a 300-word note whole, its one action included
+NOTE_DEADLINE = (23, 20)     # wait for sage's 22:30 note until here, then go without it
 
 
 def _daily_note(now: datetime) -> str:
@@ -283,8 +284,14 @@ async def send_digest(*, now: datetime | None = None) -> bool:
     Returns False and sends nothing when there is nothing to report or when
     today's digest already left."""
     now = now or datetime.now(UTC)
+    local = now.astimezone(ZoneInfo(settings().cron_tz))
     text, counts = await _build(None, now=now)
     if not text:
+        return False
+    # The note is the reason the digest goes out at all. Sage's 22:30 run
+    # takes up to half an hour, so a fixed 22:50 send missed the note about
+    # half the time; the watchdog calls again each minute until it is there.
+    if not counts.get("note") and (local.hour, local.minute) < NOTE_DEADLINE:
         return False
     local_date = now.astimezone(ZoneInfo(settings().cron_tz)).strftime("%Y-%m-%d")
     queued = await _record_step(text, local_date, counts, now.astimezone(UTC).isoformat())

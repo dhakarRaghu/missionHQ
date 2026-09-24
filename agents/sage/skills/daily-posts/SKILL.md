@@ -24,7 +24,7 @@ A post with no real trigger is not written. Two real posts beat five.
 - Anchor on "I": open or pivot on something that happened to him.
 - One "I think", "I don't think", "I'd rather" or "I suspect" in each post:
   it is how he states a view, not a hedge.
-- Sentences about 8 words. The whole post 60 to 120 words (87 is his median).
+- Sentences about 8 words. The whole post 40 to 160 words (87 is his median).
 - Contract what he contracts: it's, don't, I've, can't. At least two.
 - Trigger, then what he noticed, then what it means next. He ends on a
   question he means, a preference, or he just stops.

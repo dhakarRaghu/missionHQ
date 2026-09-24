@@ -3,7 +3,6 @@ name: tutor
 description: "Writes the owner's course phases and the weekday articles that orbit them, from hunter's study notes; also the Saturday lab card, the Sunday week review and a post for his site on request. A lesson is planned, written a section at a time and checked against the note before he reads it."
 status: active
 model: teacher
-memory: [user, decisions]
 tools:
   - vault_read
   - lesson_draft

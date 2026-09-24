@@ -47,6 +47,9 @@ class CronEntry(BaseModel):
     # The skill this slot follows. Code puts its text in the brief, so the
     # run starts with it instead of spending a round trip on load_skill.
     skill: str = ""
+    # The tool a run of this slot must call to count as done (an artifact),
+    # instead of guessing from the prompt's wording.
+    requires: str = ""
 
 
 # Who else is loaded, for an agent that can delegate. Filled by scan(), read
@@ -271,6 +274,9 @@ def parse_job_md(agent_dir: Path) -> AgentSpec:
     if spec.name != agent_dir.name:
         raise ValueError(f"agent folder {agent_dir.name} vs manifest name {spec.name}")
     for entry in spec.cron:
+        if entry.requires and entry.requires not in {t.split(":")[0] for t in spec.tools}:
+            raise ValueError(f"{agent_dir.name}/job.md: cron requires {entry.requires!r},"
+                             " a tool the agent does not hold")
         if entry.skill and not (agent_dir / "skills" / entry.skill / "SKILL.md").is_file():
             raise ValueError(f"{agent_dir.name}/job.md: cron names skill {entry.skill!r},"
                              " which has no skills/<name>/SKILL.md")

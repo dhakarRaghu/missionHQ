@@ -206,8 +206,15 @@ def _charter() -> str:
 
 
 def writer_prompt(*names: str) -> str:
-    """The charter first, as every agent gets it, then the writer's own files."""
-    return "\n\n".join([_charter().strip(), *(_writer_file(n).strip() for n in names)])
+    """The charter first, as every agent gets it, then the writer's own files,
+    with the clock line the charter refers to (rule 7 says to use it)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    now = datetime.now(ZoneInfo(settings().cron_tz))
+    clock = (f"Current date and time: {now:%A %Y-%m-%d %H:%M} ({settings().cron_tz})."
+             " Use this date for anything you date.")
+    return "\n\n".join([clock, _charter().strip(), *(_writer_file(n).strip() for n in names)])
 
 
 def outline_instructions(article: bool, page: str = "") -> str:
@@ -595,10 +602,17 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
     # passed added up to 14% of a page whose ceiling is 12%, and a page-wide
     # refusal names no part to rewrite.
     said_again = lt._restatement_words(html)
-    allowed = max(RESTATEMENT_FLOOR, int(words * lt.RESTATEMENT_SHARE))
-    if said_again > allowed:
-        probs.append(f"the key-point box and the lead here are {said_again} words; keep them"
-                     f" under {allowed}: one short sentence each, a point said once")
+    if apparatus:
+        if said_again:
+            probs.append("an apparatus section has no lead and no key-point box; remove them")
+    else:
+        # As section.md states it: the lead and three key points, one
+        # sentence of at most 15 words each, so 60 words is the rule and a
+        # long section may spend its 12% share.
+        allowed = max(RESTATEMENT_FLOOR, int(words * lt.RESTATEMENT_SHARE))
+        if said_again > allowed:
+            probs.append(f"the lead and the key points here are {said_again} words; keep them"
+                         f" under {allowed}: one sentence of at most 15 words each")
     if budget and words > budget * BUDGET_SLACK:
         probs.append(f"this section is {words} words; its share of the page is about"
                      f" {budget}. Cut it to that: keep the mechanism and the one piece of"
@@ -638,7 +652,7 @@ OPENING_WORDS = 150
 APPARATUS_WORDS = {"lab": 300, "checkpoint": 220, "post": 140, "sources": 120,
                    "orientation": 180, "cheatsheet": 200, "recall": 200}
 BUDGET_SLACK = 1.2           # a part this far past its budget is sent back
-RESTATEMENT_FLOOR = 30       # words a short part may spend on its key points
+RESTATEMENT_FLOOR = 60       # the lead and three key points at 15 words each
 
 
 def word_budgets(outline: Outline, limit: int) -> dict[int, int]:
@@ -778,8 +792,9 @@ class Writer:
                 self.m, self.outline, i, s, previous, found, budget))
             html = _h2(i, s) + "\n" + clean_section(raw)
             found = section_problems(html, earlier=earlier, article=self.m.article,
-                                     kind=self.m.kind, apparatus=bool(s.kind), total_words=total,
-                                     budget=budget, source=self.m.source or self.m.lab_source)
+                                     kind=self.evidence_kind(), apparatus=bool(s.kind),
+                                     total_words=total, budget=budget,
+                                     source=self.m.source or self.m.lab_source)
             if not found:
                 break
         if found:
@@ -836,6 +851,15 @@ class Writer:
                       reverse=True)
         return sorted(i for ratio, i in over[:3] if ratio > 1.0)
 
+    def _largest_parts(self, n: int = 2) -> list[int]:
+        """When a page-wide ratio fails and no part is named, the parts that
+        weigh most on it: the largest teaching parts. Always at least one."""
+        assert self.outline is not None
+        sized = sorted(((lt._visible_words(self.parts[i]), i)
+                        for i in range(1, len(self.parts))
+                        if not self.outline.sections[i - 1].kind), reverse=True)
+        return sorted(i for _w, i in sized[:n]) or [1] if len(self.parts) > 1 else []
+
     def _failing_parts(self) -> list[int]:
         assert self.outline is not None
         out = []
@@ -865,7 +889,7 @@ class Writer:
                 # Named by a quote, a url or a heading; failing that, the
                 # parts that fail their own checks, which mirror the page's.
                 parts = (self._parts_quoting(message) or self._over_budget(message)
-                         or self._failing_parts())
+                         or self._failing_parts() or self._largest_parts())
                 self.report.append(f"page check: {message[:300]}"
                                    + (f" (sections {parts})" if parts else ""))
                 if round_ == REPAIR_ROUNDS or not parts:
@@ -882,6 +906,19 @@ class Writer:
         a sentence from his own phase or its sequence is supported, not an
         invention. A course phase's material is its whole prompt."""
         return self.m.prompt if self.m.source else self.m.note
+
+    def evidence_kind(self) -> str:
+        """The kind whose evidence ceiling applies: a paper's, when the piece
+        is about a paper or its plan cites one, whatever the weekday says. A
+        frontier article about the Orca paper was refused on every part for
+        sentences about its source."""
+        if self.m.kind == learning.PAPER or self.m.relationship == "foundation":
+            return learning.PAPER
+        if self.outline and any(re.search(r"\b(paper|arxiv|osdi|nsdi|sosp|proceedings)\b",
+                                          c.evidence + " " + c.evidence_quote, re.IGNORECASE)
+                                for c in self.outline.concepts):
+            return learning.PAPER
+        return self.m.kind
 
     def _claims(self, parts: list[int]) -> list[dict[str, Any]]:
         """Every checkable sentence of these parts, tagged with its part."""
@@ -1041,6 +1078,10 @@ def lesson_essentials(page_html: str) -> str:
         keys = [plain(k) for k in _KEEP_RE.findall(section)]
         if title and keys:
             out.append(f"### {title}\n" + "\n".join(f"- {k}" for k in keys))
+    # The page's links, so a review that cites one is citing the material.
+    urls = list(dict.fromkeys(lt._HREF_RE.findall(page_html)))
+    if urls:
+        out.append("Links:\n" + "\n".join(urls[:40]))
     return "\n\n".join(out)
 
 

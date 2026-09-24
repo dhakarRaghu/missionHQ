@@ -564,7 +564,9 @@ def test_the_scan_is_given_a_budget_for_the_metered_call() -> None:
     brief = scan_brief(scan_payload())
 
     assert "at most four in this run" in brief
-    assert "forty calls a day" in brief
+    from hq.config import settings as _settings
+
+    assert f"{_settings().brightdata_daily_calls} calls a" in brief
     assert "index pages do nearly all the useful work and are free" in brief
 
 

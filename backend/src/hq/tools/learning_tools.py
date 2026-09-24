@@ -23,11 +23,12 @@ from zoneinfo import ZoneInfo
 import httpx
 from pydantic_ai import ModelRetry, RunContext
 
+from hq import board, db, lesson_kit, privacy
 from hq import courses as courses_spec
-from hq import db, lesson_kit, privacy
 from hq.config import settings
 from hq.learning_pipeline import (
     ARTICLE_KINDS,
+    COURSE_WRITTEN_STAGE,
     FRONTIER,
     LAB_CARD,
     LESSON_DIR,
@@ -707,7 +708,7 @@ def part_notes(html: str, *, earlier_html: str = "", article: bool = False,
     """
     notes: list[str] = []
     share = EVIDENCE_SHARE if evidence_share is None else evidence_share
-    text = _page_text(html)
+    text = teaching_prose(html)
     sentences = _sentences(text)
     if len(sentences) >= 8:
         avg, long = reading_ease(text)
@@ -789,7 +790,7 @@ async def write_lesson_part(
 
     Use this for anything longer than a short article: one call per section,
     `part` counting from 1 in reading order. `html` is that section as page
-    body, using the page kit's components (the `teaching` skill lists them);
+    body, using the page kit's components (agents/tutor/writer/page-kit.md lists them);
     no doctype, head or style — `write_lesson` wraps the parts in the kit.
     `markdown` is the same section as text; leave it empty for a course page
     and it is derived from the html. The parts are joined in order, so write
@@ -1542,6 +1543,19 @@ def _page_text(page_html: str) -> str:
     return html_lib.unescape(re.sub(r"<[^>]+>", " ", stripped))
 
 
+_NOT_PROSE_RE = re.compile(
+    r"(?is)<(nav|header|pre|aside|details|figure|table|svg)\b[^>]*>.*?</\1>"
+    r"|<(ul|ol)\b[^>]*class=[\"'](?:sources|concepts|exercises)[\"'][^>]*>.*?</\2>")
+
+
+def teaching_prose(page_html: str) -> str:
+    """The sentences he reads as prose: no code, no source list, no concept
+    list, no hero or contents rail. The page measured its plainness over all
+    of these (a sources list scored "33 words a sentence") while each part
+    measured only itself, so the two verdicts never agreed."""
+    return _page_text(_NOT_PROSE_RE.sub(" ", page_html))
+
+
 def reading_ease(text: str) -> tuple[float, float]:
     """(average sentence length, share of sentences over 25 words).
 
@@ -1933,7 +1947,7 @@ def page_coverage(source: str, page_html: str, note: str = "", *,
     if measurable:
         # He reads English as a second language. The bar is absolute: a page is
         # plain or it is not, whatever the phase it grew from sounds like.
-        page_avg, page_long = reading_ease(_page_text(page_html))
+        page_avg, page_long = reading_ease(teaching_prose(page_html))
         if page_avg > PLAIN_SENTENCE_WORDS or page_long > PLAIN_LONG_SHARE:
             problems.append(
                 f"the page reads heavier than it should: sentences average"
@@ -2232,6 +2246,18 @@ async def start_course_study(ctx: RunContext[HQDeps], course: str = "") -> str:
             " study platform; the next sync picks it up and Mission HQ adds to it."
         )
 
+    # The study is done and its lesson stopped: run the lesson again rather
+    # than report the old study as "studying" every night (3A, twice).
+    stopped = await db.fetchone(
+        "SELECT id::text FROM hq.tasks WHERE payload->>'stage' = %s AND payload->>'slug' = %s"
+        " AND status IN ('failed', 'blocked') ORDER BY created_at DESC LIMIT 1",
+        (COURSE_WRITTEN_STAGE, nxt["slug"]),
+    )
+    if stopped:
+        await board.apply(stopped["id"], "retried", actor="system", status="backlog",
+                          data={"reason": "the phase is studied and its lesson stopped"})
+        return f"the lesson for {nxt['title']!r} is queued again as task {stopped['id']}"
+
     payload = course_payload(dict(nxt))
     task_id = await engine.dispatch(
         agent="hunter",
@@ -2475,11 +2501,13 @@ async def start_learning_run(
     """
     from hq import engine  # late import to avoid cycles
 
-    blocker = await topic_learning_blocker()
+    kind = day_kind(_today().date())
+    # One unread article holds back the next article, not the weekend pages:
+    # a lab card and a week review are pages he works from, not reading.
+    blocker = None if kind in (LAB_CARD, WEEK_REVIEW) else await topic_learning_blocker()
     if blocker:
         return blocker
 
-    kind = day_kind(_today().date())
     if kind == LAB_CARD:
         return await _start_lab_card(ctx)
     if kind == WEEK_REVIEW:

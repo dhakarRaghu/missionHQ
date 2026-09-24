@@ -263,3 +263,33 @@ def test_a_study_note_cannot_be_written_as_a_tool_argument() -> None:
     with pytest.raises(Retry, match="file_study_note"):
         asyncio.run(inspect.unwrap(vault_tools.vault_write)(
             ctx, "quarantine/2026-09-24-x-study.md", "# x\n"))
+
+
+def test_a_stopped_task_asked_for_again_runs_again() -> None:
+    src = inspect.getsource(engine.dispatch)
+    assert 'status in ("blocked", "failed")' in src and '"retried"' in src
+
+
+def test_the_deadman_claim_is_one_statement() -> None:
+    src = inspect.getsource(engine._deadman_due)
+    assert "RETURNING key" in src and "SELECT value" not in src
+
+
+def test_a_cron_slot_can_name_the_tool_its_run_must_call() -> None:
+    from hq.loader import scan
+
+    posts = next(e for e in scan()["sage"].cron if e.skill == "daily-posts")
+    assert posts.requires == "file_posts"
+    assert engine.artifact_expected("Write today's posts.", {"requires": "file_posts"}) is True
+    assert "file_posts" in engine.ARTIFACT_TOOLS
+
+
+def test_a_post_may_not_claim_an_agents_work_as_his() -> None:
+    from hq.tools import content_tools as ct
+
+    post = ("I checked the company's careers page before applying and the role wasn't there."
+            " I don't think half the listings are real. I'd rather verify than write an"
+            " application to a ghost. It's one minute of work, and it keeps saving me hours.")
+    assert any("claims work an agent did" in p for p in ct.post_problems(post))
+    fixed = post.replace("I checked", "My job sweep checked")
+    assert not any("claims work" in p for p in ct.post_problems(fixed))

@@ -335,7 +335,8 @@ def test_model_text_in_a_heading_is_escaped() -> None:
 
 def test_the_writer_is_told_the_charter_first() -> None:
     text = lw.section_instructions()
-    assert text.startswith("# Mission HQ charter")
+    assert text.startswith("Current date and time:")          # charter rule 7 refers to it
+    assert text.split("\n\n")[1].startswith("# Mission HQ charter")
     assert len(lw.bundle_sha()) == 12
 
 
@@ -420,7 +421,7 @@ def test_a_part_that_restates_too_much_is_sent_back_alone() -> None:
              + "Rebuild the batch every step. " * 12 + "</p></div>")
     probs = lw.section_problems(heavy, earlier="", article=True, kind="", apparatus=False,
                                 total_words=0)
-    assert any("key-point box and the lead here" in p for p in probs)
+    assert any("the lead and the key points here" in p for p in probs)
 
 
 def test_a_dated_teaching_sentence_is_caught_on_its_part() -> None:
@@ -488,3 +489,19 @@ def test_an_evidence_quote_with_a_small_edit_is_still_the_notes_words() -> None:
                                    "with 512 token budget"), body)
     assert not lw.quoted_from(lw._norm("speculative decoding doubled throughput on every "
                                        "model we tried"), body)
+
+
+def test_an_apparatus_part_with_key_points_is_sent_back() -> None:
+    html = ('<h2 data-kind="lab">Lab</h2><ul class="exercises"><li>E1 run it</li></ul>'
+            '<div class="keypoints"><p class="remember">Keep this.</p></div>')
+    probs = lw.section_problems(html, earlier="", article=True, kind="", apparatus=True,
+                                total_words=0)
+    assert any("apparatus section has no lead" in p for p in probs)
+
+
+def test_plainness_is_measured_on_teaching_prose_alone() -> None:
+    prose = "<p>" + "The batch is rebuilt every step. " * 20 + "</p>"
+    sources = ('<h2 data-kind="sources">Sources</h2><ul class="sources"><li>'
+               + "https://a.dev/a-very-long-url-with-many-words-in-it and what it gave " * 12
+               + "</li></ul>")
+    assert lt.reading_ease(lt.teaching_prose(prose + sources)) == lt.reading_ease(lt._page_text(prose))

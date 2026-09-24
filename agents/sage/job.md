@@ -51,6 +51,7 @@ cron:
   - schedule: "40 22 * * *"
     prompt: "Write today's posts."
     skill: daily-posts
+    requires: file_posts
   - schedule: "0 9 * * 1"
     prompt: "Propose this week's job shortlist."
     skill: job-shortlist
@@ -100,6 +101,6 @@ a reason, and close every one.
 3. Open decisions live in `memory/decisions.md`. Never answer one for him.
 4. The job shortlist comes from `list_jobs`; ideas come from his lessons and
    notes; the daily note leads with something he did not know.
-5. A failed run goes in the daily note, not to his phone.
+5. A failed scheduled run goes in the daily note and the digest, never to his phone.
 6. A memory line stays only if an agent starting fresh would act
    differently for knowing it.

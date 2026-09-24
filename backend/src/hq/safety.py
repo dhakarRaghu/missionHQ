@@ -100,10 +100,12 @@ async def spend_cap_hit(agent: str, agent_daily_cap: float) -> str | None:
 
 
 async def notifications_sent_today() -> int:
+    """Messages queued to his phone today: outbox rows, not events. Thirty
+    alarm events in one second (2026-09-24) counted as thirty sends."""
     tz = settings().cron_tz
     row = await db.fetchone(
-        "SELECT count(*) AS n FROM hq.events"
-        f" WHERE kind = 'notify' AND ts AT TIME ZONE %s >= {_TODAY}",
+        "SELECT count(*) AS n FROM hq.outbox"
+        f" WHERE idempotency_key NOT LIKE 'digest:%%' AND created_at AT TIME ZONE %s >= {_TODAY}",
         (tz, tz),
     )
     return int(row["n"]) if row else 0

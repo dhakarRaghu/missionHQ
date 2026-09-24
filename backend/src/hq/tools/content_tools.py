@@ -47,7 +47,13 @@ def with_batch(existing: str | None, batch: str, day: str, title: str) -> str:
 
 
 POSTS_MIN, POSTS_MAX = 2, 5
-POST_WORDS = (25, 200)
+POST_WORDS = (40, 160)       # 87 is his median; rendered into the skill text
+_URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
+# Work an agent did, told as his own doing. His job sweep checks boards; he
+# does not. "I was reading" and "my sweep found" are his; these are not.
+_CLAIMED_RE = re.compile(
+    r"\bI\s+(?:checked|verified|applied|scraped|searched|swept|crawled|fetched|looked up"
+    r"|opened|read the board|ran (?:a|the|my) (?:sweep|search|scan))\b", re.IGNORECASE)
 SOURCES_PATH = "projects/content/post-sources.md"
 _POST_SPLIT = re.compile(r"^\s*-{3,}\s*$", re.MULTILINE)
 _PATHISH = re.compile(r"\b[\w./-]+\.md\b|\bquarantine/|\bwhy:|\bsources?:", re.IGNORECASE)
@@ -73,6 +79,12 @@ def post_problems(post: str) -> list[str]:
         probs.append("a file path or a note label (why:, Sources:); a post carries neither")
     if privacy.problem(post):
         probs.append("it names one of his employers")
+    if _URL_RE.search(post):
+        probs.append("a link; his posts carry none")
+    claimed = _CLAIMED_RE.search(post)
+    if claimed:
+        probs.append(f"\u201c{claimed.group(0)}\u201d claims work an agent did as his own;"
+                     " say who did it (\u201cmy job sweep found\u201d) or drop the line")
     return probs
 
 
