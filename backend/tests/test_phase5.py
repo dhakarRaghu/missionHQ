@@ -234,3 +234,17 @@ def test_a_browser_that_could_not_be_driven_is_tried_again_later() -> None:
     assert '_defer_step(task_id, "deferred_browser", BROWSER_RETRIES)' in src
     # blocked -> backlog is a legal move, so the deferral can land
     assert "backlog" in board.ALLOWED["blocked"]
+
+
+def test_a_study_note_cannot_be_written_as_a_tool_argument() -> None:
+    from types import SimpleNamespace
+
+    from pydantic_ai import ModelRetry as Retry
+
+    from hq.tools import vault_tools
+
+    ctx = SimpleNamespace(deps=HQDeps(agent="hunter", run_id=None, task_id=None,
+                                      vault_write_scopes=["quarantine/**"]))
+    with pytest.raises(Retry, match="file_study_note"):
+        asyncio.run(inspect.unwrap(vault_tools.vault_write)(
+            ctx, "quarantine/2026-09-24-x-study.md", "# x\n"))

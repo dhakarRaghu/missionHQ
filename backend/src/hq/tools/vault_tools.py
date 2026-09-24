@@ -166,6 +166,15 @@ async def vault_write(ctx: RunContext[HQDeps], path: str, content: str) -> str:
         rel = memory.normalize(path)
     except PermissionError as exc:
         raise ModelRetry(str(exc)) from None
+    if rel.startswith("quarantine/") and rel.endswith("-study.md"):
+        # A study note is the text of a reply, filed by file_study_note. Sent
+        # as this tool's argument it is generated in silence and can be cut
+        # at the idle limit; hunter also rewrote a filed 13k-character note
+        # through here, paying for it twice.
+        raise ModelRetry(
+            "study notes are filed with file_study_note: write the note as the text of"
+            " your reply and call file_study_note in that same reply. Calling it again"
+            " replaces the note")
     if not memory.in_scope(rel, scopes):
         # A retry hint, not a crash: the agent learns its scope and adapts.
         raise ModelRetry(
