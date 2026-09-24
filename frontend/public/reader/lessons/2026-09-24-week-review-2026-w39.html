@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Week review: batches, budgets, and proof</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Sunday week review · 2026-09-28</div><h1>Week review: batches, budgets, and proof</h1><p class="subtitle">Ten minutes that make this week&#x27;s five lessons stick, then set up next week</p></header>
+<p>You finished five lessons this week. Two came from your Kubernetes course, starting from the primitives. Two moved inside the inference server scheduler. One frontier piece asked what a quiet month actually proves. Each one made sense on the day you read it.</p>
+
+<p>But understanding on the day is not keeping. A lesson you cannot restate in your own words next month was reading, not learning. This page checks what lasted: the claims recalled from memory, three worked questions answered with numbers, and one decision about where next week starts. The question it leaves open is simple. Which of the five ideas can you still explain without looking?</p>
+<div class="keypoints"><p class="remember">Averages hide freezes, silence proves nothing, and every shared resource needs a budget you can name.</p></div>
+<h2 data-kind="recall">What did you actually read this week?</h2>
+<p class="why">Restating each lesson in one sentence is the test that it stayed.</p>
+
+<p>Five lessons, five one-liners. Say each one out loud before you read yours back here. If your version matches, it kept. If you cannot produce one, that lesson goes back on the reading list.</p>
+
+<ul>
+<li><strong>Kubernetes Phase 1, Core Concepts.</strong> Everything you debug traces to five primitives, and the rolling update pair maxSurge 50% with maxUnavailable 0% means capacity never dips during a deploy.</li>
+<li><strong>Inference Internals Phase 2A, Scheduling and Memory.</strong> The server runs one scheduler loop over a shared batch, so your TTFT depends on strangers' requests that arrived in the same second.</li>
+<li><strong>Inference Internals Phase 2B, Decoding and context.</strong> Prefill and decode share one forward pass, and chunked prefill with a token budget is what stops one long prompt freezing every stream.</li>
+<li><strong>Did the fix work, or did the bug go quiet?</strong> After a rare-failure fix, count the dangerous condition, not the damage, because silence fits both fixed and dormant.</li>
+<li><strong>Inference Internals Phase 3A, The Bill and the Cache.</strong> input_tokens is a provider contract, and caching is a purchase with a break-even, not a free optimization.</li>
+</ul>
+
+<p>Notice the shape across the five. Three are about a shared resource that needs a budget: pod capacity, the batch, the token pool. Two are about evidence that lies by omission: silence after a fix, and a plausible number with a hole in it.</p>
+<h2 data-kind="recall">Which five facts are still worth having in six months?</h2>
+<p class="why">Five facts survive six months; the rest was scaffolding.</p>
+
+<p>The one-liners above are what you read. These five are what you keep. Each earns its place because it predicts something you could not predict before it. Say each one back, then check it here.</p>
+
+<ul>
+<li><strong>Continuous batching refills a freed slot on the next iteration.</strong> In the simulator, mean TTFT fell from 5,357ms to 867ms, 40 requests at 6 arrivals per second. It lasts because no serving engine will go back to holding idle slots. <em>From 2.1, The scheduler loop.</em></li>
+<li><strong>Prefill is charged per token, decode once per step.</strong> So one long prompt freezes every stream, and the max inter-token gap is the metric that sees it. It lasts because the asymmetry is in the hardware, not the framework. <em>From 2B, How do you see the freeze in numbers you can act on?</em></li>
+<li><strong>maxSurge 50% with maxUnavailable 0% means capacity never decreases during a deploy.</strong> New pods pass readiness before old ones die. It lasts because this pair is the safety argument behind every rolling update you will ever run. <em>From 1.2, Deployments &amp; ReplicaSets.</em></li>
+<li><strong>Verify a rare-failure fix by counting the dangerous condition, not the damage.</strong> One overlap firing with zero corruption proved the fix; silence never could. It lasts because every rare failure you will ever ship a fix for has this same epistemics. <em>From Why the fix release itself cried wolf.</em></li>
+<li><strong>Nested usage details decompose the billed total; they never sum to it.</strong> Adding them can double a reported cost. It lasts because providers will keep adding detail fields, and the rule survives every new one. <em>From 3A, Which parts of the bill are not token counts at all?</em></li>
+</ul>
+
+<p>Notice what all five share. None names a product. Each is a claim about a mechanism: a scheduler, a cost model, an update strategy, a proof, a contract. Mechanisms outlive versions.</p>
+
+<div class="keypoints">
+<p class="remember">Keep the five claims about mechanisms; the version details around them can go.</p>
+<p class="trap">Memorising the constants instead: 0.03 and 18.0 belong to one teaching simulator.</p>
+<p class="try">Cover the list, write the five from memory, then compare word for word.</p>
+</div>
+<h2 data-kind="checkpoint">Can you still answer three questions with numbers?</h2>
+<p class="why">Numbers you cannot reproduce on demand were never learned.</p>
+
+<p>Three questions, each one arithmetic you saw this week. Answer each before opening the block. Use a scrap of paper. The point is not the answer. It is whether the constants and the units come back to you without the lesson in front of you.</p>
+
+<div class="cards" data-cols="1">
+<div class="card">
+<h4>Q1. The long prompt</h4>
+<p>Three streams are decoding. A 24,000-token prompt arrives. The cost model charges 0.03 ms per prefill token, 18.0 ms per decode step, and 0.12 ms per decoding stream.</p>
+<p>a) Without chunking, one pass runs the whole prefill. How long do the three streams freeze?</p>
+<p>b) With a 2,048-token budget, 3 tokens are reserved for the decodes, leaving 2,045 for prefill. What does one iteration now cost, and how many passes does the prefill take?</p>
+<details class="answer">
+<summary>Answer sketch</summary>
+<p>a) 24,000 × 0.03 ms = <b>720 ms</b>. All three streams emit nothing for that whole pass. That is the freeze the max inter-token gap catches.</p>
+<p>b) Prefill slice: 2,045 × 0.03 = 61.4 ms. Decode side: 18.0 + 0.12 × 3 = 18.4 ms. One iteration costs 61.4 + 18.4 = <b>79.8 ms</b>. Passes needed: 24,000 / 2,045 = 11.7, so <b>12 passes</b>. Every stream still gets a token each iteration; the new request pays with a slower TTFT of about 12 × 79.8 ≈ 957 ms.</p>
+</details>
+</div>
+
+<div class="card">
+<h4>Q2. The rolling update</h4>
+<p>A Deployment runs replicas=2 with maxSurge 50% and maxUnavailable 0%. You push a new image.</p>
+<p>a) How many pods run at the peak of the rollout?</p>
+<p>b) When does the first v1 pod die?</p>
+<details class="answer">
+<summary>Answer sketch</summary>
+<p>a) maxSurge 50% of 2 is 1 extra pod, so the peak is <b>3 pods</b>: 2 × v1 plus 1 × v2 coming up.</p>
+<p>b) The first v1 dies only <b>after the new v2 pod passes its readiness probe</b>. maxUnavailable 0% forbids dipping below 2 ready pods, so the controller must wait for the v2 pod to report Ready before it terminates anything. With initialDelaySeconds: 60 in this chart, that wait is at least a minute.</p>
+</details>
+</div>
+
+<div class="card">
+<h4>Q3. The doubled bill</h4>
+<p>Your multimodal meter sees one request: usage.input_tokens is 300, and a nested detail says image.input_tokens is 200. Your meter bills 300 + 200 = 500.</p>
+<p>a) What is the real billed input?</p>
+<p>b) Which direction did the error go, and by how much?</p>
+<details class="answer">
+<summary>Answer sketch</summary>
+<p>a) <b>300 input tokens</b>. The 200 image tokens live inside the 300; the detail decomposes the total, it never adds to it.</p>
+<p>b) <b>Upward, by 200 tokens</b>. The meter over-reports the request by 67%, and it can report up to double the real cost on multimodal traffic. Bill the total, price the subsets.</p>
+</details>
+</div>
+</div>
+
+<div class="keypoints">
+<p class="remember">Three numbers from memory: 720 ms, 3 pods, 300 billed.</p>
+<p class="trap">Recognizing the arithmetic is not the same as reproducing it.</p>
+<p class="try">Cover the answers, redo all three on paper, compare.</p>
+</div>
+<h2 data-kind="orientation">Does the path change?</h2>
+<p class="why">The path changes only when the evidence crosses the bar you set for it.</p>
+
+<p>Something new shows up in your study and it feels important. The temptation is to rebuild the course around it on the spot. That is how a plan becomes whatever you read last. So the lesson path has a rule: a topic must appear three separate times in your material before it earns a place of its own. One appearance is a signal, not a pattern. Three appearances means the idea keeps surviving contact with different lessons, which is the evidence that it will pay back a dedicated course.</p>
+
+<p>This week the frontier shortlist holds exactly one entry: rare-failure verification. It appeared once, in the lesson on declaring a rare bug dead. The keepers from that week summarise it as its own rule: verify a rare-failure fix by counting the dangerous condition, not the damage. That is one appearance, and the bar is three. So the path does not change.</p>
+
+<details class="evidence">
+<summary>Evidence</summary>
+<p>The sole appearance was the frontier piece "Did the fix work, or did the bug go quiet?", read 2026-09-24, which the week's review judged a course of its own. No proposal was made this week.</p>
+</details>
+
+<p>That lesson still earns its keep inside the current path. Its lab, exercises E1 to E3, has you build the condition-fired alert for your own escalation guardrail: one counter for the trigger, one for the damage. That lab satisfies the topic for now. You get the mechanism in your hands without pretending one sighting justifies a course.</p>
+
+<p>If rare-failure verification shows up again, in a later phase or in your own incidents, you note it and go on. If it reaches three appearances, a proposal goes on the review. Until then, nothing moves.</p>
+
+<div class="callout note">
+<p>The rule protects both directions. It stops you chasing every striking lesson, and it stops you ignoring a topic that keeps coming back.</p>
+</div>
+
+<div class="keypoints">
+<p class="remember">One sighting is a signal; three sightings earn a course.</p>
+<p class="trap">Re-planning around the latest lesson turns the path into a mirror of it.</p>
+<p class="try">Rebuild the Tailscale lab's two counters and watch which one fires.</p>
+</div>
+<h2 data-kind="orientation">What does next week start with?</h2>
+<p class="why">Next week finishes a cut-off lesson and gates on one lab check.</p>
+
+<p>Two threads are open, and both have a clear first move. One is reading. One is doing.</p>
+
+<p>The reading is the rest of Inference Internals Phase 3A. This week's excerpt cut off mid-lesson. What remains is the second half of the caching argument: the break-even arithmetic for a cache write, and the byte-exact prefix match that fails silently. Both continue ideas from this week. The break-even extends the claim that caching is a purchase, not a free optimization. The silent-match rule extends the claim that only the cached-token count proves a hit.</p>
+
+<p>The doing is the Kubernetes Phase 1 lab. It has been waiting since the start of the week. The lab card needs two things first: the kind cluster created, and the hello-server:v1 image loaded into it. kind has no registry, so the image is side-loaded with kind load.</p>
+
+<p>The phase sets a gate before any further reading. Run kubectl get nodes and confirm 3 nodes Ready: one control-plane and two workers. That one line is Monday's first move, or the first move of your next study block. If the output shows 3 Ready, Phase 1 continues. If not, the cluster setup is the whole block, and that is fine.</p>
+
+<pre><code data-lang="bash">kubectl get nodes
+# expected: 1 control-plane + 2 workers, all STATUS Ready</code></pre>
+
+<p>Order matters little here. The kubectl gate takes minutes. The Phase 3A reading takes the rest of the session. What matters is that neither starts with a decision: the week has already chosen both.</p>
+
+<div class="keypoints">
+<p class="remember">Finish Phase 3A, then pass the 3-node gate.</p>
+<p class="trap">Reading on without the lab leaves operators who cannot operate.</p>
+<p class="try">Run kubectl get nodes; look for 3 Ready.</p>
+</div>
+<h2 data-kind="sources">Where did this week come from?</h2>
+<p>The week's reading was five lesson files:</p>
+
+<ul class="sources">
+<li><b>2026-09-19</b> — <code>learning/lessons/2026-09-19-kubernetes-phase-01-core-concepts.md</code> — pods, the Deployment→ReplicaSet chain, and the rolling-update math with maxSurge 50% and maxUnavailable 0%.</li>
+<li><b>2026-09-20</b> — <code>learning/lessons/2026-09-20-inference-internals-phase-02a-scheduling-memory.md</code> — the scheduler loop, static versus continuous batching, and the 5,357ms to 867ms mean TTFT run in batching_sim.py.</li>
+<li><b>2026-09-22</b> — <code>learning/lessons/2026-09-22-inference-internals-phase-02b-decoding-context.md</code> — chunked prefill, the per-token prefill charge versus the per-step decode charge, and the max inter-token gap.</li>
+<li><b>2026-09-24</b> — <code>learning/lessons/2026-09-24-did-the-fix-work-or-did-the-bug.md</code> — the Tailscale WAL bug, the six deceptive weeks, and the overlap alert that proved the fix.</li>
+<li><b>2026-09-24</b> — <code>learning/lessons/2026-09-24-inference-internals-phase-03a-caching.md</code> — usage objects as provider contracts, details that decompose the total, and caching as a purchase with a break-even.</li>
+</ul>
+
+<p>Two files share 2026-09-24. The Tailscale piece and Phase 3A are different lessons that landed on the same day, not one document.</p>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+</body>
+</html>

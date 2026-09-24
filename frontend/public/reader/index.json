@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-09-24T05:15:31.592476+05:30",
+  "built_at": "2026-09-25T00:12:50.560441+05:30",
   "courses": [
     {
       "slug": "inference-internals",
@@ -40,6 +40,15 @@
           "date": "2026-09-22",
           "read": false,
           "file": "2026-09-22-inference-internals-phase-02b-decoding-context.html"
+        },
+        {
+          "slug": "inference-internals-phase-03a-caching",
+          "title": "The Bill and the Cache",
+          "one_liner": "He can read a real usage object into the right cost for either provider, lay out a prompt so the cache hits and prove it with one number, and derive the reads needed before explicit caching pays.",
+          "minutes": 110,
+          "date": "2026-09-24",
+          "read": false,
+          "file": "2026-09-24-inference-internals-phase-03a-caching.html"
         }
       ]
     },
@@ -69,6 +78,33 @@
     }
   ],
   "articles": [
+    {
+      "title": "Did the fix work, or did the bug go quiet?",
+      "one_liner": "He can design an alert that fires on the dangerous condition occurring, so he can tell 'fixed' apart from 'dormant' after any rare-failure fix, including his LLM guardrails.",
+      "topic": "",
+      "kind": "frontier",
+      "date": "2026-09-24",
+      "read": false,
+      "file": "2026-09-24-did-the-fix-work-or-did-the-bug.html"
+    },
+    {
+      "title": "Week review: batches, budgets, and proof",
+      "one_liner": "The week's five lessons recalled in his own words, three worked questions answered, and a clear first move into next week",
+      "topic": "week review",
+      "kind": "",
+      "date": "2026-09-24",
+      "read": false,
+      "file": "2026-09-24-week-review-2026-w39.html"
+    },
+    {
+      "title": "Lab card: stream freeze, schema tax, and the 400",
+      "one_liner": "A written table of your own numbers: worst gap and TTFT at two token budgets, the constraint tax on 12 tickets, the compaction trigger turn, and one forced backstop with its log line.",
+      "topic": "inference-internals",
+      "kind": "",
+      "date": "2026-09-24",
+      "read": false,
+      "file": "2026-09-24-lab-inference-internals-phase-02b-decoding-context.html"
+    },
     {
       "title": "The decision before the lifecycle: does cache-aware routing actually pay?",
       "one_liner": "On agentic traffic (43-turn sessions, 142K tokens in per turn), cache-aware sticky routing beats round-robin 2\u20133\u00d7 where prefill dominates and buys nothing where decode does, and the stickiness limit \u03c4 is derived from one calibration measurement, not tuned.",

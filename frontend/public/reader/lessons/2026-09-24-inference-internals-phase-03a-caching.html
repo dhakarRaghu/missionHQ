@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Bill and the Cache</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Inference Internals — Phase 3A</div><h1>The Bill and the Cache</h1><p class="subtitle">Your Phase 1 meter over-bills every cached request and cannot prove a cache hit. What does a correct meter have to see?</p></header>
+<p>Phase 0 had a timestamp bug that cost four months of full-price agent steps. The fix was one line. The expensive part was that nobody had a number that could show the loss. When you built a meter in Phase 1, it priced every input token at the full rate. That meter cannot show a cache saving, because it cannot see the field the saving lives in.</p>
+
+<p>Here is the sharper failure. A dashboard can show 20 input tokens for a 40-turn agent run with a 20,000-token system prompt, and nobody questions it. The number is small and plausible. The hole in it is invisible from the inside, because the missing tokens were priced at the cache rate, not the full rate, so the total cost also looks plausible. This lesson is about reading a real usage object correctly. Which tokens count as input is a provider contract, not a standard. A cache hit is a byte-exact match that fails silently. And caching is a purchase with a break-even point, not a free optimization. The question the lesson leaves open: given a real usage object from either provider, can you say what the run actually cost and prove the cache worked?</p>
+<ol class="concepts"><li id="c1"><b>What input_tokens counts is a provider contract, not a standard, so a meter must normalize each provider&#x27;s shape before any summation.</b><span>Question any cross-provider meter, spot a quietly wrong cost dashboard, and know that dropped cache fields mis-bill in the plausible direction.</span></li><li id="c2"><b>Caching is a purchase with a payback period: the write premium must be amortized by reads, and the break-even is derivable arithmetic, not a judgement.</b><span>Compute the reads needed to profit before deploying, and recognize workloads where caching raises the bill.</span></li><li id="c3"><b>A cache hit is a byte-exact prefix match from token 0, its failure is silent, and only the cached-token count in the usage object proves it works.</b><span>Lay out prompts that hit, diagnose a flat hit rate, and not trust &#x27;no error&#x27; as evidence.</span></li><li id="c4"><b>A reported token total decomposes into overlapping detail counts rather than summing from them, so every class a meter cannot map to a price lands wherever its fallback puts it.</b><span>Read any usage object without double counting, and predict which direction an unpriced class bends the bill before writing the fallback.</span></li></ol>
+<h2 data-kind="orientation">Why your Phase 1 meter is wrong about every cached request</h2>
+<p class="why">Phase 3A turns the prefix cache you already understand into numbers on an invoice.</p>
+
+<p>You already own the mechanism. Phase 2B taught you the prefix rule: a cache hit needs identical tokens from position zero. It taught you the radix tree: the server stores prefixes and shares them across requests. Phase 1 gave you the two-price formula: input tokens times the input rate plus output tokens times the output rate.</p>
+
+<p>This phase is the billing side of the same mechanism. The prefix rule now has prices attached. A reused prefix reads at a fraction of the input rate. A fresh prefix can cost a write premium above it. So your Phase 1 formula mis-bills every cached request, in both directions. It overstates cached runs and misses write premiums.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 640 250" xmlns="http://www.w3.org/2000/svg" font-family="inherit" font-size="13" fill="currentColor">
+  <rect x="30" y="30" width="160" height="60" rx="6" fill="none" stroke="currentColor"/>
+  <text x="110" y="55" text-anchor="middle">Phase 2B</text>
+  <text x="110" y="74" text-anchor="middle">prefix rule, radix tree</text>
+  <rect x="30" y="150" width="160" height="60" rx="6" fill="none" stroke="currentColor"/>
+  <text x="110" y="175" text-anchor="middle">Phase 1</text>
+  <text x="110" y="194" text-anchor="middle">cost = in&#183;pin + out&#183;pout</text>
+  <line x1="195" y1="60" x2="290" y2="115" stroke="currentColor" marker-end="url(#s1-arr)"/>
+  <line x1="195" y1="180" x2="290" y2="135" stroke="currentColor" marker-end="url(#s1-arr)"/>
+  <rect x="295" y="90" width="170" height="70" rx="6" fill="var(--accent)" opacity="0.15" stroke="currentColor"/>
+  <text x="380" y="118" text-anchor="middle">Phase 3A</text>
+  <text x="380" y="137" text-anchor="middle">the bill and the cache</text>
+  <line x1="470" y1="125" x2="560" y2="125" stroke="currentColor" marker-end="url(#s1-arr)"/>
+  <rect x="565" y="95" width="70" height="60" rx="6" fill="none" stroke="currentColor"/>
+  <text x="600" y="120" text-anchor="middle">Phase 3B</text>
+  <text x="600" y="139" text-anchor="middle">routing</text>
+  <defs><marker id="s1-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="none" stroke="currentColor"/></marker></defs>
+</svg>
+<figcaption>Phase 3A prices the prefix mechanism you already know. Phase 3B builds on its token-class model.</figcaption>
+</figure>
+
+<p>Four claims carry the phase, in the order above. The usage object itself is a provider contract, not a standard. Detail counts decompose the total, and a missing price falls wherever your fallback puts it. Caching is a purchase with a payback period, not a free switch. And a cache hit is a byte-exact prefix match whose failure is silent, so only the cached-token count proves it.</p>
+
+<p>Two things from here feed Phase 3B directly. The batch multiplier is one of the request-level multipliers this phase defines. The cost alarm in 3B is the detector for the silent cache regressions this phase describes. The batch-and-caching question stays open until then.</p>
+<h2 data-concept="c1">Are cached tokens inside or outside your input count?</h2>
+<p class="why">The same field name counts cached tokens at different providers, so your summation needs an adapter per provider.</p>
+
+<p>You write a cost meter against one provider's usage object. It passes its tests. Then a second provider feeds it, and every cached run reports the wrong cost. The meter was never broken. The contract changed under it.</p>
+
+<details class="predict"><summary>Predict: Your dashboard shows 20 input tokens for a 40-turn agent with a 20,000-token system prompt. What should that number have made you suspect, and why did it survive code review?</summary>
+<p>The prompt alone needs 20,000 tokens per turn, so 20 total input is impossible. The meter had to be missing the cached fields. It survived review because nothing crashed. The number it printed was small and shaped like a real number, and no test asserts that an input count is plausible for the prompt that produced it.</p>
+</details>
+
+<h3>The same field name, two opposite contracts</h3>
+
+<p>Today the two major providers put cached tokens on opposite sides of the base count.</p>
+
+<p>On OpenAI, cached and cache-write tokens sit inside <code>input_tokens</code>. So fresh input is what is left: <code>ordinary input = input_tokens − cached − cache_write</code>. Add the cached classes back and you double count.</p>
+
+<p>On Anthropic, they sit outside. <code>input_tokens</code> there counts only the tokens after the last cache breakpoint. Total input is <code>cache_read + cache_creation + input_tokens</code>.</p>
+
+<p>OpenTelemetry, the observability standard this pipeline stacks converges on, normalizes to the OpenAI shape. Its <code>gen_ai.usage.input_tokens</code> should include every input token type, cached ones included. So an adapter that forwards Anthropic's raw <code>input_tokens</code> into an OTel pipeline under-reports, and everything that recomputes cost from tokens downstream inherits the hole.</p>
+
+<figure class="diagram"><svg viewBox="0 0 760 230" width="100%" role="img" aria-label="Two usage object shapes and one shared summation">
+  <text x="150" y="24" text-anchor="middle" fill="currentColor">OpenAI shape</text>
+  <rect x="30" y="40" width="180" height="30" rx="4" fill="var(--accent)" opacity="0.25" stroke="currentColor"/>
+  <rect x="210" y="40" width="60" height="30" rx="4" fill="var(--accent)" opacity="0.55" stroke="currentColor"/>
+  <rect x="270" y="40" width="30" height="30" rx="4" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="35" y="60" fill="currentColor">input_tokens (contains cached + write)</text>
+  <text x="150" y="92" text-anchor="middle" fill="currentColor">ordinary = input − cached − write</text>
+
+  <text x="560" y="24" text-anchor="middle" fill="currentColor">Anthropic shape</text>
+  <rect x="420" y="40" width="40" height="30" rx="4" fill="var(--accent)" opacity="0.25" stroke="currentColor"/>
+  <rect x="460" y="40" width="110" height="30" rx="4" fill="var(--accent)" opacity="0.55" stroke="currentColor"/>
+  <rect x="570" y="40" width="90" height="30" rx="4" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="425" y="60" fill="currentColor">input</text>
+  <text x="462" y="60" fill="currentColor">cache_read</text>
+  <text x="572" y="60" fill="currentColor">cache_creation</text>
+  <text x="560" y="92" text-anchor="middle" fill="currentColor">total = read + creation + input</text>
+
+  <line x1="330" y1="55" x2="400" y2="55" stroke="currentColor" opacity="0.5"/>
+
+  <rect x="30" y="125" width="300" height="70" rx="6" fill="none" stroke="currentColor"/>
+  <text x="180" y="150" text-anchor="middle" fill="currentColor">the same summation function</text>
+  <text x="180" y="172" text-anchor="middle" fill="currentColor">total = input_tokens</text>
+  <text x="180" y="215" text-anchor="middle" fill="currentColor">OpenAI: right total ✓ ── Anthropic: cached prefix missing ✗</text>
+</svg>
+<figcaption>One summation is correct for one shape and quietly wrong for the other.</figcaption>
+</figure>
+
+<h3>The failure, with its receipt</h3>
+
+<p>Langfuse issue 13807 is the failure in production. A Claude Agent SDK run traced through an OpenInference and Langfuse pipeline. The provider reported a cost of $0.522 for the run. The dashboard showed $0.238, about 46 percent of the truth. The usage it recorded was <code>input: 20, output: 13,545</code>. The instrumentation never forwarded the cache-read and cache-write attributes, and those classes dominated the input.</p>
+
+<div class="stats">
+  <div class="stat"><b>$0.522</b><span>provider-reported cost</span></div>
+  <div class="stat"><b>$0.238</b><span>dashboard cost, 46% of truth</span></div>
+  <div class="stat"><b>20</b><span>input tokens recorded</span></div>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Langfuse issue 13807, opened 2026-05-23 and still open when read 2026-09-23. A Claude Agent SDK run cost $0.52231845; Langfuse displayed $0.237606 and recorded <code>input: 20, output: 13,545</code>. The cache-read and cache-write attributes were never emitted through the pipeline. The note's own warning: "An adapter that forwards Anthropic's raw <code>input_tokens</code> into an OTel pipeline under-reports, and anything downstream that recomputes cost from tokens inherits the hole."</p>
+</details>
+
+<p>The field names and their sides can change in any release. The failure they produce is stable: a plausible number with a hole in it. So the durable rule is not a table of shapes. It is a habit. Treat each usage object as a provider contract. Write one adapter per provider that normalizes to your internal shape and prints the shape it matched. Re-check the contract whenever you change provider, model, or pipeline.</p>
+
+<p>The same check lives in your phase's meter. <code>pricing.py</code> takes a token split, not a raw usage object: something upstream must already have split <code>uncached_in</code>, <code>cached_in</code>, and <code>out</code> from the provider's response. Which provider shape does your adapter expect, and what would it print if an Anthropic response landed on it?</p>
+
+<div class="keypoints">
+  <p class="remember">input_tokens is a provider contract, so normalize each provider's shape before summing anything.</p>
+  <p class="trap">A summation written for one provider is portable; the failure is a plausible number with a hole.</p>
+  <p class="try">Print the raw usage object from one cached call per provider and compare which side cached tokens sit on.</p>
+</div>
+<h2 data-concept="c4">Which parts of the bill are not token counts at all?</h2>
+<p class="why">Your meter reads token counts. Part of the bill is not a token count at all, and misreading that part can double a reported cost.</p>
+
+<details class="predict"><summary>Predict: your multimodal meter reports 500 input tokens as 300 total plus 200 image tokens, billed as 500. What is wrong, and which direction does the error go?</summary>
+<p>The meter added a subset to its own total. The 200 image tokens are inside the 300. The real bill is 300 input tokens, so the meter over-reports by 200.</p>
+<p>The direction is upward. Every modality detail field it adds inflates the bill. In the limit it reports up to double the real cost.</p>
+</details>
+
+<p>The wrong belief is that nested detail counts sum up to the total. Actually they decompose it. The total is what you are billed on. The details tell you which tokens inside it cost more. The OpenTelemetry registry states this with a worked example:</p>
+
+<pre class="ascii">usage.input_tokens          300   ← the total you are billed on
+  text.input_tokens         100   ┐
+  image.input_tokens        200   ├ subsets: they SUM to the total
+  text.cache_read            40   ┘ cached overlaps text, so it adds neither
+
+WRONG:  300 + 200 = 500 billed      (the 200 counted twice)
+RIGHT:  300 billed, of which 200 carry the image price</pre>
+
+<p>One request carries 100 text tokens, 40 of them cached, plus 200 image tokens. The billed input count is 300. A meter that adds the nested fields to the total bills 500. It can report up to double the real bill on multimodal traffic.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The OpenTelemetry GenAI attribute registry, note 41, read 2026-09-23: "100 text tokens, 40 of them cached, plus 200 image tokens gives <code>input_tokens: 300</code>, <code>text.input_tokens: 100</code>, <code>text.cache_read: 40</code>, <code>image.input_tokens: 200</code>". The registry defines no cost attribute at all. Spend is always computed downstream, from these counts and a dated price sheet.</p>
+</details>
+
+<p>Two more things move the same invoice without changing any token count. They are multipliers, not classes.</p>
+
+<p><strong>Service tier.</strong> A service tier is a speed and price level per request. Batch is the half-price tier you know. Other tiers price above or below standard. The tier multiplies every class at once. The usage object carries a <code>service_tier</code> field, so record the tier you were charged, not only the one you asked for. Your phase claims a priority tier excluded from a cost endpoint and a 1.1x region multiplier. Neither was verified this run. Treat both as "check your provider", not as numbers.</p>
+
+<p><strong>Modality.</strong> Image and audio input become tokens, and those tokens can cost more than text. Charge the text rate once, then add only the extra on top. Your <code>pricing.py</code> already models it that way. Its self-test line <code>image surcharge adds only the EXTRA</code> is the subset rule as a test.</p>
+
+<p>One lookup to keep nearby: the minimum cacheable prefix runs from 512 to 4,096 tokens by model. Do not memorize the table. Remember that minimums exist and vary eightfold.</p>
+
+<p>Use it: open <code>pricing.py</code> and read the modality surcharge. Ask which line prevents the double count shown above, and what breaks if the image count were added to the total instead.</p>
+
+<div class="keypoints">
+<p class="remember">Detail counts decompose the total. Bill the total, price the subsets.</p>
+<p class="trap">Adding details to the total double-bills, and the number looks careful.</p>
+<p class="try">Run the OTel example through your meter and check it bills 300, not 500.</p>
+</div>
+<h2 data-concept="c4">Which direction does your meter err when it cannot price a class?</h2>
+<p class="why">An unpriced class never stays neutral. It takes whichever value your fallback sets.</p>
+
+<p>Your meter meets a token class with no price on the sheet. Cache reads on a new model, a tier you have not seen. The code must still emit a number. That number comes from a default you chose earlier, and it chooses the direction of every error you are about to make.</p>
+
+<p>Only two defaults exist. Default to zero, and the class looks free. Default to the full rate, and the class looks expensive. Neither throws an exception. They differ in who notices.</p>
+
+<div class="compare">
+<div class="wrong">
+<p><b>Fallback to zero.</b></p>
+<pre><code data-lang="python">cached_rate = price.cached_input_per_mtok or 0.0</code></pre>
+<p>Every unpriced class makes the request look cheaper than it is. The error grows silently as you add models whose sheets you have not filled in. Nothing ever contradicts it, because no invoice shows a saving.</p>
+</div>
+<div class="right">
+<p><b>Fallback to the dearest rate.</b></p>
+<pre><code data-lang="python">cached_rate = (price.cached_input_per_mtok
+               if price.cached_input_per_mtok is not None
+               else price.input_per_mtok)</code></pre>
+<p>You over-report until you fill in the sheet. Over-reporting contradicts the invoice, so someone notices, investigates, and finds the missing price.</p>
+</div>
+</div>
+
+<p>The zero default is the worse error because nothing detects it. A dashboard that says you are saving money you are not saving looks healthy. A dashboard that says you spend more than the invoice looks broken, and broken things get debugged. <span class="badge">inferred</span> Which direction your gaps bend is your decision, not the library's.</p>
+
+<p>Over-reporting has its own cost, and it is not silence. It hides the wrong things.</p>
+
+<ol class="steps">
+<li><b>It hides your wins.</b> Caching already cut your bill in half, but a meter that prices cache reads at the full rate cannot see it. You cannot prove the work mattered, and you cannot see it stop working.</li>
+<li><b>It breaks comparisons.</b> A routing choice between two models is a ratio. One model caches and one does not. An overcharging meter compares them on the wrong basis and can pick the wrong model.</li>
+</ol>
+
+<p>The durable rule sits next to it: every price on the sheet carries the date it was read. Prices change in every release. A price in your repository with no <code>priced_on</code> beside it cannot be audited, so it is not a fact, only a number. When the sheet is filled in weeks later, the date tells you which past reports to distrust.</p>
+
+<p>Use it: open <code>pricing.py</code> and find the cached-price fallback. Ask which branch an unpriced class lands on, then change it to zero and watch which self-test fails. The failing test is the safe-default rule written as a correctness property.</p>
+
+<div class="keypoints">
+<p class="remember">An unknown price defaults to the dearest rate, so the error shows on the invoice.</p>
+<p class="trap">A zero default feels safe and hides every saving, silently, forever.</p>
+<p class="try">Set a cached price to zero in pricing.py, run the self-test, and read the failure.</p>
+</div>
+<h2 data-concept="c2">When does caching cost more than no caching?</h2>
+<p>Caching is not a free discount. Every write costs more than the uncached rate, and every read costs less. Whether the feature saves you money depends on one number: how many times each entry gets read before it expires.</p>
+
+<details class="predict"><summary>Predict: Ten identical requests fire in parallel at cold start, all carrying the same 12,000-token prefix, writes at 1.25x. Is that burst cheaper or more expensive than the same ten with caching off?</summary>
+
+<p>More expensive, by a factor of 1.25. A cache entry becomes usable only after the first response begins. All ten requests start before any entry exists. You get ten writes at 1.25x and zero reads. Caching off would have cost 10x. The burst costs 12.5x.</p>
+
+</details>
+
+<p>The derivation is arithmetic, not judgement. A write costs more than a normal input token. A read costs less. So the trade turns positive after a fixed number of reads.</p>
+
+<pre class="ascii">extra cost to write   = (write_rate - input_rate) x tokens
+saving per read       = (input_rate - read_rate)  x tokens
+
+reads needed to profit = (write_rate - input_rate) / (input_rate - read_rate)</pre>
+
+<p>Put in the verified multipliers. A 5-minute write costs 1.25x input. A read costs 0.1x. The break-even is (1.25 - 1.00) / (1.00 - 0.10) = 0.28 reads, so one read already profits. A 1-hour write costs 2x. The break-even is 1.11 reads, so two reads profit. The formula survives every price change. The numbers carry their model and date, and both do change.</p>
+
+<div class="bars">
+<div class="bar" style="--v:25" data-label="5-minute write, 1.25x" data-value="0.28 reads"></div>
+<div class="bar" style="--v:100" data-label="1-hour write, 2x" data-value="1.11 reads"></div>
+</div>
+
+<p>This is a payback-period picture. Draw cost per turn for a cached run and a control run. The cached run starts above the control because turn 1 pays the write premium. Each read then drags it below. The crossing point is the break-even turn.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+
+<p>Multipliers verified at both providers' prompt-caching docs, read 2026-09-23: 1.25x writes and 0.1x reads on OpenAI GPT-5.6 and later, 1.25x 5-minute and 2x 1-hour writes with 0.1x reads on Anthropic's common models. OpenAI's doc states the amortization directly: "Writing a prefix once and fully reusing it once costs 1.35x its ordinary input cost, compared with 2x for processing it twice without caching". One write plus nine reads costs 2.15x against 10x uncached. The cold-start rule, an entry usable only after the first response begins, is from Anthropic's doc.</p>
+
+</details>
+
+<p>The cold-start fan-out is the expensive version of this rule, and the phase's table makes it concrete. Ten calls share a 12,000-token prefix, at input $2.00, write $2.50, read $0.20 per million tokens.</p>
+
+<div class="compare">
+<div class="wrong">
+<p><b>All ten at once:</b> 10 writes, 0 reads. Cost 10 x 12,000 x $2.50 / 1e6 = $0.300. No caching at all costs $0.240. You paid 1.25x to save nothing.</p>
+</div>
+<div class="right">
+<p><b>One warm-up call, then nine:</b> 1 write plus 9 reads. Cost $0.0300 + $0.0216 = $0.0516. Same work, nearly 6x cheaper than the uncached burst.</p>
+</div>
+</div>
+
+<p>The fix is a prewarm. Both providers now ship one as a first-class feature, and the phase omitted both. OpenAI has <code>prompt_cache_options.prewarm: true</code>, which prepares the cache without generating output. Anthropic uses <code>max_tokens: 0</code>, which writes the entry at your breakpoint and returns at once with zero output tokens billed. One warning on the Anthropic version: the prewarm must use the same thinking and effort configuration as the real traffic, or the entry is never hit.</p>
+
+<div class="callout note">
+<p>Google bills differently again: cache storage by the hour. An idle entry costs nothing on OpenAI and Anthropic, and money on Google. The dollar figure is a lookup on their pricing page. The mechanism is the part to keep.</p>
+</div>
+
+<p>Use it: lab exercise E7 runs a cached conversation against a <code>--no-cache</code> control, and your job is to find the break-even turn on your own numbers. Before you run it, predict the turn from the formula and your price sheet. Then check whether the run agrees.</p>
+
+<div class="keypoints">
+<p class="remember">Compute break-even reads before you place a breakpoint; one read profits at 1.25x.</p>
+<p class="trap">A write-forever, read-never workload pays 1.25x for what caching off costs 1x.</p>
+<p class="try">Compute the break-even at 2x by hand, then predict E7's crossing turn.</p>
+</div>
+<h2 data-concept="c3">Why did your cache silently stop hitting?</h2>
+<p class="why">Your cache failed silently, and only the cached-token count can tell you it did.</p>
+
+<p>You enabled caching. No error ever appeared. Yet the invoice did not move. This section is why, and how you prove the cache works at all.</p>
+
+<details class="predict">
+<summary>Predict: your team enabled prompt caching and the invoice did not move. Give three separate causes, and the one number that distinguishes them.</summary>
+<p>Three causes. First, a volatile field sits above the breakpoint, like a timestamp. Every request then writes a fresh entry and never reads. Second, something hands the provider reordered bytes, like a Go map serialized with random key order. Third, the prefix sits below the cacheable minimum. That fails with no error.</p>
+<p>One number distinguishes them: the cached-token count in the usage object. Zero cached tokens with full write counts says the prefix changes. All zeros says below the minimum, or nothing marked.</p>
+</details>
+
+<p>The match is byte-exact from token 0, not a match on meaning. The provider hashes the prefix cumulatively, in a fixed order: tools, then system, then messages. A changed byte at any level breaks that level and every level after it. So an edit to one tool definition breaks everything. A new user message breaks nothing above it.</p>
+
+<pre class="ascii">the cache prefix, hashed from token 0 downward
+
+┌─────────────────────────────┐
+│ tools                       │  ✗ changed byte, or Go/Swift map
+├─────────────────────────────┤    keys reordered: breaks ALL levels
+│ system                      │  ✗ changed effort, thinking, or a
+│   (wildcard setting)        │    setting: breaks system + messages
+├─────────────────────────────┤
+│ messages                    │  ✗ below the minimum: silent no-op,
+└─────────────────────────────┘    no error returned
+
+proof: usage.cached_tokens — the single truth gauge</pre>
+
+<p>The invalidation list is longer than the phase showed. Anthropic warns that thinking and effort configuration change the hash too. On OpenAI, model, tool definitions and their order, <code>parallel_tool_calls</code>, the structured-output format, reasoning effort, verbosity, and context management all invalidate. One language-level trap deserves its own sentence: Go and Swift randomize JSON map key order. Your tool schema then serializes differently per process. Your hit rate depends on which pod ran the serializer. The fix is a fixed key order where you serialize schemas.</p>
+
+<p>Below the minimum, the failure is a silent no-op. The Anthropic doc states it directly: shorter prompts cannot be cached, even when marked with <code>cache_control</code>, and no error is returned. The minimums run from 512 to 4,096 tokens by model. Treat that range as a lookup, not a memory.</p>
+
+<p>One rule corrects a common reading of the lookback. The 20-block backward lookback finds entries that prior requests wrote at their own breakpoints. It does not find stable content that happens to sit behind your breakpoint. A volatile block above the breakpoint therefore means a fresh write every request, and never a read. For your agent loops: a run of consecutive tool_use blocks, and a run of tool_result blocks, count as one position each in that lookback.</p>
+
+<p>One paragraph on multi-tenant systems. OpenAI now frames a separate <code>prompt_cache_key</code> per customer as a defence against cache-hit probing across users. Without it, one tenant can in principle detect which prefixes another tenant used by timing responses. You build multi-tenant agents. Put the customer id in that key.</p>
+
+<p>Measured proof that layout drives the hit rate. ProjectDiscovery runs an agent platform: tasks average 26 steps and 40 tool calls, with system prompts over 20,000 tokens. They moved dynamic content out of the cacheable prefix. The hit rate rose from about 7 percent to about 74 percent in one deployment, later about 84. Cost savings ran 59 to 70 percent. Their sharpest pair: two tasks with nearly the same token volume, one at a 91.8 percent cache rate, one at 3.2 percent. The second cost roughly 60 times more.</p>
+
+<details class="evidence">
+<summary>Evidence</summary>
+<p>ProjectDiscovery blog, "How We Cut LLM Costs by 59% With Prompt Caching", read via page summary. The summary rounds the weekly table to 7, 74, 84; the phase's precise decimals (7.6, 73.7, 85) are consistent but unconfirmed. The silent-no-op quote is from Anthropic's prompt-caching doc. Invalidation lists verified on both providers' docs.</p>
+</details>
+
+<p>Use it. Run the three lab exercises that prove hits on your own account. E4 gets a real hit and reads the cached-token count. E5 puts a timestamp at position 0, then at the end, and you read the difference. E6 sends a prefix below the minimum and shows the silent no-op. For each one, predict the usage fields before you run it. Then check.</p>
+
+<div class="keypoints">
+<p class="remember">A hit is byte-exact from token 0; only the cached-token count proves it happened.</p>
+<p class="trap">No error means nothing; below the minimum, caching silently does nothing at full price.</p>
+<p class="try">Predict E6's usage fields before running it, then read the cached-token count.</p>
+</div>
+<h2 data-concept="c2">Where do you place the breakpoint, and for how long?</h2>
+<p class="why">Breakpoint placement and TTL set whether you ever reach break-even.</p>
+
+<p>Implicit caching from earlier sections picked the boundary and the lifetime for you. Explicit caching hands you both. Each choice has a price, so each needs its own arithmetic.</p>
+
+<h3>A breakpoint writes exactly one entry</h3>
+
+<p>A breakpoint is a content block you mark with <code>cache_control</code>. The mark writes one entry. The entry is a hash of everything up to and including that block. Earlier positions get nothing.</p>
+
+<pre class="ascii">system blocks                                  what gets cached
+
+┌──────────────────────────────┐
+│ tool definitions             │  ─┐
+├──────────────────────────────┤   │  the entry is a hash of
+│ policy text, 8,000 tokens    │   ├─ EVERYTHING up to and
+│   cache_control: ephemeral   │  ─┘  including this block
+├──────────────────────────────┤
+│ today's date, session id     │      below the breakpoint:
+└──────────────────────────────┘      never cached, and it
+                                      cannot break the entry</pre>
+
+<p>You get at most 4 breakpoints per request. A fifth returns HTTP 400. Use them for layers with different change rates. One for tools. One for policy text. One for the conversation tail.</p>
+
+<p>The next request hashes the prefix at your breakpoint and looks for a match. On a miss it walks backward, at most 20 blocks. It can only find entries that earlier requests wrote. It never finds stable content behind your breakpoint. That is why long agent runs need intermediate breakpoints, not one at the end.</p>
+
+<h3>Read the usage object back to the whole input</h3>
+
+<p>Anthropic's usage object splits the input three ways. The pieces sum to the total.</p>
+
+<pre><code data-lang="text">usage.input_tokens                        tokens after the last breakpoint
+usage.cache_read_input_tokens             served from the entry, at the read rate
+usage.cache_creation_input_tokens         written into the entry, at the write rate
+usage.cache_creation.ephemeral_5m_input_tokens   the split, by TTL
+usage.cache_creation.ephemeral_1h_input_tokens
+
+total_input = cache_read + cache_creation + input</code></pre>
+
+<p>TTL is time to live, the lifetime of a cache entry. Check this identity on your first run. If the pieces do not sum, your adapter dropped a field.</p>
+
+<h3>Choose the TTL by the gap between calls</h3>
+
+<p>The 5-minute tier writes at 1.25x. The 1-hour tier writes at 2x. From the break-even formula you derived above, the 5-minute tier profits after one read. The 1-hour tier needs two reads before expiry.</p>
+
+<p>So the 1-hour tier wins only when gaps between calls beat 5 minutes. Think of a human conversation with pauses, or a nightly batch. A fast tool loop never lets the 5-minute entry expire. There, paying 2x buys nothing.</p>
+
+<div class="compare">
+<div class="right"><p>Tool loop, 20-second gaps: 5-minute tier, 1.25x write. Entry refreshes every turn. Profits from read one.</p></div>
+<div class="wrong"><p>Same loop, 1-hour tier: 2x write premium paid. The longer lifetime is never used. Pure waste.</p></div>
+</div>
+
+<div class="callout note">
+<p>The two-tier table is an Anthropic shape. Both providers now ship both caching modes. OpenAI GPT-5.6 and later supports explicit breakpoints and TTL options. Anthropic also offers automatic caching with one top-level <code>cache_control</code> field. The old table, OpenAI automatic versus Anthropic breakpoints, is stale.</p>
+</div>
+
+<h3>The multipliers are dated, so your formula must not be</h3>
+
+<p>Three verified values carry their conditions. The 1.25x OpenAI write price applies to GPT-5.6 and later. Earlier models charge nothing extra for writes. The 1,024-token OpenAI minimum is also a current-model value, and it counts visible tokens only.</p>
+
+<p>Anthropic reads are no longer a flat 0.1x. On Fable 5.1 and Mythos 5.1, reads are 0.025x base input. On Opus 5.5, they are 0.05x. A meter hardcoding 0.1x under-reports savings on those models. The break-even formula survives all of this. The constants do not.</p>
+
+<details class="evidence">
+<summary>Evidence</summary>
+<p>All values verified on both providers' prompt-caching docs, read 2026-09-23: the 4-breakpoint limit and HTTP 400, the usage-field identity, the 1.25x and 2x write tiers, the per-model read rates (0.025x, 0.05x, 0.1x), the GPT-5.6 conditions on OpenAI's write price and minimum, and the both-modes correction.</p>
+</details>
+
+<p>Use it. Run E7 and watch the cached run cross the control at the break-even turn. Then run E8 with <code>--break-it</code>. A volatile block above the breakpoint makes every turn a write and never a read. Which usage field shows you that pattern first?</p>
+
+<div class="keypoints">
+<p class="remember">One breakpoint writes one entry; pick the TTL by the gap between calls.</p>
+<p class="trap">Hardcoding today's multipliers silently mis-prices every model released after.</p>
+<p class="try">Check your usage object: do read, creation and input sum to the total?</p>
+</div>
+<h2 data-kind="lab">Lab</h2>
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1</b> <span class="tag">offline</span></label> The fallback must be a failing test, not a convention. <span class="badge">c4</span>
+<br>Run: <code>python pricing.py --self-test</code>
+<br>Then break it: open <code>pricing.py</code> at the price fallback, change it to <code>0.0</code>, and run the test again. The check for an unknown cached price now fails and names your mistake. Change it back.
+<br>Teaches: a cost module has a correctness property. The zero default is caught by a test, the way a silent dashboard never catches it.</li>
+
+<li><label><input type="checkbox"> <b>E2</b> <span class="tag">offline</span></label> Fill the price sheet and date it. <span class="badge">c4</span> <span class="badge">c2</span>
+<br>Run: <code>python pricing.py --role deep</code> then <code>python pricing.py --role cheap</code>
+<br>Then edit <code>prices.yaml</code>. Replace both models with the ones you use. Fill every field you can find on the provider's pricing page. Set <code>priced_on</code> to today. Leave out what you cannot find. Do not guess it.
+<br>Teaches: every number in this phase is dated. A guessed price produces a wrong answer that looks certain.</li>
+
+<li><label><input type="checkbox"> <b>E3</b> <span class="tag">offline</span></label> See the gap your Phase 1 meter was hiding. <span class="badge">c1</span> <span class="badge">c2</span>
+<br>Run: <code>python phase03_economics/cost_meter.py --replay --role cache_demo</code>
+<br>Look for the overstatement on the warm call, about 76 percent by the phase author's run. Then run with <code>--role deep</code> and <code>--role cheap</code>. Neither has a cached price, so the saving disappears by construction.
+<br>Teaches: the size of the saving before you spend anything live, and how a missing price hides it completely.</li>
+
+<li><label><input type="checkbox"> <b>E4</b> <span class="tag">live</span></label> See a real cache hit on your own account. <span class="badge">c3</span>
+<br>Run: <code>python phase03_economics/cost_meter.py --model &lt;your-model&gt; --role cache_demo</code>
+<br>Call 1 should report 0 cached tokens, call 2 should report most of the long prefix as cached. If call 2 also reports 0, read the diagnosis the script prints: a prefix below the minimum, too long a pause, or a gateway that drops the details object.
+<br>Teaches: the cached-token count is the only proof caching works. This is the one live exercise that matters most.</li>
+
+<li><label><input type="checkbox"> <b>E5</b> <span class="tag">live, break-it</span></label> Break the hit with one line. <span class="badge">c3</span>
+<br>Edit <code>build_prompt</code> at <code>cost_meter.py:56</code> and put the current timestamp at position 0 of the prompt. Run E4 again: call 2 reports 0 cached. Then move the timestamp to the end and the hit comes back.
+<br>Teaches: your Phase 0 story, on your own bill, in two minutes. Remove the edit afterwards.</li>
+
+<li><label><input type="checkbox"> <b>E6</b> <span class="tag">live, break-it</span></label> Go below the minimum and get no error. <span class="badge">c3</span>
+<br>Run: <code>python phase03_economics/cost_meter.py --model &lt;your-model&gt; --role cache_demo --prefix-tokens 400</code>
+<br>Both calls succeed, both report 0 cached, and nothing says why. Raise it to 1,200 and watch the hit appear.
+<br>Teaches: the absence of an error does not prove a feature works.</li>
+
+<li><label><input type="checkbox"> <b>E7</b> <span class="tag">live</span></label> Find the break-even turn. <span class="badge">c2</span>
+<br>Run offline first: <code>python phase03_economics/cache_control_lab.py --explain</code> and read the block order and usage fields.
+<br>Then: <code>python phase03_economics/cache_control_lab.py --model &lt;model-id&gt; --role claude --turns 5</code>, and again with <code>--no-cache</code>. Turn 1 of the cached run costs more than the control: you paid the write premium. Write down the turn where the cached total crosses below.</li>
+
+<li><label><input type="checkbox"> <b>E8</b> <span class="tag">live, break-it</span></label> Pay the premium every turn and never collect. <span class="badge">c2</span> <span class="badge">c3</span>
+<br>Run: <code>python phase03_economics/cache_control_lab.py --model &lt;model-id&gt; --role claude --turns 5 --break-it</code>
+<br>Every turn shows a non-zero <code>written</code> column and a zero <code>read</code> column. The run costs more than caching off. Compare the total with your E7 control and write down the difference.
+<br>Teaches: a volatile block above the breakpoint reverses the feature.</li>
+</ul>
+
+<div class="callout note">Setup: <code>cd ~/Desktop/project/code/study-material/inference-internals/code && uv sync</code>. The study note author ran none of these scripts this run, so every Expected behaviour above is the phase's own claim, unverified. E1 to E3 run offline. E4 to E8 need a provider key; run them only if you have one.</div>
+<h2 data-kind="checkpoint">Checkpoint</h2>
+<p class="why">Five scenarios, no notes. Write your answer first, then open the sketch. The maths questions want the numbers, not the principle.</p>
+
+<ol class="steps">
+<li><b>Show the math.</b> A model charges, per million tokens: input $2.00, cached input $0.20, cache writes $2.50, output $12.00. Your agent step sends 20,000 input tokens. 18,000 of them hit the cache. The step generates 400 output tokens. (a) Compute the true cost. (b) Compute what your Phase 1 two-price meter (input price, output price) reports. (c) How many times higher is the old number? (d) Finance prices customers from the old number. Name the business error.
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) Uncached input: 2,000 x $2.00 / 1e6 = $0.004. Cached input: 18,000 x $0.20 / 1e6 = $0.0036. Output: 400 x $12.00 / 1e6 = $0.0048. True total: $0.0124.</p>
+<p>(b) 20,000 x $2.00 / 1e6 + $0.0048 = $0.0448.</p>
+<p>(c) $0.0448 / $0.0124 is about 3.6x.</p>
+<p>(d) You price against a cost 3.6x above your real cost. You lose deals you could have won, and you cannot explain your margin when someone checks the invoice.</p>
+</details></li>
+
+<li><b>Caching is on, the invoice did not move.</b> A colleague concludes caching does not work for your workload. Give three separate causes. For each, name the one number you would check.
+<details class="answer"><summary>Answer sketch</summary>
+<ul>
+<li>The prefix is below the model's minimum. Nothing caches, and no error is returned. The cached-token count is exactly 0 on every call.</li>
+<li>Something volatile sits early in the prompt, so every request is cold. The cached count is also 0. Lengthen the test prefix above the minimum: if it still reads 0, the cause is volatility, not length.</li>
+<li>The saving is real but your meter never reads the cached-token field. Check whether your code reads it at all. If not, your cost number can never move.</li>
+<li>A fourth correct answer: writes cost 1.25x and your workload writes often but reads rarely. Compare written tokens against read tokens.</li>
+</ul>
+</details></li>
+
+<li><b>Pick the tier.</b> The provider charges 2x input for a 1-hour write, 1.25x for a 5-minute write, 0.1x for a read. (a) Derive the reads needed before the 1-hour tier profits. (b) Your agent calls every 12 minutes for an hour. Which tier? (c) Your agent calls every 20 seconds for two minutes, then stops. Which tier, and why is the answer different?
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) (2.00 - 1.00) / (1.00 - 0.10) = 1.11, so two reads.</p>
+<p>(b) At a 12-minute gap a 5-minute entry always expires before the next call: a write every time, zero reads. The 1-hour tier gives one write and four reads in the hour, and four reads clears the two-read break-even. Pick one hour.</p>
+<p>(c) Calls 20 seconds apart never let a 5-minute entry expire, so the cheaper 1.25x write is already reused. The extra 0.75x buys nothing. Pick five minutes.</p>
+</details></li>
+
+<li><b>This is broken.</b> Your dashboard reports $0.24 for an agent run. The provider billed $0.52. The dashboard shows 20 input tokens and 13,545 output tokens, on a many-turn run with a large system prompt. (a) Name the cause. (b) Why should 20 input tokens have looked wrong to any reader? (c) Name the two missing usage fields. (d) Why did this pass code review?
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) The instrumentation never forwarded cache-read and cache-write tokens, so the tool recomputed cost from partial counts.</p>
+<p>(b) On that provider, <code>input_tokens</code> counts only the tokens after the last cache breakpoint. A many-turn run with a large system prompt cannot have 20 real input tokens. The tool read the field as total input. It is not.</p>
+<p>(c) <code>cache_read_input_tokens</code> and <code>cache_creation_input_tokens</code>.</p>
+<p>(d) The wrong number looks plausible, comes through the same code path as correct numbers, and raises no error. Only a comparison with the provider's own bill catches it.</p>
+</details></li>
+
+<li><b>Walk it through.</b> Ten identical requests arrive at once, at cold start, each with the same 12,000-token system prompt. Writes cost 1.25x. (a) Trace what the cache does across the 10 requests. (b) Compare total input cost with caching off. (c) Name the one change that fixes it, and its latency cost.
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) An entry becomes usable only after the first response begins. All 10 requests start before any entry exists, so all 10 write and none read.</p>
+<p>(b) The burst costs 1.25x the no-cache run. At $2.00 per million input tokens, that is $0.300 against $0.240. Caching made this burst more expensive.</p>
+<p>(c) Send one warm-up call, wait until its response starts, then fire the other nine at the warm entry. The cost is one extra round trip at the start of the burst.</p>
+</details></li>
+</ol>
+
+<div class="keypoints">
+<p class="remember">The break-even formula and the total-input identity answer all five questions; everything else is plugging in.</p>
+<p class="trap">A plausible number from the same code path as correct numbers passes review. Only the provider's bill audits it.</p>
+<p class="try">Redo question 1 with your own model's prices from the sheet you filled in E2, dated today.</p>
+</div>
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+<pre class="cheatsheet">PHASE 3A · THE BILL AND THE CACHE                    prices dated 2026-09-23, check yours
+
+USAGE SHAPES (same field name, opposite sides of the base count)
+  OpenAI    ordinary input = input_tokens - cached_tokens - cache_write_tokens
+  Anthropic total input    = cache_read + cache_creation + input_tokens
+  OTel normalizes to the OpenAI shape (cached inside input_tokens)
+  → forward Anthropic raw input_tokens into OTel and you under-report (Langfuse #13807: $0.522 shown as $0.238)
+
+SUBSET RULE (details decompose the total, they never add to it)
+  100 text (40 cached) + 200 image → input_tokens: 300, not 500
+  Adding nested counts double-counts, up to 2x
+  OTel has NO cost attribute → spend is computed downstream from a dated price sheet
+
+FALLBACK RULE
+  Unpriced class → default to the dearest rate and warn
+  Zero default under-reports silently and hides savings
+  Full-rate default contradicts the invoice, so it gets caught
+
+BREAK-EVEN (caching is a purchase)
+  reads needed = (write_rate - input_rate) / (input_rate - read_rate)
+  1.25x write, 0.1x read → 0.28 → one read profits
+  2.0x write (1-hour tier)      → 1.11 → two reads profit
+  1 write + 1 full read = 1.35x vs 2x uncached (OpenAI doc)
+  Cold start: entry usable only after first response begins
+  → N parallel first calls = N writes, 0 reads → 1.25x MORE than no caching
+  Fix: prewarm (OpenAI prompt_cache_options.prewarm / Anthropic max_tokens: 0,
+  same thinking + effort config)
+  Google bills cache storage per hour: idle entries cost there, nowhere else
+
+CURRENT MULTIPLIERS (2026-09-23, model-dependent)
+  writes  1.25x (5-min) · 2x (1-hour, Anthropic) · 1.25x OpenAI GPT-5.6+
+  reads   0.1x most models · 0.025x Fable 5.1 / Mythos 5.1 · 0.05x Opus 5.5
+
+CACHE HIT = byte-exact prefix match from token 0, order: tools → system → messages
+  Invalidation: changed byte · changed setting (model, tools + order,
+  parallel_tool_calls, output format, reasoning effort, verbosity, thinking) ·
+  reordered map keys (Go/Swift serialization) · block below minimum (512–4,096, silent, no error)
+  Anthropic lookback: 20 blocks, finds entries prior requests WROTE
+  (tool_use / tool_result runs count as one position each)
+  Failure is always silent. Only the cached-token count proves it.
+
+FIELD PATHS (verified paths only)
+  OpenAI Responses : usage.input_tokens_details.cached_tokens · cache_write_tokens
+  Anthropic        : usage.cache_read_input_tokens · cache_creation_input_tokens
+
+LIMITS (Anthropic explicit)
+  Max 4 breakpoints per request, a 5th → HTTP 400
+  Min cacheable 512–4,096 tokens by model (lookup, varies 8x)
+
+PROOF NUMBERS
+  ProjectDiscovery: 7% → 74% hit rate in one deployment, 59–70% cost saved
+  91.8% cache rate vs 3.2% at same volume ≈ 60x cost difference</pre>
+<h2 data-kind="post">Post</h2>
+<p class="why">Two drafts you can post. Each one carries a real number from a real system, so it reads as experience, not advice.</p>
+
+<div class="cards" data-cols="1">
+  <div class="card"><h4>Post 1: the dashboard that halved the bill</h4>
+  <p>A tracing pipeline showed a Claude agent run at $0.24. The provider charged $0.52. The meter saw "input: 20" for a 40-turn agent, because the cache-read and cache-write fields never made it through. Nobody questioned 20 tokens, since the number looked plausible. The lesson: input_tokens means something different on each provider. OpenAI counts cached tokens inside it. Anthropic counts them outside. Write one adapter per provider, and make it print the shape it matched.</p>
+  <p><em>What makes it his:</em> a real public bug (Langfuse issue 13807), read end to end, with the two usage shapes he can draw from the checkpoint he just finished.</p>
+  </div>
+  <div class="card"><h4>Post 2: the burst that paid more with caching on</h4>
+  <p>Ten identical requests fired in parallel at cold start. All carried the same 12,000-token prefix. I expected a 10x saving. I paid 1.25x more than no caching. A cache entry only exists after the first response begins. So ten parallel first calls are ten writes and zero reads. The fix is one prewarm call before the burst. Caching is a purchase with a payback period. Break-even reads = (write rate − input rate) / (input rate − read rate). At 1.25x write and 0.1x read, one read profits.</p>
+  <p><em>What makes it his:</em> the arithmetic he ran himself in exercise E7, with the cold-start rule stated as the surprise, not the specification.</p>
+  </div>
+</div>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+<li><b>OpenAI prompt caching guide</b> — the write and read multipliers, the 1.35x amortization example, and the cost formula that puts cached tokens inside <code>input_tokens</code>.<br><code>https://developers.openai.com/api/docs/guides/prompt-caching</code></li>
+<li><b>Anthropic prompt caching</b> — the breakpoint mechanics, the minimum-token silence, total = read + creation + input, and the read-rate exceptions on current models.<br><code>https://platform.claude.com/docs/en/build-with-claude/prompt-caching</code></li>
+<li><b>ProjectDiscovery: How We Cut LLM Costs by 59% With Prompt Caching</b> — the 7 to 74 percent hit-rate relocation, with 26-step, 40-tool-call tasks as its conditions.<br><code>https://projectdiscovery.io/blog/how-we-cut-llm-cost-with-prompt-caching</code></li>
+<li><b>Langfuse issue 13807</b> — the $0.522 charged versus $0.238 displayed, and <code>input: 20</code> for a 40-turn agent.<br><code>https://github.com/langfuse/langfuse/issues/13807</code></li>
+<li><b>OpenTelemetry GenAI attribute registry</b> — the subset rule with its worked example, and the confirmation that no cost attribute exists. Read on the main branch.<br><code>https://raw.githubusercontent.com/open-telemetry/semantic-conventions-genai/main/docs/registry/attributes/gen-ai.md</code></li>
+<li><b>Google Gemini context caching</b> — cache storage billed by the hour, and the "no cost saving guarantee" on implicit caching.<br><code>https://ai.google.dev/gemini-api/docs/generate-content/caching</code></li>
+</ul>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

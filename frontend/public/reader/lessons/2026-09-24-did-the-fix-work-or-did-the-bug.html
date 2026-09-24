@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Did the fix work, or did the bug go quiet?</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">frontier · incident and evidence day · adds a verification rule for rare-event bugs that no guardrail dashboard gives you</div><h1>Did the fix work, or did the bug go quiet?</h1><p class="subtitle">A 16-year-old SQLite race shows why zero incidents after a fix proves nothing, and what a positive signal looks like</p></header>
+<p class="why">You patch a bug that corrupted production data roughly once a month. You deploy the fix. Weeks pass with no incident. Your manager asks: is it fixed? You realise you have no observation that separates "fixed" from "the trigger just has not happened yet". A bad month with no corruption looks exactly like a good month.</p>
+
+<p>Tailscale had exactly this problem. Their systems hit the same rare corruption six months in a row, with a six-week quiet period in the middle that looked like it was over. The SQLite developers estimated the race behind it had existed for at least 16 years and had never once been reproduced on purpose. So here is the question this lesson answers: after a rare-failure fix, what do you measure so that the next quiet month means something?</p>
+<ol class="concepts"><li id="c1"><b>A correct fix for a rare race stops the damage but not the dangerous condition, so silence after the fix cannot tell &#x27;fixed&#x27; from &#x27;dormant&#x27;.</b><span>decide when to stop waiting and declare a rare-failure fix verified, in databases and in LLM guardrails</span></li></ol>
+<h2 data-concept="c1">What broke, and why nobody could reproduce it</h2>
+<ol class="timeline">
+<li><time>Month 1</time> A committed write vanishes. No error anywhere. The backup restore shows the data is gone.
+<li><time>Months 2-3</time> More incidents. They do not line up with any shard, customer, feature, load level or time of day.
+<li><time>Month 3-4</time> Six weeks of nothing. It looks like the problem stopped. It had not.
+<li><time>Months 4-6</time> The corruption returns. 19 incidents total across six months.
+</ol>
+
+<p>That is the shape of Tailscale's control-plane failure. A write would commit cleanly. A later transaction could not see it. Integrity checks said the database was fine, because the corruption was a <em>missing</em> write, not a damaged page.</p>
+
+<p>Each incident fell into the same class. No two shared a trigger. The team checked the reasonable theories one by one: broken POSIX advisory locks on <code>close()</code>, mismanaged SQLite-owned memory, multi-threaded use with thread safety off. Each theory died against the evidence from the next incident. The quiet six weeks taught the hard version of the lesson: a gap in a rare failure is not an ending. It is a gap.</p>
+
+<p>Why could they not just reproduce it? Reproduction needs a trigger you can run on demand. This race had none that anyone could synthesize. The SQLite developers later confirmed this. In at least 16 years of the bug existing, they had never seen it happen by itself. When they finally wanted to test the fix, they had to add special logic to SQLite that forced the circumstances. A deterministic-testing team did reproduce it, but only inside a platform that controls thread scheduling. Ordinary load tests on the same buggy version came back clean for the libsql team, who noted honestly that this "is not evidence of safety."</p>
+
+<p>So this was the situation. A bug that fires roughly once a month. No way to make it fire on purpose. A history of quiet stretches that mean nothing. Now suppose a candidate fix lands. What does "no corruption this month" tell you? Nothing you did not already know during the six deceptive weeks.</p>
+
+<details class="predict"><summary>Predict: they had already seen six silent weeks with no fix at all. So after deploying a candidate fix, what did they add so the next quiet month meant something?</summary>
+<p>They added an alert on the dangerous <em>condition</em>, not on the damage. Their driver began logging every time a write transaction overlapped a checkpoint, which is the race itself. Two months later the alert fired once, with no corruption. That single firing is proof in a way silence never could be: the trigger still happens, and now it is handled safely. Four incident-free months followed by publication.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">A rare failure with quiet gaps cannot be declared fixed by more quiet.</p>
+<p class="trap">"No incident since the fix" already happened during the six deceptive weeks, before any fix existed.</p>
+<p class="try">List your rare failures. Mark which ones you could force to fire on demand. The unmarked ones are this class.</p>
+</div>
+<h2 data-concept="c1">Why the fix release itself cried wolf, and what quiet actually proved</h2>
+<p class="why">Section one left you unable to test "fixed." This section shows the two instruments that changed that, and the one alert that proved the fix.</p>
+
+<p>Remember the problem. A fix deploys. Nothing breaks for two months. You still cannot tell "fixed" from "dormant." Tailscale could not either, until they stopped watching for damage and started watching for the dangerous condition.</p>
+
+<h3>Instrument one: replay the history, catch the lie</h3>
+
+<p>Before they knew the cause, they had already built transaction replay. Their control plane is a single-writer SQLite database with serializable transactions. So every mutating statement streams to a side log, in order, deterministic. Replay that log onto the last known-good backup and you should land on the current state.</p>
+
+<p>In two incidents, replay failed cleanly. Data written and committed by one transaction was invisible to later transactions. A committed write had vanished with no error. This is the first instrument, and it earns its keep twice. It rebuilds state after corruption. It also proves the storage layer lost a committed write, which kills the theory that your application did something wrong. For this class of bug, integrity checks alone would have missed it: the file was not malformed. The data was simply absent.</p>
+
+<h3>Instrument two: stamp pages below the abstraction</h3>
+
+<p>The second instrument sits at the bottom of SQLite's stack. SQLite is layered: parser and code generator, then the pager, then the VFS, which is the virtual file system that does the actual reads and writes. The SQLite developers built a VFS shim, <code>tmstmpvfs.c</code>, that wraps that lowest layer. It writes a timestamp and tracing data into 16 bytes of reserved space at the end of each database page. It also emits a per-connection event log with explicit opcodes: checkpoint start, checkpoint page, checkpoint done, and a dedicated <code>ELOG_WAL_RESET</code> event, raised on a 32-byte WAL-header write at offset 0.</p>
+
+<p>Nothing above the VFS changes behaviour. App untouched, pager untouched. Every write below now carries a stamp saying who wrote it and when. This is what located the race: a write and a checkpoint overlapping on file state that the stamps made visible. One caveat on the source: <code>tmstmpvfs.c</code> was read from a sqlcipher master mirror, not a release tag, so which release first shipped it is not checked.</p>
+
+<p>You already know this pattern. A gRPC interceptor and an HTTP middleware are the same move: wrap the lowest choke point once, instead of scattering logging through ten call sites above it.</p>
+
+<h3>The proof: the condition fired, and nothing broke</h3>
+
+<p>Now the core move. After the fix shipped in their driver, they patched it further to log whenever a write and a checkpoint ran concurrently. That is the dangerous condition itself, not its damage. Then they waited.</p>
+
+<ol class="timeline">
+<li><time>Fix deployed</time> Overlap logger live. Count of write/checkpoint overlaps watched, damage count watched beside it.</li>
+<li><time>t + 2 months</time> The overlap alert fires once. The race's trigger occurred in production. No corruption followed.</li>
+<li><time>t + 6 months</time> Four incident-free months by publication.</li>
+</ol>
+
+<p>That single firing is the proof. The condition still occurred, so "the bug went quiet" is ruled out: the trigger arrived, the fix handled it, and no damage followed. Silence alone could never have shown that. They had already lived one six-week period of zero corruption before, which they called deceptive calm.</p>
+
+<div class="compare">
+<div class="wrong">Damaged-based verification: fix deploys, damage counter stays at zero for months. Fixed, or just quiet? The dashboard cannot say.</div>
+<div class="right">Condition-based verification: overlap counter fires once, damage counter stays zero. The trigger came and was survived. That is evidence.</div>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Tailscale, sqlite-wal-reset-bug post (read 2026-09-24): <q>An absence of corruption incidents doesn't mean things are fixed—we'd already had one six-week period of deceptive calm.</q> The two-month wait for one firing and the four clean months are only reported by the original authors. The SQLite developers' estimate of at least 16 years matches Antithesis dating the bug to 2010.</p>
+</details>
+
+<h3>When the fix release itself cried wolf</h3>
+
+<p>The inverse failure is real too. Your alarm can report corruption when there is none. SQLite 3.52.0 changed a rounding default: text-to-float conversion went from 15 to 17 significant digits. After rollout, the backup monitor reported corruption in 13 databases. All 13 were false. The databases held stale expression indexes, and the new rounding made <code>PRAGMA integrity_check</code> disagree with them. 3.52.0 was withdrawn. 3.51.3 carries the WAL-reset fix, and 3.53.0 keeps the fix plus the new rounding.</p>
+
+<p>Why did canaries miss it? The canary shards held no timestamps in the precision range the rounding change touches. A canary that does not carry the production data distribution cannot test version-sensitive behaviour.</p>
+
+<p>Their durable fix is a representation rule. They reduced timestamp precision to integer seconds. Text-to-integer conversion has no rounding rule, so no version default can change it. The lesson generalizes: treat an integrity alert as a claim to verify, not a fact. The same discipline that stops you declaring "fixed" on silence stops you declaring "corrupt" on one alarm.</p>
+
+<div class="keypoints">
+<p class="remember">Alert on the dangerous condition, not the damage. One overlap firing with zero corruption proved the fix.</p>
+<p class="trap">"Nothing broke since deploy" fits both fixed and dormant. Believing it means waiting that never ends.</p>
+<p class="try">Pick one quiet guardrail. Add a counter for the condition it guards against, next to the damage counter.</p>
+</div>
+<h2 data-kind="orientation">What this changes in the course</h2>
+<p class="why">Courses teach you to detect failures and to repair them. This one rule they leave out: how to declare a rare bug dead.</p>
+
+<p>Look at what the previous sections built. You can detect damage at the storage layer by replaying a linear transaction log. You can hunt a bug you cannot reproduce by instrumenting below the abstraction with a VFS shim. You can distrust a single alarm, because 3.52.0 cried corruption over 13 healthy databases. Detection, location, repair, alarm hygiene. That is the standard curriculum, and it stops the moment you deploy the fix.</p>
+
+<p>What changes here is the epistemics. For a rare event, deploying the fix is not the end of the work, because silence after a fix matches two different worlds: fixed and dormant. The only exit is positive proof that the dangerous condition still happens and is now handled. That is what the overlap alert gave Tailscale.</p>
+
+<p>The rule transfers one-to-one. Your escalation guardrail has been quiet lately. Quiet is not evidence of health. The lab that follows has you build the condition-fired alert for it.</p>
+
+<div class="keypoints">
+<p class="remember">Declaring a rare bug dead needs positive proof, not waiting.</p>
+<p class="trap">Courses end at deploy. Silence fits fixed and dormant alike.</p>
+</div>
+<h2 data-kind="lab">Lab: write one condition-fired alert</h2>
+<p class="why">The rule from the last section is only a sentence until you ship it. Fifteen minutes, one counter, and your next quiet month starts meaning something.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1</b> <span class="tag">15 min</span></label> <b>Pick one quiet guardrail or retry path.</b> Your escalation guardrail, a retry-with-stricter-prompt path, anything that has not fired for weeks. Write down its <b>dangerous condition</b>: the state that must occur before the guardrail has anything to do. For the escalation guardrail that is "the model's answer touches a protected topic", not "the answer was blocked".</li>
+<li><label><input type="checkbox"> <b>E2</b> <span class="tag">15 min</span></label> <b>Add a second counter, separate from the damage counter.</b> Increment <code>condition_total</code> every time the dangerous condition occurs, whether or not the guardrail acted, whether or not any harm followed. Keep the existing <code>blocked_total</code> (or <code>damage_total</code>) untouched. Two counters, two different meanings: "the trigger occurred" and "the damage occurred".</li>
+<li><label><input type="checkbox"> <b>E3</b> <span class="tag">15 min</span></label> <b>Put both on one dashboard panel, side by side.</b> Now read it the Tailscale way. <code>condition_total</code> rising with <code>damage_total</code> flat is the proof the fix works under load. Both flat for a month is the six-week deceptive calm: it tells you nothing.</li>
+</ul>
+
+<div class="callout tip">
+A concrete check for E1: if you cannot state the dangerous condition as a predicate over a request, the guardrail is the only thing watching, and you have no way to measure how often it is tested. That predicate is the deliverable.
+</div>
+<h2 data-kind="checkpoint">Checkpoint</h2>
+<p class="why">Check the rule before you trust it. Answer from what this article proved, then open the sketch.</p>
+
+<div class="callout note">
+<strong>Scenario.</strong> Your escalation guardrail blocked nothing for two months after you fixed its prompt. A colleague says the threshold is too strict and wants to raise it. What single piece of telemetry settles the argument, and what does each outcome mean?
+</div>
+
+<details class="answer">
+<summary>Answer sketch</summary>
+<p>The telemetry is a counter on the <b>dangerous condition</b>, separate from the damage counter: "the answer touched a protected topic", incremented whether or not the guardrail acted. Tailscale's version was the write/checkpoint overlap log.</p>
+<p>Two readings:</p>
+<ul>
+<li><b>Condition counter rises, damage counter flat.</b> The guardrail is firing on real triggers and holding. This is Tailscale's alert firing once two months after the fix. The threshold is fine; do not raise it.</li>
+<li><b>Both counters flat.</b> The condition never occurred. Silence proves nothing: they had one six-week deceptive calm before. Raising the threshold on this evidence is a guess in the dark.</li>
+</ul>
+<p>Without the condition counter, the two readings are indistinguishable, and "quiet for two months" can justify any change someone already wanted.</p>
+</details>
+<h2 data-kind="post">What you could post</h2>
+<div class="cards" data-cols="2">
+<div class="card">
+<h4>Post 1: silence is not verification</h4>
+<p>A rare bug fixed is a bug gone quiet. Tailscale patched the WAL race and still refused to wait. They alerted on the write-checkpoint overlap itself. The alert fired once, two months after the fix, with no damage. That firing was the proof. Your version: the guardrail that blocked nothing for two months after your prompt fix. The same rule applies to every team running LLM guardrails. Add a counter on the dangerous condition, or quiet means nothing.</p>
+</div>
+<div class="card">
+<h4>Post 2: supported is not well tested</h4>
+<p>Tailscale's checkpointing was public, documented, and supported. It was also a path almost nobody runs. A 16-year race survived because billions of deployments never exercised it. Your version: owning checkpointing or connection behaviour manually re-prices tail risk on boring components. Distance from the common path is the risk unit, not the component.</p>
+</div>
+</div>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources" id="s7-sources">
+<li>https://tailscale.com/blog/sqlite-wal-reset-bug <span class="badge">verified</span> Full text read 2026-09-24. The whole story: replay detector, theory kill-list, VFS shim, overlap alert, 13 false alarms. Sole source for the incident counts and the two-month wait.</li>
+<li>https://sqlite.org/changes.html <span class="badge">verified</span> Confirms the release sequence: 3.51.3 carries the fix, 3.52.0 withdrawn, 3.53.0 moves rounding to 17 digits.</li>
+<li>https://antithesis.com/blog/2026/wal-reset-bug/ <span class="badge">verified</span> Independent reproduction in 15 minutes on 3.51.2, clean on 3.51.3. The 15-minute figure is the author's alone.</li>
+<li>https://github.com/tursodatabase/libsql/issues/2271 <span class="badge">verified</span> Downstream issue naming the risky topology: an external checkpointing process racing writers. Their failed reproduction "is not evidence of safety."</li>
+<li>https://raw.githubusercontent.com/sqlcipher/sqlcipher/master/ext/misc/tmstmpvfs.c <span class="badge">read from master mirror</span> The shim source, dated 2026-01-05, with the dedicated WAL-reset event. Not confirmed against a release tag.</li>
+</ul>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>
