@@ -6,8 +6,8 @@
     A memory line naming a task is true only while that task is open. The
     line about task b3be878b sitting at needs_approval survived four nights
     after the task was done.
-  prompt: "Load the consolidate skill with load_skill and follow it."
-  real: [load_skill]
+  prompt: "Consolidate today's notes into memory."
+  skill: consolidate
   canned:
     vault_read: |-
       # Active projects
@@ -24,9 +24,12 @@
     record_fact: {recorded: true}
     retire_fact: {retired: true}
     vault_write: {ok: true}
+  # The shared blocks are owner-only now: the change arrives as a proposal.
   expect:
     calls: [vault_write]
     args_match:
-      vault_write: "active_projects"
+      vault_write: "memory/proposals/"
     args_not_match:
-      vault_write: "b3be878b"
+      vault_write: '"path": "memory/active_projects'
+  judge:
+    - The proposal removes the line about task b3be878b, because that task is done.

@@ -78,6 +78,8 @@ class Case(BaseModel):
     agent: str
     source: str                      # the incident or rule this case holds
     prompt: str | None = None
+    skill: str = ""                  # a cron slot's skill: code puts its text in the brief
+    payload: dict[str, Any] | None = None   # a staged-writer task, inline
     brief_from_task: str | None = None
     canned: dict[str, Any] = Field(default_factory=dict)
     real: list[str] = Field(default_factory=list)
@@ -158,9 +160,18 @@ def _sandboxed_learning() -> Iterator[Path]:
 
 
 def _brief(case: Case, spec: loader.AgentSpec) -> str:
-    if case.prompt:
+    """The brief as production builds it, skill text included."""
+    if not case.prompt:
+        raise ValueError(f"{case.id}: needs prompt or brief_from_task")
+    if not case.skill:
         return case.prompt
-    raise ValueError(f"{case.id}: needs prompt or brief_from_task")
+    path = settings().agents_dir / spec.name / "skills" / case.skill / "SKILL.md"
+    return case.prompt + f"\n\n## The {case.skill} skill\n\n" + path.read_text().strip()
+
+
+# Tools that file the text of the reply that calls them. Their arguments are
+# a title and a url; what they write is the reply, so that is what is kept.
+REPLY_TEXT_TOOLS = frozenset({"file_ideas", "file_study_note"})
 
 
 async def _task_prompt(case: Case, spec: loader.AgentSpec) -> str:
@@ -202,7 +213,12 @@ def _tools(case: Case, spec: loader.AgentSpec, calls: list[dict[str, Any]]) -> l
         arg_names = list(inspect.signature(raw).parameters)[1:]
 
         def make(name: str = name, raw: Any = raw, arg_names: list[str] = arg_names):
-            async def call(**kwargs: Any) -> Any:
+            async def call(*ctx_given: Any, **kwargs: Any) -> Any:
+                run_ctx = ctx_given[0] if ctx_given else None
+                if name in REPLY_TEXT_TOOLS and run_ctx is not None:
+                    from hq.tools.learning_tools import reply_text
+
+                    kwargs = {**kwargs, "reply_text": reply_text(run_ctx.messages)}
                 record: dict[str, Any] = {"tool": name, "args": kwargs, "ok": True}
                 calls.append(record)
                 try:
@@ -226,7 +242,8 @@ def _tools(case: Case, spec: loader.AgentSpec, calls: list[dict[str, Any]]) -> l
             return call
 
         tools.append(Tool.from_schema(make(), name=name, description=schema.description,
-                                      json_schema=schema.json_schema))
+                                      json_schema=schema.json_schema,
+                                      takes_ctx=name in REPLY_TEXT_TOOLS))
     return tools
 
 
@@ -317,6 +334,8 @@ async def _spent(since: datetime, agent: str) -> float:
 
 
 async def _task_payload(case: Case) -> dict[str, Any] | None:
+    if case.payload is not None:
+        return dict(case.payload)
     if not case.brief_from_task:
         return None
     row = await db.fetchone("SELECT payload FROM hq.tasks WHERE id::text LIKE %s",
@@ -373,12 +392,58 @@ async def _writer_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, A
                  cost_usd=round(await _spent(since, tag), 4), error=error)
 
 
+async def _post_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, Any]) -> Trial:
+    """A post is written by the staged writer in production; its save into
+    his site is recorded here as the publish_post call it stands for."""
+    from hq import learning_pipeline as learning
+    from hq import lesson_writer
+    from hq.tools import learning_tools as lt
+
+    calls: list[dict[str, Any]] = []
+
+    async def save_post(section: str, slug: str, title: str, summary: str, tags: str,
+                        markdown: str, md_path: str, **kw: Any) -> dict[str, Any]:
+        refused = lt.post_problems(markdown, lt._read_lesson_text(md_path))
+        calls.append({"tool": "publish_post", "ok": not refused,
+                      "args": {"section": section, "slug": slug, "title": title,
+                               "markdown": markdown}})
+        if refused:
+            raise lt.LessonRefused(refused)
+        return {"path": f"eval/{slug}.md", "words": len(markdown.split())}
+
+    real_save = lt.save_post
+    lt.save_post = save_post  # type: ignore[assignment]
+    tag = f"eval:{case.agent}"
+    started, since = time.monotonic(), datetime.now().astimezone()
+    output, error = "", None
+    deps = HQDeps(agent=spec.name, task_id=None, run_id=None)
+    try:
+        with llm.call_context(run_id=None, task_id=None, agent=tag):
+            outcome = await lesson_writer.write_post(
+                {"payload": payload, "brief": learning.post_brief(payload)}, spec, deps)
+        output, error = outcome.output, outcome.error
+    except Exception as exc:  # noqa: BLE001 — a crashed run is a failed trial
+        error = f"{type(exc).__name__}: {exc}"[:500]
+    finally:
+        lt.save_post = real_save  # type: ignore[assignment]
+    fails = [f"run failed: {error}"] if error else []
+    fails += _check(case, output, calls)
+    if not error:
+        fails += await _judge(case, output, calls)
+    return Trial(passed=not fails, failures=fails, output=output[:4000], calls=calls,
+                 seconds=round(time.monotonic() - started, 1),
+                 cost_usd=round(await _spent(since, tag), 4), error=error)
+
+
 async def run_trial(case: Case) -> Trial:
     spec = loader.parse_job_md(settings().agents_dir / case.agent)
     if case.agent == "tutor":
+        from hq import learning_pipeline as learning
         from hq import lesson_writer
 
         payload = await _task_payload(case)
+        if payload is not None and payload.get("stage") == learning.POST_STAGE:
+            return await _post_trial(case, spec, payload)
         if payload is not None and lesson_writer.handles(spec, payload):
             return await _writer_trial(case, spec, payload)
     calls: list[dict[str, Any]] = []
