@@ -52,3 +52,42 @@
   judge:
     - Every post is finished text he could paste on X, in the first person, with no note-taking labels.
     - No post claims he built, ran or measured something the material does not show; reading is named as reading.
+
+- id: sage-posts-generic-dropped-by-judge
+  agent: sage
+  source: >-
+    Posts that passed every voice check still read like any engineer's feed.
+    Sage now writes six to eight candidates, one source each; a judge scores
+    them and code files the best three to five, dropping the generic ones.
+    The run must hand file_posts the whole candidate batch with one source
+    per candidate, each on its own real trigger from the material.
+  prompt: "Write today's posts."
+  skill: daily-posts
+  canned:
+    list_lessons:
+      - {lesson_date: "2026-09-22", title: "Phase 2B: chunked prefill, constrained decoding and context budgets", md_path: "learning/lessons/2026-09-22-inference-internals-phase-02b-decoding-context.md"}
+      - {lesson_date: "2026-09-24", title: "Phase 3A: prefix caching and the KV cache", md_path: "learning/lessons/2026-09-24-inference-internals-phase-03a-caching.md"}
+    read_lesson: {text: "A long prompt admitted whole freezes every other stream for one forward pass: 720ms for a 24,000-token prompt at 0.03ms a token. Chunked prefill caps the pass so decode keeps ticking. Prefix caching reuses the KV blocks of a shared system prompt; a cache hit skips prefill for those tokens, and one changed character early in the prompt misses the whole cache."}
+    read_activity: {runs: [{agent: tutor, title: "Write today's article", outcome: failed, error: "ReadError after 304s on every model"}, {agent: hunter, title: "Job sweep", outcome: done, summary: "42 roles found, 18 strong, none at a stated 25 LPA"}]}
+    read_board: {tasks: []}
+    memory_search: []
+    recall_facts: []
+    vault_read: ""
+    vault_write: {ok: true}
+    file_posts: >-
+      filed 3 of 6 candidates (best first: 2, 1, 4) under ## today at the top of
+      projects/content/ideas.md; left out: candidate 5 (trigger 1, detail 1, voice 3,
+      insight 2, not generic 1; mean 1.6): no trigger in the material; any engineer
+      could post this
+  expect:
+    calls: [file_posts]
+    max_calls: {file_posts: 3}
+    args_match:
+      file_posts: '(\\n\s*---\s*\\n.*){5}'
+    args_not_match:
+      file_posts: "why:|Sources:|quarantine/|\\bhunter\\b|\\btutor\\b|\\bsage\\b"
+      vault_write: '"path": "(drafts/|projects/content/ideas)'
+  judge:
+    - The reply hands file_posts six to eight candidate posts and one source per candidate, in order.
+    - Each candidate rests on a different real trigger from the material (a lesson's number, the failed run, the job sweep), not on a general opinion any engineer could post.
+    - The final answer reports only what file_posts says it filed and never says a left-out candidate was filed or posted.
