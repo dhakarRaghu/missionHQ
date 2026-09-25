@@ -27,6 +27,13 @@ stage runs:
    Parts rewritten by the page check are checked again. Whatever still does
    not map is listed on the lesson, which is marked "flagged"; a clean page
    is "passed". Neither stops the course: only his own "failed" does.
+5. TEACHING EDITOR: after the parts are cited and before the page is
+   assembled, the teacher model scores each teaching section (not
+   apparatus, and never a lab card or week review) on the rubric in
+   editor.md. The weakest three with any score under 4 are rewritten once
+   with its instruction, cited again and scored again. The scores go in the
+   report and the lesson's review notes; a section still averaging under 3
+   flags the lesson.
 
 Every model call is its own DBOS step, so a restart of the same workflow
 resumes where it was. A requeued task resumes too: the plan and every
@@ -36,6 +43,7 @@ finished part are kept on disk per task until the lesson is recorded.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html as html_lib
 import json
 import logging
@@ -194,6 +202,60 @@ class CitationVerdict(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+# --- the teaching editor --------------------------------------------------------
+# Every check above is mechanical: a part can carry a predict box, a figure
+# and short sentences and still not teach. The editor is the one judgement:
+# the teacher model scores each teaching section on the rubric in
+# editor.md, the weakest are rewritten once with its instruction, and the
+# scores are kept on the lesson.
+
+EDITOR_MODEL = "teacher"
+EDITOR_REWRITES = 3          # at most this many sections are rewritten for the editor
+EDITOR_BAR = 4               # a criterion below this sends its section to the rewrite list
+EDITOR_FLOOR = 3.0           # a section still averaging below this flags the lesson
+CRITERIA = ("concept_first", "asks_before_tells", "concrete", "plain", "transfer")
+_CRITERIA_FIX = {
+    "concept_first": "state the claim in the first lines, then show the cause step by step",
+    "asks_before_tells": "ask a predict question with numbers whose obvious answer is wrong,"
+                         " before the answer",
+    "concrete": "give one number with its conditions, or one failure he can picture",
+    "plain": "split long sentences, one idea each; replace idioms with literal verbs",
+    "transfer": "end with one thing to do or check from his phase or the owner-state"
+                " block, and what to look for",
+}
+
+
+def _score_field(what: str) -> Any:
+    return Field(ge=1, le=5, description=what)
+
+
+class SectionScore(BaseModel):
+    number: int = Field(description="the section number exactly as given")
+    concept_first: int = _score_field("the claim is stated, then earned by mechanism")
+    asks_before_tells: int = _score_field("a real predict question he could get wrong")
+    concrete: int = _score_field("a specific number, failure or trace he can picture")
+    plain: int = _score_field("short plain sentences for a second-language reader")
+    transfer: int = _score_field("it ends with something he can do or check")
+    rewrite: str = Field(default="", description=(
+        "for a section below 4 on any criterion: what to change, specifically; else empty"))
+
+    def scores(self) -> list[int]:
+        return [getattr(self, c) for c in CRITERIA]
+
+    def mean(self) -> float:
+        return sum(self.scores()) / len(CRITERIA)
+
+    def weak(self) -> list[str]:
+        return [c for c in CRITERIA if getattr(self, c) < EDITOR_BAR]
+
+    def line(self) -> str:
+        return ", ".join(f"{c} {getattr(self, c)}" for c in CRITERIA)
+
+
+class EditorVerdict(BaseModel):
+    sections: list[SectionScore] = Field(description="one entry per section you were given")
+
+
 # --- instructions ------------------------------------------------------------
 
 def outline_instructions(article: bool, page: str = "") -> str:
@@ -204,6 +266,11 @@ def outline_instructions(article: bool, page: str = "") -> str:
 
 def section_instructions() -> str:
     return assemble.assemble("writer-section", _tutor()).text
+
+
+def editor_instructions() -> str:
+    """The editor's rubric, and nothing else: it judges, it does not write."""
+    return (writer_dir() / "editor.md").read_text()
 
 
 def _tutor() -> AgentSpec:
@@ -292,6 +359,23 @@ async def _citation_step(note: str, claims: list[dict[str, Any]]) -> dict[str, A
     prompt = (f"<material>\n{note[:MATERIAL_CHARS]}\n</material>\n\n"
               f"<sentences>\n{json.dumps(claims, ensure_ascii=False)}\n</sentences>")
     result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=3))
+    return result.output.model_dump()
+
+
+@DBOS.step(name="writer.editor", **_STEP)
+async def _editor_step(concepts: list[dict[str, Any]], material: str, context: str,
+                       parts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Scores on the rubric in editor.md for each part, by its number. The
+    teacher model at its own reasoning: a judgement with a short answer."""
+    model, model_settings = _model_for(EDITOR_MODEL)
+    agent = Agent(model, output_type=EditorVerdict, instructions=editor_instructions(),
+                  retries=3, model_settings=model_settings)
+    prompt = (f"<plan>\n{json.dumps(concepts, ensure_ascii=False)}\n</plan>\n\n"
+              f"<material>\n{material[:NOTE_CHARS]}\n</material>\n\n"
+              + (f"<his_phase_and_state>\n{context}\n</his_phase_and_state>\n\n" if context else "")
+              + f"<sections>\n{json.dumps(parts, ensure_ascii=False)}\n</sections>\n\n"
+              "Score every section above by its number.")
+    result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=4))
     return result.output.model_dump()
 
 
@@ -623,8 +707,21 @@ def _h2(i: int, s: SectionPlan) -> str:
     return f'<h2 {attr}>{_esc(s.heading)}</h2>'
 
 
+def _sentence(text: str) -> str:
+    """One sentence: a capital first letter and a closing stop."""
+    text = text.strip()
+    if not text:
+        return ""
+    text = text[0].upper() + text[1:]
+    return text if text[-1] in ".?!" else text + "."
+
+
 def _concept_list(outline: Outline) -> str:
-    items = "".join(f'<li id="{_esc(c.id)}"><b>{_esc(c.claim)}</b><span>{_esc(c.lets_him)}</span></li>'
+    # Each half is its own sentence with a space between: the text copy
+    # (html_to_text) drops the tags, and "...summation.Question any..." was
+    # what the markdown carried when they touched.
+    items = "".join(f'<li id="{_esc(c.id)}"><b>{_esc(_sentence(c.claim))}</b>'
+                    f' <span>{_esc(_sentence(c.lets_him))}</span></li>'
                     for c in outline.concepts)
     return f'<ol class="concepts">{items}</ol>'
 
@@ -713,6 +810,37 @@ def save_outline(task_id: str | None, outline: Outline) -> None:
 def drop_outline(task_id: str | None) -> None:
     if task_id:
         _outline_file(task_id).unlink(missing_ok=True)
+        _editor_file(task_id).unlink(missing_ok=True)
+
+
+def _editor_file(task_id: str) -> Path:
+    f = _outline_file(task_id)
+    return f.with_name(f.name.replace(".outline.json", ".editor.json"))
+
+
+def _sha(html: str) -> str:
+    return hashlib.sha1(html.encode()).hexdigest()
+
+
+def saved_scores(task_id: str | None) -> dict[int, dict[str, Any]]:
+    """The editor's scores kept for this task, by section number: {sha of
+    the part's html, scores, edited}. A requeued run reuses a part's scores
+    while its text is unchanged, and never rewrites a part for the editor
+    twice."""
+    if not task_id:
+        return {}
+    try:
+        raw = json.loads(_editor_file(task_id).read_text())
+        return {int(k): v for k, v in raw.items() if isinstance(v, dict)}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_scores(task_id: str | None, cache: dict[int, dict[str, Any]]) -> None:
+    if task_id:
+        f = _editor_file(task_id)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({str(k): v for k, v in sorted(cache.items())}))
 
 
 def saved_parts(task_id: str | None, slug: str) -> dict[int, str]:
@@ -736,6 +864,12 @@ class Writer:
         self.review_status = "passed"
         self.release_flags: list[str] = []
         self.budgets: dict[int, int] = {}
+        # The editor's final scores by section, and its instruction for each
+        # section it sent back: kept on every later rewrite of that section
+        # (a retry, a citation repair, a page repair), so a fix for one
+        # finding does not undo the teaching fix.
+        self.editor_scores: dict[int, SectionScore] = {}
+        self.teaching_notes: dict[int, str] = {}
 
     # Parts: 1 is the opening (story + concept list); section k is part k + 1.
     async def _save(self, part: int, html: str) -> dict[str, Any]:
@@ -785,9 +919,11 @@ class Writer:
         found = list(problems or [])
         html = ""
         budget = self.budgets.get(i, 0)
+        standing = self.teaching_notes.get(i, "")
         for _ in range(SECTION_RETRIES + 1):
+            asked = found + ([standing] if standing and standing not in found else [])
             raw = await _section_step(self.spec.model, _section_prompt(
-                self.m, self.outline, i, s, previous, found, budget))
+                self.m, self.outline, i, s, previous, asked, budget))
             html = _h2(i, s) + "\n" + clean_section(raw)
             found = section_problems(html, earlier=earlier, article=self.m.article,
                                      kind=self.evidence_kind(), apparatus=bool(s.kind),
@@ -961,6 +1097,116 @@ class Writer:
             todo = sorted(by_part)
         return unsupported
 
+    # --- the teaching editor ----------------------------------------------------
+
+    def teaching_parts(self) -> list[int]:
+        """The sections that teach a concept. Apparatus (sources, post, lab,
+        checkpoint, cheatsheet, recall, orientation) is not judged on the
+        rubric, and a lab card or week review is all apparatus."""
+        if self.outline is None or self.m.page:
+            return []
+        return [i for i, s in enumerate(self.outline.sections, 1)
+                if not s.kind and i < len(self.parts) and self.parts[i].strip()]
+
+    def _editor_context(self) -> str:
+        """What a transfer step may be drawn from: his phase and the ledger."""
+        return "\n\n".join(x for x in (
+            f"## His phase\n\n{self.m.source[:SOURCE_CHARS]}" if self.m.source else "",
+            self.m.owner_state) if x)
+
+    async def score(self, numbers: list[int]) -> dict[int, SectionScore]:
+        """The editor's scores for these sections, one call for all of them.
+        A section whose text is unchanged since it was last scored (a
+        requeued run) keeps its saved scores and is not sent again."""
+        assert self.outline is not None
+        task_id = self.deps.task_id
+        cache = saved_scores(task_id)
+        out: dict[int, SectionScore] = {}
+        todo: list[int] = []
+        for i in numbers:
+            hit = cache.get(i) or {}
+            if hit.get("sha") == _sha(self.parts[i]) and hit.get("scores"):
+                try:
+                    out[i] = SectionScore.model_validate(hit["scores"])
+                    continue
+                except ValueError:
+                    pass
+            todo.append(i)
+        if not todo:
+            return out
+        sent = [{"number": i, "heading": self.outline.sections[i - 1].heading,
+                 "concept": self.outline.sections[i - 1].concept, "html": self.parts[i]}
+                for i in todo]
+        concepts = [c.model_dump(include={"id", "claim", "lets_him", "wrong_belief", "predict",
+                                          "evidence", "picture"}) for c in self.outline.concepts]
+        verdict = EditorVerdict.model_validate(await _editor_step(
+            concepts, self.m.note[:NOTE_CHARS], self._editor_context(), sent))
+        for s in verdict.sections:
+            if s.number in todo and s.number not in out:
+                out[s.number] = s
+        missed = [i for i in todo if i not in out]
+        if missed:
+            self.report.append(f"editor gave no scores for section(s) {missed}")
+        cache = saved_scores(task_id)
+        for i in todo:
+            if i in out:
+                cache[i] = {**cache.get(i, {}), "sha": _sha(self.parts[i]),
+                            "scores": out[i].model_dump()}
+        save_scores(task_id, cache)
+        return out
+
+    @staticmethod
+    def _instruction(s: SectionScore) -> str:
+        weak = s.weak()
+        fix = s.rewrite.strip() or "; ".join(f"{c}: {_CRITERIA_FIX[c]}" for c in weak)
+        return ("the teaching editor scored this section below 4 on "
+                + ", ".join(f"{c} ({getattr(s, c)})" for c in weak)
+                + f". What to change: {fix}. Keep what already works.")
+
+    async def edit(self) -> list[int]:
+        """Score every teaching section, then rewrite the weakest (at most
+        EDITOR_REWRITES, any criterion under EDITOR_BAR) once, with the
+        editor's instruction. Returns the sections rewritten in this run."""
+        teaching = self.teaching_parts()
+        if not teaching:
+            return []
+        scores = await self.score(teaching)
+        self.editor_scores = dict(scores)
+        cache = saved_scores(self.deps.task_id)
+        edited = {i for i in teaching if (cache.get(i) or {}).get("edited")}
+        for i in edited:
+            if (cache.get(i) or {}).get("instruction"):
+                self.teaching_notes[i] = str(cache[i]["instruction"])
+        room = max(0, EDITOR_REWRITES - len(edited))
+        weakest = sorted((sum(s.scores()), i) for i, s in scores.items()
+                         if s.weak() and i not in edited)[:room]
+        chosen = sorted(i for _total, i in weakest)
+        for i in chosen:
+            self.teaching_notes[i] = self._instruction(scores[i])
+            # Marked before the rewrite: a run cut mid-rewrite and requeued
+            # scores the new text, and does not send the part back again.
+            cache.setdefault(i, {}).update(edited=True, instruction=self.teaching_notes[i])
+            save_scores(self.deps.task_id, cache)
+            self.report.append(f"editor sent back section {i}: {self.teaching_notes[i][:300]}")
+            await self.write_section(i, [self.teaching_notes[i]])
+        return chosen
+
+    def editor_summary(self) -> tuple[list[str], str, list[int]]:
+        """(a report line per section, the notes line, sections still weak)."""
+        assert self.outline is not None
+        if not self.editor_scores:
+            return [], "", []
+        lines = [f"editor scores, section {i} ({self.outline.sections[i - 1].heading}): {s.line()}"
+                 for i, s in sorted(self.editor_scores.items())]
+        means = {i: s.mean() for i, s in self.editor_scores.items()}
+        page = sum(means.values()) / len(means)
+        weak = sorted(i for i, m in means.items() if m < EDITOR_FLOOR)
+        notes = (f"Editor scores: mean {page:.1f} of 5 over {len(means)} teaching section(s) ("
+                 + ", ".join(f"section {i} {m:.1f}" for i, m in sorted(means.items())) + ")"
+                 + (f"; still below {EDITOR_FLOOR:.0f} after the rewrite: sections {weak}"
+                    if weak else ""))
+        return lines, notes, weak
+
     async def run(self) -> tuple[str, str, str] | None:
         """Returns (md_path, html_path, lesson_id), or None when not written."""
         task_id = self.deps.task_id
@@ -996,6 +1242,17 @@ class Writer:
                 # Missing, or written before the checks it now fails.
                 await self.write_section(i, list(stale or []) or None)
         unsupported = await self.cite()
+        # The teaching editor: after every part is written and cited, before
+        # the page is assembled. The parts it sent back are cited again (a
+        # repair keeps the editor's instruction) and scored once more on
+        # their final text; nothing loops further.
+        rewritten = await self.edit()
+        if rewritten:
+            unsupported = ([c for c in unsupported if c["part"] not in rewritten]
+                           + await self.cite(rewritten))
+            self.editor_scores.update(await self.score(rewritten))
+        score_lines, score_notes, weak = self.editor_summary()
+        self.report += score_lines
         before = list(self.parts)
         md_path, html_path = await self.assemble()
         changed = [i for i in range(1, len(self.parts)) if self.parts[i] != before[i]]
@@ -1011,12 +1268,15 @@ class Writer:
                                " listed on the lesson")
         if self.release_flags:
             self.review_status = "flagged"
+        if weak:
+            self.review_status = "flagged"
         notes = "\n\n".join(part for part in (
             ("Sentences the study note does not support:\n"
              + "\n".join(f"- {c['claim'][:200]} ({c['why']})" for c in unsupported)
              if unsupported else ""),
             ("Concepts the release test doubted:\n"
              + "\n".join(f"- {f}" for f in self.release_flags) if self.release_flags else ""),
+            score_notes,
         ) if part)
         await _once("review", lesson_id, self.review_status, notes)
         drop_outline(task_id)

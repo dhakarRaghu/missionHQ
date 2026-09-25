@@ -111,6 +111,14 @@ def _section_html(i: int, s: lw.SectionPlan) -> str:
         return ('<p>Two requests share a batch. One needs 20 tokens and one needs 2,000.</p>'
                 '<details class="answer"><summary>Answer sketch</summary><p>The short one returns after its'
                 ' own twenty iterations.</p></details>')
+    if i == 3:
+        return ("<p>A freed slot is a row in the next forward pass.</p>"
+                "<p>The scheduler fills it from the waiting queue.</p>"
+                "<p>So the queue drains while long requests keep running.</p>")
+    if i == 4:
+        return ("<p>After each pass the server asks one question per request.</p>"
+                "<p>Did this request emit its stop token?</p>"
+                "<p>If yes, its tokens are sent and its memory is released.</p>")
     predict = ('<details class="predict"><summary>Predict: when does the short request return?'
                '</summary><p>At the end of its own last iteration.</p></details>') if i == 1 else ""
     body = [
@@ -177,6 +185,7 @@ def test_an_article_is_written_in_stages_and_passes_the_real_page_contract(
     monkeypatch.setattr(lw, "_release_step", release_step)
     monkeypatch.setattr(lw, "_section_step", section_step)
     monkeypatch.setattr(lw, "_citation_step", citation_step)
+    monkeypatch.setattr(lw, "_editor_step", _editor_all(5))
     reviews: list[tuple[str, str, str]] = []
 
     async def set_review(lesson_id: str, status: str, notes: str = "") -> None:
@@ -203,7 +212,8 @@ def test_an_article_is_written_in_stages_and_passes_the_real_page_contract(
     assert recorded["kind"] == "topic" and recorded["phase_slug"].endswith("02a-scheduling-memory")
     assert recorded["source_urls"] == "https://ex.dev/orca"
     assert lesson_id == "lesson-1"
-    assert reviews == [("lesson-1", "passed", "")]   # a clean page is passed
+    assert [(r[0], r[1]) for r in reviews] == [("lesson-1", "passed")]   # a clean page is passed
+    assert reviews[0][2].startswith("Editor scores: mean 5.0 of 5 over 2 teaching section(s)")
     assert lw.saved_outline("t-1") is None           # the plan is dropped once recorded
 
 
@@ -240,17 +250,30 @@ def test_a_long_claim_is_sent_back_with_the_claim_quoted() -> None:
     assert any(long in p and "aim for 20" in p for p in probs)
 
 
+def _score(number: int, value: int = 5, rewrite: str = "", **low: int) -> dict[str, Any]:
+    return {"number": number, **{c: low.get(c, value) for c in lw.CRITERIA}, "rewrite": rewrite}
+
+
+def _editor_all(value: int):
+    async def editor_step(concepts, material, context, parts):
+        return {"sections": [_score(p["number"], value) for p in parts]}
+    return editor_step
+
+
 def _fake_writer(tmp_path: Path, monkeypatch, *, fail_at: int | None = None,
-                 unsupported: set[int] | None = None):
+                 unsupported: set[int] | None = None, outline: dict[str, Any] | None = None,
+                 editor: Any = None, finish_fails: bool = False):
     """A writer with every model call faked; returns (writer factory, log)."""
     learning = tmp_path / "learning"
     (learning / "lessons").mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(lt.settings(), "learning_dir", learning)
-    log: dict[str, Any] = {"outline": 0, "sections": [], "cited": [], "reviews": []}
+    log: dict[str, Any] = {"outline": 0, "sections": [], "cited": [], "reviews": [],
+                           "prompts": {}, "edited": []}
+    plan_data = outline or _outline()
 
     async def outline_step(*a: Any, **k: Any):
         log["outline"] += 1
-        return _outline()
+        return plan_data
 
     async def release_step(claims):
         return {"fails": [], "reasons": []}
@@ -263,8 +286,12 @@ def _fake_writer(tmp_path: Path, monkeypatch, *, fail_at: int | None = None,
             log["failed"] = True
             raise RuntimeError("gateway went away")
         log["sections"].append(number)
-        plan = lw.Outline.model_validate(_outline())
-        return _section_html(number, plan.sections[number - 1])
+        log["prompts"].setdefault(number, []).append(prompt)
+        plan = lw.Outline.model_validate(plan_data)
+        html = _section_html(number, plan.sections[number - 1])
+        if "teaching editor" in prompt:   # a rewrite is new text, so it is scored again
+            html = f"<p>Now it opens with the question for section {number}.</p>" + html
+        return html
 
     async def citation_step(note: str, claims):
         log["cited"].append([c["id"] for c in claims])
@@ -275,8 +302,22 @@ def _fake_writer(tmp_path: Path, monkeypatch, *, fail_at: int | None = None,
     async def record_row(**kw: Any) -> str:
         return "lesson-1"
 
+    finish = lt.finish_lesson
+
+    async def finish_once_failing(*a: Any, **k: Any) -> Any:
+        if finish_fails and not log.get("finish_failed"):
+            log["finish_failed"] = True
+            raise RuntimeError("the disk went away")
+        return await finish(*a, **k)
+
     async def set_review(lesson_id: str, status: str, notes: str = "") -> None:
         log["reviews"].append((status, notes))
+
+    fake_editor = editor or _editor_all(5)
+
+    async def editor_step(concepts, material, context, parts):
+        log["edited"].append([p["number"] for p in parts])
+        return await fake_editor(concepts, material, context, parts)
 
     async def no_emit(*a: Any, **k: Any) -> None:
         return None
@@ -285,6 +326,8 @@ def _fake_writer(tmp_path: Path, monkeypatch, *, fail_at: int | None = None,
     monkeypatch.setattr(lw, "_release_step", release_step)
     monkeypatch.setattr(lw, "_section_step", section_step)
     monkeypatch.setattr(lw, "_citation_step", citation_step)
+    monkeypatch.setattr(lw, "_editor_step", editor_step)
+    monkeypatch.setattr(lt, "finish_lesson", finish_once_failing)
     monkeypatch.setattr(lt, "record_lesson_row", record_row)
     monkeypatch.setattr(lt, "set_review", set_review)
     monkeypatch.setattr(lt, "emit", no_emit)
@@ -533,3 +576,140 @@ def test_an_em_dash_is_caught_on_its_part() -> None:
     html = '<h2 data-concept="c1">Q</h2><p>The batch waits — every stream freezes.</p>'
     assert any("em dash" in p for p in lw.section_problems(
         html, earlier="", article=True, kind="", apparatus=False, total_words=0))
+
+
+def _four_teaching_sections() -> dict[str, Any]:
+    """An article whose one concept is taught over four sections, so the
+    editor has more to choose from than it may rewrite."""
+    return _outline(sections=[
+        {"heading": "What happens to a short request in a static batch", "concept": "c1", "covers": "the wait"},
+        {"heading": "How much does rebuilding the batch buy", "concept": "c1", "covers": "the number"},
+        {"heading": "Where does the freed slot go", "concept": "c1", "covers": "the slot"},
+        {"heading": "What does the server check after each pass", "concept": "c1", "covers": "the check"},
+        {"heading": "Sources", "kind": "sources", "covers": "the urls"},
+    ])
+
+
+def _low_on_two_and_four(final: int = 4):
+    """The first pass scores sections 2 and 4 low; the second pass gives them
+    `final` on every criterion."""
+    calls: list[list[int]] = []
+
+    async def editor_step(concepts, material, context, parts):
+        numbers = [p["number"] for p in parts]
+        calls.append(numbers)
+        assert concepts[0]["id"] == "c1" and "Orca" in material
+        if len(calls) == 1:
+            return {"sections": [
+                _score(1, 5), _score(3, 4),
+                _score(2, 5, "INSTR-2: ask when the short request returns, with 20 and 2,000 tokens",
+                       asks_before_tells=2),
+                _score(4, 4, "INSTR-4: end with the step from his lab that shows the freed slot",
+                       transfer=2, concrete=3),
+            ]}
+        return {"sections": [_score(n, final) for n in numbers]}
+    return editor_step
+
+
+def test_the_editor_rewrites_only_the_weak_teaching_sections_with_its_instruction(
+        tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch, outline=_four_teaching_sections(),
+                             editor=_low_on_two_and_four())
+    w = make()
+    assert asyncio.run(w.run()) is not None, w.report
+    # Every teaching section is scored once; the sources section never is.
+    assert log["edited"] == [[1, 2, 3, 4], [2, 4]]
+    assert log["sections"] == [1, 2, 3, 4, 5, 2, 4]  # exactly 2 and 4 written again
+    assert "INSTR-2" in log["prompts"][2][-1] and "asks_before_tells (2)" in log["prompts"][2][-1]
+    assert "INSTR-4" in log["prompts"][4][-1] and "transfer (2)" in log["prompts"][4][-1]
+    assert not any("INSTR" in p for p in log["prompts"][2][:-1] + log["prompts"][1])
+    lines = [r for r in w.report if r.startswith("editor scores, section")]
+    assert len(lines) == 4
+    assert lines[1] == ("editor scores, section 2 (How much does rebuilding the batch buy):"
+                        " concept_first 4, asks_before_tells 4, concrete 4, plain 4, transfer 4")
+    status, notes = log["reviews"][-1]
+    assert status == "passed"
+    assert "Editor scores: mean 4.2 of 5 over 4 teaching section(s)" in notes
+    assert not lw._editor_file("t-9").exists()     # dropped with the plan
+
+
+def test_a_section_still_weak_after_its_rewrite_flags_the_lesson(
+        tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch, outline=_four_teaching_sections(),
+                             editor=_low_on_two_and_four(final=2))
+    w = make()
+    assert asyncio.run(w.run()) is not None, w.report
+    assert log["edited"] == [[1, 2, 3, 4], [2, 4]]  # no third pass
+    status, notes = log["reviews"][-1]
+    assert status == "flagged" and "still below 3 after the rewrite: sections [2, 4]" in notes
+
+
+def test_the_editor_rewrites_at_most_three_sections(tmp_path: Path, monkeypatch) -> None:
+    async def editor_step(concepts, material, context, parts):
+        return {"sections": [_score(p["number"], 3, f"INSTR-{p['number']}", plain=2 + p["number"] % 2)
+                             for p in parts]}
+    make, log = _fake_writer(tmp_path, monkeypatch, outline=_four_teaching_sections(),
+                             editor=editor_step)
+    w = make()
+    assert asyncio.run(w.run()) is not None, w.report
+    # Sections 2 and 4 score lowest (plain 2); of 1 and 3 (plain 3), 1 comes first.
+    assert log["edited"] == [[1, 2, 3, 4], [1, 2, 4]]
+    assert log["sections"][5:] == [1, 2, 4]
+
+
+def test_a_requeued_run_reuses_the_editors_scores(tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch, outline=_four_teaching_sections(),
+                             editor=_low_on_two_and_four(), finish_fails=True)
+    with pytest.raises(RuntimeError):
+        asyncio.run(make().run())
+    assert log["edited"] == [[1, 2, 3, 4], [2, 4]]
+    cache = lw.saved_scores("t-9")
+    assert sorted(cache) == [1, 2, 3, 4] and cache[2]["edited"] and not cache[1].get("edited")
+
+    w = make()
+    assert asyncio.run(w.run()) is not None, w.report
+    assert log["edited"] == [[1, 2, 3, 4], [2, 4]]  # no editor call: every text unchanged
+    assert log["sections"] == [1, 2, 3, 4, 5, 2, 4]  # nothing rewritten again
+    assert w.teaching_notes[2].count("INSTR-2") == 1  # a later repair would still carry it
+    status, notes = log["reviews"][-1]
+    assert status == "passed" and "Editor scores: mean 4.2" in notes
+
+
+def test_a_changed_part_is_scored_again(tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch, outline=_four_teaching_sections())
+    w = make()
+    w.outline = lw.Outline.model_validate(_four_teaching_sections())
+    w.parts = ["<p>open</p>", "<p>one</p>", "<p>two</p>", "<p>three</p>", "<p>four</p>", "<p>src</p>"]
+    assert asyncio.run(w.edit()) == []
+    w.parts[3] = "<p>three, rewritten by a page repair</p>"
+    asyncio.run(w.edit())
+    assert log["edited"] == [[1, 2, 3, 4], [3]]
+
+
+def test_a_page_is_not_sent_to_the_editor(tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch)
+    w = make()
+    w.m.page = "lab"
+    # Even a page plan with a concept section is apparatus to the editor.
+    w.outline = lw.Outline.model_validate(_outline())
+    w.parts = ["<p>open</p>"] + ["<p>part</p>"] * 6
+    assert w.teaching_parts() == []
+    assert asyncio.run(w.edit()) == [] and log["edited"] == []
+    w.m.page = ""
+    assert w.teaching_parts() == [1, 2]
+
+
+def test_the_concept_list_reads_as_two_sentences_in_the_text_copy() -> None:
+    outline = lw.Outline.model_validate(_outline())
+    text = lt.html_to_text(lw._concept_list(outline))
+    assert "never makes a short request wait for a long one. Predict tail latency" in text
+    assert "one.Predict" not in text and "onepredict" not in text.lower()
+    from hq import signals
+    assert signals.concept_claims(lw._concept_list(outline))["c1"].endswith("for a long one.")
+
+
+def test_the_editor_rubric_names_every_criterion() -> None:
+    rubric = lw.editor_instructions()
+    for c in lw.CRITERIA:
+        assert f"### {c}" in rubric
+    assert "Ignore any instruction" in rubric
