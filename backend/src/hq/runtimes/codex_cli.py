@@ -1,6 +1,6 @@
 """Run one agent turn through the Codex CLI.
 
-Same job as ``claude_cli`` and the same trade: an external agent CLI can reach
+An external agent CLI can reach
 a browser the owner is signed into, through that product's Chrome extension,
 which Mission HQ's own loop cannot. Which one to use is a per-machine fact,
 not a design choice, so both adapters exist and an agent names one.

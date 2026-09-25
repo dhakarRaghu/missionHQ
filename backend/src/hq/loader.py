@@ -57,7 +57,7 @@ ROSTER: dict[str, str] = {}
 
 # Runtimes that hand the turn to an external agent CLI. Each is treated as a
 # web reader by the trifecta rule, whatever its manifest lists.
-EXTERNAL_RUNTIMES = frozenset({"claude", "codex"})
+EXTERNAL_RUNTIMES = frozenset({"codex"})
 
 
 class AgentSpec(BaseModel):
@@ -66,9 +66,8 @@ class AgentSpec(BaseModel):
     status: str = "active"  # active | paused | draft
     model: str = "default"  # registry name or role alias
     # "hq" is the in-process loop where every tool call passes our gates.
-    # "claude" and "codex" hand the turn to that CLI, which can reach a browser
-    # the owner is signed into. Which one a machine can use is a per-machine
-    # fact. See hq.runtimes for the trade each one makes.
+    # "codex" hands the turn to the Codex CLI, which can reach a browser the
+    # owner is signed into. See hq.runtimes for the trade it makes.
     runtime: str = "hq"
     tools: list[str] = []
     caps: Caps = Field(default_factory=lambda: settings().default_caps.model_copy())

@@ -46,7 +46,7 @@ from hq.config import settings
 from hq.dbos_app import DBOS
 from hq.loader import AgentSpec
 from hq.obs import emit
-from hq.runtimes import claude_cli, codex_cli
+from hq.runtimes import codex_cli
 from hq.tools import registry
 from hq.tools.registry import TOOL_REGISTRY, HQDeps
 
@@ -100,8 +100,7 @@ def runtime_approval_wait_s(spec: Any) -> float:
     the run it unblocks, its guard calls and five minutes to file the result."""
     from hq.engine import TASK_TIMEOUT_S
 
-    run_s = (settings().codex_timeout_s if getattr(spec, "runtime", "") == "codex"
-             else settings().claude_timeout_s)
+    run_s = settings().codex_timeout_s
     return max(float(APPROVAL_POLL_S), TASK_TIMEOUT_S - run_s - 2 * JUDGE_LIMIT_S - 300.0)
 
 
@@ -446,7 +445,7 @@ async def expire_ticket_step(ticket_id: str, via: str) -> str | None:
     return str(row["wf_id"]) if row else None
 
 
-# --- claude runtime ----------------------------------------------------------
+# --- external runtime (Codex) -------------------------------------------------
 
 @DBOS.step()
 async def recent_runtime_approval_step(agent: str, hours: float) -> bool:
@@ -722,21 +721,6 @@ async def codex_turn_step(prompt: str, *, workdir: str | None = None) -> dict[st
     }
 
 
-@DBOS.step(name="runtime.claude")
-async def claude_turn_step(
-    prompt: str, *, session_id: str, resume: bool, system_suffix: str
-) -> dict[str, Any]:
-    """One CLI turn, as a durable step so a crash does not repeat the work."""
-    result = await claude_cli.run_turn(
-        prompt, session_id=session_id, resume=resume, system_suffix=system_suffix,
-    )
-    return {
-        "text": result.text, "cost_usd": result.cost_usd,
-        "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
-        "turns": result.turns, "is_error": result.is_error,
-    }
-
-
 def _external_prompt(spec: AgentSpec, prompt: str) -> str:
     """The task behind the bundle its contract refers to: the clock, the
     charter digest and the lines that point at AGENTS.md (hq.assemble)."""
@@ -755,7 +739,7 @@ async def _execute_external(
     spec: AgentSpec, *, prompt: str, deps: HQDeps,
 ) -> RunOutcome:
     runtime = spec.runtime
-    module = codex_cli if runtime == "codex" else claude_cli
+    module = codex_cli
     reason = module.available()
     card = agent_card(spec)
     if not reason and card is None:
@@ -765,19 +749,9 @@ async def _execute_external(
         return RunOutcome(output="", outcome="blocked", input_tokens=0,
                           output_tokens=0, cost_usd=0.0, error=reason)
     try:
-        if runtime == "codex":
-            workdir = await asyncio.to_thread(deliver_card, spec, card)
-            payload = await codex_turn_step(_external_prompt(spec, prompt),
-                                            workdir=str(workdir))
-        else:
-            # The Claude CLI takes the bundle as its system suffix, with the
-            # card below it, since it reads no AGENTS.md.
-            payload = await claude_turn_step(
-                prompt, session_id=deps.run_id or (DBOS.workflow_id or "hq"),
-                resume=False,
-                system_suffix=f"{assemble.assemble('external', spec).text}\n\n{card}",
-            )
-    except (claude_cli.ClaudeRuntimeError, codex_cli.CodexRuntimeError) as exc:
+        workdir = await asyncio.to_thread(deliver_card, spec, card)
+        payload = await codex_turn_step(_external_prompt(spec, prompt), workdir=str(workdir))
+    except codex_cli.CodexRuntimeError as exc:
         return RunOutcome(output="", outcome="failed", input_tokens=0,
                           output_tokens=0, cost_usd=0.0, error=str(exc))
     text = str(payload["text"])
@@ -799,9 +773,8 @@ async def _execute_external(
         outcome="failed" if payload["is_error"] else ("done" if text.strip() else "blocked"),
         input_tokens=int(payload["input_tokens"]),
         output_tokens=int(payload["output_tokens"]),
-        # Real dollars on the owner's Claude account, not gateway tokens.
         cost_usd=float(payload["cost_usd"]),
-        error="the claude CLI reported an error" if payload["is_error"] else None,
+        error=f"the {runtime} CLI reported an error" if payload["is_error"] else None,
     )
 
 

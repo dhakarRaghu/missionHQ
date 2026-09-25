@@ -57,24 +57,8 @@ class Settings(BaseSettings):
     bind_host: str = "127.0.0.1"
     bind_port: int = 8000
 
-    # --- claude runtime (agents with `runtime: claude` in job.md) -------------
-    # Hands one task to the Claude Code CLI, which can drive the browser you
-    # are signed into through the Claude in Chrome extension. Needs a desktop
-    # session, so it is off unless a machine actually has that set up.
-    claude_runtime_enabled: bool = False
-    claude_cli_path: str = "claude"
-    # Only these tools. Headless mode refuses anything unlisted rather than
-    # asking, so this list is the whole permission model for that process.
-    # Browser tools only: Claude reads, Mission HQ writes through its gates.
-    claude_allowed_tools: str = "mcp__claude-in-chrome__*"
-    claude_max_turns: int = 25
-    # A hard ceiling in real dollars. A run that cannot reach a browser burns
-    # money discovering that, so this is not optional.
-    claude_max_budget_usd: float = 1.00
-    claude_timeout_s: float = 600.0
-
     # --- codex runtime (agents with `runtime: codex` in job.md) ---------------
-    # Same job as the claude runtime: reach a browser the owner is signed into.
+    # Reach a browser the owner is signed into.
     # Which CLI a machine can use is a per-machine fact, so both exist.
     codex_runtime_enabled: bool = False
     codex_cli_path: str = "codex"

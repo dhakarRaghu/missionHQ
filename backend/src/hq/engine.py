@@ -2188,7 +2188,7 @@ async def _finish_run(run_id: str, outcome: str, input_tokens: int,
     """Close the run. Its cost and tokens are the sum of its recorded model
     calls when it has any: that counts the spare that answered at its own
     price, the judges, and the attempts that failed. The figures the runner
-    passed are the fallback for runtimes with no rows (the claude CLI)."""
+    passed are the fallback for runtimes with no rows."""
     await db.execute(
         "UPDATE hq.runs r SET ended_at = now(), outcome = %s, error = %s,"
         f" input_tokens = coalesce({safety.CALLS_SUM.format(col='input_tokens')}, %s),"

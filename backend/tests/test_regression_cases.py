@@ -364,10 +364,11 @@ def test_a_browser_that_could_not_be_driven_is_deferred_not_blocked(monkeypatch)
         return {"text": "The browser extension is not connected, so I read nothing.",
                 "input_tokens": 10, "output_tokens": 5, "cost_usd": 0.01, "is_error": False}
 
-    monkeypatch.setattr(runner.claude_cli, "available", lambda: None)
+    monkeypatch.setattr(runner.codex_cli, "available", lambda: None)
     monkeypatch.setattr(runner, "agent_card", lambda spec: "the card")
-    monkeypatch.setattr(runner, "claude_turn_step", turn)
-    spec = SimpleNamespace(runtime="claude", name="operator")
+    monkeypatch.setattr(runner, "deliver_card", lambda spec, card: "/tmp")
+    monkeypatch.setattr(runner, "codex_turn_step", turn)
+    spec = SimpleNamespace(runtime="codex", name="operator")
     out = asyncio.run(runner._execute_external(
         spec, prompt="read the board", deps=HQDeps(agent="operator", run_id="r1", task_id="t1")))
     assert out.outcome == "blocked" and out.retry_later is True
