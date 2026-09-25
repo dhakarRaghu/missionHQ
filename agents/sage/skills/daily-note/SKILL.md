@@ -25,6 +25,12 @@ landed today, with its source:
   proposed default, and the counters there are the only numbers you state.
   A memory proposal in `memory/proposals/` that he has not acted on counts:
   name the file once.
+- **What waits on him to read:** name a gate only from the two gate lines
+  in the Continuity block, "The next course phase waits on" and "The next
+  article waits on", with the lesson title exactly as they give it. A line
+  that says "nothing" means nothing waits: say so, or leave it out. A line
+  marked `[unread, not the gate]` is a lesson no chain waits on; you may
+  say it is unread, never that it gates, blocks or holds anything.
 - **Today:** what was written or found, one line each, with the path.
 - **What failed:** one line per failed or blocked run from `read_activity`
   with `since_hours=24`, and what it needs. Machine health is a footnote.

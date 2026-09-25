@@ -122,9 +122,10 @@ def test_a_post_is_filed_only_in_his_voice() -> None:
              " why: Langfuse issue 13807, verified by hunter. Sources: quarantine/x-study.md")
     probs = " ".join(ct.post_problems(notes))
     assert "private words" in probs and "file path" in probs and "contraction" in probs
-    posts = ct.split_posts("## heading\n" + good + "\n\n---\n\n" + good)
-    assert len(posts) == 2 and ct.batch_problems(posts) == []
-    assert ct.batch_problems([good])   # one post is not a batch
+    posts = ct.split_posts("## heading\n" + "\n\n---\n\n".join([good] * 6))
+    assert len(posts) == 6 and ct.count_problem(posts, ["s"] * 6) is None
+    assert ct.gate(posts) == {n: [] for n in range(1, 7)}
+    assert ct.count_problem([good], ["s"])   # one post is not a batch of candidates
 
 
 

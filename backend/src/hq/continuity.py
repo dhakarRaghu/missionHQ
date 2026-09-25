@@ -14,6 +14,11 @@ What it holds, by skill (``for_skill``):
 - the open decisions in ``memory/decisions.md`` with their age in days;
 - counters code computed: unread lessons, lessons written and read this
   week, jobs found, strong and applied this week, open operator requests;
+- the gates: which lesson the next course phase and the next article wait
+  on, read with the same rule the engine starts them by. A note once kept
+  saying an older phase "gates both learning chains" while the lesson that
+  held the course was a newer one; a "Needs you" line about an unread
+  lesson that is not the gate is marked so;
 - for the shortlist: every candidate row's status, score, pay (stated,
   estimated or none) and when it was last live-checked;
 - the owner-state block (``hq.owner_state``) where a claim about him is
@@ -57,6 +62,10 @@ NOT_READABLE = "not readable"
 NOT_IN_LEDGER = "not in any ledger"
 CLOSED_MARK = "[closed]"
 OPEN_MARK = "[still open]"
+NOT_GATE_MARK = "[unread, not the gate]"
+NOT_GATE = "not the gate"
+COURSE_GATE = "gates the next course phase"
+TOPIC_GATE = "gates the next article"
 DECISIONS_PATH = "memory/decisions.md"
 DAILY_DIR = "daily"
 OPEN_JOB_STATUSES = ("seen", "shortlisted", "referral")
@@ -67,12 +76,22 @@ SKILLS = ("daily-note", "consolidate", "job-shortlist", "daily-posts", "weekly-r
 # the shortlist gets the rows it must pick from; the posts and the review get
 # what he has done, because that is where a claim about him is possible.
 SECTIONS: dict[str, tuple[str, ...]] = {
-    "daily-note": ("lead", "needs", "decisions", "counters", "owner"),
-    "consolidate": ("needs", "decisions", "counters"),
+    "daily-note": ("lead", "needs", "decisions", "counters", "gates", "owner"),
+    "consolidate": ("needs", "decisions", "counters", "gates"),
     "job-shortlist": ("shortlist", "decisions", "counters"),
     "daily-posts": ("lead", "counters", "owner"),
-    "weekly-review": ("needs", "decisions", "counters", "owner"),
+    "weekly-review": ("needs", "decisions", "counters", "gates", "owner"),
 }
+# The engine's own gates, as queries. The course query is start_course_study's:
+# the newest course lesson that is unread, or that he failed in review. The
+# topic query is topic_learning_blocker's: the newest unread topic article.
+COURSE_GATE_SQL = (
+    "SELECT title, lesson_date, review_status, read_at IS NULL AS unread FROM hq.lessons"
+    " WHERE kind = 'course' AND (read_at IS NULL OR review_status = 'failed')"
+    " ORDER BY lesson_date DESC LIMIT 1")
+TOPIC_GATE_SQL = (
+    "SELECT title, lesson_date FROM hq.lessons WHERE kind = 'topic' AND read_at IS NULL"
+    " ORDER BY lesson_date DESC, created_at DESC LIMIT 1")
 
 _DAILY_NAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.md$")
 _DATE_RE = re.compile(r"(?<!\d)(20\d\d-\d\d-\d\d)(?!\d)")
@@ -203,6 +222,34 @@ class Ledger:
     lessons: list[dict[str, Any]] = field(default_factory=list)
     open_decisions: list[str] = field(default_factory=list)
     decided: list[str] = field(default_factory=list)
+    # What each gate lesson holds, keyed by its normalised title; None when
+    # the gates could not be read, so no lesson is called "not the gate".
+    gates: dict[str, str] | None = None
+
+
+@dataclass
+class Gate:
+    """What the next item of a learning chain waits on. ``title`` is "" when
+    nothing waits; ``failed`` when it is a read course lesson he failed."""
+    title: str = ""
+    since: str = ""
+    failed: bool = False
+
+
+def _norm(title: str) -> str:
+    return " ".join(title.lower().split())
+
+
+def gate_roles(course: Gate | None, topic: Gate | None) -> dict[str, str] | None:
+    """The Ledger's ``gates``: None unless both gates were read."""
+    if course is None or topic is None:
+        return None
+    roles: dict[str, str] = {}
+    if topic.title:
+        roles[_norm(topic.title)] = TOPIC_GATE
+    if course.title:
+        roles[_norm(course.title)] = COURSE_GATE
+    return roles
 
 
 def company_key(company: str) -> str:
@@ -275,12 +322,13 @@ def _pick_job(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return max(rows, key=lambda r: _day(r.get("last_seen")))
 
 
-def line_status(line: str, ledger: Ledger) -> tuple[str, bool | None]:
-    """``(status text, closed)`` for one "Needs you" line. ``closed`` is True
-    when every subject found is closed, done, read or decided; None when no
-    ledger row matches the line at all."""
-    parts: list[str] = []
-    closed: list[bool] = []
+_CLOSED, _OPEN, _NOT_GATE = "closed", "open", "not_gate"
+
+
+def _subjects(line: str, ledger: Ledger) -> list[tuple[str, str]]:
+    """Every ledger subject a "Needs you" line names, as ``(text, state)``;
+    state is closed, open, or not_gate (an unread lesson no chain waits on)."""
+    out: list[tuple[str, str]] = []
 
     by_company: dict[str, list[dict[str, Any]]] = {}
     for row in ledger.jobs:
@@ -289,36 +337,55 @@ def line_status(line: str, ledger: Ledger) -> tuple[str, bool | None]:
             by_company.setdefault(key, []).append(row)
     for key in sorted(by_company):
         row = _pick_job(by_company[key])
-        parts.append("job " + _job_line(row))
-        closed.append(str(row.get("status")) in CLOSED_JOB_STATUSES)
+        out.append(("job " + _job_line(row),
+                    _CLOSED if str(row.get("status")) in CLOSED_JOB_STATUSES else _OPEN))
 
     ids = set(_TASK_ID_RE.findall(line))
     for row in ledger.tasks:
         tid = str(row.get("id") or "")
         if tid[:8] in ids:
             status = str(row.get("status") or "?")
-            parts.append(f"task {tid[:8]} {status}")
-            closed.append(status in DONE_TASK_STATUSES)
+            out.append((f"task {tid[:8]} {status}",
+                        _CLOSED if status in DONE_TASK_STATUSES else _OPEN))
 
     phases = {" ".join(m.group(0).lower().split()) for m in _PHASE_RE.finditer(line)}
     for row in ledger.lessons:
         title = str(row.get("title") or "")
-        norm = " ".join(title.lower().split())
+        norm = _norm(title)
         if any(_mentions(norm, p) or _mentions(norm, p.replace(" ", "")) for p in phases):
             read_at = row.get("read_at")
-            state = f"read {_day(read_at)}" if read_at else "unread"
-            parts.append(f"lesson “{_cut(title, 40)}” {state}")
-            closed.append(bool(read_at))
+            if read_at:
+                out.append((f"lesson “{_cut(title, 40)}” read {_day(read_at)}", _CLOSED))
+            elif ledger.gates is None:
+                out.append((f"lesson “{_cut(title, 40)}” unread", _OPEN))
+            elif norm in ledger.gates:
+                out.append((f"lesson “{_cut(title, 40)}” unread, {ledger.gates[norm]}", _OPEN))
+            else:
+                out.append((f"lesson “{_cut(title, 40)}” unread, {NOT_GATE}", _NOT_GATE))
 
-    for item, state in ((d, "open") for d in ledger.open_decisions):
+    for item in ledger.open_decisions:
         if any(_mentions(line, key) for key in proper_nouns(item)):
-            parts.append(f"decision {state}: {_cut(item, 50)}")
-            closed.append(False)
+            out.append((f"decision open: {_cut(item, 50)}", _OPEN))
     for item in ledger.decided:
         if any(_mentions(line, key) for key in proper_nouns(item)):
-            parts.append(f"decided: {_cut(item, 50)}")
-            closed.append(True)
+            out.append((f"decided: {_cut(item, 50)}", _CLOSED))
+    return out
 
+
+def not_the_gate(line: str, ledger: Ledger) -> bool:
+    """True when what keeps a line open is only unread lessons that no chain
+    waits on: the line may not say its lesson gates anything."""
+    states = {state for _text, state in _subjects(line, ledger)}
+    return _NOT_GATE in states and _OPEN not in states
+
+
+def line_status(line: str, ledger: Ledger) -> tuple[str, bool | None]:
+    """``(status text, closed)`` for one "Needs you" line. ``closed`` is True
+    when every subject found is closed, done, read or decided; None when no
+    ledger row matches the line at all."""
+    subjects = _subjects(line, ledger)
+    parts = [text for text, _state in subjects]
+    closed = [state == _CLOSED for _text, state in subjects]
     if not parts:
         return NOT_IN_LEDGER, None
     if len(parts) > STATUS_PARTS:
@@ -331,12 +398,14 @@ def line_status(line: str, ledger: Ledger) -> tuple[str, bool | None]:
 @dataclass
 class Need:
     """One "Needs you" line with the status the ledger gives it now. ``also``
-    holds the earlier nights the same status line was raised on."""
+    holds the earlier nights the same status line was raised on; ``not_gate``
+    marks a line kept open only by lessons no chain waits on."""
     day: str
     line: str
     status: str
     closed: bool | None
     also: list[str] = field(default_factory=list)
+    not_gate: bool = False
 
 
 def dedupe_needs(needs: list[Need]) -> list[Need]:
@@ -354,7 +423,8 @@ def dedupe_needs(needs: list[Need]) -> list[Need]:
         if prior is not None:
             prior.also.append(need.day)
         else:
-            out.append(Need(need.day, need.line, need.status, need.closed, list(need.also)))
+            out.append(Need(need.day, need.line, need.status, need.closed, list(need.also),
+                            need.not_gate))
     return out
 
 
@@ -371,13 +441,38 @@ class Counters:
     jobs_applied: int | None = None
     open_requests: int | None = None
     days: int = COUNTER_DAYS
+    course_gate: Gate | None = None                  # None: not readable
+    topic_gate: Gate | None = None
 
 
 def _n(value: int | None) -> str:
     return NOT_READABLE if value is None else str(value)
 
 
-def render_counters(c: Counters) -> list[str]:
+def render_gates(course: Gate | None, topic: Gate | None) -> list[str]:
+    """The two gate lines. Each names the one lesson its chain waits on, by
+    the rule the engine starts that chain by, or says nothing waits."""
+    head = "- The next course phase waits on: "
+    if course is None:
+        course_line = head + NOT_READABLE
+    elif not course.title:
+        course_line = head + "nothing: the last course lesson is read"
+    elif course.failed:
+        course_line = (head + f"“{_cut(course.title, 90)}” (failed his review; his decision"
+                       " on the Courses page)")
+    else:
+        course_line = head + f"“{_cut(course.title, 90)}” (unread since {course.since})"
+    head = "- The next article waits on: "
+    if topic is None:
+        topic_line = head + NOT_READABLE
+    elif not topic.title:
+        topic_line = head + "nothing"
+    else:
+        topic_line = head + f"“{_cut(topic.title, 90)}” (unread since {topic.since})"
+    return [course_line, topic_line]
+
+
+def render_counters(c: Counters, gates: bool = False) -> list[str]:
     if c.unread_by_kind is None:
         unread = NOT_READABLE
     elif not c.unread_by_kind:
@@ -386,7 +481,7 @@ def render_counters(c: Counters) -> list[str]:
         total = sum(c.unread_by_kind.values())
         unread = f"{total} (" + ", ".join(
             f"{k} {n}" for k, n in sorted(c.unread_by_kind.items())) + ")"
-    return [
+    lines = [
         f"- Days since he last published a post: {NOT_RECORDED} (nothing records a post going out)",
         f"- Unread lessons: {unread}",
         f"- Last {c.days} days: lessons written {_n(c.written)}, read {_n(c.read)}",
@@ -394,6 +489,7 @@ def render_counters(c: Counters) -> list[str]:
          f" applied {_n(c.jobs_applied)}"),
         f"- Open operator requests: {_n(c.open_requests)}",
     ]
+    return lines + (render_gates(c.course_gate, c.topic_gate) if gates else [])
 
 
 def render_decisions(decisions: list[tuple[str, int | None]]) -> list[str]:
@@ -415,7 +511,11 @@ def render_needs(needs: list[Need]) -> list[str]:
     what stops a closed item repeating."""
     out: list[str] = []
     for n in needs:
-        mark = OPEN_MARK if n.closed is False else (CLOSED_MARK if n.closed else f"[{NOT_IN_LEDGER}]")
+        if n.not_gate and n.closed is False:
+            mark = NOT_GATE_MARK
+        else:
+            mark = (OPEN_MARK if n.closed is False
+                    else (CLOSED_MARK if n.closed else f"[{NOT_IN_LEDGER}]"))
         days = n.day[5:] + (f" (also {', '.join(d[5:] for d in n.also)})" if n.also else "")
         out.append(f"- {mark} {days}: “{_cut(n.line, LINE_CHARS)}” -> {n.status}")
     return out
@@ -465,7 +565,8 @@ def render_block(
             fixed.append("Last note: none found. Tonight has no subject to avoid.")
     if "needs" in sections:
         fixed.append(f"Needs-you lines from the last {NEEDS_NIGHTS} notes, with their status now"
-                     f" ({CLOSED_MARK} means do not repeat it):")
+                     f" ({CLOSED_MARK} means do not repeat it; {NOT_GATE_MARK} means the lesson"
+                     " is unread but no chain waits on it, so never say it gates anything):")
         fixed.extend(render_needs(needs or []) or ["- none"])
     cuttable: list[tuple[str, list[str]]] = []
     if "decisions" in sections:
@@ -475,8 +576,10 @@ def render_block(
         head, *rows = render_shortlist(shortlist or [], bar)
         cuttable.append((head, rows))
     if "counters" in sections:
-        fixed.append("Counters, computed by code:")
-        fixed.extend(render_counters(counters or Counters()))
+        fixed.append("Counters, computed by code:" if "gates" not in sections else
+                     "Counters and gates, computed by code (what a chain waits on is named only"
+                     " from the two gate lines):")
+        fixed.extend(render_counters(counters or Counters(), gates="gates" in sections))
     tail = owner.strip() if "owner" in sections and owner.strip() else ""
 
     def assemble(kept: list[list[str]]) -> str:
@@ -555,9 +658,27 @@ def decisions_with_age(
     return aged, decided
 
 
-async def _ledger(lines: list[str], decisions: str) -> Ledger:
+def _gate(rows: list[dict[str, Any]] | None) -> Gate | None:
+    if rows is None:
+        return None
+    if not rows:
+        return Gate()
+    row = rows[0]
+    unread = _truthy(row.get("unread", True))
+    return Gate(title=str(row.get("title") or "(untitled lesson)"),
+                since=_day(row.get("lesson_date")),
+                failed=not unread and str(row.get("review_status") or "") == "failed")
+
+
+async def _gates() -> tuple[Gate | None, Gate | None]:
+    """``(course, topic)``: the lesson each chain waits on, None if unreadable."""
+    return _gate(await _rows(COURSE_GATE_SQL)), _gate(await _rows(TOPIC_GATE_SQL))
+
+
+async def _ledger(lines: list[str], decisions: str,
+                  gates: dict[str, str] | None = None) -> Ledger:
     open_, decided = parse_decisions(decisions)
-    ledger = Ledger(open_decisions=open_, decided=decided)
+    ledger = Ledger(open_decisions=open_, decided=decided, gates=gates)
     ledger.jobs = await _rows(
         "SELECT id::text AS job_id, company, role, status, fit_score, pay_lakh::float8 AS pay_lakh,"
         " fit_parts->'pay'->>'estimated' AS estimated, last_seen FROM hq.jobs") or []
@@ -618,18 +739,26 @@ async def build(skill: str, now: datetime | None = None) -> str:
     decisions_text = await asyncio.to_thread(_read_decisions)
 
     lead = (notes[0][0], parse_lead(notes[0][1])) if notes and parse_lead(notes[0][1]) else None
+    course_gate: Gate | None = None
+    topic_gate: Gate | None = None
+    if "gates" in sections or "needs" in sections:
+        course_gate, topic_gate = await _gates()
     needs: list[Need] = []
     if "needs" in sections:
         raw = [(day, ln) for day, text in notes for ln in parse_needs_you(text)]
-        ledger = await _ledger([ln for _d, ln in raw], decisions_text)
+        ledger = await _ledger([ln for _d, ln in raw], decisions_text,
+                               gate_roles(course_gate, topic_gate))
         for day, ln in raw:
             status, closed = line_status(ln, ledger)
-            needs.append(Need(day, ln, status, closed))
+            needs.append(Need(day, ln, status, closed,
+                              not_gate=closed is False and not_the_gate(ln, ledger)))
         needs = dedupe_needs(needs)
     aged: list[tuple[str, int | None]] = []
     if "decisions" in sections:
         aged, _decided = await asyncio.to_thread(decisions_with_age, decisions_text, today)
     counters = await _counters(now) if "counters" in sections else None
+    if counters is not None:
+        counters.course_gate, counters.topic_gate = course_gate, topic_gate
     shortlist = await _shortlist_rows() if "shortlist" in sections else None
     owner = await owner_state.block() if "owner" in sections else ""
     return render_block(

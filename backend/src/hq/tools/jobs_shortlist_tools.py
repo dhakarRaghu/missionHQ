@@ -14,6 +14,7 @@ the next step and the page title.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, TypedDict
 
 from pydantic_ai import ModelRetry, RunContext
@@ -37,6 +38,13 @@ ACTION_WORDS = {
     "verify_pay": "Verify pay",
     "shortlist": "Shortlist it on the board",
 }
+
+
+# A next step for any action but apply never tells him to apply: otherwise
+# the sentence under "Verify pay" undoes the gate on the action. Kept simple
+# on purpose: any "apply" in that sentence is refused, "before you apply"
+# included, and the step says what to verify instead.
+_APPLY_RE = re.compile(r"\bapply\b", re.IGNORECASE)
 
 
 class Pick(TypedDict):
@@ -102,6 +110,9 @@ def pick_problems(picks: list[Pick], rows: dict[str, dict[str, Any]], bar: float
             problem = apply_problem(row, bar)
             if problem:
                 problems.append(problem)
+        elif _APPLY_RE.search(pick.get("next_step", "")):
+            problems.append(f"{_label(row)}: the next step says apply but the action is"
+                            f" {pick['action']}; say what to verify first")
         if not pick.get("next_step", "").strip():
             problems.append(f"{_label(row)}: next_step is empty")
     return problems

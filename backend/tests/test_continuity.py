@@ -526,3 +526,154 @@ def test_regression_cases_carry_a_canned_continuity_block() -> None:
     brief = regress._brief(note, spec)
     assert brief.endswith(note.continuity.strip())
     assert brief.index(ct.HEADING) > brief.index("## The daily-note skill")
+
+
+def _skill_text(name: str) -> str:
+    from hq.config import settings
+
+    return (settings().agents_dir / "sage" / "skills" / name / "SKILL.md").read_text()
+
+
+# --- the shortlist: a next step never says apply unless the action is apply -------------------
+
+@pytest.mark.parametrize("action", ["verify_pay", "referral", "shortlist"])
+def test_a_next_step_that_says_apply_is_refused_when_the_action_is_not(action: str) -> None:
+    pick: st.Pick = {"job_id": BJAK[:8], "action": action,  # type: ignore[typeddict-item]
+                     "next_step": "Check the posting for pay, then apply this week."}
+    problems = st.pick_problems([pick], _rows(), 25.0)
+    assert problems == [(f"BJAK, Applied AI Engineer (9fe6f9a9): the next step says apply but"
+                         f" the action is {action}; say what to verify first")]
+    ok: st.Pick = {"job_id": BJAK[:8], "action": action,  # type: ignore[typeddict-item]
+                   "next_step": "Ask the recruiter for the pay band; the application form can wait."}
+    assert st.pick_problems([ok], _rows(), 25.0) == []
+
+
+def test_apply_in_the_next_step_of_an_apply_pick_is_fine() -> None:
+    pick: st.Pick = {"job_id": RIPPLING[:8], "action": "apply",
+                     "next_step": "Apply on the careers page today."}
+    assert st.pick_problems([pick], _rows(), 25.0) == []
+
+
+def test_file_shortlist_sends_back_a_verify_pay_pick_that_says_apply(monkeypatch) -> None:
+    written: list[tuple[str, str]] = []
+    _patch_tool(monkeypatch, written)
+    tool = inspect.unwrap(st.file_shortlist)
+    with pytest.raises(ModelRetry) as exc:
+        asyncio.run(tool(_tool_ctx(), [
+            {"job_id": VISA[:8], "action": "verify_pay",
+             "next_step": "Before you apply, confirm the band on the posting."},
+        ], "Week 39"))
+    assert "the next step says apply but the action is verify_pay" in str(exc.value)
+    assert written == []
+    assert "code refuses one that tells him to apply" in " ".join(
+        _skill_text("job-shortlist").split())
+
+
+# --- the gates: what the next course phase and the next article wait on ----------------------
+
+PHASE_3A = "Phase 3A — Prefix caching"
+PHASE_2B = "Phase 2B — Decoding and context"
+
+
+def _gated_ledger() -> ct.Ledger:
+    ledger = _ledger()
+    ledger.lessons = [
+        {"title": PHASE_3A, "kind": "course", "read_at": None},
+        {"title": PHASE_2B, "kind": "course", "read_at": None},
+        {"title": "Phase 2A — Scheduling and memory", "kind": "course",
+         "read_at": datetime(2026, 9, 22, tzinfo=UTC)},
+    ]
+    ledger.gates = ct.gate_roles(ct.Gate(PHASE_3A, "2026-09-24"),
+                                 ct.Gate("Why the bill doubled", "2026-09-23"))
+    return ledger
+
+
+def test_the_gate_lines_name_the_newest_unread_lesson_or_nothing() -> None:
+    lines = ct.render_gates(ct.Gate(PHASE_3A, "2026-09-24"),
+                            ct.Gate("Why the bill doubled", "2026-09-23"))
+    assert lines == [
+        f"- The next course phase waits on: “{PHASE_3A}” (unread since 2026-09-24)",
+        "- The next article waits on: “Why the bill doubled” (unread since 2026-09-23)"]
+    assert ct.render_gates(ct.Gate(), ct.Gate()) == [
+        "- The next course phase waits on: nothing: the last course lesson is read",
+        "- The next article waits on: nothing"]
+    assert ct.render_gates(None, None) == [
+        "- The next course phase waits on: not readable",
+        "- The next article waits on: not readable"]
+    failed = ct.render_gates(ct.Gate(PHASE_2B, "2026-09-22", failed=True), ct.Gate())[0]
+    assert failed.endswith("(failed his review; his decision on the Courses page)")
+
+
+def test_a_gate_row_is_read_the_way_the_engine_reads_it() -> None:
+    assert ("kind = 'course' AND (read_at IS NULL OR review_status = 'failed')"
+            in ct.COURSE_GATE_SQL)
+    assert "ORDER BY lesson_date DESC LIMIT 1" in ct.COURSE_GATE_SQL
+    assert "kind = 'topic' AND read_at IS NULL" in ct.TOPIC_GATE_SQL
+    assert ct._gate(None) is None and ct._gate([]) == ct.Gate()
+    row = {"title": PHASE_2B, "lesson_date": date(2026, 9, 22), "review_status": "failed",
+           "unread": False}
+    assert ct._gate([row]) == ct.Gate(PHASE_2B, "2026-09-22", failed=True)
+    unread = ct._gate([dict(row, unread=True)])
+    assert unread is not None and unread.failed is False
+
+
+def test_an_unread_lesson_that_is_not_the_gate_is_marked_so() -> None:
+    ledger = _gated_ledger()
+    line = "Read and mark Phase 2B. It still gates both learning chains."
+    status, closed = ct.line_status(line, ledger)
+    assert status == f"lesson “{PHASE_2B}” unread, not the gate" and closed is False
+    assert ct.not_the_gate(line, ledger)
+    need = ct.Need("2026-09-24", line, status, closed, not_gate=ct.not_the_gate(line, ledger))
+    assert ct.render_needs([need]) == [
+        f"- [unread, not the gate] 09-24: “{line}” -> lesson “{PHASE_2B}” unread, not the gate"]
+    gate_line = "Read Phase 3A tonight."
+    status, closed = ct.line_status(gate_line, ledger)
+    assert status == f"lesson “{PHASE_3A}” unread, gates the next course phase"
+    assert not ct.not_the_gate(gate_line, ledger)
+    assert not ct.not_the_gate("Read Phase 2B and Phase 3A.", ledger)   # the gate keeps it open
+    assert not ct.not_the_gate("Read and mark the Phase 2A lesson.", ledger)   # read: closed
+
+
+def test_without_readable_gates_no_lesson_is_called_not_the_gate() -> None:
+    ledger = _gated_ledger()
+    ledger.gates = None
+    status, _ = ct.line_status("Read and mark Phase 2B.", ledger)
+    assert status == f"lesson “{PHASE_2B}” unread"
+    assert ct.gate_roles(None, ct.Gate()) is None
+
+
+def _patch_gates(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_readers(monkeypatch)
+    plain = ct._rows
+
+    async def rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]] | None:
+        if sql == ct.COURSE_GATE_SQL:
+            return [{"title": PHASE_3A, "lesson_date": date(2026, 9, 24),
+                     "review_status": "passed", "unread": True}]
+        if sql == ct.TOPIC_GATE_SQL:
+            return []
+        if "SELECT title, kind, read_at FROM hq.lessons" in sql:
+            return [{"title": PHASE_3A, "kind": "course", "read_at": None},
+                    {"title": PHASE_2B, "kind": "course", "read_at": None}]
+        return await plain(sql, params)
+
+    monkeypatch.setattr(ct, "_rows", rows)
+
+
+@pytest.mark.parametrize("skill", sorted(ct.SECTIONS))
+def test_the_gate_lines_reach_the_note_the_review_and_the_consolidation(
+        monkeypatch, skill: str) -> None:
+    _patch_gates(monkeypatch)
+    block = asyncio.run(ct.build(skill, now=datetime(2026, 9, 25, 18, tzinfo=UTC)))
+    course = f"- The next course phase waits on: “{PHASE_3A}” (unread since 2026-09-24)"
+    wanted = skill in {"daily-note", "weekly-review", "consolidate"}
+    assert (course in block) == wanted
+    assert ("- The next article waits on: nothing" in block) == wanted
+    assert ("- [unread, not the gate] 09-24: “Read and mark Phase 2B." in block) == (
+        "needs" in ct.SECTIONS[skill])
+
+
+def test_the_daily_note_skill_names_a_gate_only_from_the_gate_lines() -> None:
+    skill = " ".join(_skill_text("daily-note").split())
+    assert "The next course phase waits on" in skill and "The next article waits on" in skill
+    assert "`[unread, not the gate]`" in skill

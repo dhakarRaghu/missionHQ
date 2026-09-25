@@ -7,8 +7,7 @@ Weekly, and whenever he asks which roles to act on. The page is
 ## Read
 
 1. `list_jobs` with status `seen`, then `shortlisted`, then `referral`. The
-   ledger is the source: hunter verified every row and code computed its
-   score. Each row carries the `job_id` you file.
+   ledger is the source; each row carries the `job_id` you file.
 2. The Continuity block in your brief lists the candidate rows with status,
    score, pay (stated, estimated or none) and last live check. Read pay from
    there, never from memory.
@@ -32,9 +31,10 @@ he has already applied to. Give each one `action`:
 ## Write
 
 Call `file_shortlist` once with the picks (`job_id`, `action`, `next_step`)
-and a title. Code writes company, role, score, pay, status and last live
-check from the row and stamps the date; your `next_step` is one sentence he
-can act on. A refused pick: change it and call again.
+and a title. Code writes every figure from the row and stamps the date;
+your `next_step` is one sentence he can act on. For any action but
+`apply` it says what to verify first: code refuses one that tells him to
+apply. A refused pick: change it and call again.
 
 Reply in three lines: the role to act on first and why, any strong role
 left out and the reason, and the page's path.
@@ -43,4 +43,4 @@ left out and the reason, and the page's path.
 
 - You shortlist; he acts. Never write as if he has applied.
 - Never write a name, title, figure or relationship that is not on the row.
-- Five is the size. Do not change a job's status; moving a role is his.
+- Do not change a job's status; moving a role is his.

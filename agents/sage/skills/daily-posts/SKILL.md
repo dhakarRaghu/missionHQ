@@ -1,7 +1,8 @@
 # Today's posts
 
-Every evening, three to five posts he can paste on X as they are. Finished
-copy in his voice, never notes about a post. He publishes; you never do.
+Every evening, six to eight candidate posts he could paste on X as they
+are; code keeps the best three to five. Finished copy in his voice, never
+notes about a post. He publishes; you never do.
 
 ## Where a post comes from
 
@@ -23,7 +24,22 @@ he read, applied to or posted anything that block does not list. The
 Continuity block names what last night's note led with; a post on the same
 subject needs a new trigger.
 
-A post with no real trigger is not written. Two real posts beat five.
+Every candidate stands on its own real trigger, and no two share one. A
+candidate with no real trigger is the one the judge drops, so find six
+different triggers before you write: a lesson's number, a failed run, a
+board row, a cost. Never pad the batch with a post about nothing.
+
+## How the candidates are judged
+
+Each candidate that passes the voice checks is scored 1 to 5 on five
+things, and code keeps those whose average is 3.5 or more, best first:
+
+- a specific trigger: a real thing that happened, from the sources;
+- one detail only he has: a number, name or moment from his ledger or his
+  reading, never a generic one;
+- his voice: his measured register, and it reads as spoken;
+- insight: a turn the reader did not expect;
+- not generic: it would not fit any other engineer's feed.
 
 ## His voice, measured from his own posts
 
@@ -44,9 +60,12 @@ A post with no real trigger is not written. Two real posts beat five.
 
 ## Write
 
-Your reply's text is the posts and nothing else: each post exactly as he
-would paste it, separated by a line holding only `---`. In that same reply,
-call `file_posts` with `sources`: for each post in order, the lesson, note
-or board row it rests on, and a short title for the batch. Code checks each
-post against his measured voice; if one is sent back, rewrite what it names
-and send the whole batch again.
+Your reply's text is the six to eight candidates and nothing else: each
+exactly as he would paste it, separated by a line holding only `---`. In
+that same reply, call `file_posts` with `sources`: one entry per candidate,
+in order, naming the lesson path, note path or board row it rests on (a
+path lets the judge read it), and a short title for the batch. Code checks
+each candidate against his measured voice, the judge scores the rest, and
+code files the best three to five. If fewer than three are good enough,
+the weak ones come back with the judge's reason: rewrite those on a real
+trigger with a detail only he has, and send all the candidates again.
