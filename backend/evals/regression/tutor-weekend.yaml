@@ -1,0 +1,20 @@
+# Tutor's remaining agent-loop tasks. Lesson tools write into the sandbox.
+
+- id: tutor-post-for-his-site
+  agent: tutor
+  source: >-
+    A post for his site is a rewrite of a lesson for a stranger: every private
+    reference goes, every fact and number stays with its source, no new links,
+    his employer never named.
+  payload:
+    workflow: learning_journey
+    stage: post_draft
+    section: writing
+    md_path: learning/lessons/2026-09-20-inference-internals-phase-02a-scheduling-memory.md
+    title: "Phase 2A: scheduling and memory"
+  expect:
+    calls: [publish_post]
+    args_not_match:
+      publish_post: '\b(Mission HQ|study note|hunter|tutor|phase 2A)\b'
+  judge:
+    - The post reads as written for a stranger, with no reference to his course, notes or agents.

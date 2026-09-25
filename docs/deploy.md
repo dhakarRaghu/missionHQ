@@ -87,7 +87,7 @@ Copy `backend/.env.example` to `backend/.env` and set:
 | `CRON_TZ` | Your time zone, for example `Asia/Kolkata` |
 | `DAILY_SPEND_CAP_USD`, `NOTIFICATIONS_PER_DAY` | Keep the defaults until you have a reason to change them |
 | `HEALTHCHECKS_PING_URL` | Optional. A healthchecks.io ping URL. The backend pings it so you are told when the box is down |
-| `CORS_ORIGINS` | Leave empty for this setup. Only used when the console is hosted on another origin. See section 11 |
+| `CORS_ORIGINS` | Leave empty for this setup. Only used when a page on another origin calls the API: the console on Vercel (section 11) or the phone reader's sync (section 12) |
 | `BIND_HOST`, `BIND_PORT` | Keep `127.0.0.1` and `8000`. Caddy and Tailscale Serve reach the backend on the same box |
 
 `API_BEARER_TOKEN` must not be empty in production. An empty token turns
@@ -134,6 +134,69 @@ ops/backup-schedule.sh install    # backup   (com.missionhq.backup, 03:30 nightl
 Each script also has `status`, `logs`, `uninstall`, and (for the servers)
 `restart`. Logs go to `data/logs/<service>.log`. `KeepAlive` restarts a server
 after any exit, including a crash.
+
+### The nightly regression run (Mac, optional)
+
+`scripts/regress-nightly.sh` runs the model-backed regression set
+(`hq.cli regress run nightly-<date>`) and compares it with the newest
+`after-*` result. It calls the models for real, so it runs here, where
+`backend/.env` has the gateway key, and never in CI. Nothing installs it for
+you; to schedule it at 04:30, after the backup, write a LaunchAgent:
+
+```bash
+cat > ~/Library/LaunchAgents/com.missionhq.regress.plist <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.missionhq.regress</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/path/to/missionHq/scripts/regress-nightly.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/path/to/missionHq</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>/path/to/missionHq/data/logs/regress.log</string>
+  <key>StandardErrorPath</key>
+  <string>/path/to/missionHq/data/logs/regress.log</string>
+</dict>
+</plist>
+EOF
+sed -i '' "s#/path/to/missionHq#$(pwd)#g" ~/Library/LaunchAgents/com.missionhq.regress.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missionhq.regress.plist
+```
+
+Run it from the repo root so `$(pwd)` fills the path, and check that `uv` is
+on the `PATH` the plist names (`which uv`). Then:
+
+```bash
+launchctl kickstart gui/$(id -u)/com.missionhq.regress     # run one now
+tail -f data/logs/regress.log                              # PASS/FAIL per case, then the compare
+launchctl bootout gui/$(id -u)/com.missionhq.regress       # remove it
+```
+
+The compare's last line is the night's summary (`N/M pass → N/M pass; $a →
+$b`); a `REGRESSION` line means a case the accepted run passed and tonight's
+failed. The spend lands on the daily cap like any other run, under agents
+named `eval:<name>`, so size `--k` (add it to `ProgramArguments`) with that
+in mind.
 
 ### Linux (systemd)
 
@@ -419,22 +482,70 @@ the machine that runs the backend is asleep. `providers.tsx` exempts the path
 from the auth guard and from the event stream, both of which would otherwise
 try to reach a backend the phone cannot see.
 
-### The loop
+### The loop: nightly, on the `reader` branch
+
+Nothing to do by hand. Every night, right after the 03:00 vault reindex (or
+its catch-up when the machine was asleep at 03:00), the backend builds the
+bundle and commits it to a branch named **`reader`**, then runs
+`git push origin reader`. Vercel deploys that branch. New lessons are on the
+phone by morning.
+
+How it stays out of your way:
+
+- **`main` and your working tree are never touched.** The bundle is built in a
+  temporary folder, hashed into git's object store, and committed with
+  `git commit-tree` from a throwaway index (`GIT_INDEX_FILE` in a temp dir).
+  Nothing is checked out, nothing is staged in your index, HEAD does not
+  move, and your uncommitted files are never read.
+- **The tree is `origin/main` plus the bundle.** Each `reader` commit is the
+  app as you last pushed it, with `frontend/public/reader` replaced by
+  tonight's bundle. Only already-pushed code goes out, and app changes reach
+  the phone with the next lesson change after you push `main`.
+- **A commit only when the library changed.** The commit carries a
+  `Reader-Fingerprint:` line, a hash of every file in the bundle with
+  `index.json`'s `built_at` left out. Same fingerprint as last night means no
+  commit, no push and no Vercel build. A lesson written, rebuilt or marked
+  read changes it.
+- **A failed push is logged, not raised.** No network or no credential: the
+  commit stays on your local `reader` branch, a `reader.published` event
+  records the error, and the next night pushes it. The push runs with
+  `GIT_TERMINAL_PROMPT=0`, so it can never hang waiting for a password; the
+  https remote needs the macOS keychain credential helper (or an SSH remote)
+  to push unattended.
+
+Run the same thing by hand, for example after a lesson you want now:
 
 ```bash
-uv run python -m hq.cli export-reader   # in backend/, writes frontend/public/reader
-git add frontend/public/reader && git commit && git push
+uv run python -m hq.cli publish-reader   # in backend/
 ```
 
-Vercel builds on the push. That is the whole publishing model: write a lesson
-on the machine, export, push, read it on the phone.
+`uv run python -m hq.cli export-reader` still writes `frontend/public/reader`
+in your working tree, for `next dev` on your own machine; you no longer need
+to commit it.
 
-The export writes `index.json` (the catalogue) and one file per lesson under
-`lessons/`. It rebuilds the folder every time, so a lesson you deleted or
-rebuilt under a new date does not linger in the copy you push. Each page gets
-the same content policy and `<base target="_blank">` that
-`/api/learning/page` injects for the console, because here there is no
-endpoint to inject them.
+The bundle is `index.json` (the catalogue) and one file per lesson under
+`lessons/`, rebuilt from scratch each time, so a lesson you deleted or
+rebuilt under a new date does not linger. Each page gets the same content
+policy and `<base target="_blank">` that `/api/learning/page` injects for the
+console, because here there is no endpoint to inject them.
+
+### Point Vercel at `reader`
+
+Once, after the first nightly run has pushed the branch (or after
+`publish-reader`):
+
+1. Vercel dashboard → the project → **Settings → Git**.
+2. Under **Production Branch**, change `main` to `reader` and save.
+3. Optional, to stop a preview build on every push to `main`: **Settings →
+   Git → Ignored Build Step**, command
+   `[ "$VERCEL_GIT_COMMIT_REF" = "reader" ] && exit 1 || exit 0`. Vercel
+   builds when the command exits 1, so only `reader` builds.
+4. **Deployments → Redeploy** the latest `reader` commit once, so production
+   switches now rather than at the next lesson.
+
+Root Directory stays `frontend`: the `reader` branch is the whole repo as of
+`origin/main`, so the app, `src/proxy.ts` and its password gate build exactly
+as before.
 
 ### Vercel settings
 
@@ -456,9 +567,12 @@ endpoint to inject them.
    is compiled into the JavaScript the browser downloads, so the secret would
    be published rather than checked.
 
-3. Leave `NEXT_PUBLIC_API_BASE` and `BACKEND_ORIGIN` unset. The reader calls
-   no API.
-4. Open `https://<your-project>.vercel.app/read` on the phone and add it to
+3. Leave `NEXT_PUBLIC_API_BASE` and `BACKEND_ORIGIN` unset. The reader
+   reads its own files; the only request it makes to the backend is the
+   optional sync below.
+4. Optional, to send "Mark read" and concept taps back: set
+   `NEXT_PUBLIC_READER_SYNC_URL` (see "Sending reads and taps back").
+5. Open `https://<your-project>.vercel.app/read` on the phone and add it to
    the home screen.
 
 The gate has no matcher, on purpose. The lessons are static files:
@@ -470,12 +584,61 @@ Vercel's own Deployment Protection does the same job without any code, and
 the two can be used together. This project uses the variable instead, so the
 credential lives with the repo's other secrets.
 
+### Sending reads and taps back
+
+Reading on the phone has to move the course along: the evening run will not
+start the next phase while the last course lesson is unread, and topic
+articles wait the same way. So the lesson page on `/read` has a **Mark read**
+button under the lesson, and each **Got it / Lost me** tap under a concept is
+sent too. Both go to the backend on your tailnet, with no secret anywhere in
+the deployment.
+
+How it works: the page posts to `NEXT_PUBLIC_READER_SYNC_URL`, your backend's
+tailnet address, with `credentials: "omit"` and no token. Tailscale Serve adds
+the `Tailscale-User-Login` header on the way in, and the backend accepts it
+because it equals `TAILSCALE_OWNER_LOGIN` (section 6). The two endpoints are
+`POST /api/reader/read {file}` and `POST /api/reader/signal {file, concept,
+verdict}`, where `file` is the lesson's page name from `index.json`. A read
+goes through the same function as the console's buttons, so a course lesson
+marks its phase read as well; a tap is stored in `hq.concept_signals` with
+`via = 'phone'`, where the next outline reads it.
+
+To turn it on:
+
+1. **Vercel**, Settings → Environment Variables:
+
+   | Variable | Set it to |
+   | --- | --- |
+   | `NEXT_PUBLIC_READER_SYNC_URL` | Your backend's tailnet origin, e.g. `https://mac.tail1234.ts.net` (no path, no trailing slash). `tailscale serve status` shows it |
+
+   It is public by design (compiled into the page) and is not a secret: it
+   only answers devices on your tailnet, signed in as you. Redeploy after
+   setting it; `NEXT_PUBLIC_*` values are fixed at build time.
+2. **Backend** `.env`: add the reader's Vercel origin to `CORS_ORIGINS`
+   (comma-separated, exact, scheme and host, no path), e.g.
+   `CORS_ORIGINS=https://your-reader.vercel.app`. Without it the browser
+   blocks the request. Add each origin you open the reader from (a custom
+   domain as well as the `.vercel.app` one). The backend reads this at start,
+   so it applies from its next restart.
+3. `TAILSCALE_OWNER_LOGIN` must be set (section 3) and Tailscale must be on,
+   signed in as you, on the phone. If the phone's browser asks whether the
+   page may reach devices on your network, allow it for the reader's site.
+
+When the phone is off the tailnet, the Mac is asleep, or the variable is not
+set, nothing is lost: the event waits in an outbox in the phone browser's
+storage, and is sent on the next page load of `/read` and whenever the
+browser comes back online. Next to the button, **saved** means the backend has
+it and **will sync** means it is waiting. A tap on a page the backend has no
+lesson for (**refused**) is dropped rather than retried. The read tick in the
+library shows at once on that phone; everywhere else it follows from the
+backend with the next export.
+
 ### What the phone cannot do
 
-Everything that writes. There is no Mark as read, no Build enhanced version,
-no board and no chat, because each of those is a request to a machine that is
-not in the picture. The read ticks come from the export and are true as of
-the push. The console on your laptop stays the place that changes anything.
+Everything else that writes. There is no Build enhanced version, no board and
+no chat, because each of those needs the console and its credential. The
+console on your laptop stays the place that changes anything beyond "I read
+this" and "this concept landed / lost me".
 
 The console routes are deployed too, and they have no backend to talk to:
 the `/api/*` rewrite lands on the serverless function's own localhost, so

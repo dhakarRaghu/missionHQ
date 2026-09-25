@@ -17,18 +17,18 @@ import { vaultApi, vaultKeys } from "@/lib/api/vault";
 /** What each core block is for, in the owner's terms. */
 const BLURBS: Record<string, string> = {
   "memory/user.md":
-    "What the agents know about you: your goals, your audience, how you like things done. Every agent reads this before it works.",
+    "What the agents know about you: your goals, your audience, how you like things done. Every agent reads this before it works; only you edit it.",
   "memory/active_projects.md":
-    "What you are working on now. The librarian keeps it current from your daily notes.",
-  "memory/rules.md":
-    "Standing rules. Only you write here: an agent can propose a rule, but never mint one.",
+    "What you are working on now. Only you edit it: each night sage proposes changes in memory/proposals/.",
+  "memory/decisions.md":
+    "What you have decided and what is still open. Only you write here; no agent answers an open decision.",
 };
 
 function blurbFor(path: string): string | undefined {
   if (BLURBS[path]) return BLURBS[path];
   if (path.startsWith("memory/agents/")) {
     const name = path.slice("memory/agents/".length).replace(/\.md$/, "");
-    return `${name}'s own notebook. It rewrites this at the end of every run, and no other agent reads it.`;
+    return `${name}'s own notebook. It rewrites this at the end of every run, and no other agent reads it. Agents that read the web keep none.`;
   }
   return undefined;
 }

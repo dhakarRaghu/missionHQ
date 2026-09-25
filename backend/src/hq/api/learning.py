@@ -19,7 +19,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from hq import db
+from hq import db, lesson_kit, signals
 from hq.api.deps import require_auth
 from hq.config import settings
 from hq.learning_pipeline import LESSON_DIR
@@ -60,8 +60,12 @@ def harden_page(html: str) -> str:
     * A leading vault frontmatter block, stripped. Tutor stamps one on notes,
       and before `<!DOCTYPE html>` it renders as stray text and drops the page
       into quirks mode.
+
+    And one addition: the "Got it / Lost me" script on a page that has a
+    concept list but was written before the kit carried it. It only posts to
+    the parent frame; the policy above still blocks every load.
     """
-    html = _FRONTMATTER_RE.sub("", html, count=1)
+    html = lesson_kit.with_taps(_FRONTMATTER_RE.sub("", html, count=1))
     head = f'<meta http-equiv="Content-Security-Policy" content="{CSP}">' \
            '<base target="_blank">'
     match = _HEAD_RE.search(html)
@@ -223,13 +227,76 @@ async def mark_lesson_read(lesson_date: str, kind: str = "course") -> dict:
     a new phase while the previous course lesson is unread, so this button is
     the thing that advances the course.
     """
-    row = await db.fetchone(
-        "UPDATE hq.lessons SET read_at = now()"
-        " WHERE lesson_date = %s::date AND kind = %s AND read_at IS NULL"
-        " RETURNING title",
+    rows = await db.fetch(
+        "SELECT id::text FROM hq.lessons"
+        " WHERE lesson_date = %s::date AND kind = %s AND read_at IS NULL",
         (lesson_date, kind),
     )
-    return {"ok": row is not None, "title": (row or {}).get("title", "")}
+    marked = [row for r in rows if (row := await mark_read(str(r["id"])))]
+    return {"ok": bool(marked), "title": marked[0]["title"] if marked else ""}
+
+
+async def mark_read(lesson_id: str) -> dict[str, Any] | None:
+    """The one way a lesson becomes read, wherever he read it.
+
+    Sets `hq.lessons.read_at`, and for a course lesson the phase's `read_at`
+    too: the gates read one or the other (`coalesce(p.read_at, l.read_at)`,
+    or the lesson alone), so a read that reached only one of them used to
+    leave half the chain still waiting. The console's two buttons and the
+    phone reader all come through here. A second call keeps the first time.
+    Returns the lesson (id, title, kind), or None when there is no such lesson.
+    """
+    if not signals.is_uuid(lesson_id):
+        return None
+    row = await db.fetchone(
+        "UPDATE hq.lessons SET read_at = coalesce(read_at, now()) WHERE id = %s::uuid"
+        " RETURNING id::text, title, kind, course_slug",
+        (lesson_id,),
+    )
+    if row is None:
+        return None
+    if row["kind"] == "course":
+        # The phase names its lesson once taught; the lesson names its phase
+        # by slug from the start. Either link is enough.
+        slug = str(row.get("course_slug") or "").strip()
+        await db.execute(
+            "UPDATE hq.course_phases SET read_at = coalesce(read_at, now())"
+            " WHERE lesson_id = %s::uuid" + (" OR slug = %s" if slug else ""),
+            (lesson_id, slug) if slug else (lesson_id,),
+        )
+    return {"id": row["id"], "title": str(row["title"] or ""), "kind": str(row["kind"])}
+
+
+class SignalBody(BaseModel):
+    """One "Got it" / "Lost me" tap on a concept of a lesson page. The page is
+    model-written markup, so the values are checked, never trusted."""
+
+    concept: str = Field(max_length=8)
+    verdict: str = Field(max_length=16)
+
+
+@router.post("/lessons/{lesson_id}/signals", operation_id="addConceptSignal", status_code=201)
+async def add_concept_signal(lesson_id: str, body: SignalBody) -> dict[str, Any]:
+    """Record how one concept landed. The next outline of the same course reads
+    the "lost me" answers."""
+    try:
+        signals.validate(body.concept, body.verdict)
+    except signals.SignalRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not signals.is_uuid(lesson_id):
+        raise HTTPException(400, "lesson id must be a uuid")
+    row = await signals.record(lesson_id, body.concept, body.verdict, via="console")
+    if row is None:
+        raise HTTPException(404, "no such lesson")
+    return row
+
+
+@router.get("/lessons/{lesson_id}/signals", operation_id="listConceptSignals")
+async def list_concept_signals(lesson_id: str) -> dict[str, Any]:
+    """Every tap on one lesson, and his current answer per concept."""
+    if not signals.is_uuid(lesson_id):
+        raise HTTPException(400, "lesson id must be a uuid")
+    return await signals.for_lesson(lesson_id)
 
 
 ACTIVE_COURSE_KEY = "learning:active_course"
@@ -386,13 +453,12 @@ async def teach_phase(course: str, slug: str, force: bool = False) -> dict:
 
     unread = None if force else await db.fetchone(
         "SELECT title, review_status FROM hq.lessons WHERE kind = 'course'"
-        " AND (read_at IS NULL OR review_status IN ('revise', 'failed'))"
+        " AND (read_at IS NULL OR review_status = 'failed')"
         " ORDER BY lesson_date DESC LIMIT 1",
         (),
     )
     if unread:
-        why = {"revise": "is being revised after review",
-               "failed": "failed review and needs a decision"}.get(
+        why = {"failed": "failed review and needs a decision"}.get(
             str(unread["review_status"]), "is still unread — mark it read first")
         return {"started": False, "reason": f"{unread['title']} {why}"}
 
@@ -452,10 +518,7 @@ async def mark_phase_read(course: str, slug: str) -> dict:
     if not row:
         raise HTTPException(404, f"no phase {slug!r} in {course!r}")
     if row["lesson_id"]:
-        await db.execute(
-            "UPDATE hq.lessons SET read_at = coalesce(read_at, now()) WHERE id = %s::uuid",
-            (row["lesson_id"],),
-        )
+        await mark_read(str(row["lesson_id"]))
     return {"ok": True, "title": row["title"]}
 
 

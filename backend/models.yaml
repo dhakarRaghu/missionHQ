@@ -26,33 +26,12 @@ models:
     settings:
       reasoning_effort: high
       max_tokens: 16000
-      timeout_s: 300
-    # When the gateway answers kimi with a timeout or a connection error,
-    # try these instead rather than failing the run. Ten of twenty-three run
-    # failures in the week to 2026-09-08 were exactly that, and every role
-    # pointed at this one model, so one flaky model stopped everything.
-    fallback: [sonnet, glm]
-
-  # Fallback spares. They are priced at their public list price, which the
-  # gateway may not match; that only matters if an agent declares one as its
-  # own model, because a run is costed at the model its manifest names.
-  sonnet:
-    provider: gateway
-    model: claude-sonnet-4-6
-    input_per_mtok: 3.00
-    output_per_mtok: 15.00
-    settings:
-      max_tokens: 16000
-      timeout_s: 300
-
-  glm:
-    provider: gateway
-    model: glm-latest
-    input_per_mtok: 0.60
-    output_per_mtok: 2.20
-    settings:
-      max_tokens: 16000
-      timeout_s: 300
+      timeout_s: 900
+    # Kimi only, by the owner's decision on 2026-09-25. When the gateway
+    # answers kimi-latest with a timeout or a connection error, kimi-k3 takes
+    # the request: a different model on the same provider, so one hung model
+    # does not stop everything.
+    fallback: [kimi_k3]
 
 # Roles are what agents declare. All three point at one model for now; split
 # them (deep -> a stronger model, cheap -> a faster one) by editing these three
@@ -82,12 +61,16 @@ models:
       # proves little — 64k is chosen because it is far past any lesson or
       # digest, not because 128k failed.
       max_tokens: 64000
-      # Eight minutes, from measurement, not fifteen. Over the week to
-      # 2026-09-23, 1,073 model steps: p50 23s, p90 119s, p99 408s, and the
-      # p99 includes retries. A request still silent at 480s is hung, and
-      # every extra minute it is allowed is a minute the whole lane waits.
-      timeout_s: 480
-    fallback: [sonnet, glm]
+      # Fifteen minutes of streaming. Every call is streamed, and a stream
+      # silent for 290s is failed by the idle limit (llm.IDLE_LIMIT_S), so
+      # this total no longer decides what counts as hung. It only has to fit
+      # a long answer at this gateway's speed: kimi streams reasoning at about
+      # 20 characters a second and text at about 40 (measured 2026-09-23).
+      # Twenty-five minutes: hunter writes a study note as the text of one
+      # reply, and a 25k-character note after high-effort reasoning needs ~15.
+      # Longer would push the hang watchdog past the course lane's cap.
+      timeout_s: 1500
+    fallback: [kimi_k3]
 
   # The teacher. He asked for tutor's reasoning to go higher, then on
   # 2026-09-23 ruled opus out: the gateway caps it at $5 a day, and one phase
@@ -106,10 +89,10 @@ models:
     settings:
       reasoning_effort: high
       max_tokens: 64000
-      timeout_s: 480      # see kimi_deep: p99 of a real step is 408s
-    # Spares on other providers. When kimi-k3 hangs, kimi-latest on the same
-    # backend is the likeliest to hang with it.
-    fallback: [sonnet, glm]
+      timeout_s: 900      # see kimi_deep
+    # kimi-latest is the spare: the only other model in use. A longer chain
+    # would push the hang watchdog past the course lane's cap.
+    fallback: [kimi_deep]
 
 roles:
   deep: kimi_deep
@@ -127,3 +110,14 @@ embeddings:
   provider: gateway
   model: gemini-embedding-001
   dimensions: 768
+
+# Runtimes that spend tokens outside the gateway models above, priced so their
+# runs are costed. Codex runs on `open-large` through the Juspay provider
+# (CODEX_CONFIG in .env). Its price was not known on 2026-09-23, so it is 0:
+# the tokens are recorded in hq.model_calls either way, and setting these two
+# numbers prices every Codex run from then on.
+external:
+  codex:
+    model: open-large
+    input_per_mtok: 0
+    output_per_mtok: 0

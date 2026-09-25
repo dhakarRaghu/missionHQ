@@ -45,8 +45,17 @@ function todayLocal() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-export function shapeRows(rows: DailyCost[], days = DAYS) {
-  const agents = Array.from(new Set(rows.map((r) => r.agent))).sort();
+/** Spend by agents no longer on the roster, shown as one series: scout and
+ * librarian were retired, and a legend entry per retired agent reads as a
+ * roster the system does not have. */
+export const RETIRED = "retired";
+
+export function shapeRows(rows: DailyCost[], days = DAYS, live?: ReadonlySet<string>) {
+  const name = (agent: string) => (live && !live.has(agent) ? RETIRED : agent);
+  rows = rows.map((r) => ({ ...r, agent: name(r.agent) }));
+  const agents = Array.from(new Set(rows.map((r) => r.agent))).sort(
+    (a, b) => Number(a === RETIRED) - Number(b === RETIRED) || a.localeCompare(b),
+  );
   const last = rows.reduce((max, r) => (r.date > max ? r.date : max), todayLocal());
   const first = addDays(last, -(days - 1));
   const byDate = new Map<string, Row>();
@@ -133,7 +142,12 @@ export function CostChart() {
     queryKey: qk.dailyCosts(DAYS),
     queryFn: () => api.dailyCosts(DAYS),
   });
-  const shaped = useMemo(() => (data ? shapeRows(data) : null), [data]);
+  const roster = useQuery({ queryKey: qk.agents, queryFn: api.agents });
+  const live = useMemo(
+    () => (roster.data ? new Set(roster.data.map((a) => a.name)) : undefined),
+    [roster.data],
+  );
+  const shaped = useMemo(() => (data ? shapeRows(data, DAYS, live) : null), [data, live]);
   const config = useMemo(
     () => chartConfig(shaped?.agents ?? []),
     [shaped?.agents],

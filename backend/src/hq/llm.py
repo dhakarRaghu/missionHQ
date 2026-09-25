@@ -8,14 +8,26 @@ truth for cost accounting; auto-pricing cannot price gateway-aliased ids.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import json
 import logging
+import re
+import time
+import weakref
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
+import openai
 import yaml
 from openai import AsyncOpenAI
-from pydantic_ai.models import Model
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
+from pydantic_ai.models import Model, ModelRequestParameters
+from pydantic_ai.models.wrapper import WrapperModel
+from pydantic_ai.settings import ModelSettings
 
 from hq.config import settings
 
@@ -30,19 +42,79 @@ log = logging.getLogger(__name__)
 # here lets the step retry only what is worth retrying.
 SLOT_WAITS_S = (5.0, 10.0, 20.0, 40.0)
 
+# One slot limit per event loop. The backend has exactly one loop (DBOS
+# adopts uvicorn's when it launches inside the FastAPI lifespan), so in
+# production this is one semaphore for every chat, judge, reader, embedding
+# and agent call on the key. Tests open a loop each; keying by loop keeps a
+# semaphore from being used on a loop it was not created on.
+_slot_limits: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _slot_limit() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    sem = _slot_limits.get(loop)
+    if sem is None:
+        sem = _slot_limits[loop] = asyncio.Semaphore(max(1, settings().gateway_parallel))
+    return sem
+
+
+class _SlotHeldStream(httpx.AsyncByteStream):
+    """A response body that keeps its gateway slot until it is read or closed.
+
+    A streamed answer returns its headers at once and then sends tokens for
+    minutes. Releasing the slot when the headers arrived would let the
+    backend open far more requests than the key allows.
+    """
+
+    def __init__(self, inner: httpx.AsyncByteStream, release: Callable[[], None]) -> None:
+        self._inner = inner
+        self._release = release
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        try:
+            async for chunk in self._inner:
+                yield chunk
+        finally:
+            self._release()
+
+    async def aclose(self) -> None:
+        try:
+            await self._inner.aclose()
+        finally:
+            self._release()
+
 
 class GatewayCompatTransport(httpx.AsyncHTTPTransport):
-    """Waits out a full slot table, and drops vendor extras the OpenAI schema
-    rejects.
+    """Admits at most ``gateway_parallel`` requests at once, waits out a full
+    slot table, and drops vendor extras the OpenAI schema rejects.
 
     Grid proxies several backends, and some (Kimi) attach a ``metadata`` object
     whose ``weight_versions`` is a list. The OpenAI SDK types ``metadata`` as
     ``dict[str, str]`` and raises on the whole response. The field carries
     nothing we use, so it is removed before parsing. Streaming responses pass
-    through untouched.
+    through untouched, holding their slot until the body is closed.
     """
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        slots = _slot_limit()
+        await slots.acquire()
+        held = True
+
+        def release() -> None:
+            nonlocal held
+            if held:
+                held = False
+                slots.release()
+
+        try:
+            return await self._send(request, release)
+        except BaseException:
+            release()
+            raise
+
+    async def _send(self, request: httpx.Request, release: Callable[[], None]) -> httpx.Response:
         response = await super().handle_async_request(request)
         for wait in SLOT_WAITS_S:
             if response.status_code != 429:
@@ -56,8 +128,12 @@ class GatewayCompatTransport(httpx.AsyncHTTPTransport):
             await asyncio.sleep(min(wait, 60.0))
             response = await super().handle_async_request(request)
         if "application/json" not in response.headers.get("content-type", ""):
+            response.stream = _SlotHeldStream(response.stream, release)  # type: ignore[arg-type]
             return response
-        await response.aread()
+        try:
+            await response.aread()
+        finally:
+            release()
         try:
             payload = json.loads(response.content)
         except ValueError:
@@ -76,6 +152,218 @@ class GatewayCompatTransport(httpx.AsyncHTTPTransport):
             content=json.dumps(payload).encode(),
             request=request,
             extensions=response.extensions,
+        )
+
+
+# --- model calls: streamed, bounded, classified, recorded ---------------------
+
+# Who a model call belongs to. Set by the runner around a run; every call
+# made inside it (the agent's, the judges', the web reader's) inherits it,
+# because asyncio tasks copy the context they are created in.
+CALL_CONTEXT: contextvars.ContextVar[dict[str, str | None] | None] = contextvars.ContextVar(
+    "hq_call_context", default=None
+)
+
+
+@contextlib.contextmanager
+def call_context(*, run_id: str | None, task_id: str | None, agent: str | None) -> Iterator[None]:
+    token = CALL_CONTEXT.set({"run_id": run_id, "task_id": task_id, "agent": agent})
+    try:
+        yield
+    finally:
+        CALL_CONTEXT.reset(token)
+
+
+# A prompt too long for the model's window. Handing it to a spare with a
+# smaller window only fails again, slower, and hides the real problem.
+_OVERFLOW_RE = re.compile(
+    r"context[ _-]?(length|window)|maximum context|too many tokens|prompt is too long"
+    r"|input is too long|ContextWindowExceeded",
+    re.IGNORECASE,
+)
+
+
+def is_context_overflow(exc: BaseException) -> bool:
+    if not isinstance(exc, ModelHTTPError) or exc.status_code not in (400, 413, 422):
+        return False
+    return bool(_OVERFLOW_RE.search(f"{exc.message} {exc.body}"))
+
+
+def moves_to_spare(exc: Exception) -> bool:
+    """Which failures hand the request to the next model in the chain.
+
+    A timeout, a dropped stream, a gateway 5xx or a 429 that outlasted the
+    slot waits: yes. A context overflow: no.
+    """
+    return isinstance(exc, ModelAPIError) and not is_context_overflow(exc)
+
+
+def _estimated_tokens(messages: list[ModelMessage], response: ModelResponse | None) -> tuple[int, int]:
+    """About four characters a token, for the rare stream that sends no usage."""
+    sent = sum(len(str(m)) for m in messages) // 4
+    got = 0
+    if response is not None:
+        got = sum(len(p.content) for p in response.parts if isinstance(p, TextPart)) // 4
+    return sent, got
+
+
+async def record_call(
+    *, model: str, model_id: str, ms: int, input_tokens: int, output_tokens: int,
+    cache_read_tokens: int = 0, cost_usd: float, error_class: str | None,
+    usage_source: str = "reported", first_token_ms: int | None = None,
+) -> None:
+    """One row in hq.model_calls. Never raises: a failed write must not turn
+    a good answer into a failed step."""
+    ctx = CALL_CONTEXT.get() or {}
+    try:
+        from hq import db
+
+        # started_at is when the attempt began, not when this row is written.
+        await db.execute(
+            "INSERT INTO hq.model_calls (run_id, task_id, agent, model, model_id,"
+            " started_at, ms, first_token_ms, input_tokens, output_tokens,"
+            " cache_read_tokens, cost_usd, error_class, usage_source)"
+            " VALUES (%s,%s,%s,%s,%s, now() - make_interval(secs => %s),"
+            " %s,%s,%s,%s,%s,%s,%s,%s)",
+            (ctx.get("run_id"), ctx.get("task_id"), ctx.get("agent"), model, model_id,
+             ms / 1000.0, ms, first_token_ms, input_tokens, output_tokens,
+             cache_read_tokens, cost_usd, error_class, usage_source),
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not record a model call for %s: %s", model, exc)
+
+
+# A streamed answer sends reasoning and text as it goes. Silence this long
+# means the request is hung, whatever its total allowance: fail it and let
+# the spare try, instead of waiting out the whole limit. Just under the
+# gateway's own 300-second cut: a model writing tool-call arguments sends
+# nothing while it writes, and that silence is legitimate until then.
+IDLE_LIMIT_S = 290.0
+
+
+class StreamIdle(Exception):
+    """The stream sent nothing for IDLE_LIMIT_S."""
+
+
+class StreamingModel(WrapperModel):
+    """Every request streamed, bounded by wall clock, and recorded.
+
+    Why streamed: the gateway closes a connection that has sent nothing for
+    300 seconds. A long-reasoning answer sent in one piece arrives after that
+    and dies as ``ReadError`` on every model in the chain; the same request
+    streamed sends its first byte in seconds (measured 2026-09-23: 303s
+    failed plain, 377s finished streamed).
+
+    Why a wall clock: httpx's read timeout restarts on every byte, so a model
+    that trickles tokens would never trip it. ``timeout_s`` from models.yaml
+    is the whole attempt's allowance.
+
+    Why the errors are rewritten: a failure after the first byte surfaces as
+    a raw httpx or SDK error, and ``FallbackModel`` only moves to a spare on
+    ``ModelAPIError``. Rewritten, a stream that breaks halfway goes to the
+    spare instead of failing the step.
+    """
+
+    def __init__(self, wrapped: Model, entry: ModelEntry) -> None:
+        super().__init__(wrapped)
+        self.entry = entry
+
+    @property
+    def limit_s(self) -> float:
+        return float((self.entry.settings or {}).get("timeout_s", 300.0))
+
+    def total_limit_s(self, model_settings: ModelSettings | None) -> float:
+        """The attempt's whole allowance: the entry's own, or longer when the
+        caller asks for it (a planning call that reasons for minutes)."""
+        asked = (model_settings or {}).get("timeout")
+        return max(self.limit_s, float(asked) if isinstance(asked, int | float) else 0.0)
+
+    async def request(
+        self,
+        messages: list[ModelMessage],
+        model_settings: ModelSettings | None,
+        model_request_parameters: ModelRequestParameters,
+    ) -> ModelResponse:
+        started = time.monotonic()
+        first: float | None = None
+        response: ModelResponse | None = None
+        live: Any = None
+        error_class: str | None = None
+        total = self.total_limit_s(model_settings)
+        try:
+            try:
+                async with asyncio.timeout(total):
+                    async with self.wrapped.request_stream(
+                        messages, model_settings, model_request_parameters
+                    ) as stream:
+                        live = stream
+                        events = stream.__aiter__()
+                        while True:
+                            try:
+                                await asyncio.wait_for(anext(events), IDLE_LIMIT_S)
+                            except StopAsyncIteration:
+                                break
+                            except TimeoutError as exc:
+                                raise StreamIdle(f"nothing streamed for {IDLE_LIMIT_S:.0f}s") from exc
+                            if first is None:
+                                first = time.monotonic()
+                    response = stream.get()
+            except ModelAPIError:
+                raise
+            except StreamIdle as exc:
+                raise ModelAPIError(self.model_name, str(exc)) from exc
+            except TimeoutError as exc:
+                raise ModelAPIError(
+                    self.model_name, f"no complete answer within {total:.0f}s"
+                ) from exc
+            except (httpx.HTTPError, openai.APIError, OSError) as exc:
+                raise ModelAPIError(
+                    self.model_name, f"the stream broke: {type(exc).__name__}: {exc}"
+                ) from exc
+            return response
+        except BaseException as exc:
+            cause = exc.__cause__ if isinstance(exc, ModelAPIError) and exc.__cause__ else exc
+            error_class = type(cause).__name__
+            if isinstance(exc, ModelHTTPError):
+                error_class = f"HTTP{exc.status_code}"
+            raise
+        finally:
+            partial = None
+            if response is None and live is not None:
+                try:
+                    partial = live.get()
+                except Exception:  # noqa: BLE001 — cost is best effort
+                    partial = None
+            await self._record(messages, response, error_class, started, first, partial)
+
+    async def _record(
+        self, messages: list[ModelMessage], response: ModelResponse | None,
+        error_class: str | None, started: float, first: float | None,
+        partial: ModelResponse | None = None,
+    ) -> None:
+        usage = response.usage if response is not None else None
+        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+        source = "reported"
+        if response is None:
+            # A timeout, an idle cut or a broken stream still cost the whole
+            # prompt and whatever had streamed; recording $0 hid that spend.
+            input_tokens, output_tokens = _estimated_tokens(messages, partial)
+            source = "estimated"
+        elif input_tokens == 0 and output_tokens == 0:
+            input_tokens, output_tokens = _estimated_tokens(messages, response)
+            source = "estimated"
+            log.warning("model %s answered with no usage; estimated %d/%d tokens",
+                        self.entry.name, input_tokens, output_tokens)
+        cost = (input_tokens * self.entry.input_per_mtok
+                + output_tokens * self.entry.output_per_mtok) / 1_000_000
+        await record_call(
+            model=self.entry.name, model_id=self.entry.model_id,
+            ms=int((time.monotonic() - started) * 1000),
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            cache_read_tokens=int(getattr(usage, "cache_read_tokens", 0) or 0),
+            cost_usd=cost, error_class=error_class, usage_source=source,
+            first_token_ms=None if first is None else int((first - started) * 1000),
         )
 
 
@@ -155,6 +443,14 @@ class ModelRegistry:
             else None
         )
         self._embed_client: AsyncOpenAI | None = None
+        # Runtimes that are not models on the gateway but still spend tokens
+        # (Codex). Priced here so their runs are costed like every other run.
+        self.external: dict[str, dict[str, Any]] = dict(raw.get("external") or {})
+
+    def external_cost(self, name: str, input_tokens: int, output_tokens: int) -> float:
+        cfg = self.external.get(name) or {}
+        return (input_tokens * float(cfg.get("input_per_mtok", 0))
+                + output_tokens * float(cfg.get("output_per_mtok", 0))) / 1_000_000
 
     def embed_client(self) -> AsyncOpenAI:
         """Lazily built client for ``embeddings.provider``; cached for reuse."""
@@ -189,6 +485,12 @@ class ModelRegistry:
         if name not in self._instances:
             self._instances[name] = self._build(self.entries[name])
         return self._instances[name]
+
+    def resolve_alone(self, name_or_role: str) -> Model:
+        """The entry's own model with no fallback chain, for a call whose
+        slow path must fail fast to a cheaper plan rather than wait out a
+        second slow model."""
+        return self._build_one(self.entries[self.canonical(name_or_role)])
 
     def all_instances(self) -> dict[str, Model]:
         """Every usable entry, pre-registered into DBOSDurability(models=...).
@@ -291,7 +593,7 @@ class ModelRegistry:
         if not spares:
             return primary
         log.info("model %r falls back to %s", entry.name, list(entry.fallback))
-        return FallbackModel(primary, *spares)
+        return FallbackModel(primary, *spares, fallback_on=moves_to_spare)
 
     def _build_one(self, entry: ModelEntry) -> Model:
         from pydantic_ai.models.openai import OpenAIChatModel
@@ -308,7 +610,9 @@ class ModelRegistry:
             raise ValueError(
                 f"provider {entry.provider!r} not wired yet; add it in llm._build"
             )
-        return OpenAIChatModel(entry.model_id, provider=OpenAIProvider(openai_client=client))
+        return StreamingModel(
+            OpenAIChatModel(entry.model_id, provider=OpenAIProvider(openai_client=client)), entry
+        )
 
 
 _registry: ModelRegistry | None = None

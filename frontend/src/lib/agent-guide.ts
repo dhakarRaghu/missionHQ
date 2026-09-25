@@ -17,40 +17,40 @@ export interface AgentGuide {
 
 const GUIDE: Record<string, AgentGuide> = {
   sage: {
-    does: "Your second brain. It keeps the daily note, the weekly review, and the memory blocks the other agents read before every run.",
+    does: "Your coordinator and memory. It decides who does what, writes the daily note and the Sunday review, proposes a Monday job shortlist and Wednesday content ideas, and keeps the memory every agent reads short and true.",
     use: [
       "Ask it anything. It answers what is its own and hands the rest over.",
       "Ask it what happened: “What did the agents do in the last 24 hours?”",
-      "Ask it what to deal with: “What is the most important open loop in my vault?”",
-      "Leave it alone. It writes a note at 21:00 daily and a review on Sunday at 20:00.",
+      "Ask it which roles to act on: “What is on this week's shortlist?”",
+      "Leave it alone. It writes a note at 22:30 daily, proposes memory changes for you at 23:30, and reviews the week on Sunday at 20:00.",
     ],
-    output: "daily/<date>.md, the weekly review, and memory/ blocks.",
+    output: "daily/<date>.md, the weekly review, projects/jobs/shortlist-<week>.md, projects/content/ideas.md and memory/ blocks.",
   },
   hunter: {
-    does: "Reads the web and writes what it found. It is the only agent with web access, and it can write nowhere except quarantine.",
+    does: "Reads the web and writes what it found. It verifies job leads with a person to reach, and writes the study notes lessons are built from. It can write nowhere except quarantine.",
     use: [
-      "Give it one precise question, not a topic: “What changed in X this month?”",
-      "Read the quarantine note it writes, then tell sage to promote or drop it.",
-      "Scout creates work for it automatically when it needs fresh research.",
+      "Give it one precise question, not a topic: “Who could refer me at this company, and what do we share?”",
+      "Read the quarantine note it writes, then tell sage to act on it or drop it.",
+      "The nightly sweep and the learning run create its work automatically.",
     ],
-    output: "quarantine/<date>-<slug>.md, with its sources and a confidence level.",
+    output: "Roles on the Jobs board, and quarantine/<date>-<slug>.md with its sources.",
   },
-  scout: {
-    does: "Content for YouTube and Twitter. It turns hunter's research into ideas, outlines and drafts, and never posts anything without your approval.",
+  tutor: {
+    does: "Your teacher. It plans the concepts worth knowing, writes a lesson one section at a time, and checks every sentence against the study note before you read it.",
     use: [
-      "Ask for ideas: “Five video ideas from the newest quarantine notes, ranked.”",
-      "Ask for a draft, then edit it. It writes in short, plain sentences.",
-      "Anything meant to be published becomes an approval in your Inbox first.",
+      "Read the lesson in Learn or on your phone, and tap Got it or Lost me on each concept.",
+      "A new phase starts once you have read the last one.",
+      "Ask sage for a post from a lesson; tutor drafts it for your site and never publishes.",
     ],
-    output: "projects/content/ideas.md and projects/content/drafts/.",
+    output: "learning/lessons/<date>-<slug>.html, on your phone at /read.",
   },
-  librarian: {
-    does: "Nightly housekeeping for memory. It merges the day's notes into the memory blocks without letting them grow past their caps.",
+  operator: {
+    does: "Reads pages only your signed-in browser can open (LinkedIn, X, your analytics), read-only, under one written contract.",
     use: [
-      "Nothing. It runs at 23:30 and its work shows up as one git commit you can revert.",
-      "Ask it what is close to full: “What is in my memory blocks right now?”",
+      "Ask sage for it with the exact pages you want read.",
+      "Approve the run once; it never clicks anything that sends, posts or applies.",
     ],
-    output: "memory/user.md and memory/active_projects.md.",
+    output: "A quarantine note with the URL of every source, or leads handed to hunter.",
   },
 };
 

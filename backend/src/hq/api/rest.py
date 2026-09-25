@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from hq import board, db, engagement, safety
+from hq import board, db, engagement, safety, value
 from hq.api.deps import require_auth
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -107,8 +107,9 @@ async def cancel_task(task_id: str) -> dict:
     # with outcome NULL would count against the success rate in `hq.cli health`.
     # A deliberate stop is not a failure, so record it as its own outcome.
     await db.execute(
-        "UPDATE hq.runs SET outcome = 'cancelled', ended_at = now()"
-        " WHERE task_id = %s AND ended_at IS NULL",
+        "UPDATE hq.runs r SET outcome = 'cancelled', ended_at = now(),"
+        f" {safety.CALLS_COSTED}"
+        " WHERE r.task_id = %s AND r.ended_at IS NULL",
         (task_id,),
     )
     await board.apply(
@@ -248,7 +249,8 @@ JOB_SELECT = (
     " location, remote_policy,"
     " experience_band, compensation, stack, fit_score, fit_bucket, status,"
     " why_fit, next_step, notes, referral, seen_count, first_seen, last_seen,"
-    " company_brief, pay_signal, role_brief, researched_at, linkedin_url"
+    " company_brief, pay_signal, role_brief, researched_at, linkedin_url,"
+    " fit_parts, pay_lakh::float8 AS pay_lakh, lane"
     " FROM hq.jobs"
 )
 
@@ -513,6 +515,14 @@ async def start_value_week() -> dict:
     same shape as GET /engagement."""
     await engagement.start_value_week()
     return await engagement.value_week_status()
+
+
+@router.get("/value/week", operation_id="getValueWeek")
+async def get_value_week() -> dict:
+    """The past seven days: lessons written vs read, concept taps, jobs he
+    moved, content ideas vs drafts, model spend and cost per lesson. Counts
+    from the tables, no model call."""
+    return await value.week_report()
 
 
 @router.get("/agents", operation_id="listAgents")

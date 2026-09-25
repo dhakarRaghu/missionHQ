@@ -1,0 +1,35 @@
+# Sage consolidation (was the librarian). Reads are canned so the memory it judges is fixed.
+
+- id: sage-consolidate-drops-a-closed-task-line
+  agent: sage
+  source: >-
+    A memory line naming a task is true only while that task is open. The
+    line about task b3be878b sitting at needs_approval survived four nights
+    after the task was done.
+  prompt: "Consolidate today's notes into memory."
+  skill: consolidate
+  canned:
+    vault_read: |-
+      # Active projects
+      <!-- Maintained by librarian. -->
+      - Job search: level one roles, 25 LPA or more, India or India-remote.
+      - Operator task b3be878b is sitting at needs_approval, waiting on the owner.
+      - Inference Internals course: on Phase 2B.
+    vault_list: {notes: []}
+    read_board:
+      tasks:
+        - {id: "b3be878b-0000-0000-0000-000000000000", title: "Read the owner's feed", status: done}
+    recall_facts: []
+    memory_search: []
+    record_fact: {recorded: true}
+    retire_fact: {retired: true}
+    vault_write: {ok: true}
+  # The shared blocks are owner-only now: the change arrives as a proposal.
+  expect:
+    calls: [vault_write]
+    args_match:
+      vault_write: "memory/proposals/"
+    args_not_match:
+      vault_write: '"path": "memory/active_projects'
+  judge:
+    - The proposal removes the line about task b3be878b, because that task is done.

@@ -13,6 +13,9 @@
     board-check                        replay task_events and report tasks whose stored status differs (exit 1 if any)
     prompt-check <agent|all>           zero-tool judge audits an agent's instruction corpus (exit 1 on a high contradiction)
     vault-health [--merge-plan]        dry-run vault maintenance report: duplicates, orphans, unsourced, stale, future-dated
+    export-reader                      write the phone reader bundle into frontend/public/reader
+    publish-reader                     what the nightly does: build the bundle and commit+push it to the `reader` branch (only when it changed)
+    value-week                         the weekly value report: lessons written vs read, taps, jobs moved, ideas, spend
 """
 
 from __future__ import annotations
@@ -214,6 +217,37 @@ async def cmd_export_reader() -> int:
         await db.close_pool()
 
 
+async def cmd_publish_reader() -> int:
+    """The nightly publish, by hand: bundle to the `reader` branch, pushed."""
+    from hq import db, reader_export
+
+    await db.open_pool()
+    try:
+        result = await reader_export.publish_nightly()
+        if result.get("error"):
+            print(f"not published: {result['error']}")
+            return 1
+        if result.get("committed"):
+            print(f"committed {result['committed'][:12]} on {result['branch']}")
+        else:
+            print(f"no change in the library; {result['branch']} left as it was")
+        print("pushed" if result.get("pushed") else "nothing to push")
+        return 0
+    finally:
+        await db.close_pool()
+
+
+async def cmd_value_week() -> int:
+    from hq import db, value
+
+    await db.open_pool()
+    try:
+        print(value.format_report(await value.week_report()))
+        return 0
+    finally:
+        await db.close_pool()
+
+
 async def cmd_board_check() -> int:
     """Event-sourcing audit: derive every task's status from hq.task_events and
     compare with the hq.tasks projection. Read-only."""
@@ -402,6 +436,10 @@ def main() -> None:
         raise SystemExit(asyncio.run(cmd_sync_courses()))
     if args[0] == "export-reader":
         raise SystemExit(asyncio.run(cmd_export_reader()))
+    if args[0] == "publish-reader":
+        raise SystemExit(asyncio.run(cmd_publish_reader()))
+    if args[0] == "value-week":
+        raise SystemExit(asyncio.run(cmd_value_week()))
     if args[0] == "board-check":
         raise SystemExit(asyncio.run(cmd_board_check()))
     if args[0] == "prompt-check" and len(args) == 2:
@@ -412,6 +450,10 @@ def main() -> None:
         raise SystemExit(asyncio.run(cmd_models()))
     if args[0] == "ask" and len(args) >= 3:
         raise SystemExit(asyncio.run(cmd_ask(args[1], " ".join(args[2:]))))
+    if args[0] == "regress" and len(args) >= 2:
+        from hq import regress
+
+        raise SystemExit(regress.main(args[1:]))
     if args[0] == "evals" and len(args) >= 3:
         raise SystemExit(asyncio.run(cmd_evals(args[1], args[2], args[3:])))
     print(__doc__)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hashlib
 import inspect
 import json
 import logging
@@ -17,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from hq import privacy
 from hq.dbos_app import DBOS
 from hq.safety import ActionClass, Trust
 
@@ -36,9 +38,18 @@ RESULT_CHARS = 400  # the tool result is truncated to this many chars
 # threw away everything the agent had already read. Four tries doubling from
 # two seconds covers about thirty, which is the length of a real transient
 # outage rather than a packet drop.
+def _worth_retrying(exc: BaseException) -> bool:
+    """A refusal addressed to the model (ModelRetry) or a policy refusal is the
+    same answer every time; only transport failures get another attempt."""
+    from pydantic_ai import ModelRetry
+
+    return not isinstance(exc, (ModelRetry, PermissionError, ValueError))
+
+
 NETWORK_RETRIES: dict[str, Any] = {
     "retries_allowed": True, "max_attempts": 4,
     "interval_seconds": 2.0, "backoff_rate": 2.0,
+    "should_retry": _worth_retrying,
 }
 
 
@@ -70,6 +81,8 @@ class ToolDef:
     # and draft, and he acts. Enforced at load, not by an approval prompt.
     world_facing: bool
     description: str
+    # True when the employer gate (``hq.privacy``) checks every argument.
+    private: bool = False
 
 
 TOOL_REGISTRY: dict[str, ToolDef] = {}
@@ -108,6 +121,79 @@ def _run_context(args: tuple[Any, ...]) -> Any:
     """Every tool takes RunContext[HQDeps] as its first positional argument."""
     deps = getattr(args[0], "deps", None) if args else None
     return deps if isinstance(deps, HQDeps) else None
+
+
+# Identical calls per run: (tool, hash of arguments) -> count. A model that
+# repeats the same call is looping; the answer will not change. The third
+# identical call is refused with a note the model can act on, and the runner
+# asks the judge whether the run has stalled only when this count is set.
+REPEAT_REFUSED_AT = 3
+_repeats: dict[str, dict[tuple[str, str], int]] = {}
+
+
+def note_call(run_id: str, tool_name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> int:
+    key = hashlib.sha1(
+        json.dumps([args, kwargs], default=str, sort_keys=True).encode()).hexdigest()
+    counts = _repeats.setdefault(run_id, {})
+    counts[(tool_name, key)] = counts.get((tool_name, key), 0) + 1
+    return counts[(tool_name, key)]
+
+
+def run_repeats(run_id: str | None) -> int:
+    """How many calls in this run repeated an earlier call exactly."""
+    if not run_id:
+        return 0
+    return sum(n - 1 for n in _repeats.get(run_id, {}).values() if n > 1)
+
+
+def forget_run(run_id: str | None) -> None:
+    if run_id:
+        _repeats.pop(run_id, None)
+
+
+def privacy_gated(action: ActionClass, trust: Trust, network: bool) -> bool:
+    """Whether a tool's arguments pass the employer gate (``hq.privacy``).
+
+    Every tool whose arguments leave the agent's own reading does: anything
+    sent over the network (a search query, a url), anything written (a note,
+    a job row, a lesson, a post, a proposal), and anything handed to another
+    agent (a subtask brief). Only local reads of the vault and the owner's own
+    data are exempt, because refusing a lookup protects nothing."""
+    return network or action != ActionClass.READ or trust not in (Trust.VAULT, Trust.USER)
+
+
+def _repeat_gated(
+    tool_name: str, stepped: Callable[..., Any], *, private: bool = False,
+) -> Callable[..., Any]:
+    """Count and refuse repeats outside the durable step, once per model tool
+    call. Inside the step a refusal was retried like a network error, and each
+    retry of a failing fetch counted as a repeat of itself.
+
+    With ``private`` set, the employer gate runs first, here and not inside
+    the step, for the same reason: a refusal is an answer, not a failure."""
+
+    @functools.wraps(stepped)
+    async def gated(*args: Any, **kwargs: Any) -> Any:
+        if private:
+            refused = privacy.problem(args[1:], kwargs)
+            if refused:
+                from pydantic_ai import ModelRetry
+
+                raise ModelRetry(refused)
+        deps_now = _run_context(args)
+        if deps_now is not None and deps_now.run_id:
+            n = note_call(deps_now.run_id, tool_name, args[1:], kwargs)
+            if n >= REPEAT_REFUSED_AT:
+                from pydantic_ai import ModelRetry
+
+                raise ModelRetry(
+                    f"you have called {tool_name} with exactly these arguments"
+                    f" {n - 1} times already; the answer will not change. Use what"
+                    " it returned, change the arguments, or finish and say what is"
+                    " missing.")
+        return await stepped(*args, **kwargs)
+
+    return gated
 
 
 def _audited(tool_name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -200,15 +286,17 @@ def hq_tool(
         stepped = DBOS.step(name=f"tool.{tool_name}", **(NETWORK_RETRIES if network else {}))(
             _audited(tool_name, wrapped)
         )
+        private = privacy_gated(action, trust, network)
         TOOL_REGISTRY[tool_name] = ToolDef(
             name=tool_name,
-            fn=stepped,
+            fn=_repeat_gated(tool_name, stepped, private=private),
             action=action,
             trust=trust,
             requires_approval=action in OUTBOUND_ACTIONS,
             owner_only=owner_only,
             world_facing=world_facing,
             description=(fn.__doc__ or "").strip().splitlines()[0] if fn.__doc__ else "",
+            private=private,
         )
         return stepped
 

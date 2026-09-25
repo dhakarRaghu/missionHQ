@@ -12,12 +12,13 @@ The digest is NOT a budgeted notification: it never emits a ``notify`` event.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from hq import db, engagement, runner, safety
+from hq import db, engagement, runner, safety, value
 from hq.config import settings
 from hq.dbos_app import DBOS
 from hq.obs import emit
@@ -25,7 +26,7 @@ from hq.obs import emit
 log = logging.getLogger(__name__)
 
 LAST_SENT_KEY = "digest:last_sent"
-MAX_CHARS = 3500
+MAX_CHARS = 3900
 MAX_ITEMS = 8           # per list; the rest collapses into "…and N more"
 ITEM_TEXT_CHARS = 160
 
@@ -39,6 +40,25 @@ async def build_digest(since: datetime | None, *, now: datetime | None = None) -
     return text
 
 
+NOTE_CHARS = 2200            # a 300-word note whole, its one action included
+NOTE_DEADLINE = (23, 20)     # wait for sage's 22:30 note until here, then go without it
+
+
+def _daily_note(now: datetime) -> str:
+    """Sage's note for the day, as plain text, when it has been written. The
+    note is what he reads at night; the digest is how it reaches his phone."""
+    from hq import memory
+
+    try:
+        text = memory.read(f"daily/{now:%Y-%m-%d}.md")
+    except (OSError, ValueError):
+        return ""
+    _meta, body = memory.parse_frontmatter(text)
+    lines = [ln.lstrip("#").strip() if ln.startswith("#") else ln for ln in body.splitlines()]
+    plain = "\n".join(lines).replace("**", "").strip()
+    return plain if len(plain) <= NOTE_CHARS else plain[: NOTE_CHARS - 1].rstrip() + "…"
+
+
 async def _build(since: datetime | None, *, now: datetime | None = None
                  ) -> tuple[str, dict[str, int]]:
     tz = ZoneInfo(settings().cron_tz)
@@ -48,6 +68,8 @@ async def _build(since: datetime | None, *, now: datetime | None = None
 
     sections: list[str] = []
     counts: dict[str, int] = {}
+    note = await asyncio.to_thread(_daily_note, now)
+    counts["note"] = int(bool(note))
 
     held = await _held_messages(since)
     counts["held"] = len(held)
@@ -100,14 +122,19 @@ async def _build(since: datetime | None, *, now: datetime | None = None
         cap = settings().daily_spend_cap_usd
         sections.append(f"Spend today: ${spend:.2f} of ${cap:.2f} cap")
 
-    if not sections:
+    if not sections and not note:
         return "", counts
+    # The week in numbers rides along when there is a digest anyway; on its
+    # own it is not a reason to send one.
+    week = await _value_section(now)
+    if week:
+        sections.append(week)
 
     header = f"Mission HQ digest — {now:%Y-%m-%d}"
     week_line = await _value_week_line(now)
     if week_line:
         header += "\n" + week_line
-    body = header + "\n\n" + "\n\n".join(sections)
+    body = header + "\n\n" + "\n\n".join(([note] if note else []) + sections)
     if len(body) > MAX_CHARS:
         body = body[: MAX_CHARS - 1].rstrip() + "…"
     return body, counts
@@ -122,6 +149,16 @@ async def _value_week_line(now: datetime) -> str:
         log.warning("value week status unavailable for the digest", exc_info=True)
         return ""
     return engagement.format_status(status) if status["active"] else ""
+
+
+async def _value_section(now: datetime) -> str:
+    """The weekly value report, five lines. Empty on failure: the report must
+    not cost the owner the digest."""
+    try:
+        return value.format_report(await value.week_report(now))
+    except Exception:
+        log.warning("value report unavailable for the digest", exc_info=True)
+        return ""
 
 
 async def last_sent() -> datetime | None:
@@ -247,8 +284,14 @@ async def send_digest(*, now: datetime | None = None) -> bool:
     Returns False and sends nothing when there is nothing to report or when
     today's digest already left."""
     now = now or datetime.now(UTC)
+    local = now.astimezone(ZoneInfo(settings().cron_tz))
     text, counts = await _build(None, now=now)
     if not text:
+        return False
+    # The note is the reason the digest goes out at all. Sage's 22:30 run
+    # takes up to half an hour, so a fixed 22:50 send missed the note about
+    # half the time; the watchdog calls again each minute until it is there.
+    if not counts.get("note") and (local.hour, local.minute) < NOTE_DEADLINE:
         return False
     local_date = now.astimezone(ZoneInfo(settings().cron_tz)).strftime("%Y-%m-%d")
     queued = await _record_step(text, local_date, counts, now.astimezone(UTC).isoformat())

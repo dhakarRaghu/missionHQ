@@ -1,15 +1,18 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ShieldQuestion } from "lucide-react";
 
 import { formatBytes } from "@/components/features/vault/format";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { VaultFile, VaultFolder, VaultNode } from "@/lib/api/vault";
 import { exactTime, timeAgo } from "@/lib/time";
 
 const RECENT_LIMIT = 8;
 const QUARANTINE = "quarantine/";
+const PROPOSALS = "memory/proposals/";
+const DECISIONS = "memory/decisions.md";
 
 /** Every file in the tree, in one flat list. */
 function flatten(node: VaultNode, out: VaultFile[] = []): VaultFile[] {
@@ -52,6 +55,22 @@ export function VaultOverview({
     [files],
   );
 
+  // What actually waits on him: memory changes only he can make.
+  const proposals = useMemo(
+    () =>
+      files
+        .filter((file) => file.path.startsWith(PROPOSALS))
+        .sort((a, b) => b.path.localeCompare(a.path)),
+    [files],
+  );
+  const decisions = files.find((file) => file.path === DECISIONS);
+  // Fixed when the page opens: "this week" does not shift under him mid-read.
+  const [weekAgo] = useState(() => new Date(Date.now() - 7 * 86_400_000).toISOString());
+  const [allResearch, setAllResearch] = useState(false);
+  const research = allResearch
+    ? quarantine
+    : quarantine.filter((file) => file.mtime >= weekAgo);
+
   const recent = useMemo(
     () =>
       [...files]
@@ -76,29 +95,69 @@ export function VaultOverview({
 
   return (
     <div className="flex flex-col gap-4">
-      {quarantine.length ? (
+      {proposals.length || decisions ? (
         <Card className="border-status-approval/40">
           <CardContent className="pt-6">
             <h2 className="flex items-center gap-2 text-sm font-medium">
               <ShieldQuestion className="size-4" aria-hidden />
-              Waiting for your review
-              <span className="text-muted-foreground tabular-nums">
-                {quarantine.length}
-              </span>
+              Waiting for you
             </h2>
             <p className="text-muted-foreground mt-1 text-sm">
-              Research written from web pages. It stays out of the main vault
-              until you read it, so nothing an agent found online can become a
-              fact the other agents trust. Open one, then tell sage in chat to
-              promote or drop it.
+              Only you change the memory every agent reads. Sage proposes the
+              edits each night; you copy the ones that are right into the block.
             </p>
             <ul className="mt-3 flex flex-col gap-1">
-              {quarantine.map((file) => (
+              {proposals.map((file) => (
                 <li key={file.path}>
                   <NoteRow file={file} onSelect={onSelect} />
                 </li>
               ))}
+              {decisions ? (
+                <li>
+                  <NoteRow file={decisions} onSelect={onSelect} />
+                </li>
+              ) : null}
             </ul>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {quarantine.length ? (
+        <Card>
+          <CardContent className="pt-6">
+            <h2 className="flex items-center gap-2 text-sm font-medium">
+              Research notes
+              <span className="text-muted-foreground tabular-nums">
+                {research.length} of {quarantine.length}
+              </span>
+            </h2>
+            <p className="text-muted-foreground mt-1 text-sm">
+              Hunter&apos;s study notes and job research, written from web
+              pages. They stay in quarantine so nothing found online becomes a
+              fact other agents trust; lessons and jobs are built from them.
+              Nothing here needs you.
+            </p>
+            {research.length ? (
+              <ul className="mt-3 flex flex-col gap-1">
+                {research.map((file) => (
+                  <li key={file.path}>
+                    <NoteRow file={file} onSelect={onSelect} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground mt-3 text-sm">None this week.</p>
+            )}
+            {quarantine.length > research.length || allResearch ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-2 -ml-2"
+                onClick={() => setAllResearch((v) => !v)}
+              >
+                {allResearch ? "Show this week only" : `Show all ${quarantine.length}`}
+              </Button>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

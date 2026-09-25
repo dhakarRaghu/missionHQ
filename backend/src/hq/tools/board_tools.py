@@ -7,10 +7,19 @@ import hashlib
 from pydantic_ai import RunContext
 
 from hq import board, db, safety
-from hq.job_pipeline import discovery_brief, discovery_payload
+from hq.job_pipeline import discovery_brief, discovery_payload, families_for
 from hq.obs import emit
 from hq.safety import ActionClass
 from hq.tools.registry import HQDeps, hq_tool
+
+
+def _now_local():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from hq.config import settings
+
+    return datetime.now(ZoneInfo(settings().cron_tz))
 
 
 @hq_tool(action=ActionClass.READ)
@@ -108,6 +117,7 @@ async def start_job_search(
         query=query,
         locations=locations,
         max_roles=max_roles,
+        families=families_for(_now_local().date()),
     )
     query_label = str(payload["query"])
     task_id = await engine.dispatch(
@@ -118,7 +128,11 @@ async def start_job_search(
         parent_task_id=ctx.deps.task_id,
         origin_session_id=ctx.deps.session_id,
         payload={**payload, "run_id": ctx.deps.run_id},
-        dedup_key=f"job-search-discovery:{ctx.deps.task_id}:{ctx.deps.run_id}",
+        # A nightly start has no task or run of its own; the date keeps one
+        # discovery per night instead of one ever ("None:None").
+        dedup_key=(f"job-search-discovery:{ctx.deps.task_id}:{ctx.deps.run_id}"
+                   if ctx.deps.task_id or ctx.deps.run_id
+                   else f"job-search-discovery:system:{_now_local():%Y-%m-%d}"),
     )
     return (
         f"started browser job discovery task {task_id} for operator; "

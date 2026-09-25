@@ -58,20 +58,35 @@ async def set_agent_paused(agent: str, paused: bool) -> None:
     )
 
 
+# A run's totals from its recorded model calls (hq.model_calls, one row per
+# attempt). NULL when the run has none, so callers coalesce to what they had.
+CALLS_SUM = "(SELECT sum(mc.{col}) FROM hq.model_calls mc WHERE mc.run_id = r.id)"
+# SET clause that costs a run being closed by someone other than its workflow
+# (the watchdog, an owner cancel): what it spent before it stopped.
+CALLS_COSTED = (
+    f"input_tokens = coalesce({CALLS_SUM.format(col='input_tokens')}, r.input_tokens),"
+    f" output_tokens = coalesce({CALLS_SUM.format(col='output_tokens')}, r.output_tokens),"
+    f" cost_usd = coalesce({CALLS_SUM.format(col='cost_usd')}, r.cost_usd)"
+)
+
+
 async def spend_today_usd(agent: str | None = None) -> float:
+    """Today's spend: every recorded model call, including those of runs
+    still going, plus the cost of runs that have no call rows (the claude
+    CLI, and runs from before calls were recorded)."""
     tz = settings().cron_tz
-    if agent is None:
-        row = await db.fetchone(
-            "SELECT coalesce(sum(cost_usd), 0) AS c FROM hq.runs"
-            f" WHERE started_at AT TIME ZONE %s >= {_TODAY}",
-            (tz, tz),
-        )
-    else:
-        row = await db.fetchone(
-            "SELECT coalesce(sum(cost_usd), 0) AS c FROM hq.runs"
-            f" WHERE started_at AT TIME ZONE %s >= {_TODAY} AND agent = %s",
-            (tz, tz, agent),
-        )
+    who_calls = "" if agent is None else " AND mc.agent = %s"
+    who_runs = "" if agent is None else " AND r.agent = %s"
+    params: tuple = (tz, tz) + ((agent,) if agent else ()) + (tz, tz) + ((agent,) if agent else ())
+    row = await db.fetchone(
+        "SELECT coalesce((SELECT sum(mc.cost_usd) FROM hq.model_calls mc"
+        f"   WHERE mc.started_at AT TIME ZONE %s >= {_TODAY}{who_calls}), 0)"
+        " + coalesce((SELECT sum(r.cost_usd) FROM hq.runs r"
+        f"   WHERE r.started_at AT TIME ZONE %s >= {_TODAY}{who_runs}"
+        "   AND NOT EXISTS (SELECT 1 FROM hq.model_calls mc WHERE mc.run_id = r.id)), 0)"
+        " AS c",
+        params,
+    )
     return float(row["c"]) if row else 0.0
 
 
@@ -85,10 +100,12 @@ async def spend_cap_hit(agent: str, agent_daily_cap: float) -> str | None:
 
 
 async def notifications_sent_today() -> int:
+    """Messages queued to his phone today: outbox rows, not events. Thirty
+    alarm events in one second (2026-09-24) counted as thirty sends."""
     tz = settings().cron_tz
     row = await db.fetchone(
-        "SELECT count(*) AS n FROM hq.events"
-        f" WHERE kind = 'notify' AND ts AT TIME ZONE %s >= {_TODAY}",
+        "SELECT count(*) AS n FROM hq.outbox"
+        f" WHERE idempotency_key NOT LIKE 'digest:%%' AND created_at AT TIME ZONE %s >= {_TODAY}",
         (tz, tz),
     )
     return int(row["n"]) if row else 0

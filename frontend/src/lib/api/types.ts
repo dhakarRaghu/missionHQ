@@ -342,6 +342,13 @@ export const JOB_STATUSES = [
 
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
+export interface JobFitPart {
+  points: number;
+  note?: string;
+  lane?: string;
+  reason?: string;
+}
+
 export interface Job {
   id: string;
   company: string;
@@ -355,8 +362,14 @@ export interface Job {
   experience_band: string;
   compensation: string;
   stack: string;
-  /** 0-10 from hunter's rubric; why_fit is the sentence justifying it. */
+  /** 0-10, computed by record_job from the row's fields; `fit_parts` holds
+   * each part that moved it, and why_fit is hunter's sentence on the role. */
   fit_score: number;
+  fit_parts?: Record<string, JobFitPart | number | string | null>;
+  /** Upper bound of the package, in lakhs per annum; null when none is named. */
+  pay_lakh?: number | null;
+  /** The candidate profile's lane: software, forward_deployed, applied_ai or "". */
+  lane?: string;
   fit_bucket: "strong" | "decent" | "stretch";
   status: JobStatus;
   why_fit: string;
@@ -377,4 +390,48 @@ export interface Job {
   seen_count: number;
   first_seen: string;
   last_seen: string;
+}
+
+
+/** GET /today: what needs him, what the last night did, and this week. */
+export type NeedKind = "read" | "decide" | "review" | "post" | "apply" | "fix";
+
+export interface TodayNeed {
+  key: string;
+  kind: NeedKind;
+  title: string;
+  detail: string;
+  href: string;
+  action: string;
+  count: number;
+}
+
+export type SlotStatus =
+  | "done" | "running" | "backlog" | "needs_approval" | "blocked" | "failed"
+  | "archived" | "started" | "held" | "missed" | "due";
+
+export interface NightSlot {
+  at: string;
+  agent: string;
+  label: string;
+  status: SlotStatus;
+  detail: string;
+  task_id: string | null;
+  cost_usd: number | null;
+}
+
+export interface Today {
+  date: string;
+  needs: TodayNeed[];
+  night: { slots: NightSlot[]; cut_runs: number };
+  week: {
+    lessons_written: number | null;
+    lessons_read: number | null;
+    unread: number | null;
+    jobs_found: number | null;
+    jobs_strong: number | null;
+    jobs_applied: number | null;
+    posts_filed: number | null;
+    spend_usd: number | null;
+  };
 }

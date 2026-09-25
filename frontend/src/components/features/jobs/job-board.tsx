@@ -45,14 +45,13 @@ const ACTIVE_COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
 ];
 
 /**
- * "interviewing" is deliberately absent. The owner tracks that himself, and a
- * column that is always empty costs the three that are not a quarter of the
- * width each. The status still exists in the API and in the ledger, so a row
- * already in it is not orphaned — it simply is not a stage of this board.
+ * Interviews sit with the outcomes rather than in the active pipeline: the
+ * active view keeps its four columns at a quarter width each, and a role in
+ * interview is past everything an agent does for it. Every status is a choice
+ * on every card, so a role can be moved to any stage from either view.
  */
-const HIDDEN_STATUSES: ReadonlySet<string> = new Set(["interviewing"]);
-
 const OUTCOME_COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
+  { key: "interviewing", label: "Interviewing", hint: "Roles you are interviewing for." },
   { key: "offer", label: "Offers", hint: "Offers will appear here." },
   { key: "rejected", label: "Rejected", hint: "Rejected roles stay searchable." },
   { key: "closed", label: "Closed", hint: "Expired or closed roles stay in the ledger." },
@@ -139,12 +138,12 @@ export function JobBoard() {
           value={statusView}
           onValueChange={(value) => setStatusView(value as "active" | "outcomes")}
         >
-          <SelectTrigger size="sm" className="w-40" aria-label="Filter by status">
+          <SelectTrigger size="sm" className="w-52" aria-label="Filter by status">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="active">Active pipeline</SelectItem>
-            <SelectItem value="outcomes">Outcomes</SelectItem>
+            <SelectItem value="outcomes">Interviews and outcomes</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -171,6 +170,72 @@ export function JobBoard() {
 }
 
 type Column = { key: JobStatus; label: string; hint: string };
+
+const FIT_PART_ORDER = ["lane", "years", "stack", "domain", "pay", "geography", "adjust"];
+
+/**
+ * The score's reasons, on hover. The score is computed from the row's fields,
+ * so each point it gained or lost is named rather than asserted.
+ */
+function fitTitle(job: Job): string {
+  const parts = job.fit_parts ?? {};
+  const moved = FIT_PART_ORDER.flatMap((key) => {
+    const part = parts[key];
+    if (!part || typeof part !== "object" || !part.points) return [];
+    const sign = part.points > 0 ? "+" : "";
+    const why = part.note ?? part.lane ?? part.reason ?? "";
+    return [`${key} ${sign}${part.points}${why ? ` (${why})` : ""}`];
+  });
+  const head = `${job.fit_bucket} fit`;
+  return moved.length ? `${head}: base 5, ${moved.join(", ")}` : head;
+}
+
+type PayPart = { lakh?: number | null; estimated?: boolean; note?: string };
+type YearsPart = { floor?: number | null; note?: string };
+type MatchPart = { matched?: string[] };
+
+function part<T>(job: Job, key: string): T | undefined {
+  const value = job.fit_parts?.[key];
+  return value && typeof value === "object" ? (value as T) : undefined;
+}
+
+/** Pay as the score read it: stated, estimated, or unknown, never prose. */
+function payChip(job: Job): { label: string; stated: boolean; known: boolean; title: string } {
+  const pay = part<PayPart>(job, "pay");
+  const title = job.compensation || job.pay_signal || pay?.note || "No package named anywhere";
+  if (pay?.lakh) {
+    return pay.estimated
+      ? { label: `~${pay.lakh} LPA est.`, stated: false, known: true, title }
+      : { label: `${pay.lakh} LPA`, stated: true, known: true, title };
+  }
+  return { label: "pay unknown", stated: false, known: false, title };
+}
+
+/** The experience floor the gate read, not the sentence it came from. */
+function yearsChip(job: Job): string | null {
+  const years = part<YearsPart>(job, "years");
+  if (years?.floor !== undefined && years.floor !== null) {
+    return years.floor === 0 ? "no years floor" : `${years.floor}+ yrs`;
+  }
+  if (years?.note === "early career") return "early career";
+  return job.experience_band ? "years not stated" : null;
+}
+
+/** Why the score is what it is, in a few words: the parts that moved it. */
+function fitReasons(job: Job): string {
+  const out: string[] = [];
+  const lane = part<{ lane?: string }>(job, "lane")?.lane;
+  if (lane && lane !== "none") out.push(`${lane.replace("_", " ")} lane`);
+  const years = part<YearsPart>(job, "years")?.note;
+  if (years && years !== "not stated") out.push(years);
+  const stack = part<MatchPart>(job, "stack")?.matched ?? [];
+  if (stack.length) out.push(stack.slice(0, 2).join(", "));
+  const domain = part<MatchPart>(job, "domain")?.matched ?? [];
+  if (domain.length) out.push(domain[0]);
+  const pay = payChip(job);
+  out.push(pay.stated ? "pay stated" : pay.known ? "pay estimated" : "pay unknown");
+  return out.join(" · ");
+}
 
 /** A column of roles. */
 function BoardColumn({ column, items }: { column: Column; items: Job[] }) {
@@ -398,13 +463,18 @@ function JobCard({ job }: { job: Job }) {
             {job.company}
             {job.location ? ` · ${job.location}` : ""}
           </p>
+          {/* The score's reasons in words, so a 10 can be trusted or doubted
+              at a glance; the full breakdown stays on the score's hover. */}
+          <p className="text-muted-foreground mt-0.5 truncate text-[11px]" title={fitTitle(job)}>
+            {fitReasons(job)}
+          </p>
         </div>
         <span
           className={cn(
             "shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium tabular-nums",
             BUCKET_TONE[job.fit_bucket],
           )}
-          title={`${job.fit_bucket} fit`}
+          title={fitTitle(job)}
         >
           {job.fit_score}
         </span>
@@ -414,22 +484,6 @@ function JobCard({ job }: { job: Job }) {
           thing you scan a column of; one that runs to twenty lines because the
           agent wrote a good paragraph pushes the next role off the screen, and
           the column stops being scannable at all. */}
-      {job.why_fit ? (
-        <p
-          className="text-muted-foreground border-border line-clamp-3 border-l-2 pl-2 text-xs"
-          title={job.why_fit}
-        >
-          {job.why_fit}
-        </p>
-      ) : null}
-
-      {job.referral ? (
-        <p className="line-clamp-2 text-xs" title={job.referral}>
-          <span className="text-muted-foreground">Referral: </span>
-          {job.referral}
-        </p>
-      ) : null}
-
       {job.next_step ? (
         <p className="line-clamp-2 text-xs" title={job.next_step}>
           <span className="text-muted-foreground">Next: </span>
@@ -437,45 +491,66 @@ function JobCard({ job }: { job: Job }) {
         </p>
       ) : null}
 
-      {/* The company dig. He is employed, so "is this worth leaving for" is
-          the real question and a title cannot answer it. Absent on a weak fit
-          by design — hunter only digs at 6+. */}
-      {job.company_brief ? (
+      {job.why_fit ? (
         <p
-          className="text-muted-foreground line-clamp-2 text-xs"
-          title={job.company_brief}
+          className="text-muted-foreground border-border line-clamp-2 border-l-2 pl-2 text-xs"
+          title={job.why_fit}
         >
-          <span className="text-foreground font-medium">Company: </span>
-          {job.company_brief}
+          {job.why_fit}
         </p>
       ) : null}
 
-      {job.role_brief ? (
-        <p
-          className="text-muted-foreground line-clamp-2 text-xs"
-          title={job.role_brief}
-        >
-          <span className="text-foreground font-medium">Day to day: </span>
-          {job.role_brief}
-        </p>
-      ) : null}
+      {job.company_brief || job.role_brief || job.stack || job.referral ? (
+        <details className="group text-xs">
+          <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none select-none">
+            <span className="group-open:hidden">More about the role</span>
+            <span className="hidden group-open:inline">Less</span>
+          </summary>
+          <div className="mt-1.5 flex flex-col gap-1.5">
+          {job.referral ? (
+            <p className="line-clamp-3 text-xs" title={job.referral}>
+              <span className="text-foreground font-medium">Referral: </span>
+              {job.referral}
+            </p>
+          ) : null}
+          {/* The company dig. He is employed, so "is this worth leaving for" is
+              the real question and a title cannot answer it. Absent on a weak fit
+              by design — hunter only digs at 6+. */}
+          {job.company_brief ? (
+            <p
+              className="text-muted-foreground line-clamp-2 text-xs"
+              title={job.company_brief}
+            >
+              <span className="text-foreground font-medium">Company: </span>
+              {job.company_brief}
+            </p>
+          ) : null}
 
-      {job.stack ? (
-        <p className="text-muted-foreground truncate text-xs" title={job.stack}>
-          {job.stack}
-        </p>
+          {job.role_brief ? (
+            <p
+              className="text-muted-foreground line-clamp-2 text-xs"
+              title={job.role_brief}
+            >
+              <span className="text-foreground font-medium">Day to day: </span>
+              {job.role_brief}
+            </p>
+          ) : null}
+
+          {job.stack ? (
+            <p className="text-muted-foreground truncate text-xs" title={job.stack}>
+              {job.stack}
+            </p>
+          ) : null}
+          </div>
+        </details>
       ) : null}
 
       <div className="flex flex-wrap items-center gap-1">
         {/* max-w keeps a verbose band ("early career explicitly welcomed")
             from taking a whole row to itself and pushing the rest to the next. */}
-        {job.experience_band ? (
-          <Badge
-            variant="secondary"
-            className="max-w-36 truncate text-xs"
-            title={job.experience_band}
-          >
-            {job.experience_band}
+        {yearsChip(job) ? (
+          <Badge variant="secondary" className="text-xs" title={job.experience_band}>
+            {yearsChip(job)}
           </Badge>
         ) : null}
         {job.remote_policy ? (
@@ -489,22 +564,19 @@ function JobCard({ job }: { job: Job }) {
         ) : null}
         {/* Always rendered. A blank package is the thing worth chasing, so an
             unstated one has to be visible rather than simply absent. */}
-        <Badge
-          variant={job.compensation || job.pay_signal ? "secondary" : "outline"}
-          className={cn(
-            "max-w-44 truncate text-xs",
-            !(job.compensation || job.pay_signal) && "text-muted-foreground",
-          )}
-          title={
-            job.compensation ||
-            job.pay_signal ||
-            (job.researched_at
-              ? "Hunter looked and found no public pay signal"
-              : "Not researched yet — hunter digs at a 6+ fit")
-          }
-        >
-          {job.compensation || job.pay_signal || "no package"}
-        </Badge>
+        {(() => {
+          const pay = payChip(job);
+          return (
+            <Badge
+              variant={pay.known ? "secondary" : "outline"}
+              tone={pay.stated ? "success" : undefined}
+              className={cn("text-xs", !pay.known && "text-muted-foreground border-dashed")}
+              title={pay.title}
+            >
+              {pay.label}
+            </Badge>
+          );
+        })()}
         {job.seen_count > 1 ? (
           <span className="text-muted-foreground text-xs">
             {job.seen_count}x
@@ -553,7 +625,7 @@ function JobCard({ job }: { job: Job }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {JOB_STATUSES.filter((s) => !HIDDEN_STATUSES.has(s)).map((status) => (
+            {JOB_STATUSES.map((status) => (
               <SelectItem key={status} value={status}>
                 {status}
               </SelectItem>

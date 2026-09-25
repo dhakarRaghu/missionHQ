@@ -1,8 +1,6 @@
 # Build a new agent
 
-Use when the owner describes an agent he wants. This was a separate agent
-once; it is a skill because building an agent is a thing you do occasionally,
-not a role someone holds.
+Use when the owner describes an agent he wants.
 
 ## Before you draft anything
 

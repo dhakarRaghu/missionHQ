@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why did serving Transformers require rethinking batching itself?</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">foundation · inference-internals-phase-02a-scheduling-memory · the paper the scheduler loop came from, and the tensor argument the phase skips</div><h1>Why did serving Transformers require rethinking batching itself?</h1><p class="subtitle">What in a Transformer actually breaks when requests leave and join a batch mid-generation, and why the fix costs almost nothing</p></header>
+<p>Continuous batching reads as obvious in retrospect: when a request finishes, evict it; when capacity frees, admit a new one; repeat every decoding step. If you built a scheduler this year, that is the baseline you would start from. But in 2022 the standard engines, NVIDIA's FasterTransformer and Triton Inference Server, ran each batch as a unit from prefilled prompt to the last generated token, and capable teams shipped that on purpose.</p>
+
+<p>If the fix was so obvious, those teams would have shipped it. They did not, and the reason is not that eviction is hard to implement. It is that iteration-level scheduling makes the batch irregular: at any step, the requests you must run forward have processed different numbers of tokens. That looks like it breaks the one thing batching exists for, the ability to run many requests through the model in one set of GPU operations. The question this lesson answers is which part of the Transformer block actually breaks, because knowing that is what lets you read a claim like "36.9x higher throughput" and say where the gain lives before you believe it.</p>
+<ol class="concepts"><li id="c1"><b>Batching exists to amortize weight reads, attention has no weights, so only attention needed per-request handling and the rest flattens into one token-wise tensor.</b><span>decide which ops block irregular batches and predict where scheduling gains come from</span></li></ol>
+<h2 data-concept="c1">What did request-level scheduling waste, in a trace you can picture?</h2>
+<p class="why">Request-level scheduling wastes compute and delays clients, and you can see both in four iterations.</p>
+
+<details class="predict"><summary>Predict: a batch of two requests, one finishes at iteration 2, one at iteration 4. When can the first client's answer leave the server?</summary><p>At iteration 4. Under request-level scheduling the batch is a unit: the engine runs it until every request finishes. The finished request's slot keeps computing for two more iterations, and its client waits. This is the wrong the scheduler loop in your phase fixes.</p></details>
+
+<p>Put yourself behind a serving cluster in 2022. A client sends a prompt that needs two tokens of answer. Another sends one that needs four. Your engine batches them together, because batching is how you keep the GPU fed. Here is what the trace looks like.</p>
+
+<figure class="diagram"><svg viewBox="0 0 640 210">
+<text x="60" y="28" fill="currentColor" font-size="13">iteration</text>
+<text x="150" y="28" fill="currentColor" font-size="13">1</text>
+<text x="230" y="28" fill="currentColor" font-size="13">2</text>
+<text x="310" y="28" fill="currentColor" font-size="13">3</text>
+<text x="390" y="28" fill="currentColor" font-size="13">4</text>
+<text x="460" y="28" fill="currentColor" font-size="13">client sees</text>
+<text x="60" y="70" fill="currentColor" font-size="13">request A</text>
+<rect x="140" y="50" width="70" height="28" fill="var(--accent)" opacity="0.85"/>
+<rect x="220" y="50" width="70" height="28" fill="var(--accent)" opacity="0.85"/>
+<rect x="300" y="50" width="70" height="28" fill="var(--accent)" opacity="0.25"/>
+<rect x="380" y="50" width="70" height="28" fill="var(--accent)" opacity="0.25"/>
+<text x="460" y="70" fill="currentColor" font-size="13">iteration 4</text>
+<text x="60" y="120" fill="currentColor" font-size="13">request B</text>
+<rect x="140" y="100" width="70" height="28" fill="var(--accent)" opacity="0.85"/>
+<rect x="220" y="100" width="70" height="28" fill="var(--accent)" opacity="0.85"/>
+<rect x="300" y="100" width="70" height="28" fill="var(--accent)" opacity="0.85"/>
+<rect x="380" y="100" width="70" height="28" fill="var(--accent)" opacity="0.85"/>
+<text x="460" y="120" fill="currentColor" font-size="13">iteration 4</text>
+<line x1="140" y1="160" x2="450" y2="160" stroke="currentColor" stroke-dasharray="4 3"/>
+<text x="140" y="185" fill="currentColor" font-size="12">A's slot: 2 useful iterations, 2 wasted (pale boxes)</text>
+</svg><figcaption>Static batching, two requests (Orca Figure 3, redrawn). A finishes at iteration 2 but its slot runs uselessly twice more, and its answer ships only when B finishes.</figcaption></figure>
+
+<p>Two distinct wastes hide in this picture, and they have different victims. First, the finished request cannot return. Request A produced its last token at iteration 2, but the client waits two more iterations, and the GPU spends those iterations computing a slot that produces nothing.</p>
+
+<p>Second, late joiners queue behind someone else's output length. A request arriving at iteration 2 waits until iteration 4, because the current batch runs to completion as a unit. Queueing delay now scales with the longest generation in flight, a number the new request has nothing to do with.</p>
+
+<p>Both wastes come from one design choice: the batch boundary is the request, not the iteration. For ResNet or BERT this cost nothing, because every request needs exactly one forward pass and the whole batch finishes together. Autoregressive generation breaks the assumption. Each request needs an unknown number of iterations, so a fixed batch guarantees that some slots outlive their requests and some arrivals outwait them.</p>
+
+<details class="evidence"><summary>Evidence</summary><p>Two-request trace: Orca, OSDI '22, Figure 3 and §2 (verified, paper text via the ASa Book rendering). The scheduled systems named as request-granular are NVIDIA FasterTransformer with Triton Inference Server and TensorFlow Serving.</p></details>
+
+<div class="keypoints">
+<p class="remember">A fixed batch makes short requests pay the longest request's bill.</p>
+<p class="trap">Thinking the short request's answer ships when it finishes; it ships when the batch finishes.</p>
+<p class="try">Draw your last batch as boxes per iteration; count the pale, wasted ones.</p>
+</div>
+<h2 data-concept="c1">Why did running one iteration at a time look impossible?</h2>
+<p class="why">The irregular batch has exactly one blocker, and it is not a weight layer.</p>
+
+<p>Scheduling one iteration at a time frees the scheduler, but it breaks the tensor. Every request now sits at a different token position within the same iteration. A GPU kernel expects one rectangular tensor, and this batch is not rectangular.</p>
+
+<details class="predict"><summary>Predict: request A is 12 tokens in, B is at token 3, C just arrived. Which operation in the block stops you from running all three as one flat tensor?</summary>
+<p>The natural guess is a weight-bearing layer, since weights dominate the model. In fact every weighted op flattens without complaint. The blocker is attention: the one operation with no weights of its own. A Linear maps each token's vector independently, so rows from different requests never meet. But A's twelfth token must attend to A's past tokens, and only A's. The request boundary lives in exactly one place.</p>
+</details>
+
+<p>Start from why batching pays at all. Weights live in GPU memory, and reading them costs time. A batch reads the weight matrix once and spends that read across every token. Amortizing weight reads is the whole benefit.</p>
+
+<p>Linear, LayerNorm, Add and GeLU are position-wise: each output row comes from one input row. No row cares which request produced it. So flatten the batch into one token-wise tensor of shape [ΣL, H], where ΣL counts all tokens in the iteration. Four requests holding seven tokens become a single [7, H] tensor.</p>
+
+<p>The Q, K and V projections are Linear layers, so they flatten with the rest. The remaining score computation has no parameters, and the paper says so in one sentence. <em>"Since the Attention operation is not associated with any model parameters, applying batching to Attention has no benefit of reducing the amount of GPU memory reads by reusing the loaded parameters across multiple requests."</em> Per-request attention gives up no amortization, because there are no weights to amortize. One rule remains: a token never scores against another request's keys.</p>
+
+<p>That leaves the execution shape: Split the flat tensor per request, attend each against its own stored keys and values, then Merge back into [7, H]. Orca calls this selective batching.</p>
+
+<pre class="ascii">req A   a1 a2 a3 ─┐
+req B   b1 b2 ────┤
+req C   c1 ───────┼──► flatten to one tensor [7, H]
+req D   d1 ───────┘
+                          │
+                          ▼
+              ┌─────────────────────────────┐
+              │  QKV Linear · LayerNorm · MLP │   weights read once, spent on all 7 rows
+              └─────────────────────────────┘
+                          │
+                        Split
+              ┌──────┬─────┴─────┬──────┐
+              ▼      ▼           ▼      ▼
+            attn A attn B      attn C attn D    each reads only its own stored K/V
+              └──────┴─────┬─────┴──────┘
+                        Merge
+                          │
+                          ▼
+                    [7, H] ──► next layer</pre>
+
+<p>Redrawn from Orca Figure 5. vLLM kept this shape: it concatenates all current-iteration tokens into one flat sequence before the forward pass (vLLM paper, §4.3). In the lab you will find both the flattening and the per-request attention in a server you can run. The question to answer there: did Figure 5's shape survive into the running system?</p>
+
+<details class="evidence"><summary>Evidence</summary><p>Flattened [ΣL, H] execution with Split and Merge around attention, and the quoted sentence: Orca, OSDI '22, §3 and Figure 5 (verified through the ASa Book rendering of the paper). The flat-sequence forward pass in vLLM: vLLM paper §4.3 (verified text).</p></details>
+
+<div class="keypoints">
+<p class="remember">Attention has no weights, so running it per request costs almost nothing.</p>
+<p class="trap">Thinking continuous batching is scheduler code alone, with the model math untouched.</p>
+<p class="try">List a Transformer block's ops and circle the one that cannot flatten.</p>
+</div>
+<h2 data-concept="c1">What does the 36.9x number actually claim, and what did the paper leave open?</h2>
+<p class="why">The 36.9x is a scheduling-efficiency claim with a baseline attached, not a general speedup.</p>
+
+<p>You have Orca's two ideas now: iteration-level scheduling and selective batching. The paper's abstract reports what they bought together: 36.9x throughput over NVIDIA FasterTransformer at the same level of latency, on a GPT-3 175B model. The baseline is the era's request-granularity scheduler, and latency is held fixed.</p>
+
+<p>Two further conditions come from reading notes, not the paper text (unconfirmed). Runs used synthesized client request traces and models matching the GPT-3 architecture at 13B, 101B, 175B and 341B, because real GPT-3 checkpoints were not public. Read 36.9x as a scheduling-efficiency result at one architecture, not a measurement of a production GPT-3.</p>
+
+<p>The paper leaves one hole unmeasured. Nothing in the design manages where K/V states sit. Reading notes say they are pre-reserved per request (secondary). vLLM's verified text confirms earlier systems reserve a chunk for the maximum sequence length.</p>
+
+<details class="predict"><summary>Predict: an Orca-style server pre-reserves each request's full K/V in GPU memory. What fraction of it held real tokens? Guess a percentage.</summary>
+<p>Well over half is the reasonable guess. The measured answer: only 20.4 to 38.2 percent of the K/V cache memory held actual token states. The rest was reserved for tokens never emitted, or lost to fragmentation between fixed chunks.</p>
+</details>
+
+<div class="stats">
+<div class="stat"><b>36.9x</b><span>throughput over FasterTransformer, same latency, GPT-3 175B (Orca abstract)</span></div>
+<div class="stat"><b>20.4–38.2%</b><span>of reserved K/V memory holding real token states (vLLM Fig. 2)</span></div>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>36.9x is a verified quote from the Orca abstract: "36.9× throughput improvement at the same level of latency" on a GPT-3 175B model. Trace and checkpoint conditions: lingyunyang reading notes, secondary. 20.4-38.2%: vLLM paper §3.1 and Fig. 2, verified in its text.</p>
+</details>
+
+<p>So scheduling was half the problem. A server can swap requests every iteration and still waste most of the memory that decides how many requests fit. vLLM runs into exactly that hole: the paged K/V section next takes it from there.</p>
+
+<p>Practice this reading on a number already in your material. Anyscale re-measured continuous batching independently: OPT-13B, one A100 40GB, 1000 requests, 512 input tokens, output lengths exponential with mean 128. There vLLM reads up to 23x over naive static batching. Continuous batching alone reads about 8x over naive, and about 4x over FasterTransformer-style optimized static batching. Same mechanism, different baseline, different headline.</p>
+
+<div class="keypoints">
+<p class="remember">36.9x means: Orca versus the old request-level scheduler, equal latency, GPT-3 175B.</p>
+<p class="trap">Believing "36.9x faster serving" loses the baseline, the latency condition, and the idle memory.</p>
+<p class="try">Take Anyscale's 23x claim, name its baseline and conditions, then swap the baseline.</p>
+</div>
+<h2 data-kind="orientation">What this changes in the course</h2>
+<p>Your phase teaches continuous batching as a scheduler feature: swap requests in and out between decode steps. The paper shows that is only half of it. The deeper move is a tensor-layout argument. Requests of different lengths cannot share one tensor. So you flatten every operation except attention into one [ΣL, H] tensor and split only where attention needs request boundaries. The scheduler decides who runs. The layout decides that an irregular batch is runnable at all.</p>
+
+<p>That reframing explains why Phase 2A has a memory half. Once lengths vary freely, each request still holds state across iterations: its growing K/V. Orca left that state pre-reserved and unmanaged. vLLM later measured only 20.4 to 38.2 percent of it holding real tokens. Scheduling fixed when requests move. Memory layout fixed how much room they have to exist.</p>
+
+<p>Keep both layers in mind going forward. When you read any serving engine, ask two questions. First: what is the scheduling granularity? Second: how is per-request state stored across iterations? Orca answered the first and ignored the second. The next section is the answer to the second, and it borrows its idea from operating systems: pages.</p>
+<h2 data-kind="lab">Lab: find the Split and Merge in a server you can run</h2>
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>L1</b> <span class="tag">offline</span></label>
+Get the vLLM source. The repository is public: <code>https://github.com/vllm-project/vllm</code>. A shallow clone or an already installed copy both work. You are reading, not running, so no GPU is needed.</li>
+
+<li><label><input type="checkbox"> <b>L2</b> <span class="tag">offline</span></label>
+Find the flatten. Search the model-execution path for where the tokens queued in the current iteration are gathered into one tensor before the model's forward pass. You are looking for Orca Figure 5's left half: every request's current token laid end to end, one [ΣL, H] tensor through Linear, LayerNorm and the MLP, regardless of how many tokens each request has already produced. The vLLM paper states this shape directly: it concatenates all current-iteration tokens into one sequence before running the model.</li>
+
+<li><label><input type="checkbox"> <b>L3</b> <span class="tag">offline</span></label>
+Find the Split. Trace where the flattened tensor reaches attention. There the shared path must end: the attention kernel reads per-request state. In vLLM each request walks its own block table, a logical-to-physical map over fixed-size KV blocks, and attends against its own stored K/V block by block. That per-request loop is the Split. The return to one flat tensor for the next linear layer is the Merge.</li>
+
+<li><label><input type="checkbox"> <b>L4</b> <span class="tag">offline</span></label>
+Write down your two answers as file and function names: where flat tokens are built, and where per-request KV is read. Then answer one question from the previous sections: why is this split exactly at attention and not at the MLP? The reason from the paper: attention has no model parameters, so batching it saves no weight reads. Everything with weights stays flat.</li>
+</ul>
+
+<div class="callout tip">
+If the source layout has shifted since these notes were written, work from the papers instead. Orca's Figure 5 and section 3.1 of the vLLM paper describe the same two shapes. The names in the code change; the [ΣL, H] tensor and the per-request attention loop survive, because the mechanism requires them.
+</div>
+
+<p>Fifteen minutes. If you find the flat tensor but not the per-request KV read, that is enough: you have confirmed the shape that makes an irregular batch runnable. The KV half is where Section 2.2 picks up.</p>
+<h2 data-kind="checkpoint">Checkpoint</h2>
+<p>Two questions. Use the mechanism, then open the answer.</p>
+
+<p><b>Q1.</b> Your teammate profiles decode and sees the attention kernel at low utilization. He proposes a custom kernel that batches attention across requests, so all queries in the iteration run in one call. Can this give the gain he expects, and what would you measure first?</p>
+
+<details class="answer" id="s6-a1">
+<summary>Answer sketch</summary>
+<p>Batching attention does not amortize weight reads, because attention has no weights. The redundant work batching removes is reading model parameters once per request, and attention loads only the per-request K/V, which is already different per request. Merging requests into one kernel call cannot remove those reads. So the expected gain is small: at best, fewer kernel launches and better scheduling inside the launch.</p>
+<p>Measure first whether attention is slow <i>because</i> it is memory-bound on K/V reads or because of launch overhead. On decode, each request's query is one token, so the kernel reads megabytes of K/V to multiply against a vector of length one. It is memory-bound, and utilization of compute units being low is the expected state, not a fixable defect. If launch overhead were the cause, you would see idle gaps between kernels, not a slow kernel.</p>
+</details>
+
+<p><b>Q2.</b> A colleague reads the Orca result and concludes the 36.9x came from splitting and merging tensors around attention. What is his mistake?</p>
+
+<details class="answer" id="s6-a2">
+<summary>Answer sketch</summary>
+<p>Selective batching is what made iteration-level scheduling possible; it is not what bought the throughput. The 36.9x against FasterTransformer on GPT-3 175B at similar latency comes from scheduling: finished requests leave immediately and new requests join at the next iteration, so the GPU stops computing dead slots. The Split and Merge changed no math and saved no work by itself. It removed the excuse for keeping batches fixed. Also note the conditions on the number itself: synthesized request traces, and models matching the GPT-3 architecture rather than real GPT-3 weights (secondary, from reading notes). Treat 36.9x as a scheduling-efficiency number against a 2022 baseline, not a universal gain.</p>
+</details>
+<h2 data-kind="post">Post</h2>
+<div class="post">
+<p><b>Post 1.</b> Serving Transformers needed new batching for one reason. Batching exists to amortize weight reads, and attention has no weights. Orca flattens every request's tokens into one [ΣL, H] tensor, runs Linear and LayerNorm on all of it, Splits for per-request attention, Merges back. The irregular batch stops being a problem. Yours because you can draw the Split/Merge shape and point at it in vLLM's source.</p>
+<p><b>Post 2.</b> "36.9x faster" is a headline with a baseline attached. Orca beats FasterTransformer 36.9x in throughput at similar latency, on GPT-3 175B, with synthesized traces. The number measures scheduling waste in the 2022 baseline, not a production speedup. Read every systems paper this way: the multiplier only means what its baseline wastes. Yours because you read the primary source and kept its conditions.</p>
+</div>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+<li><a href="https://www.usenix.org/conference/osdi22/presentation/yu">Orca, OSDI '22 paper page (usenix.org/conference/osdi22/presentation/yu)</a>. Gave the 36.9x abstract quote and the Split/Merge mechanism, both verified. The note could not open the PDF's section 6; the synthesized-trace and no-real-checkpoint conditions come from reading notes and are secondary.</li>
+<li><a href="https://arxiv.org/abs/2309.06180">vLLM / PagedAttention, arXiv 2309.06180</a>. Gave the 20.4 to 38.2 percent memory-waste measurement, verified in the paper text, and the Orca-Oracle baselines. The per-figure eval numbers past section 4.5 are secondary via a write-up.</li>
+<li><a href="https://www.anyscale.com/blog/continuous-batching-llm-inference">Anyscale continuous-batching benchmark</a>. Gave the independent reproduction: about 8x over static batching with continuous batching alone, about 23x with vLLM, OPT-13B on one A100 40GB.</li>
+</ul>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

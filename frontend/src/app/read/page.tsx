@@ -14,6 +14,8 @@ import {
   type ReaderArticle,
   type ReaderPhase,
 } from "@/lib/reader";
+import { markedReadHere } from "@/lib/reader-sync";
+import { useReaderSync } from "@/hooks/use-reader-sync";
 
 /**
  * The library, built for a phone.
@@ -24,10 +26,14 @@ import {
  * backend it cannot reach. `providers.tsx` exempts this path by name.
  *
  * It reads `public/reader`, which he exports and pushes. So this page has no
- * Teach button, no Mark as read and no live feed: every one of those is a
- * write to a machine that is not in the picture. Reading is the whole job.
+ * Teach button and no live feed: those need the backend. The two things he
+ * does while reading, "Mark read" and a tap per concept, live on the lesson
+ * page and reach the backend through `lib/reader-sync.ts` when the phone is
+ * on his tailnet; loading this page sends whatever was kept meanwhile. A
+ * lesson he marked read here shows as read before the next export says so.
  */
 export default function ReadPage() {
+  useReaderSync();
   const index = useQuery({
     queryKey: readerKeys.index,
     queryFn: readerApi.index,
@@ -131,7 +137,7 @@ function Row({
     >
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm leading-snug font-medium">{lesson.title}</p>
-        {lesson.read ? (
+        {lesson.read || markedReadHere(lesson.file) ? (
           <Badge variant="outline" className="shrink-0 text-[10px]">
             Read
           </Badge>

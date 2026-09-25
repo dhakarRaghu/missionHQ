@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import BaseModel
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 REPO_DIR = BACKEND_DIR.parent
@@ -26,6 +28,10 @@ class Settings(BaseSettings):
 
     gateway_base_url: str = ""
     gateway_api_key: str = ""
+    # Requests the gateway key allows at once. Every chat, embedding and judge
+    # call waits for one of these before it is sent, so the backend never
+    # overfills the key's slot table and has to wait out 429s instead.
+    gateway_parallel: int = 5
     openai_api_key: str = ""
     grid_api_key: str = ""
 
@@ -51,24 +57,8 @@ class Settings(BaseSettings):
     bind_host: str = "127.0.0.1"
     bind_port: int = 8000
 
-    # --- claude runtime (agents with `runtime: claude` in job.md) -------------
-    # Hands one task to the Claude Code CLI, which can drive the browser you
-    # are signed into through the Claude in Chrome extension. Needs a desktop
-    # session, so it is off unless a machine actually has that set up.
-    claude_runtime_enabled: bool = False
-    claude_cli_path: str = "claude"
-    # Only these tools. Headless mode refuses anything unlisted rather than
-    # asking, so this list is the whole permission model for that process.
-    # Browser tools only: Claude reads, Mission HQ writes through its gates.
-    claude_allowed_tools: str = "mcp__claude-in-chrome__*"
-    claude_max_turns: int = 25
-    # A hard ceiling in real dollars. A run that cannot reach a browser burns
-    # money discovering that, so this is not optional.
-    claude_max_budget_usd: float = 1.00
-    claude_timeout_s: float = 600.0
-
     # --- codex runtime (agents with `runtime: codex` in job.md) ---------------
-    # Same job as the claude runtime: reach a browser the owner is signed into.
+    # Reach a browser the owner is signed into.
     # Which CLI a machine can use is a per-machine fact, so both exist.
     codex_runtime_enabled: bool = False
     codex_cli_path: str = "codex"
@@ -89,6 +79,10 @@ class Settings(BaseSettings):
     # CODEX_CONFIG="model_provider=juspay,model=open-large".
     codex_model: str = ""
     codex_config: str = ""
+    # Codex's working directory (`--cd`) for operator. Codex reads AGENTS.md
+    # from it, so the card is copied here before every run. Not the vault:
+    # the vault indexes, lists and commits every .md in it.
+    operator_workdir: Path = REPO_DIR / "data" / "operator"
     # Hours an approval of an external-runtime agent stays good for. The owner
     # asked to be able to say "go" once rather than per run, and this agent
     # only reads. 0 asks every time. It never covers acting on the world:
@@ -185,10 +179,11 @@ class Settings(BaseSettings):
     # His own study platform. The catalogue at /api/study is public; the phase
     # pages are readable by slug. Tutor works through them one phase a day.
     study_api_base: str = "https://raghu-monitoring.vercel.app"
-    # Never named in anything written for him to read or post: his current
-    # and former employers. His older platform courses name the former one;
-    # an enhanced page built from them must not. Checked by code, not prose.
-    private_employers: tuple[str, ...] = ("Mindtickle", "Juspay")
+    # His current and former employers. Never named in anything an agent
+    # loads, writes, searches or posts (``hq.privacy`` is the one gate). The
+    # names live only in .env as PRIVATE_EMPLOYERS, comma-separated, so no
+    # prompt, source line or test in this repo carries them.
+    private_employers: Annotated[tuple[str, ...], NoDecode] = ()
     # His own site, beside this repo. Posts are written into its content
     # folder and never committed or pushed from here: publishing is his.
     portfolio_dir: Path = REPO_DIR.parent / "portfolio"
@@ -198,6 +193,18 @@ class Settings(BaseSettings):
     # Defaults applied when an agent manifest omits caps
     default_caps: Caps = Caps()
 
+
+    @field_validator("private_employers", mode="before")
+    @classmethod
+    def _split_employers(cls, v: object) -> object:
+        """``PRIVATE_EMPLOYERS=A Corp,B Inc`` in .env; blanks dropped. A JSON
+        list (``["A Corp","B Inc"]``) is read too."""
+        if isinstance(v, str):
+            text = v.strip()
+            if text.startswith("["):
+                return tuple(str(n).strip() for n in json.loads(text) if str(n).strip())
+            return tuple(n.strip() for n in text.split(",") if n.strip())
+        return v
 
 @lru_cache
 def settings() -> Settings:

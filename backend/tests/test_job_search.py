@@ -4,6 +4,7 @@ import json
 import pytest
 
 from hq import engine
+from hq.assemble import assemble
 from hq.board import ALLOWED, VALID_STATUSES
 from hq.config import settings
 from hq.db import load_migrations
@@ -22,7 +23,7 @@ from hq.job_pipeline import (
     verification_brief,
     verification_payload,
 )
-from hq.loader import AgentSpec, instructions_for, scan
+from hq.loader import AgentSpec, scan
 from hq.tools.job_tools import STATUSES as JOB_TOOL_STATUSES
 from hq.tools.job_tools import _dedupe_key, min_years_required, senior_title
 from hq.tools.registry import OUTBOUND_ACTIONS, TOOL_REGISTRY, WEB_FORBIDDEN_TOOLS
@@ -390,7 +391,7 @@ def test_candidate_profile_is_injected_from_agent_folder(tmp_path) -> None:
     (profile_dir / "candidate-profile.md").write_text("# Candidate profile\nSDE-1")
     spec = AgentSpec(name="hunter", dir=tmp_path, system_prompt="Find roles")
 
-    instructions = instructions_for(spec)
+    instructions = assemble("agent", spec).text
 
     assert (
         "# Candidate profile (owner-provided; use as the source of truth)"
@@ -778,8 +779,11 @@ def test_discovery_runs_four_searches_for_twenty_roles() -> None:
     assert "Go straight to one LinkedIn jobs search" not in brief
     assert "Maximum candidates: 20" in brief
     assert "max_roles: int = 20" in inspect.getsource(board_tools)
-    sage = pathlib.Path(__file__).resolve().parents[2] / "agents" / "sage" / "job.md"
-    assert "and max_roles 20." in sage.read_text()
+    from hq import engine
+
+    job = next(d for d in engine.SYSTEM_DISPATCHES if d[0] == "job_search")
+    assert job[2] == "start_job_search" and job[3]["max_roles"] == 20
+    assert pathlib.Path  # the nightly discovery is a code schedule, not a sage prompt
 
 
 def test_a_level_two_title_is_the_wrong_rung() -> None:

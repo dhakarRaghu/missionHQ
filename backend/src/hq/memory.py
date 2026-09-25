@@ -28,13 +28,17 @@ from zoneinfo import ZoneInfo
 import psycopg
 import yaml
 
-from hq import db, llm
+from hq import db, llm, privacy
 from hq.config import settings
 
 log = logging.getLogger(__name__)
 
 # Core memory blocks: hard size caps are the feature (Letta lesson).
-BLOCK_CAPS = {"memory/user.md": 4000, "memory/active_projects.md": 6000, "memory/rules.md": 4000}
+BLOCK_CAPS = {
+    "memory/user.md": 4000,
+    "memory/decisions.md": 4000,
+    "memory/active_projects.md": 4000,
+}
 # Per-agent working memory: memory/agents/<name>.md. One small block an agent
 # rewrites at the end of every run so it never forgets its own last run. It is
 # the agent's own scratch, not trusted shared memory: never injected into
@@ -43,9 +47,12 @@ WORKING_MEMORY_CAP = 2000
 WORKING_MEMORY_DIR = "memory/agents/"
 _WORKING_MEMORY_RE = re.compile(r"^memory/agents/([A-Za-z0-9_-]+)\.md$")
 
-# Blocks no agent may write. Rules come only from the owner (policy tools or a
-# direct edit), so a poisoned or over-eager run can never mint a standing rule.
-OWNER_ONLY = frozenset({"memory/rules.md"})
+# Blocks no agent may write. Every agent reads them on every run, so a line
+# in one is a standing instruction: only the owner writes them. Consolidation
+# proposes changes in PROPOSALS_DIR and he promotes what he agrees with, so a
+# poisoned or over-eager run can never mint a permanent instruction.
+OWNER_ONLY = frozenset(BLOCK_CAPS)
+PROPOSALS_DIR = "memory/proposals/"
 MEMORY_PREFIX = "memory/"
 # Destructive-edit gate: a rewrite of a memory note that drops more than this
 # share of its existing non-empty lines is refused (write-time consolidation
@@ -261,6 +268,16 @@ def stamp_frontmatter(
     return render_frontmatter(stamped, body)
 
 
+def from_web(rel_path: str, text: str) -> bool:
+    """True for a note that carries web-derived text: anything in quarantine/,
+    and any note code stamped ``provenance: web`` (its run read the web or the
+    owner's browser). Such a note is data; it never feeds shared memory."""
+    if rel_path.startswith("quarantine/"):
+        return True
+    meta, _body = parse_frontmatter(text)
+    return str(meta.get("provenance", "")).strip().lower() == "web"
+
+
 def quarantine_problem(rel_path: str, meta: dict[str, Any]) -> str | None:
     """quarantine/ notes hold web-derived text and must cite their sources:
     a non-empty ``source_urls`` list is required in the agent's frontmatter."""
@@ -309,13 +326,19 @@ def write_problem(rel_path: str, content: str, *, actor: str, existing: str | No
     """Every code gate that needs only the target path, the new content and
     the current content: owner-only block, memory-block cap (``block_cap``),
     future date in the filename, future date in a heading, destructive edit.
-    ``actor == 'owner'`` skips the owner-only, future-heading and destructive
-    gates (the owner may rewrite anything). Returns the refusal text or None."""
+    Also the employer gate (``hq.privacy``) for every writer but the owner.
+    ``actor == 'owner'`` skips the owner-only, employer, future-heading and
+    destructive gates (the owner may rewrite anything). Returns the refusal text or None."""
     if actor != "owner" and rel_path in OWNER_ONLY:
         return (
-            f"refused: {rel_path} is owner-only. Rules come from the owner or the policy"
-            " tools; agents never write this block"
+            f"refused: {rel_path} is owner-only; agents never write a shared memory"
+            f" block. Write the change you want as a proposal in"
+            f" {PROPOSALS_DIR}<YYYY-MM-DD>.md and the owner promotes it"
         )
+    if actor != "owner":
+        refused = privacy.problem(rel_path, content)
+        if refused:
+            return refused
     cap = block_cap(rel_path)
     if cap is not None and len(content) > cap:
         return (
@@ -444,12 +467,15 @@ def block_status() -> list[dict]:
     return rows
 
 
-def load_core_blocks() -> str:
-    """Concatenated memory blocks injected into every agent's instructions.
+def load_core_blocks(names: list[str] | None = None) -> str:
+    """Memory blocks injected into an agent's instructions. ``names`` picks
+    blocks by file stem ("user", "decisions", ...); None means every block.
     Each heading carries ``(N/CAP chars)`` so agents see how full a block is
     before they try to add to it."""
     parts = []
     for rel, cap in BLOCK_CAPS.items():
+        if names is not None and Path(rel).stem not in names:
+            continue
         p = _vault() / rel
         if p.exists():
             text = p.read_text()
@@ -517,7 +543,15 @@ async def _replace_chunks(conn: psycopg.AsyncConnection, rel_path: str,
     """Make the rows for ``rel_path`` equal ``chunks``. Rows whose
     (chunk_no, heading, body) are unchanged are left alone so they keep their
     embedding; only changed or new chunks are rewritten (embedding NULL until
-    ``_embed_missing`` fills it). Returns the number of rows rewritten."""
+    ``_embed_missing`` fills it). Returns the number of rows rewritten.
+
+    One writer per path at a time: two runs writing the same note in the same
+    minute (the daily note and consolidation, 2026-09-24 05:15) both read the
+    old rows, both inserted chunk 0, and the second failed its workflow on a
+    unique violation. The lock is held to the end of the caller's transaction.
+    """
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtext('memory_chunks:' || %s))",
+                       (rel_path,))
     cur = await conn.execute(
         "SELECT chunk_no, heading, body FROM hq.memory_chunks WHERE path = %s", (rel_path,)
     )
@@ -533,7 +567,8 @@ async def _replace_chunks(conn: psycopg.AsyncConnection, rel_path: str,
         async with conn.cursor() as cur2:
             await cur2.executemany(
                 "INSERT INTO hq.memory_chunks (path, chunk_no, heading, body)"
-                " VALUES (%s, %s, %s, %s)",
+                " VALUES (%s, %s, %s, %s) ON CONFLICT (path, chunk_no) DO UPDATE"
+                " SET heading = EXCLUDED.heading, body = EXCLUDED.body, embedding = NULL",
                 changed,
             )
     return len(changed)

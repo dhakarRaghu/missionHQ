@@ -3,7 +3,7 @@
 ``vault_write`` is the write path every agent uses, so the memory-layer gates
 live here and in ``memory.write_problem``:
 
-- scope check (``in_scope``), owner-only blocks (``memory/rules.md``),
+- scope check (``in_scope``), owner-only blocks (``memory.OWNER_ONLY``),
   memory-block caps, future dates in filenames, destructive-edit gate for
   memory notes: all refused with ``ModelRetry`` so the agent adapts.
 - provenance + dates on every AI-written note outside memory/: code merges
@@ -20,7 +20,7 @@ import time
 
 from pydantic_ai import ModelRetry, RunContext
 
-from hq import memory
+from hq import memory, voice
 from hq.config import settings
 from hq.safety import ActionClass, Trust
 from hq.tools.policy_tools import _run_read_web as run_read_web
@@ -42,7 +42,7 @@ def _folder_entries(path: str) -> list[str]:
 # failed reads in one run). Name the tool that does reach them.
 _REPO_PATHS = {
     "learning/lessons": "lessons are read with read_lesson; list_lessons gives the paths",
-    "learning/courses": "course specs are read with read_course_spec",
+    "learning/courses": "course specs are not read by agents",
     "learning/study-material": "course sources are read with read_course_source",
     "learning/sources.md": "the roster is not readable by a tool; the part you need"
                            " arrives inside your brief",
@@ -83,7 +83,7 @@ async def vault_read(ctx: RunContext[HQDeps], path: str) -> str:
         raise ModelRetry(str(exc)) from None
 
 
-def _list_notes(folder: str, since_days: int) -> list[dict]:
+def _list_notes(folder: str, since_days: int, trusted_only: bool = False) -> list[dict]:
     root = memory._vault().resolve()
     base = memory._safe_path(folder) if folder else root
     if not base.exists():
@@ -98,8 +98,11 @@ def _list_notes(folder: str, since_days: int) -> list[dict]:
         st = p.stat()
         if cutoff is not None and st.st_mtime < cutoff:
             continue
+        rel = p.resolve().relative_to(root).as_posix()
+        if trusted_only and memory.from_web(rel, p.read_text(errors="replace")):
+            continue
         rows.append({
-            "path": p.resolve().relative_to(root).as_posix(),
+            "path": rel,
             "size": st.st_size,
             "mtime": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(st.st_mtime)),
         })
@@ -108,13 +111,18 @@ def _list_notes(folder: str, since_days: int) -> list[dict]:
 
 
 @hq_tool(action=ActionClass.READ, trust=Trust.VAULT)
-async def vault_list(ctx: RunContext[HQDeps], folder: str = "", since_days: int = 0) -> list[dict]:
+async def vault_list(
+    ctx: RunContext[HQDeps], folder: str = "", since_days: int = 0, trusted_only: bool = False,
+) -> list[dict]:
     """List markdown notes under a vault folder (recursive): path, size in bytes,
     mtime (newest first). folder="" means the whole vault. since_days > 0 keeps
-    only notes modified in the last N days. One call replaces many searches
-    when you only need to know what exists or what changed recently."""
+    only notes modified in the last N days. trusted_only drops every note that
+    carries web-derived text (quarantine/ and anything stamped provenance: web).
+    One call replaces many searches when you only need to know what exists or
+    what changed recently."""
     try:
-        return await asyncio.to_thread(_list_notes, folder, max(0, int(since_days)))
+        return await asyncio.to_thread(
+            _list_notes, folder, max(0, int(since_days)), bool(trusted_only))
     except FileNotFoundError:
         raise ModelRetry(_missing_note(folder) if folder.strip().lstrip('./').startswith('learning')
                          else f"no folder {folder!r} in the vault; call vault_list with"
@@ -149,17 +157,39 @@ async def vault_write(ctx: RunContext[HQDeps], path: str, content: str) -> str:
     this agent's write scope. Notes outside memory/ get frontmatter with
     created, author and provenance set by code; quarantine/ notes must carry a
     source_urls list. Rewrites of memory/ notes may not drop more than 30% of
-    the existing lines; memory/rules.md is owner-only."""
+    the existing lines. The shared memory blocks (memory/user.md,
+    memory/decisions.md, memory/active_projects.md) are owner-only: propose a
+    change in memory/proposals/<YYYY-MM-DD>.md instead. Nothing written may
+    name the owner's employers."""
     scopes = ctx.deps.vault_write_scopes
     try:
         rel = memory.normalize(path)
     except PermissionError as exc:
         raise ModelRetry(str(exc)) from None
+    if rel.startswith("quarantine/") and rel.endswith("-study.md"):
+        # A study note is the text of a reply, filed by file_study_note. Sent
+        # as this tool's argument it is generated in silence and can be cut
+        # at the idle limit; hunter also rewrote a filed 13k-character note
+        # through here, paying for it twice.
+        raise ModelRetry(
+            "study notes are filed with file_study_note: write the note as the text of"
+            " your reply and call file_study_note in that same reply. Calling it again"
+            " replaces the note")
     if not memory.in_scope(rel, scopes):
         # A retry hint, not a crash: the agent learns its scope and adapts.
         raise ModelRetry(
             f"refused: agent {ctx.deps.agent} may only write inside {scopes or ['(nothing)']}"
         )
+    # A content draft is his voice or it is not written. Checked on what the
+    # agent wrote, before frontmatter is stamped, the way publish_post checks
+    # a post before it reaches his site.
+    if voice.is_draft_path(rel):
+        off = voice.register_problems(content)
+        if off:
+            raise ModelRetry(
+                "this draft is not in his register: " + "; ".join(off)
+                + ". Rewrite it the way he writes, then call vault_write again"
+            )
     warnings: list[str] = []
     try:
         if not memory.is_memory_note(rel):

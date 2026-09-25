@@ -104,7 +104,14 @@ export function LearnView() {
   const [mode, setMode] = useState<"page" | "text">("page");
 
   const list = lessons.data ?? [];
-  const current = list.find((l) => l.id === selected) ?? list[0];
+  // The day's reading is the newest article. A lab card or week review is
+  // a page he works or recalls from, reached from the drawer; on 2026-09-24
+  // a week review written after the article opened by default and read as
+  // "today's article", which it is not.
+  const current =
+    list.find((l) => l.id === selected) ??
+    list.find((l) => l.kind === "topic") ??
+    list[0];
 
   if (lessons.isPending) {
     return (
@@ -264,13 +271,17 @@ export function LearnView() {
       </header>
 
       {mode === "page" && current.html_path ? (
-        <LessonPageFrame path={current.html_path} title={current.title} />
+        <LessonPageFrame
+          path={current.html_path}
+          title={current.title}
+          lessonId={current.id}
+        />
       ) : (
         <LessonText path={current.md_path} />
       )}
 
       <footer className="shrink-0">
-        <Drawer label={`Earlier topic lessons (${list.length})`}>
+        <Drawer label={`Earlier lessons and weekend pages (${list.length})`}>
           <ul className="space-y-0.5 pt-1">
             {list.map((lesson) => (
               <li key={lesson.id}>

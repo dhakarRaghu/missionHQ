@@ -1,4 +1,5 @@
 import { getJson, queryString, sendJson } from "@/lib/api/request";
+import type { ConceptVerdict } from "@/lib/concept-taps";
 
 // Client, types and query keys for the daily learning journey
 // (GET /api/learning/*). Tutor writes one lesson a morning from the articles
@@ -46,7 +47,7 @@ export interface Lesson {
 }
 
 /** What an independent reviewer made of a lesson after running its lab. */
-export type ReviewStatus = "pending" | "passed" | "revise" | "failed";
+export type ReviewStatus = "pending" | "passed" | "flagged" | "failed" | "none";
 
 /** How a daily article relates to the course phase it orbits. */
 export type ArticleRelationship =
@@ -242,7 +243,16 @@ export const learningKeys = {
   phaseContent: (course: string, slug: string) =>
     ["learning", "phase-content", course, slug] as const,
   readings: (status: string) => ["learning", "readings", status] as const,
+  signals: (lessonId: string) => ["learning", "signals", lessonId] as const,
 };
+
+/** Every "Got it" / "Lost me" tap on one lesson, and his current answer per
+ * concept (the latest tap wins). */
+export interface LessonSignals {
+  lesson_id: string;
+  verdicts: Record<string, ConceptVerdict>;
+  taps: { concept: string; verdict: ConceptVerdict; at: string; via: string }[];
+}
 
 export const learningApi = {
   lessons: (limit = 30, kind = "") =>
@@ -297,4 +307,14 @@ export const learningApi = {
     sendJson<{ ok: boolean }>("POST", `/learning/requests/${id}/drop`),
   readings: (status = "", limit = 50) =>
     getJson<Reading[]>(`/learning/readings${queryString({ status, limit })}`),
+  signals: (lessonId: string) =>
+    getJson<LessonSignals>(`/learning/lessons/${encodeURIComponent(lessonId)}/signals`),
+  /** One tap from the lesson page. The next outline of the course reads the
+   * "lost me" answers. */
+  addSignal: (lessonId: string, concept: string, verdict: ConceptVerdict) =>
+    sendJson<{ concept: string; verdict: ConceptVerdict }>(
+      "POST",
+      `/learning/lessons/${encodeURIComponent(lessonId)}/signals`,
+      { concept, verdict },
+    ),
 };

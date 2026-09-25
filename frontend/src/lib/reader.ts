@@ -4,8 +4,16 @@
  * `backend/src/hq/reader_export.py` writes `public/reader/` on his machine and
  * he commits it. Everything here therefore reads the deployment's own files.
  * Nothing in this module may call `/api`: the point of the reader is that it
- * works when the Mac that runs the backend is asleep.
+ * works when the Mac that runs the backend is asleep. What he sends back
+ * (mark read, concept taps) is `lib/reader-sync.ts`, which queues it for
+ * whenever the backend is reachable and never blocks reading.
  */
+
+import {
+  CONCEPT_RE,
+  isConceptVerdict,
+  type ConceptVerdict,
+} from "@/lib/concept-taps";
 
 export type ReaderLesson = {
   /** Page file name, without `.html` — also the URL segment under /read. */
@@ -68,3 +76,44 @@ export const readerApi = {
       "text",
     ) as Promise<string>,
 };
+
+/**
+ * "Got it" / "Lost me" on the phone.
+ *
+ * What the buttons show is kept here: in this page's own storage (the lesson
+ * frame has none), one key per lesson file and concept. Storage can be
+ * missing or refuse (private mode, a full quota), so every access is guarded
+ * and a failure only means the answer is not remembered. Sending the tap to
+ * the backend, where the next outline reads it, is `lib/reader-sync.ts`.
+ */
+const TAP_PREFIX = "hq:tap:";
+
+type StoredTap = { verdict: ConceptVerdict; at: string };
+
+export function loadTaps(file: string): Record<string, ConceptVerdict> {
+  const out: Record<string, ConceptVerdict> = {};
+  try {
+    const store = window.localStorage;
+    const prefix = `${TAP_PREFIX}${file}:`;
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (!key?.startsWith(prefix)) continue;
+      const concept = key.slice(prefix.length);
+      if (!CONCEPT_RE.test(concept)) continue;
+      const stored = JSON.parse(store.getItem(key) ?? "null") as Partial<StoredTap> | null;
+      if (stored && isConceptVerdict(stored.verdict)) out[concept] = stored.verdict;
+    }
+  } catch {
+    // No storage here (or on the server): the answers are simply not remembered.
+  }
+  return out;
+}
+
+export function saveTap(file: string, concept: string, verdict: ConceptVerdict) {
+  try {
+    const value: StoredTap = { verdict, at: new Date().toISOString() };
+    window.localStorage.setItem(`${TAP_PREFIX}${file}:${concept}`, JSON.stringify(value));
+  } catch {
+    // As above: shown for this visit, not kept.
+  }
+}

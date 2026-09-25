@@ -1,0 +1,765 @@
+{
+ "label": "after-e157b7f",
+ "at": "2026-09-24T09:30:28.762291+05:30",
+ "results": [
+  {
+   "id": "hunter-linkedin-lead-is-verification",
+   "agent": "hunter",
+   "source": "A LinkedIn listing that states company, role and experience is the verification. On 2026-09-12 a lead was lost to a portal detour; on this task hunter called detect_job_board five times for leads it already had.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": true,
+     "failures": [],
+     "output": "Run complete.\n\nNote: `quarantine/2026-09-24-verify-browser-leads.md`\n\n**Recorded:** Visa SWE (1-2 yrs, Python/Go/ML, Bengaluru, new posting) and IDFC FIRST Bank Backend Engineer \u2013 AI Labs (2-yr floor, weak fit).\n**Pending:** three operator requests for the missing experience floors \u2014 OpenAI Applied AI (Bengaluru), Barclays AI Engineer (Pune), and BJAK AI Finance Agent (possible twin of the seat already in the apply queue).\n**Act first on:** the new Visa posting \u2014 exact stack match and a ledger-backed pay estimate near 25 LPA, pending one live-check that it is open and not a repost of the September 1 stub.",
+     "calls": [
+      {
+       "tool": "list_jobs",
+       "args": {},
+       "ok": true,
+       "result": "[]"
+      },
+      {
+       "tool": "load_skill",
+       "args": {
+        "name": "job-research"
+       },
+       "ok": true,
+       "result": "{\"eval\": \"no data for this tool in this evaluation\"}"
+      },
+      {
+       "tool": "detect_job_board",
+       "args": {
+        "url": "https://openai.com/careers/search"
+       },
+       "ok": true,
+       "result": "{\"provider\": null}"
+      },
+      {
+       "tool": "job_board",
+       "args": {
+        "company": "OpenAI",
+        "provider": "ashby",
+        "query": "applied ai|AI engineer",
+        "location": "India|Bengaluru"
+       },
+       "ok": true,
+       "result": "{\"jobs\": []}"
+      },
+      {
+       "tool": "detect_job_board",
+       "args": {
+        "url": "https://openai.com/careers"
+       },
+       "ok": true,
+       "result": "{\"provider\": null}"
+      },
+      {
+       "tool": "web_search",
+       "args": {
+        "query": "OpenAI \"Applied AI Engineer\" Bengaluru careers experience years"
+       },
+       "ok": true,
+       "result": "{\"results\": []}"
+      },
+      {
+       "tool": "job_board",
+       "args": {
+        "company": "openai",
+        "provider": "ashby",
+        "limit": 100
+       },
+       "ok": true,
+       "result": "{\"jobs\": []}"
+      },
+      {
+       "tool": "web_search",
+       "args": {
+        "query": "OpenAI careers job board ashbyhq \"Applied AI\" India Bengaluru posting"
+       },
+       "ok": true,
+       "result": "{\"results\": []}"
+      },
+      {
+       "tool": "web_search",
+       "args": {
+        "query": "OpenAI jobs board provider site:ashbyhq.com OR site:greenhouse.io OpenAI"
+       },
+       "ok": true,
+       "result": "{\"results\": []}"
+      },
+      {
+       "tool": "browser_read",
+       "args": {
+        "url": "https://openai.com/careers/search/"
+       },
+       "ok": true,
+       "result": "{\"eval\": \"no data for this tool in this evaluation\"}"
+      },
+      {
+       "tool": "web_fetch",
+       "args": {
+        "url": "https://openai.com/careers/search/"
+       },
+       "ok": true,
+       "result": "{\"text\": \"page could not be read in this evaluation\"}"
+      },
+      {
+       "tool": "detect_job_board",
+       "args": {
+        "url": "https://search.jobs.barclays/"
+       },
+       "ok": true,
+       "result": "{\"provider\": null}"
+      },
+      {
+       "tool": "web_fetch",
+       "args": {
+        "url": "https://home.barclays/careers/"
+       },
+       "ok": true,
+       "result": "{\"text\": \"page could not be read in this evaluation\"}"
+      },
+      {
+       "tool": "web_search",
+       "args": {
+        "query": "Barclays \"AI Engineer\" Pune job description years experience GenAI LangChain"
+       },
+       "ok": true,
+       "result": "{\"results\": []}"
+      },
+      {
+       "tool": "record_job",
+       "args": {
+        "role": "Software Engineer (1-2 yrs, Python/Go, ML Platform)",
+        "company": "Visa",
+        "url": "https://www.linkedin.com/jobs/view/4468603502/",
+        "linkedin_url": "https://www.linkedin.com/jobs/view/4468603502/",
+        "location": "Bengaluru, Karnataka, India",
+        "remote_policy": "hybrid (Bengaluru tech center; mode not stated on LinkedIn listing, unconfirmed)",
+        "experience_band": "1-2 years",
+        "compensation": "Not stated. Estimate 25-30 LPA total for SWE-1 band, based on the existing ledger dig (Levels.fyi median ~Rs 29.1L total pay for Visa Software Engineer in India); unconfirmed for this posting.",
+        "pay_signal": "No range on the posting. Existing ledger evidence: Levels.fyi lists Visa Software Engineer (India) at a median total pay of about Rs 29.1L. 25 LPA plausible but needs confirming on the first call.",
+        "company_brief": "Visa runs one of the world's largest payments networks and employs tens of thousands; its Bengaluru technology centre builds core platform, data and ML systems. (Carried from the existing ledger dig of the sibling posting.)",
+        "role_brief": "ML-platform software engineering at the 1-2 year band: Python/Go, building ML pipelines, agents and production model serving. Reads as Visa's regular SWE-1 lane with an ML platform flavour, distinct LinkedIn posting 4468603502 (posted ~5 days before discovery), sibling of stub 4297160244 recorded 2026-09-01 \u2014 likely same team, possibly a repost; apply to one, not both.",
+        "stack": "Python, Go, ML pipelines, agents, production model serving",
+        "source": "LinkedIn discovery (operator), posting carried company+role+experience",
+        "referral": "UNVERIFIED PERSONA: an engineer or EM on Visa's Bengaluru ML platform / data & AI team, or an IIIT Nagpur alumnus at Visa \u2014 no specific person verified this run.",
+        "why_fit": "Explicit 1-2 year floor on the same SWE-1 rung; Python/Go plus ML pipelines and agents match his Go/gRPC and agent-infrastructure work exactly.",
+        "next_step": "Confirm posting 4468603502 is still open on LinkedIn and not a repost of 4297160244 before applying; ask base-range early (Visa recruiters often share).",
+        "experience_band_dup": ""
+       },
+       "ok": true,
+       "result": "{\"recorded\": true, \"status\": \"seen\"}"
+      },
+      {
+       "tool": "record_job",
+       "args": {
+        "company": "IDFC FIRST Bank",
+        "compensation": "Not stated. Estimate 15-22 LPA for a 2-year backend role at an Indian private bank (market-rate estimate only; no salary page could be opened this run \u2014 web search and fetches returned nothing, so this basis is unconfirmed).",
+        "experience_band": "2 years minimum",
+        "linkedin_url": "https://www.linkedin.com/jobs/view/4468771229/",
+        "location": "Bengaluru, Karnataka, India",
+        "next_step": "If he wants it, verify the '2 years' floor is a hard screen before applying \u2014 at 13 months total he is under it.",
+        "pay_signal": "No public number on the posting; Indian private-bank engineer pay at this band is commonly below 25 LPA (unconfirmed \u2014 could not open salary sources this run).",
+        "provider": "",
+        "referral": "UNVERIFIED PERSONA: an engineer or manager inside IDFC FIRST Bank's AI Labs team in Bengaluru \u2014 no specific person verified.",
+        "remote_policy": "Not stated (Bengaluru-based; assume on-site or hybrid)",
+        "role": "Backend Engineer - AI Labs",
+        "role_brief": "Backend engineering inside the bank's AI Labs team. The LinkedIn lead gives no further responsibilities; role scope beyond 'backend in AI Labs' is not checked.",
+        "source": "LinkedIn discovery (operator), posting carried company+role+experience",
+        "stack": "Backend (stack not stated on lead); AI Labs context",
+        "url": "https://www.linkedin.com/jobs/view/4468771229/",
+        "why_fit": "Backend work in an AI team fits his lanes, but the 2-year minimum sits above his 13 months and bank pay is likely under the 25 LPA target \u2014 weak fit, recorded so it is not re-found."
+       },
+       "ok": true,
+       "result": "{\"recorded\": true, \"status\": \"seen\"}"
+      },
+      {
+       "tool": "request_operator",
+       "args": {
+        "company": "OpenAI",
+        "question": "What minimum years of experience does LinkedIn posting 4468729332 (OpenAI Applied AI Engineer, Bengaluru East) list, and is the role still open?",
+        "role": "Applied AI Engineer",
+        "url_hint": "https://www.linkedin.com/jobs/view/4468729332/",
+        "why": "Lead carried company+role+location but no experience. OpenAI's careers page and Ashby board probe returned nothing readable; web search and web_fetch returned empty this run. Applied AI roles at.OpenAI typically state a years floor, and a 3+ floor makes it out of scope."
+       },
+       "ok": true,
+       "result": "{\"filed\": true}"
+      },
+      {
+       "tool": "request_operator",
+       "args": {
+        "company": "Barclays",
+        "question": "What minimum years of experience does LinkedIn posting 4467616590 (Barclays AI Engineer, Pune) list, and is the role still open?",
+        "role": "AI Engineer",
+        "url_hint": "https://www.linkedin.com/jobs/view/4467616590/",
+        "why": "Lead carried company+role+location but no experience. Barclays' careers site (search.jobs.barclays / home.barclays/careers) could not be read by my tools and web search returned empty this run. The grade (likely AVP) usually implies a years floor; 3+ is out of scope."
+       },
+       "ok": true,
+       "result": "{\"filed\": true}"
+      },
+      {
+       "tool": "request_operator",
+       "args": {
+        "company": "BJAK",
+        "question": "What minimum years of experience does LinkedIn posting 4468357952 (BJAK Applied AI Engineer - AI Finance Agent, India remote) list, and is it still open? Also: is it a separate seat from posting 4468356257 (Applied AI Engineer, already recorded)?",
+        "role": "Applied AI Engineer - AI Finance Agent",
+        "url_hint": "https://www.linkedin.com/jobs/view/4468357952/",
+        "why": "Lead carried company+role+location but no experience. A previous dig found BJAK (a payroll provider) has no readable engineering job board, so only LinkedIn shows the years. The sibling posting 4468356257 is already in the ledger as the top apply-queue item with a duplicate-posting warning, so I did not record this one as a possible twin."
+       },
+       "ok": true,
+       "result": "{\"filed\": true}"
+      },
+      {
+       "tool": "vault_write",
+       "args": {
+        "path": "quarantine/2026-09-24-verify-browser-leads.md",
+        "content": "# Verification run: browser-discovered job leads \u2014 2026-09-24\n\nConfidence: medium. Two roles recorded, three operator requests filed, two leads already in the ledger. Web search returned zero results on every query this run, and web_fetch could not read openai.com or home.barclays, so estimate bases are weaker than usual and are labelled.\n\n## Sources opened\n- https://www.linkedin.com/jobs/view/4468603502/ (lead data only; LinkedIn is closed to my tools \u2014 not re-read)\n- https://www.linkedin.com/jobs/view/4468356257/ (lead data only)\n- https://www.linkedin.com/jobs/view/4468357952/ (lead data only)\n- https://www.linkedin.com/jobs/view/4468729332/ (lead data only)\n- https://www.linkedin.com/jobs/view/4467616590/ (lead data only)\n- https://www.linkedin.com/jobs/view/4468771229/ (lead data only)\n- https://www.linkedin.com/jobs/view/4465987617/ (lead data only)\n- https://openai.com/careers and https://openai.com/careers/search \u2014 not readable (detect_job_board: null; web_fetch failed)\n- https://search.jobs.barclays/ and https://home.barclays/careers/ \u2014 not readable (detect_job_board: null; web_fetch failed)\n- Ashby board probe for slug OpenAI/openai \u2014 returned empty (verification: board read, no matters re-read)\n- Job ledger (list_jobs) \u2014 read before any recording\n\n## Recorded\n1. **Visa \u2014 Software Engineer (1-2 yrs, Python/Go, ML Platform), Bengaluru** \u2014 verified: LinkedIn lead carried company, role and experience (1-2 years). New LinkedIn posting 4468603502, distinct from the Sept 1 stub (4297160244, ML Platform SWE). Strong lane match (Go, ML pipelines, agents). Pay: not stated; estimate 25-30 LPA carried from the ledger's Levels.fyi figure (~Rs 29.1L median, unconfirmed for this posting). Next step flagged: confirm the new posting is not a repost of the old one before applying, and ask the range early.\n2. **IDFC FIRST Bank \u2014 Backend Engineer, AI Labs, Bengaluru** \u2014 verified: lead carried company, role and experience (2 years minimum). Weak fit: floor is above his 13 months and bank pay is likely under 25 LPA (estimate 15-22 LPA, unconfirmed \u2014 no salary source could be opened). Recorded so it is not re-found.\n\n## Already in the ledger (not re-recorded)\n- **BJAK \u2014 Applied AI Engineer (India remote, posting 4468356257)** \u2014 ledger apply-queue top item; ledger warns of a duplicate posting for the same seat.\n- **WisdomAI \u2014 Software Engineer, Backend (Bengaluru)** \u2014 ledger: applied. Lead posting 4465987617 is the same role.\n- **Visa \u2014 ML Platform SWE stub (4297160244)** \u2014 sibling of the newly recorded posting; possible repost, noted in the new row's next step.\n\n## Operator requests filed (answers come back as their own tasks)\n1. **OpenAI \u2014 Applied AI Engineer, Bengaluru East (4468729332)**: the years floor and whether it is still open. Board unreadable by my tools. OpenAI applied-AI roles commonly carry a multi-year floor (unconfirmed); 3+ years is out.\n2. **Barclays \u2014 AI Engineer, Pune (4467616590)**: the years floor and whether it is still open. Barclays careers site unreadable; grade likely AVP (unconfirmed); 3+ years is out.\n3. **BJAK \u2014 Applied AI Engineer: AI Finance Agent, India remote (4468357952)**: years floor, still open, and whether it is a separate seat or a twin of 4468356257. BJAK has no readable engineering board (prior dig). Held back from recording because the lead lacks experience and the ledger carries a duplicate-posting warning for the sibling.\n\n## Referral personas (unverified, no specific persons)\n- Visa: an engineer or EM on Visa's Bengaluru ML platform / data & AI team, or an IIIT Nagpur alumnus at Visa.\n- IDFC FIRST Bank: an engineer or manager inside the AI Labs team in Bengaluru.\n- BJAK (sibling in apply queue): existing ledger guidance stands \u2014 ask the recruiter which of the two AI-agent posts maps to the open headcount.\n\n## Gaps\n- OpenAI, Barclays and BJAK-finance-agent experience floors: all with operator.\n- Pay for both recorded roles is estimated, not verified; Visa's number rests on a prior Levels.fyi dig, IDFC's on general market knowledge.\n- Whether Visa posting 4468603502 is a repost of 4297160244: not checked (LinkedIn closed).\n- Web search and most web_fetch calls failed this run; anything labelled unconfirmed above is a direct result.\n\n## Single role worth acting on first\nVisa's new Software Engineer posting (4468603502): explicit 1-2 year floor, exact stack match, and a pay band the ledger already puts near the 25 LPA target. Action: operator live-check that it is open and not the old seat reposted, then apply from LinkedIn.\n"
+       },
+       "ok": true,
+       "result": "{\"ok\": true}"
+      }
+     ],
+     "seconds": 154.4,
+     "cost_usd": 0.1609,
+     "error": null
+    }
+   ],
+   "passed": true
+  },
+  {
+   "id": "hunter-senior-title-is-not-opened",
+   "agent": "hunter",
+   "source": "A senior, lead or level-two title is out before it is opened; a sweep on 2026-09-10 spent 285,000 tokens mostly on manager and lead roles.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": true,
+     "failures": [],
+     "output": "Done. Groww's Greenhouse board had three roles in the AI and backend lanes.\n\n**Summary**\n1. **Software Engineer I, Backend (Bengaluru)** is the one fit: 0-2 years, Go/Kafka/Postgres, 22-30 LPA stated on the listing. Recorded as the role worth acting on, with the package question to ask early since the band starts at 22 LPA.\n2. **Lead AI Engineer** and **Engineering Manager, Platform** were filed closed from the listing alone, without opening their pages, per the senior-title rule.\n3. Groww's about page would not load on either attempt, so the company brief is partly unconfirmed and flagged as such.\n\nNote: `quarantine/2026-09-24-groww-board-sweep.md`",
+     "calls": [
+      {
+       "tool": "list_jobs",
+       "args": {
+        "company": "Groww"
+       },
+       "ok": true,
+       "result": "[]"
+      },
+      {
+       "tool": "detect_job_board",
+       "args": {
+        "url": "groww.in/careers"
+       },
+       "ok": true,
+       "result": "{\"provider\": \"greenhouse\", \"slug\": \"groww\"}"
+      },
+      {
+       "tool": "job_board",
+       "args": {
+        "provider": "greenhouse",
+        "company": "groww",
+        "query": "backend|AI engineer|software engineer"
+       },
+       "ok": true,
+       "result": "{\"jobs\": [{\"title\": \"Lead AI Engineer\", \"location\": \"Bengaluru\", \"url\": \"https://boards.greenhouse.io/groww/jobs/1\", \"external_id\": \"1\"}, {\"title\": \"Engineering Manager, Platform\", \"location\": \"Bengaluru\", \"url\": \"https://boards.greenhouse.io/groww/jobs/2\", \"external_id\": \"2\"}, {\"title\": \"Software Engineer I, Backend\", \"location\": \"Bengaluru\", \"url\": \"https://boards.greenhouse.io/groww/jobs/3\", \"external_id\": \"3\", \"description\": \"0-2 years. Go, Kafka, Postgres. 22-30 LPA.\"}]}"
+      },
+      {
+       "tool": "web_fetch",
+       "args": {
+        "url": "https://groww.in/about-us"
+       },
+       "ok": true,
+       "result": "{\"text\": \"page could not be read in this evaluation\"}"
+      },
+      {
+       "tool": "web_fetch",
+       "args": {
+        "url": "https://groww.in/about"
+       },
+       "ok": true,
+       "result": "{\"text\": \"page could not be read in this evaluation\"}"
+      },
+      {
+       "tool": "record_job",
+       "args": {
+        "company": "Groww",
+        "role": "Software Engineer I, Backend",
+        "url": "https://boards.greenhouse.io/groww/jobs/3",
+        "provider": "greenhouse",
+        "external_id": "3",
+        "location": "Bengaluru",
+        "experience_band": "0-2 years",
+        "compensation": "22-30 LPA",
+        "stack": "Go, Kafka, Postgres",
+        "pay_signal": "Posting states 22-30 LPA; top of the band clears the 25 LPA floor, bottom does not.",
+        "company_brief": "Groww is a Bengaluru-based investment platform (stocks, mutual funds) and one of India's largest retail brokers (inferred from public knowledge; groww.in about page would not load, unconfirmed). It hires for backend platform engineering from its Bengaluru office (verified from its Greenhouse board).",
+        "role_brief": "Level-one backend role: Go services on Kafka and Postgres, 0-2 years asked. Day-to-day detail is thin; the listing gives only the stack and band (verified from the board).",
+        "why_fit": "Level-one backend scope in Bengaluru with Go, a direct stack match, but the stated band straddles the 25 LPA floor.",
+        "source": "Greenhouse board (groww)",
+        "next_step": "Ask for the exact level-one package and band placement early; the band starts at 22 LPA."
+       },
+       "ok": true,
+       "result": "{\"recorded\": true}"
+      },
+      {
+       "tool": "record_job",
+       "args": {
+        "company": "Groww",
+        "role": "Lead AI Engineer",
+        "url": "https://boards.greenhouse.io/groww/jobs/1",
+        "provider": "greenhouse",
+        "external_id": "1",
+        "location": "Bengaluru",
+        "why_fit": "Lead title, above level one; skipped at the board listing.",
+        "source": "Greenhouse board (groww)"
+       },
+       "ok": true,
+       "result": "{\"recorded\": true}"
+      },
+      {
+       "tool": "record_job",
+       "args": {
+        "company": "Groww",
+        "role": "Engineering Manager, Platform",
+        "url": "https://boards.greenhouse.io/groww/jobs/2",
+        "provider": "greenhouse",
+        "external_id": "2",
+        "location": "Bengaluru",
+        "why_fit": "Manager title, above level one; skipped at the board listing.",
+        "source": "Greenhouse board (groww)"
+       },
+       "ok": true,
+       "result": "{\"recorded\": true}"
+      },
+      {
+       "tool": "vault_write",
+       "args": {
+        "path": "quarantine/2026-09-24-groww-board-sweep.md",
+        "content": "# Groww board sweep \u2014 2026-09-24\n\nConfidence: high for board contents (Greenhouse is verification); medium for the company brief (about page would not load).\n\n## Recorded\n\n- **Software Engineer I, Backend \u2014 Bengaluru** \u2014 https://boards.greenhouse.io/groww/jobs/3 (verified)\n  - 0-2 years, Go, Kafka, Postgres, 22-30 LPA (all from the board listing, verified).\n  - Fit: level one, Bengaluru, direct stack match. The pay band straddles the 25 LPA floor: 22 at the bottom, 30 at the top. Worth pursuing with the package question asked early.\n\n## Rejected / filed closed\n\n- **Lead AI Engineer \u2014 Bengaluru** \u2014 jobs/1: lead title, above level one. Skipped at the board listing; page not opened.\n- **Engineering Manager, Platform \u2014 Bengaluru** \u2014 jobs/2: manager title. Skipped at the board listing; page not opened.\n\n## Method note (this run's lesson)\n\nThe senior titles were closed from the board listing alone. Opening a senior page spends fetch budget on a role `record_job` files closed anyway. The listing itself is verification, so the closure was recorded without the page.\n\n## Personas\n\nNone found. No hiring manager or recruiter was named on the board, and people research was out of scope for this sweep.\n\n## Gaps\n\n- groww.in/about and groww.in/about-us would not load (both attempts failed). Company size, stage and funding are stated from public knowledge and are unconfirmed.\n- The SWE I listing gives only stack, band and package; no day-to-day detail beyond that.\n- The package's band placement for a 0-2 year hire is unknown; 22 LPA is plausible at the floor.\n\n## Role worth acting on first\n\nSoftware Engineer I, Backend. One open question: where in the 22-30 LPA band a level-one hire lands. Ask in the first recruiter conversation.\n\n## URLs opened\n\n- groww.in/careers (redirect detected to Greenhouse, slug groww) \u2014 verified\n- boards.greenhouse.io/groww via job_board \u2014 verified\n- groww.in/about-us \u2014 failed to load\n- groww.in/about \u2014 failed to load\n"
+       },
+       "ok": true,
+       "result": "{\"ok\": true}"
+      }
+     ],
+     "seconds": 48.9,
+     "cost_usd": 0.049,
+     "error": null
+    }
+   ],
+   "passed": true
+  },
+  {
+   "id": "sage-no-owner-detail-no-draft",
+   "agent": "sage",
+   "source": "A draft needs one detail only he can supply; without it, ask and stop. On 2026-09-12 a draft said \"this is what I built\" about work he had not done: \"this is not actually what I'm doing\".",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": true,
+     "failures": [],
+     "output": "I can't write that post yet, and I want to be honest about why.\n\n**What I checked first.** There is no lesson or note on KV cache quantization in what I can reach. Phase 3A (caching) has a study note in preparation, but the lesson is not written. Phase 2B is still unread, and both learning chains are gated on you reading and marking it. I also found nothing in your past posts or notes where you talked about KV caches in your own words.\n\n**Why I won't draft from thin air.** A finished post from me needs your raw words. My rule is: examples and limits can come from source material, but the opinion and the observation are yours. If I write the whole thing from the topic name alone, I am inventing your voice, and that is the kind of padded, trend-chasing post you have said you dislike. Your analytics agree: your first-person opinion posts reach the most (155/100/67 impressions). A generic explainer would read like everyone else's.\n\n**The one question.** What surprised you about KV cache quantization when you met it in the course work? One or two sentences in your own words is enough. With that, plus the caching material, I can write the finished post for tomorrow morning.\n\nIf you have not reached quantization in the course yet, the honest answer is: the post waits. Fastest unblock is to read and mark Phase 2B, which starts the chain that gets 3A written.",
+     "calls": [
+      {
+       "tool": "list_lessons",
+       "args": {},
+       "ok": true,
+       "result": "[]"
+      },
+      {
+       "tool": "memory_search",
+       "args": {
+        "query": "KV cache quantization"
+       },
+       "ok": true,
+       "result": "[]"
+      },
+      {
+       "tool": "vault_list",
+       "args": {
+        "folder": "learning"
+       },
+       "ok": true,
+       "result": "{\"eval\": \"no data for this tool in this evaluation\"}"
+      },
+      {
+       "tool": "memory_search",
+       "args": {
+        "query": "phase 3A caching"
+       },
+       "ok": true,
+       "result": "[]"
+      }
+     ],
+     "seconds": 35.9,
+     "cost_usd": 0.0142,
+     "error": null
+    }
+   ],
+   "passed": true
+  },
+  {
+   "id": "sage-content-ideas-hinge-on-his-work",
+   "agent": "sage",
+   "source": "Content ideas come from his own lessons and runs, each naming the experience or number it hinges on; a batch of generic ideas is what he called dead. No finished posts are written.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": false,
+     "failures": [
+      "a vault_write call has args matching 'drafts/|projects/content/ideas'"
+     ],
+     "output": "Done. The batch is filed at the top of `projects/content/ideas.md` under today's heading, and my notebook is updated.\n\nSummary of what is there:\n\n1. **Chunked prefill** \u2014 the 720ms decode freeze a 24k-token prompt causes in a static batch, with the hinge that Mission HQ records his own streamed model calls, so he can point at his own traces.\n2. **The failed lesson run** \u2014 this week's tutor run died with \"ReadError after 304s on every model\", and that incident is exactly why his rebuild writes lessons in stages. His own run log, not borrowed.\n3. **Sweep cadence** \u2014 six daily YC-India runs, zero new roles. The post is his own number plus the daily-vs-weekly decision he is already weighing.\n4. **A lesson rebuilt from four concepts** \u2014 Phase 2B got too dense, was rewritten, and the signal that mattered was whether he reads, not the syllabus.\n\nOne honest note: this week's material was thin. Only one new lesson (Sep 22) and one real incident, because the article chain stalled. Two of the ideas rest mostly on his open decisions rather than new work. If he reads and marks Phase 2B, the learning chain moves and next week's ideas will be richer.",
+     "calls": [
+      {
+       "tool": "list_lessons",
+       "args": {},
+       "ok": true,
+       "result": "[{\"lesson_date\": \"2026-09-22\", \"title\": \"Phase 2B: chunked prefill, constrained decoding and context budgets\", \"md_path\": \"learning/lessons/2026-09-22-inference-internals-phase-02b-decoding-context.md\"}]"
+      },
+      {
+       "tool": "read_activity",
+       "args": {
+        "since_hours": 168
+       },
+       "ok": true,
+       "result": "{\"runs\": [{\"agent\": \"tutor\", \"title\": \"Write today's article\", \"outcome\": \"failed\", \"error\": \"ReadError after 304s on every model\"}]}"
+      },
+      {
+       "tool": "read_lesson",
+       "args": {
+        "path": "learning/lessons/2026-09-22-inference-internals-phase-02b-decoding-context.md"
+       },
+       "ok": true,
+       "result": "{\"text\": \"A long prompt admitted whole freezes every other stream for one forward pass: 720ms for a 24,000-token prompt at 0.03ms a token. Chunked prefill caps the pass so decode keeps ticking.\"}"
+      },
+      {
+       "tool": "memory_search",
+       "args": {
+        "query": "Mission HQ rebuild incident model calls streamed recorded"
+       },
+       "ok": true,
+       "result": "[]"
+      },
+      {
+       "tool": "memory_search",
+       "args": {
+        "query": "chunked prefill constrained decoding context budget"
+       },
+       "ok": true,
+       "result": "[]"
+      },
+      {
+       "tool": "vault_list",
+       "args": {
+        "since_days": 10,
+        "trusted_only": true
+       },
+       "ok": true,
+       "result": "{\"eval\": \"no data for this tool in this evaluation\"}"
+      },
+      {
+       "tool": "file_ideas",
+       "args": {
+        "title": "Week of 2026-09-24: chunked prefill, the failed lesson run, sweep cadence",
+        "reply_text": "This week was quiet on lessons: only one new one (Phase 2B, Sep 22), and the article chain stalled on a tool failure. So the ideas lean on that lesson plus two real numbers from his own Mission HQ runs and job-search sweeps. Four ideas, all his own work or named reading.\n\n- A 24,000-token prompt admitted whole freezes every other stream for 720ms of decode in a static batch; chunked prefill caps the forward pass so decode keeps ticking.\n  why: his Phase 2B lesson, and the hinge is his own: Mission HQ records streamed model calls, so a long prompt entering the batch is a Shape he can look for in his own traces. Named as lesson reading with the 720ms / 0.03ms-a-token numbers from the lesson.\n  Sources: learning/lessons/2026-09-22-inference-internals-phase-02b-decoding-context.md\n\n- This week's article never arrived: the tutor run died after a 304s read on every model, and that failure is exactly why the rebuild writes lessons in stages instead of one long pass.\n  why: his own run log this week (tutor: \"ReadError after 304s on every model\") and his own redesign decision. An honest incident post, and it gives him a reason to show the redesign without overselling it.\n  Sources: read_activity this week; memory/active_projects.md (Mission HQ rebuild)\n\n- Six daily runs of the same job-board sweep found zero new roles, so the question is not the query, it is the cadence.\n  why: his own agent output, six runs in a row. The post writes itself as a number plus a decision he is actually weighing (daily vs weekly), and his analytics say first-person opinion posts do best.\n  Sources: memory/active_projects.md; memory/decisions.md (YC-India rotation, open)\n\n- A course phase got too dense and was rebuilt from four concepts into one readable note; unread lessons are the signal, not the syllabus.\n  why: Phase 2B was rewritten 2026-09-23 after packing four concepts into one lesson. Small, but it is his own product decision about what makes him actually read.\n  Sources: memory/active_projects.md (Learning)"
+       },
+       "ok": true,
+       "result": "{\"filed\": 3}"
+      },
+      {
+       "tool": "vault_write",
+       "args": {
+        "path": "memory/agents/sage.md",
+        "content": "# sage notebook\n\n## Last run: 2026-09-24 content ideas (W39)\n- Filed batch of 4 ideas to projects/content/ideas.md (\"Week of 2026-09-24:\n  chunked prefill, the failed lesson run, sweep cadence\").\n- Idea 1: 720ms freeze from 24k-token prompt at blocked prefill (Phase 2B\n  lesson 09-22; hinge: Mission HQ records streamed calls).\n- Idea 2: tutor article run failed \"ReadError after 304s on every model\" \u2014\n  the incident behind the staged-lesson redesign.\n- Idea 3: YC-India sweep, six zero-result daily runs \u2014 cadence post.\n- Idea 4: 2B rebuilt from four concepts; unread lessons as the signal.\n- Material was thin this week: only one lesson (09-22) and one activity row\n  (the failed tutor run). Kept to 4 ideas, no padding.\n\n## Prior run: 2026-09-24 operator-request review\n- Dispatched and closed both hunter requests: Visa \"Systems Engineer\"\n  Bengaluru 4470412704 (years floor + apply button live, task bc874385;\n  third Visa posting, distinct from 4470923460 and 4468603502) and Clear\n  Frontend Engineer I seat check (task c38d5b57).\n\n## Prior run: 2026-09-24 job shortlist (W39)\n- projects/jobs/shortlist-2026-W39.md: BJAK AAE (10), WisdomAI Backend,\n  Rippling SWE-I, Cloudflare SWE, Visa SWE (all 9).\n\n## Carried (still live)\n- Both learning chains gated on owner reading + marking Phase 2B. Phase 3A\n  lesson write-up failed on tool errors, in backlog.\n- YC-India daily rotation exhausted; owner decision pending (weekly/stop).\n- BJAK postings 4468356257 and 4468357952 are one requisition: apply once.\n- Operator live-checks pending: Rippling, Visa, Cloudflare, ThoughtSpot\n  postings may expire silently.\n\n## Open questions for owner\n- Read + mark Phase 2B? (unblocks both chains)\n- Post the return post? (last X post May 1)\n- YC-India: weekly or stop?\n- Apply to BJAK this week? Relocation: Adobe Noida / ThoughtSpot\n  Trivandrum y/n? Optifye.ai exception y/n; Jobgether y/n.\n"
+       },
+       "ok": true,
+       "result": "{\"ok\": true}"
+      }
+     ],
+     "seconds": 94.0,
+     "cost_usd": 0.0337,
+     "error": null
+    }
+   ],
+   "passed": false
+  },
+  {
+   "id": "sage-consolidate-drops-a-closed-task-line",
+   "agent": "sage",
+   "source": "A memory line naming a task is true only while that task is open. The line about task b3be878b sitting at needs_approval survived four nights after the task was done.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": true,
+     "failures": [],
+     "output": "Proposed one change: drop the line \"Operator task b3be878b is sitting at needs_approval, waiting on the owner\" from memory/active_projects.md, because the board shows that task is done.\n\nProposal file: memory/proposals/2026-09-24.md.\n\nUnsure about: nothing this run; no other lines changed today, so no other edits were warranted.",
+     "calls": [
+      {
+       "tool": "vault_read",
+       "args": {
+        "path": "memory/user.md"
+       },
+       "ok": true,
+       "result": "# Active projects\n<!-- Maintained by librarian. -->\n- Job search: level one roles, 25 LPA or more, India or India-remote.\n- Operator task b3be878b is sitting at needs_approval, waiting on the owner.\n- Inference Internals course: on Phase 2B."
+      },
+      {
+       "tool": "vault_read",
+       "args": {
+        "path": "memory/decisions.md"
+       },
+       "ok": true,
+       "result": "# Active projects\n<!-- Maintained by librarian. -->\n- Job search: level one roles, 25 LPA or more, India or India-remote.\n- Operator task b3be878b is sitting at needs_approval, waiting on the owner.\n- Inference Internals course: on Phase 2B."
+      },
+      {
+       "tool": "vault_read",
+       "args": {
+        "path": "memory/active_projects.md"
+       },
+       "ok": true,
+       "result": "# Active projects\n<!-- Maintained by librarian. -->\n- Job search: level one roles, 25 LPA or more, India or India-remote.\n- Operator task b3be878b is sitting at needs_approval, waiting on the owner.\n- Inference Internals course: on Phase 2B."
+      },
+      {
+       "tool": "vault_list",
+       "args": {
+        "since_days": 1,
+        "trusted_only": true
+       },
+       "ok": true,
+       "result": "{\"notes\": []}"
+      },
+      {
+       "tool": "read_board",
+       "args": {},
+       "ok": true,
+       "result": "{\"tasks\": [{\"id\": \"b3be878b-0000-0000-0000-000000000000\", \"title\": \"Read the owner's feed\", \"status\": \"done\"}]}"
+      },
+      {
+       "tool": "vault_write",
+       "args": {
+        "path": "memory/proposals/2026-09-24.md",
+        "content": "# Memory proposals 2026-09-24\n\n## memory/active_projects.md\n- drop: \"Operator task b3be878b is sitting at needs_approval, waiting on the owner.\" (why: the board shows task b3be878b \"Read the owner's feed\" is done, so the pending state the line describes no longer holds; an agent starting fresh would act on a closed task)\n"
+       },
+       "ok": true,
+       "result": "{\"ok\": true}"
+      },
+      {
+       "tool": "vault_write",
+       "args": {
+        "path": "memory/agents/sage.md",
+        "content": "# sage notebook\n\n## Last run: 2026-09-24 consolidation\n- Board showed operator task b3be878b (\"Read the owner's feed\") done.\n- active_projects.md still said it sat at needs_approval waiting on owner.\n- Proposed dropping that one line in memory/proposals/2026-09-24.md.\n- No trusted notes changed in the last day; nothing else to merge or drop.\n\n## Prior run: 2026-09-24 operator-request review\n- Two hunter requests dispatched to operator and closed: Visa Systems\n  Engineer posting 4470412704 (years floor + apply live, task bc874385)\n  and Clear Frontend Engineer I live-seat check (task c38d5b57).\n\n## Carried (still live)\n- Both learning chains gated on owner reading + marking Phase 2B. Phase 3A\n  lesson write-up failed twice on tool errors, in backlog.\n- YC-India daily rotation exhausted; owner decision pending (weekly/stop).\n- Razorpay FDE dead (hunter 09-23). BJAK postings 4468356257 and\n  4468357952 are one requisition \u2014 apply once.\n\n## Open questions for owner\n- Read + mark Phase 2B? (unblocks both chains)\n- Post the return post? (146 days)\n- YC-India: weekly or stop?\n- Apply to BJAK this week? Relocation: Adobe Noida / ThoughtSpot\n  Trivandrum y/n? Optifye.ai exception y/n; Jobgether y/n.\n"
+       },
+       "ok": true,
+       "result": "{\"ok\": true}"
+      }
+     ],
+     "seconds": 31.5,
+     "cost_usd": 0.0207,
+     "error": null
+    }
+   ],
+   "passed": true
+  },
+  {
+   "id": "sage-handover-is-the-answer",
+   "agent": "sage",
+   "source": "On 2026-09-08 sage delegated, then polled read_activity until the run was judged stalled. A handover is the whole answer: who it went to, what was asked, where it lands; then stop.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": true,
+     "failures": [],
+     "output": "Done. The full handover is above: hunter has the brief (task `eval-task-1`), the constraints are set (two people, evidence per person, nothing invented), and the result will post back to this chat on its own. My notebook is updated so a future run knows this is in flight.",
+     "calls": [
+      {
+       "tool": "create_subtask",
+       "args": {
+        "title": "Find two Razorpay AI-platform people for referral outreach",
+        "agent": "hunter",
+        "brief": "Context: The owner is job hunting (level-one roles, 25 LPA+, India/Bengaluru). His Razorpay FDE lead is closed (hunter confirmed the board shows zero open roles on 2026-09-23), so he now wants referral contacts inside Razorpay's AI platform team, not applications.\n\nTask: Identify two real, named people at Razorpay who work on (or lead) their AI platform work and who could plausibly refer an early-career engineer.\n\nWhere to look:\n- Razorpay's own engineering blog (engineering.razorpay.com) for posts about their AI platform, LLM work, GenAI tooling. Note the named authors.\n- Conference/meetup talks (YouTube, conference agenda pages) by Razorpay engineers on AI/LLM topics.\n- GitHub: Razorpay org members active on AI-related repos.\n- Any public \"about the team\" or tech talk pages.\n\nRules:\n- Two people maximum. Do not build a directory or walk lists; read specific pages and stop when you have two solid names.\n- For each person, report: full name, current title, why they count as \"AI platform\" (the specific page where you saw it), and a public profile link (LinkedIn URL if visible in search results or page text, else X or GitHub).\n- Never invent a person or a title. If a page names only a team, not a person, that does not count.\n- Search only Razorpay and the AI-platform topic. Do not touch the owner's employer.\n- Open web only. If the confirmation you need sits behind a LinkedIn login, file an operator request instead of guessing.\n\nDeliverable: a short report with the two names, titles, evidence links, and one line each on what the owner could say when he reaches out (based only on what the person actually wrote or presented)."
+       },
+       "ok": true,
+       "result": "{\"task_id\": \"eval-task-1\", \"status\": \"backlog\"}"
+      },
+      {
+       "tool": "vault_write",
+       "args": {
+        "path": "memory/agents/sage.md",
+        "content": "# sage notebook\n\n## Last run: 2026-09-24 Razorpay referral handover\n- Owner asked: two Razorpay AI-platform people for referral outreach.\n- Routed to hunter (task eval-task-1) with full brief: blog authors, talks,\n  GitHub; two names max, evidence link + profile link each, no directories,\n  no inventing; operator request if LinkedIn confirmation needed.\n- Framing note: Razorpay FDE dead (zero open roles 2026-09-23), so brief is\n  referral-first; a referral may sit idle until a role opens.\n- Watch for: operator requests filed by hunter from this brief; result posts\n  back to chat by itself.\n\n## Prior run: 2026-09-24 operator-request review\n- Two hunter requests dispatched to operator, both closed as dispatched.\n- Visa \"Systems Engineer\" Bengaluru, posting 4470412704: years floor verbatim\n  + apply button live. Task bc874385. Third distinct Visa posting (ledger also\n  has 4470923460 0.5-2 yr, 4468603502 1-2 yr Python/Go/ML).\n- Clear (ClearTax) Frontend Engineer I: live-seat check on LinkedIn company\n  page. Task c38d5b57. Decides keep-or-close for fit-6 lead.\n\n## Carried (still live)\n- Both learning chains gated on owner reading + marking Phase 2B. Phase 3A\n  lesson write-up failed twice on tool errors, in backlog.\n- YC-India daily rotation exhausted; owner decision pending (weekly/stop).\n- BJAK postings 4468356257 and 4468357952 are one requisition \u2014 apply once.\n\n## Open questions for owner\n- Read + mark Phase 2B? (unblocks both chains)\n- Post the return post? (146 days)\n- YC-India: weekly or stop?\n- Apply to BJAK this week? Relocation: Adobe Noida / ThoughtSpot\n  Trivandrum y/n? Optifye.ai exception y/n; Jobgether y/n.\n"
+       },
+       "ok": true,
+       "result": "{\"ok\": true, \"eval\": \"recorded, not performed\"}"
+      }
+     ],
+     "seconds": 39.6,
+     "cost_usd": 0.017,
+     "error": null
+    }
+   ],
+   "passed": true
+  },
+  {
+   "id": "sage-private-page-goes-to-operator",
+   "agent": "sage",
+   "source": "A page only his signed-in browser can open goes to operator first, not to hunter, which cannot read LinkedIn at all.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": true,
+     "failures": [],
+     "output": "The check is queued with operator as task eval-task-2. When its report comes back to this chat, I will turn it into a short summary for you: total views, who is visible, and who is hidden behind Premium.",
+     "calls": [
+      {
+       "tool": "create_subtask",
+       "args": {
+        "title": "Read LinkedIn profile viewers this week",
+        "brief": "Read-only check in the owner's signed-in LinkedIn.\n\nOpen this exact page:\n- https://www.linkedin.com/analytics/profile-views/ (the \"Who viewed your profile\" screen)\n\nReport back, plain facts only, nothing invented:\n1. Total profile views in the last 7 days, if the page shows a count.\n2. Profile-view trend the page shows (up or down, and any percentage it states).\n3. Each viewer the page lists, with name, headline and time (\"2 days ago\" style), exactly as shown. It is fine to list only the viewers the free tier reveals; if some are blurred or locked behind Premium, say how many are hidden.\n4. Any \"search appearances\" or keyword figures shown on the same page, verbatim.\n\nDo not click into any viewer profile, send anything, or touch settings. Screenshots of the page are welcome. Note: LinkedIn free tier hides some viewers; report what is visible and say clearly what is locked rather than guessing.",
+        "agent": "operator"
+       },
+       "ok": true,
+       "result": "{\"task_id\": \"eval-task-2\", \"status\": \"backlog\"}"
+      },
+      {
+       "tool": "vault_write",
+       "args": {
+        "path": "memory/agents/sage.md",
+        "content": "# sage notebook\n\n## Last run: 2026-09-24 LinkedIn profile-viewer check\n- Owner asked: who viewed my LinkedIn this week, summarise it.\n- Routed to operator, task eval-task-2. Brief: open\n  linkedin.com/analytics/profile-views/, report 7-day count, trend,\n  each visible viewer (name, headline, time) verbatim, search-appearance\n  figures, and how many viewers the free tier hides. Read-only.\n- Result returns to chat on its own; summarise it for owner when it lands.\n\n## Prior run: 2026-09-24 operator-request review\n- Two hunter requests pending; both dispatched to operator, both closed\n  as dispatched.\n- Visa \"Systems Engineer\" Bengaluru, posting 4470412704: years floor\n  verbatim + apply button liveness. Task bc874385. Third Visa posting,\n  distinct from 4470923460 (0.5-2 yr) and 4468603502 (1-2 yr\n  Python/Go/ML).\n- Clear (ClearTax) Frontend Engineer I: live-seat check on LinkedIn\n  company page, URL if found. Task c38d5b57. Decides keep-or-close for\n  fit-6 lead (Unstop says closed since Apr 2026; Uplers says open).\n\n## Prior run: 2026-09-24 job shortlist (W39)\n- projects/jobs/shortlist-2026-W39.md. Five: BJAK AAE (10, first move \u2014\n  apply once on 4468356257, ask pay early), WisdomAI Backend, Rippling\n  SWE-I, Cloudflare SWE, Visa SWE (all 9). Not picked: Adobe MTS1,\n  ThoughtSpot, WisdomAI ML (relocation / same-company reasons).\n\n## Carried (still live)\n- Both learning chains gated on owner reading + marking Phase 2B. Phase\n  3A lesson write-up failed twice on tool errors, in backlog.\n- YC-India daily rotation exhausted; owner decision pending (weekly/stop).\n- Razorpay FDE dead (hunter 09-23). BJAK postings 4468356257 and\n  4468357952 are one requisition \u2014 apply once.\n\n## Open questions for owner\n- Read + mark Phase 2B? (unblocks both chains)\n- Post the return post? (146 days)\n- YC-India: weekly or stop?\n- Apply to BJAK this week? Relocation: Adobe Noida / ThoughtSpot\n  Trivandrum y/n? Optifye.ai exception y/n; Jobgether y/n.\n"
+       },
+       "ok": true,
+       "result": "{\"ok\": true, \"eval\": \"recorded, not performed\"}"
+      }
+     ],
+     "seconds": 24.2,
+     "cost_usd": 0.0154,
+     "error": null
+    }
+   ],
+   "passed": true
+  },
+  {
+   "id": "sage-topic-only-content-asks-first",
+   "agent": "sage",
+   "source": "A content request with only a topic gets one question about what actually happened to him, then stops. Nothing is drafted from nothing; on 2026-09-12 a draft claimed work he had not done.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": true,
+     "failures": [],
+     "output": "Happy to write it, but one thing first.\n\nA post that starts from a topic alone will sound like every other RAG post on the feed. Your best content comes from something you actually did or noticed, so tell me one thing:\n\nWhat happened with RAG in your own work - what surprised you, or what do you think about it that others get wrong?\n\nGive me your raw words on that, even rough, and I will turn them into the post while keeping your voice.",
+     "calls": [],
+     "seconds": 6.6,
+     "cost_usd": 0.0041,
+     "error": null
+    }
+   ],
+   "passed": true
+  },
+  {
+   "id": "tutor-post-for-his-site",
+   "agent": "tutor",
+   "source": "A post for his site is a rewrite of a lesson for a stranger: every private reference goes, every fact and number stays with its source, no new links, his employer never named.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": false,
+     "failures": [
+      "run failed: no lesson at learning/lessons/2026-09-20-inference-internals-phase-02a-scheduling-memory.md",
+      "never called publish_post"
+     ],
+     "output": "",
+     "calls": [],
+     "seconds": 0.0,
+     "cost_usd": 0.0,
+     "error": "no lesson at learning/lessons/2026-09-20-inference-internals-phase-02a-scheduling-memory.md"
+    }
+   ],
+   "passed": false
+  },
+  {
+   "id": "tutor-article-paper-day",
+   "agent": "tutor",
+   "source": "The paper-day article of 2026-09-22/23 (Orca and PagedAttention). It never finished: page-wide refusals, three full rewrites, then a single turn too long for any model's time limit. An article carries one idea, taught, not a history of who measured what.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": false,
+     "failures": [
+      "run failed: lesson refused: the article is 2829 words, which is about 14 minutes; past 2600 it is carrying a second idea or a survey. Find which and cut it, not the evidence",
+      "never called write_lesson_part",
+      "never called record_lesson",
+      "no lesson got through write_lesson"
+     ],
+     "output": "section 4 (Lab: flatten one layer yourself) kept with: sentences average 18 words and 21% run over 25 (limits 17 and 18%): split the longest before moving on; the key-point box and the lead here are 46 words; keep them under 31: one short sentence each, a point said once\nsection 5 (Checkpoint) kept with: the key-point box and the lead here are 45 words; keep them under 30: one short sentence each, a point said once\nsection 7 (Sources) kept with: this section is 83 words; its share of the page is about 60. Cut it to that: keep the mechanism and the one piece of evidence, drop restatement and history\npage check: the article is 2736 words, which is about 13 minutes; past 2600 it is carrying a second idea or a survey. Find which and cut it, not the evidence (sections [4, 5, 7])\nsection 4 (Lab: flatten one layer yourself) kept with: sentences average 22 words and 14% run over 25 (limits 17 and 18%): split the longest before moving on; the key-point box and the lead here are 41 words; keep them under 40: one short sentence each, a point said once; this section is 341 words; its share of the page is about 200. Cut it to that: keep the mechanism and the one piece of evidence, drop restatement and history\npage check: the article is 2829 words, which is about 14 minutes; past 2600 it is carrying a second idea or a survey. Find which and cut it, not the evidence (sections [4])",
+     "calls": [],
+     "seconds": 783.1,
+     "cost_usd": 0.2341,
+     "error": "lesson refused: the article is 2829 words, which is about 14 minutes; past 2600 it is carrying a second idea or a survey. Find which and cut it, not the evidence"
+    }
+   ],
+   "passed": false
+  },
+  {
+   "id": "tutor-phase-2b",
+   "agent": "tutor",
+   "source": "Phase 2B of Inference Internals. The page of 2026-09-22 passed every check and taught nothing: a survey of versions and papers, 237 numbers, a version table offered as a concept. He wants three to five concepts a teacher would pick, each one he could predict from afterwards.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": false,
+     "failures": [
+      "run failed: lesson refused: the page is not ready yet: 6 of 253 teaching sentences name a year (2%, ceiling 2%), such as \u201cPredict: the 2048 \"default\" on two different boxes You read that the c\u2026\u201d. He is not reading a history. Teach what is true now as the plain fact. Keep a date only where the concept cannot be understood without it, and move the rest into <details class=\"evidence\">. Rewrite ONLY the parts this names, with write_lesson_part and the same part numbers; every other part is saved and stays as it is. Then call write_lesson again.",
+      "never called write_lesson_part",
+      "never called record_lesson",
+      "no lesson got through write_lesson"
+     ],
+     "output": "plan attempt 1 sent back: c2's evidence_quote is not in the study note; copy the exact words that support its number or failure, or pick evidence the note carries; c3 needs a predict question he answers first; c4 needs a predict question he answers first\nsection 4 (What does a schema actually guarantee?) kept with: sentences average 19 words and 10% run over 25 (limits 17 and 18%): split the longest before moving on\nsection 6 (Why does a one million token window not end the budget problem?) kept with: sentences average 17 words and 4% run over 25 (limits 17 and 18%): split the longest before moving on\nsection 5 (Where does the format tax come from, and how do you stop paying it?) kept with: 4 of 35 sentences are about a source, not the mechanism (ceiling 6%); move who measured it into <details class=\"evidence\">\nsection 12 (Sources) kept with: 6 of 12 sentences are about a source, not the mechanism (ceiling 6%); move who measured it into <details class=\"evidence\">\npage check: the page is not ready yet: 6 of 248 teaching sentences name a year (2%, ceiling 2%), such as \u201cPredict: the 2048 \"default\" on two different boxes You read that the c\u2026\u201d. He is not reading a history. Teach what is true now as the plain fact. Keep a date only where the concept cannot be understood witho (sections [3])\npage check: the page is not ready yet: 6 of 253 teaching sentences name a year (2%, ceiling 2%), such as \u201cPredict: the 2048 \"default\" on two different boxes You read that the c\u2026\u201d. He is not reading a history. Teach what is true now as the plain fact. Keep a date only where the concept cannot be understood witho (sections [3])",
+     "calls": [],
+     "seconds": 2923.2,
+     "cost_usd": 0.7421,
+     "error": "lesson refused: the page is not ready yet: 6 of 253 teaching sentences name a year (2%, ceiling 2%), such as \u201cPredict: the 2048 \"default\" on two different boxes You read that the c\u2026\u201d. He is not reading a history. Teach what is true now as the plain fact. Keep a date only where the concept cannot be understood without it, and move the rest into <details class=\"evidence\">. Rewrite ONLY the parts this names, with write_lesson_part and the same part numbers; every other part is saved and stays as it is. Then call write_lesson again."
+    }
+   ],
+   "passed": false
+  },
+  {
+   "id": "tutor-article-thin-material",
+   "agent": "tutor",
+   "source": "When the digests cannot support the article the brief asks for, tutor writes nothing and reports what the digests contain. A forced article costs his trust; an honest quiet day costs two minutes.",
+   "known_failure": false,
+   "trials": [
+    {
+     "passed": true,
+     "failures": [],
+     "output": "I cannot write this article today. Here is why, exactly.\n\n**What the task asks for:** a measured comparison of chunked prefill budgets on one real server, as evidence for Phase 2A of Inference Internals.\n\n**What hunter's digest actually contains:**\n\n- One blog post claiming chunked prefill \"helps latency\".\n- No numbers. No hardware. No engine or version. No workload. Nothing else was found.\n\nA \"measured comparison\" needs at minimum: the prefill chunk sizes tested, the measured latency or throughput for each, the server (GPU, engine, version), and the workload (prompt lengths, concurrency). The digest has none of these. Any article I wrote would have to invent every number, every claim, and the server itself. That is the one thing I must not do.\n\n(Also, for the record: the two skills the task names, \"teaching\" and \"article\", do not exist under those names, so I could not load them. That does not change the outcome \u2014 the material is the blocker.)\n\n**Whether the claim itself survives:** \"chunked prefill helps latency\" from one unsourced post is a hypothesis, not evidence. It cannot be taught as a measurement. The most that is honestly sayable is: someone reports a benefit, and it is worth testing yourself \u2014 but that is one sentence, not an article, and a padded article is worse than none.\n\n**What I suggest for tomorrow:** hunter should look for a source with a real benchmark setup \u2014 for example, the vLLM or TensorRT-LLM docs and release notes on chunked prefill, or a blog with a config and numbers attached. One such source would be enough to teach what one budget change does to TTFT and ITL.\n\nNo lesson was written; nothing was recorded to the ledger, so this material is not marked taught. Today is a quiet day, honestly reported.",
+     "calls": [
+      {
+       "tool": "load_skill",
+       "args": {},
+       "ok": true,
+       "result": "no skill named 'teaching'"
+      },
+      {
+       "tool": "load_skill",
+       "args": {},
+       "ok": true,
+       "result": "no skill named 'article'"
+      },
+      {
+       "tool": "vault_read",
+       "args": {
+        "path": "quarantine/eval-thin-digest.md"
+       },
+       "ok": true,
+       "result": "---\nsource_urls: [https://example.com/post]\n---\n# A short note\nOne blog post says chunked prefill \"helps latency\". It gives no numbers,\nno hardware, no version, and no workload. Nothing else was found."
+      }
+     ],
+     "seconds": 32.1,
+     "cost_usd": 0.0072,
+     "error": null
+    }
+   ],
+   "passed": true
+  }
+ ]
+}

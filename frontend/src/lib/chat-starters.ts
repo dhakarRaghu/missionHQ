@@ -8,26 +8,15 @@
 const BY_AGENT: Record<string, string[]> = {
   sage: [
     "What did the agents do in the last 24 hours?",
-    "What is the most important open loop in my vault right now?",
-    "Summarise this week from my daily notes.",
+    "Which roles should I act on this week, and what is the next step for each?",
+    "Give me three post ideas from what I learned this week.",
   ],
   hunter: [
-    "Research what changed in self-hosted agent frameworks this month and file a quarantine note.",
-    "Find two reputable sources on evaluating LLM agents and summarise the disagreement between them.",
+    "Who could refer me at Cloudflare for the SWE L1 role, and what do we share?",
+    "Find two independent sources on chunked prefill and say where they disagree.",
   ],
-  scout: [
-    "Give me five video ideas from the newest quarantine notes, ranked, with the hook for each.",
-    "Draft a short post about what I built this week, in my plain voice.",
-  ],
-  librarian: [
-    "What is in my memory blocks right now, and what is close to its cap?",
-    "Which notes look like duplicates of each other?",
-  ],
-  planner: [
-    "What should I work on this week, based on the board and my last seven daily notes?",
-  ],
-  factory: [
-    "Create an agent that reads my daily notes every Friday and writes a one-page review of what I learned.",
+  tutor: [
+    "Which concepts did the last lesson teach, and what did it leave out?",
   ],
 };
 
