@@ -697,8 +697,9 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
         if said_again > allowed:
             probs.append(f"the lead and the key points here are {said_again} words; keep them"
                          f" under {allowed}: one sentence of at most 15 words each")
-    if budget and words > budget * BUDGET_SLACK:
-        probs.append(f"this section is {words} words; its share of the page is about"
+    reading = lt.reading_words(html)
+    if budget and reading > budget * BUDGET_SLACK:
+        probs.append(f"this section is {reading} words to read; its share of the page is about"
                      f" {budget}. Cut it to that: keep the mechanism and the one piece of"
                      " evidence, drop restatement and history")
     return probs
@@ -994,7 +995,7 @@ class Writer:
         budgets, which is where the cut belongs."""
         if not self.budgets or "words, which is about" not in message:
             return []
-        over = sorted(((lt._visible_words(self.parts[i]) / b, i)
+        over = sorted(((lt.reading_words(self.parts[i]) / b, i)
                        for i, b in self.budgets.items() if i < len(self.parts) and b),
                       reverse=True)
         return sorted(i for ratio, i in over[:3] if ratio > 1.0)

@@ -739,3 +739,15 @@ def test_a_section_the_editor_sent_back_is_rewritten_with_more_thought(tmp_path:
     w.teaching_notes[1] = "concept_first: state the claim before the mechanism"
     asyncio.run(w.write_section(1))
     assert efforts and set(efforts) == {lw.REWRITE_EFFORT}
+
+
+def test_the_length_rule_counts_what_he_reads() -> None:
+    prose = "<p>" + "The batch is rebuilt every step. " * 100 + "</p>"
+    predict = ('<details class="predict"><summary>Predict?</summary><p>'
+               + "Because the slot frees. " * 20 + "</p></details>")
+    hidden = ('<details class="answer"><summary>Answer</summary><p>' + "word " * 400 + "</p></details>"
+              '<ul class="sources"><li>' + "https://a.dev/x what it gave " * 50 + "</li></ul>"
+              "<pre>" + "code " * 300 + "</pre>")
+    counted = lt.reading_words(prose + predict + hidden)
+    assert counted == lt.reading_words(prose + predict)
+    assert counted > lt.reading_words(prose)          # predict answers are read

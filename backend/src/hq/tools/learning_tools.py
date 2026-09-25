@@ -932,7 +932,7 @@ async def finish_lesson(
                 f"the article is not ready yet: {gap}. Rewrite ONLY the parts this"
                 " names with write_lesson_part, then call write_lesson again"
             )
-        words = _visible_words(html)
+        words = reading_words(html)
         if words > ARTICLE_MAX_WORDS:
             raise LessonRefused(
                 f"the article is {words} words, which is about {words // 200} minutes;"
@@ -1554,6 +1554,20 @@ def teaching_prose(page_html: str) -> str:
     of these (a sources list scored "33 words a sentence") while each part
     measured only itself, so the two verdicts never agreed."""
     return _page_text(_NOT_PROSE_RE.sub(" ", page_html))
+
+
+_NOT_READ_RE = re.compile(
+    r"(?is)<(nav|header|pre|figure|svg|table)\b[^>]*>.*?</\1>"
+    r"|<details\b[^>]*class=[\"'](?:answer|evidence)[\"'][^>]*>.*?</details>"
+    r"|<(ul|ol)\b[^>]*class=[\"'](?:sources|concepts)[\"'][^>]*>.*?</\2>")
+
+
+def reading_words(page_html: str) -> int:
+    """Words he reads through. The article's length rule counts these: the
+    prose and the answers he opens after predicting, but not the collapsed
+    checkpoint answers, the evidence receipts, the sources list, code or
+    figures. Counting those failed a finished article at 2,717 "words"."""
+    return len(_page_text(_NOT_READ_RE.sub(" ", page_html)).split())
 
 
 def reading_ease(text: str) -> tuple[float, float]:
