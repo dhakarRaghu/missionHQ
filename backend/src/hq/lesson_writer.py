@@ -97,9 +97,12 @@ OUTLINE_EFFORT = "low"
 SECTION_EFFORT = "low"
 # A section the teaching editor sent back is rewritten with more thought.
 # Measured 2026-09-25 on one real section: low 72s, medium 738s, and medium
-# defined its terms before using them and drew a fuller trace. Too slow for
-# every draft; right for the few the editor found weakest.
+# defined its terms before using them and drew a fuller trace. On the first
+# live article three of four medium calls ran past 900s and the spare timed
+# out behind them, so the medium attempt is one model with a hard limit,
+# and a low-effort rewrite with the same instruction is the fallback.
 REWRITE_EFFORT = "medium"
+REWRITE_LIMIT_S = 1200.0
 OUTLINE_LIMIT_S = 900.0
 _OUTLINE_STEP: dict[str, Any] = {**_STEP, "timeout_seconds": OUTLINE_LIMIT_S * 3 + 30.0}
 
@@ -324,6 +327,20 @@ async def _outline_step(spec_model: str, article: bool, material: str,
     out = result.output
     return (out.as_outline() if isinstance(out, (ArticleOutline, PageOutline))
             else out).model_dump()
+
+
+@DBOS.step(name="writer.rewrite", retries_allowed=False,
+           timeout_seconds=REWRITE_LIMIT_S + 60.0)
+async def _rewrite_step(spec_model: str, prompt: str) -> str:
+    """One medium-effort rewrite on the teacher model alone, no spares."""
+    reg = llm.registry()
+    agent = Agent(reg.resolve_alone(spec_model), output_type=str,
+                  instructions=section_instructions(),
+                  model_settings=_with(reg.model_settings_for(spec_model),
+                                       reasoning_effort=REWRITE_EFFORT,
+                                       timeout=REWRITE_LIMIT_S))
+    result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=2))
+    return str(result.output)
 
 
 @DBOS.step(name="writer.section", **_STEP)
@@ -924,6 +941,16 @@ class Writer:
         raise lt.LessonRefused(f"the plan still fails after {PLAN_ATTEMPTS} attempts: "
                                + "; ".join(problems))
 
+    async def _rewrite_or_draft(self, prompt: str) -> str:
+        """The editor's rewrite: medium effort when it finishes in time, else
+        the ordinary draft call with the same instruction in the prompt."""
+        try:
+            return await _rewrite_step(self.spec.model, prompt)
+        except Exception as exc:  # noqa: BLE001 — a slow rewrite falls back, never fails the run
+            self.report.append(f"medium rewrite did not finish ({type(exc).__name__});"
+                               " rewritten at low effort instead")
+            return await _section_step(self.spec.model, prompt)
+
     async def write_section(self, i: int, problems: list[str] | None = None) -> str:
         assert self.outline is not None
         s = self.outline.sections[i - 1]
@@ -937,8 +964,8 @@ class Writer:
         for _ in range(SECTION_RETRIES + 1):
             asked = found + ([standing] if standing and standing not in found else [])
             prompt = _section_prompt(self.m, self.outline, i, s, previous, asked, budget)
-            raw = (await _section_step(self.spec.model, prompt, REWRITE_EFFORT) if standing
-                   else await _section_step(self.spec.model, prompt))
+            raw = await self._rewrite_or_draft(prompt) if standing else await _section_step(
+                self.spec.model, prompt)
             html = _h2(i, s) + "\n" + clean_section(raw)
             found = section_problems(html, earlier=earlier, article=self.m.article,
                                      kind=self.evidence_kind(), apparatus=bool(s.kind),

@@ -184,6 +184,8 @@ def test_an_article_is_written_in_stages_and_passes_the_real_page_contract(
     monkeypatch.setattr(lw, "_outline_step", outline_step)
     monkeypatch.setattr(lw, "_release_step", release_step)
     monkeypatch.setattr(lw, "_section_step", section_step)
+    # The editor's rewrites go through their own step; same fake.
+    monkeypatch.setattr(lw, "_rewrite_step", lambda model, prompt: section_step(model, prompt))
     monkeypatch.setattr(lw, "_citation_step", citation_step)
     monkeypatch.setattr(lw, "_editor_step", _editor_all(5))
     reviews: list[tuple[str, str, str]] = []
@@ -325,6 +327,8 @@ def _fake_writer(tmp_path: Path, monkeypatch, *, fail_at: int | None = None,
     monkeypatch.setattr(lw, "_outline_step", outline_step)
     monkeypatch.setattr(lw, "_release_step", release_step)
     monkeypatch.setattr(lw, "_section_step", section_step)
+    # The editor's rewrites go through their own step; same fake.
+    monkeypatch.setattr(lw, "_rewrite_step", lambda model, prompt: section_step(model, prompt))
     monkeypatch.setattr(lw, "_citation_step", citation_step)
     monkeypatch.setattr(lw, "_editor_step", editor_step)
     monkeypatch.setattr(lt, "finish_lesson", finish_once_failing)
@@ -727,7 +731,16 @@ def test_a_section_the_editor_sent_back_is_rewritten_with_more_thought(tmp_path:
         plan = lw.Outline.model_validate(_outline())
         return _section_html(1, plan.sections[0])
 
+    async def rewrite_step(model: str, prompt: str) -> str:
+        efforts.append(lw.REWRITE_EFFORT)
+        if slow["on"]:
+            raise TimeoutError("medium ran past its limit")
+        plan = lw.Outline.model_validate(_outline())
+        return _section_html(1, plan.sections[0])
+
+    slow = {"on": False}
     monkeypatch.setattr(lw, "_section_step", section_step)
+    monkeypatch.setattr(lw, "_rewrite_step", rewrite_step)
     material = lw.Material(article=True, slug="x", kind="paper", note=NOTE, prompt="m")
     spec = type("Spec", (), {"model": "teacher", "name": "tutor"})()
     w = lw.Writer(spec, HQDeps(agent="tutor", task_id="t-e", run_id=None), material)  # type: ignore[arg-type]
@@ -739,6 +752,11 @@ def test_a_section_the_editor_sent_back_is_rewritten_with_more_thought(tmp_path:
     w.teaching_notes[1] = "concept_first: state the claim before the mechanism"
     asyncio.run(w.write_section(1))
     assert efforts and set(efforts) == {lw.REWRITE_EFFORT}
+    efforts.clear()
+    slow["on"] = True                       # medium runs past its limit
+    asyncio.run(w.write_section(1))
+    assert efforts[:2] == [lw.REWRITE_EFFORT, lw.SECTION_EFFORT]
+    assert any("rewritten at low effort instead" in r for r in w.report)
 
 
 def test_the_length_rule_counts_what_he_reads() -> None:

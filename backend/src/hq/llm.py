@@ -486,6 +486,12 @@ class ModelRegistry:
             self._instances[name] = self._build(self.entries[name])
         return self._instances[name]
 
+    def resolve_alone(self, name_or_role: str) -> Model:
+        """The entry's own model with no fallback chain, for a call whose
+        slow path must fail fast to a cheaper plan rather than wait out a
+        second slow model."""
+        return self._build_one(self.entries[self.canonical(name_or_role)])
+
     def all_instances(self) -> dict[str, Model]:
         """Every usable entry, pre-registered into DBOSDurability(models=...).
 
