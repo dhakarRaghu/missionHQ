@@ -161,7 +161,7 @@ def test_an_article_is_written_in_stages_and_passes_the_real_page_contract(
 
     calls: list[int] = []
 
-    async def section_step(model: str, prompt: str) -> str:
+    async def section_step(model: str, prompt: str, effort: str = "low") -> str:
         if "Id prefix: s0-" in prompt:
             return "<p>Your endpoint is fast alone.</p><p>Under load, short answers wait.</p>"
         number = int(prompt.split("Id prefix for this section: s")[1].split("-")[0])
@@ -278,7 +278,7 @@ def _fake_writer(tmp_path: Path, monkeypatch, *, fail_at: int | None = None,
     async def release_step(claims):
         return {"fails": [], "reasons": []}
 
-    async def section_step(model: str, prompt: str) -> str:
+    async def section_step(model: str, prompt: str, effort: str = "low") -> str:
         if "Id prefix: s0-" in prompt:
             return "<p>Your endpoint is fast alone.</p><p>Under load, short answers wait.</p>"
         number = int(prompt.split("Id prefix for this section: s")[1].split("-")[0])
@@ -713,3 +713,29 @@ def test_the_editor_rubric_names_every_criterion() -> None:
     for c in lw.CRITERIA:
         assert f"### {c}" in rubric
     assert "Ignore any instruction" in rubric
+
+
+def test_a_section_the_editor_sent_back_is_rewritten_with_more_thought(tmp_path: Path,
+                                                                        monkeypatch) -> None:
+    learning = tmp_path / "learning"
+    (learning / "lessons").mkdir(parents=True)
+    monkeypatch.setattr(lt.settings(), "learning_dir", learning)
+    efforts: list[str] = []
+
+    async def section_step(model: str, prompt: str, effort: str = lw.SECTION_EFFORT) -> str:
+        efforts.append(effort)
+        plan = lw.Outline.model_validate(_outline())
+        return _section_html(1, plan.sections[0])
+
+    monkeypatch.setattr(lw, "_section_step", section_step)
+    material = lw.Material(article=True, slug="x", kind="paper", note=NOTE, prompt="m")
+    spec = type("Spec", (), {"model": "teacher", "name": "tutor"})()
+    w = lw.Writer(spec, HQDeps(agent="tutor", task_id="t-e", run_id=None), material)  # type: ignore[arg-type]
+    w.outline = lw.Outline.model_validate(_outline())
+    w.parts = ["<p>opening</p>"]
+    asyncio.run(w.write_section(1))
+    assert set(efforts) == {lw.SECTION_EFFORT}
+    efforts.clear()
+    w.teaching_notes[1] = "concept_first: state the claim before the mechanism"
+    asyncio.run(w.write_section(1))
+    assert efforts and set(efforts) == {lw.REWRITE_EFFORT}

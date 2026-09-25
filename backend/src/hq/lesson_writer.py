@@ -75,7 +75,11 @@ SOURCE_CHARS = 40_000
 MATERIAL_CHARS = 120_000     # what the citation judge reads: note, phase and sequence
 PREVIOUS_CHARS = 1_500       # the end of the section above, for continuity
 CITATION_BATCH = 30
-JUDGE_MODEL = "cheap"
+# The release test and the citation check read claims against material:
+# judgement, not volume, so they use the teacher model at low effort (quick,
+# and the stronger reader). Cost is not the constraint; content is.
+JUDGE_MODEL = "teacher"
+JUDGE_EFFORT = "low"
 
 # A step covers every model in the chain timing out in turn, plus a margin,
 # exactly like an agent's model step; two attempts.
@@ -91,6 +95,11 @@ _STEP: dict[str, Any] = {"retries_allowed": True, "max_attempts": 2, "interval_s
 # judge), not by minutes of hidden reasoning.
 OUTLINE_EFFORT = "low"
 SECTION_EFFORT = "low"
+# A section the teaching editor sent back is rewritten with more thought.
+# Measured 2026-09-25 on one real section: low 72s, medium 738s, and medium
+# defined its terms before using them and drew a fuller trace. Too slow for
+# every draft; right for the few the editor found weakest.
+REWRITE_EFFORT = "medium"
 OUTLINE_LIMIT_S = 900.0
 _OUTLINE_STEP: dict[str, Any] = {**_STEP, "timeout_seconds": OUTLINE_LIMIT_S * 3 + 30.0}
 
@@ -318,10 +327,10 @@ async def _outline_step(spec_model: str, article: bool, material: str,
 
 
 @DBOS.step(name="writer.section", **_STEP)
-async def _section_step(spec_model: str, prompt: str) -> str:
+async def _section_step(spec_model: str, prompt: str, effort: str = SECTION_EFFORT) -> str:
     model, model_settings = _model_for(spec_model)
     agent = Agent(model, output_type=str, instructions=section_instructions(),
-                  model_settings=_with(model_settings, reasoning_effort=SECTION_EFFORT))
+                  model_settings=_with(model_settings, reasoning_effort=effort))
     result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=2))
     return str(result.output)
 
@@ -330,6 +339,8 @@ async def _section_step(spec_model: str, prompt: str) -> str:
 async def _release_step(claims: list[dict[str, str]]) -> dict[str, Any]:
     agent = Agent(
         llm.registry().resolve(JUDGE_MODEL), output_type=ReleaseVerdict,
+        model_settings=_with(llm.registry().model_settings_for(JUDGE_MODEL),
+                             reasoning_effort=JUDGE_EFFORT),
         instructions=(
             "Each item is a claim a lesson will teach as a concept. A concept says how"
             " a system must behave, so it stays true across releases. A claim fails"
@@ -346,6 +357,8 @@ async def _release_step(claims: list[dict[str, str]]) -> dict[str, Any]:
 async def _citation_step(note: str, claims: list[dict[str, Any]]) -> dict[str, Any]:
     agent = Agent(
         llm.registry().resolve(JUDGE_MODEL), output_type=CitationVerdict,
+        model_settings=_with(llm.registry().model_settings_for(JUDGE_MODEL),
+                             reasoning_effort=JUDGE_EFFORT),
         instructions=(
             "You check a lesson against the material it was written from: the study"
             " note and, for a course phase, his own phase and the phases around it."
@@ -922,8 +935,9 @@ class Writer:
         standing = self.teaching_notes.get(i, "")
         for _ in range(SECTION_RETRIES + 1):
             asked = found + ([standing] if standing and standing not in found else [])
-            raw = await _section_step(self.spec.model, _section_prompt(
-                self.m, self.outline, i, s, previous, asked, budget))
+            prompt = _section_prompt(self.m, self.outline, i, s, previous, asked, budget)
+            raw = (await _section_step(self.spec.model, prompt, REWRITE_EFFORT) if standing
+                   else await _section_step(self.spec.model, prompt))
             html = _h2(i, s) + "\n" + clean_section(raw)
             found = section_problems(html, earlier=earlier, article=self.m.article,
                                      kind=self.evidence_kind(), apparatus=bool(s.kind),

@@ -68,7 +68,7 @@ TASK_TIMEOUT_S = 40 * 60   # a cron/board run may not exceed 40 minutes
 # a model call of a minute or two, plus a check and a fix round. The 40-minute
 # cap cancelled Phase 2A at 20:56 with nine sections written and nothing
 # recorded, so the course lane gets its own.
-COURSE_TIMEOUT_S = 100 * 60
+COURSE_TIMEOUT_S = 150 * 60   # a phase plus the editor's medium-effort rewrites
 # A chat turn: one full model call of sage's (llm entry timeout, 25 minutes
 # for a long answer), plus an approval wait, plus tool calls. Twelve minutes
 # cancelled any turn whose one call ran long, and any turn waiting on him.
