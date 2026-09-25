@@ -975,6 +975,14 @@ async def _archive_old_tasks() -> None:
         " RETURNING id::text",
         (days,),
     )
+    # A scheduled run that stopped is superseded by the next night's slot of
+    # the same schedule; kept in Blocked it only buries the ones that matter.
+    # His own tasks and agent hand-offs stay until he dismisses them.
+    rows += await db.fetch(
+        "UPDATE hq.tasks SET status = 'archived', updated_at = now()"
+        " WHERE status IN ('blocked', 'failed') AND source = 'cron'"
+        "   AND updated_at < now() - interval '2 days'"
+        " RETURNING id::text")
     if rows:
         # An event, not a log line: engine records what it did where the
         # activity feed can show it.
