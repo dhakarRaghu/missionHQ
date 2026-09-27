@@ -15,6 +15,7 @@ from hq.tools import (  # noqa: F401
     jobs_shortlist_tools,
     learning_tools,
     policy_tools,
+    radar_tools,
     request_tools,
     review_tools,
     vault_tools,

@@ -49,6 +49,7 @@ Action = Literal[
     "retry_task",
     "dismiss_task",
     "update_job",
+    "radar",
 ]
 
 

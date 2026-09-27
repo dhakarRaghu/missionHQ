@@ -15,6 +15,7 @@ import {
   LogOut,
   MessageSquare,
   NotebookText,
+  Radar,
   Settings,
   Wrench,
 } from "lucide-react";
@@ -52,6 +53,7 @@ const NAV = [
   { href: "/board", label: "Board", icon: LayoutList },
   { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/ideas", label: "Ideas", icon: Lightbulb },
+  { href: "/radar", label: "Radar", icon: Radar },
   { href: "/learn", label: "Learn", icon: GraduationCap },
   { href: "/courses", label: "Courses", icon: Library },
   { href: "/chat", label: "Chat", icon: MessageSquare },
