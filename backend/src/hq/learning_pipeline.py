@@ -37,6 +37,7 @@ from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+from hq import site_posts
 from hq.config import settings
 
 WORKFLOW = "learning_journey"
@@ -48,9 +49,10 @@ SOURCE_HUNT_STAGE = "source_hunt"
 LAB_CARD_STAGE = "lab_card"
 WEEK_REVIEW_STAGE = "week_review"
 POST_STAGE = "post_draft"
-# Where a post lands on his site. `writing` is an article, `papershelf` is a
-# paper note, which is the shape he likes (arpitbhayani.me/papershelf).
-POST_SECTIONS = ("writing", "papershelf")
+# Where a post lands on his site. `writing` is an article (his site keeps
+# those under blog), `papershelf` is a paper note, `notes` is one idea read
+# in a minute. hq.site_posts holds the folder and the shape of each.
+POST_SECTIONS = ("writing", "papershelf", "notes")
 
 # The roster of people and publications worth his morning. Written by sage's
 # weekly refresh, read by every stage, and deliberately a vault file rather
@@ -309,11 +311,12 @@ def lesson_payload(
     }
 
 
-def post_payload(lesson: Mapping[str, Any], section: str) -> dict[str, Any]:
+def post_payload(lesson: Mapping[str, Any], section: str, shape: str = "") -> dict[str, Any]:
     return {
         "workflow": WORKFLOW,
         "stage": POST_STAGE,
         "section": section,
+        "shape": site_posts.shape_for(section, shape).name,
         "lesson_date": str(lesson.get("lesson_date") or ""),
         "md_path": str(lesson.get("md_path") or ""),
         "title": str(lesson.get("title") or ""),
@@ -325,36 +328,47 @@ def post_brief(payload: Mapping[str, Any]) -> str:
 
     The lesson was written for him: it talks about the phase he is on, the
     study note behind it, and the system that produced it. A reader of his
-    site has none of that. This is the rewrite, and the checks in
-    `publish_post` refuse anything that still reads like private notes.
+    site has none of that and owes him nothing. This is the rewrite for that
+    reader. Code measures it before it is saved (`hq.site_posts`) and refuses
+    anything that still reads like private notes.
     """
     section = str(payload.get("section") or "writing")
-    kind = ("a paper note, in the shape of arpitbhayani.me/papershelf"
-            if section == "papershelf" else "an article")
-    return f"""Prepare {kind} for his own site, from the lesson
+    rule = site_posts.shape_for(section, str(payload.get("shape") or ""))
+    low, high = rule.words
+    folder = site_posts.SITE_FOLDER.get(section, section)
+    return f"""Prepare one post for his own site, from the lesson
 `{payload.get("md_path")}` ("{payload.get("title")}").
 
 ## This task
 
-The lesson is below. Rewrite it for a reader who has none of his context:
+Shape: **{rule.name}**, {low} to {high} words, for the `{folder}` section of his site.
 
+The lesson is below. Its reader was him. This reader is a stranger who found
+the post through a link, so rewrite it for a reader with none of his context:
+
+- **State the result first.** The lesson builds up to its point; the post
+  opens with it.
 - **Cut every private reference.** No course phase, no study note, no agent
   names, no "the phase you are on", no Mission HQ internals. If a point only
   made sense because of his course, either explain it on its own terms or
   drop it.
-- **Keep every fact, number and condition**, with its source. A post that
-  softens a measured claim is worse than no post.
-- **Keep the failures and the limits.** The "could not verify" list becomes a
-  short, honest paragraph rather than a private checklist.
+- **One claim, and what it needs.** The lesson may hold several findings;
+  the post carries one. Keep every fact, number and condition that claim
+  needs, with its source, and name what you left out. A post that softens
+  a measured claim is worse than no post.
+- **Keep the failures and the limits.** They become the section on where
+  this stops working. The "could not verify" list becomes a short, honest
+  paragraph in it.
 - **Speak as himself**, plainly: his English is his second language and his
   readers are engineers. No idioms, no em dashes in prose.
 - **Never name his employer**, past or present.
 - **Add no new links.** Only urls already in the lesson.
 
 Return the post as the format asks: a slug, the title, a one-line summary,
-three to six tags, and the markdown. Code runs the checks and writes it into
-his site's `{section}` section as a draft. Nothing is committed or published:
-he reads it, edits it, and pushes it himself.
+three to six tags, the category, the claim, what was left out, and the
+markdown. Code measures it and writes
+it into his site's `{folder}` section as a draft. Nothing is committed or
+published: he reads it, edits it, and pushes it himself.
 """
 
 

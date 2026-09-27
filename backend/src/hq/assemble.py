@@ -255,6 +255,8 @@ def _writer_procedure(kind: str, *, article: bool, page: str) -> list[str]:
                      else ("outline-article.md" if article else "outline-course.md"))
     elif kind == "writer-section":
         files += ["section.md", "page-kit.md"]
+    elif kind == "writer-post":
+        files.append("post.md")
     return [text for text in (_writer_file(n) for n in files) if text]
 
 

@@ -57,7 +57,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.usage import UsageLimits
 
-from hq import assemble, db, llm, loader, memory, signals
+from hq import assemble, db, llm, loader, memory, signals, site_posts
 from hq import learning_pipeline as learning
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -92,6 +92,14 @@ CITATION_BATCH = 30
 # and the stronger reader). Cost is not the constraint; content is.
 JUDGE_MODEL = "teacher"
 JUDGE_EFFORT = "low"
+# A post is sent back at most twice, each time with what was measured or
+# what its reader said. The reader is a model that is not the writer and is
+# given none of the writer's instructions: it reads as a stranger does.
+POST_ATTEMPTS = 3
+READER_MODEL = "default"
+READER_LOST = 5              # places the reader lost the thread, sent back at most
+READER_TERMS = 2             # unexplained terms a post may carry before it goes back
+READER_FRAGMENTS = 5         # sentences with no verb, quoted back at most
 
 # A step covers every model in the chain timing out in turn, plus a margin,
 # exactly like an agent's model step; two attempts.
@@ -2024,7 +2032,36 @@ class PostDraft(BaseModel):
     title: str
     summary: str = Field(description="one line, no quotes")
     tags: list[str] = Field(description="three to six tags")
+    category: str = Field(
+        default="",
+        description="one of: " + ", ".join(site_posts.CATEGORIES))
+    claim: str = Field(
+        default="",
+        description='the sentence "After reading this, you can ..." finished;'
+                    " empty when the material cannot carry one")
+    left_out: list[str] = Field(
+        default_factory=list,
+        description="each finding in the material that the claim did not need, one line")
     markdown: str = Field(description="the whole post as markdown")
+
+
+class ReaderVerdict(BaseModel):
+    """One read of a post by a stranger."""
+
+    gets: str = Field(description="what the first 100 words promise, in one sentence")
+    lost_at: list[str] = Field(
+        default_factory=list,
+        description="each place the thread was lost: the first words, then why")
+    takeaway: str = Field(description="what he would tell a colleague the post says")
+    unexplained: list[str] = Field(
+        default_factory=list,
+        description="each term or abbreviation the post uses without saying what it is")
+    fragments: list[str] = Field(
+        default_factory=list,
+        description="each sentence with no subject and verb of its own, quoted")
+    matches_claim: bool
+    would_finish: bool
+    left_because: str = ""
 
 
 @DBOS.step(name="writer.post", **_STEP)
@@ -2037,47 +2074,160 @@ async def _post_step(spec_model: str, instructions: str, prompt: str) -> dict[st
     return result.output.model_dump()
 
 
+def reader_instructions() -> str:
+    return (writer_dir() / "post-reader.md").read_text()
+
+
+@DBOS.step(name="writer.post_reader", **_STEP)
+async def _post_reader_step(title: str, summary: str, markdown: str,
+                            claim: str) -> dict[str, Any]:
+    model, model_settings = _model_for(READER_MODEL)
+    agent = Agent(model, output_type=PromptedOutput(ReaderVerdict),
+                  instructions=reader_instructions(), retries=3,
+                  model_settings=_with(model_settings, reasoning_effort=JUDGE_EFFORT))
+    prompt = (f"# {title}\n\n{summary}\n\n{markdown}\n\n"
+              "## The writer's claim (read it after you have written your takeaway)\n\n"
+              f"{claim}")
+    result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=4))
+    return result.output.model_dump()
+
+
+def reader_notes(verdict: ReaderVerdict) -> list[str]:
+    """What a stranger's read sends back to the writer, or [] when he read
+    to the end and left with the claim."""
+    notes: list[str] = []
+    if not verdict.would_finish:
+        why = verdict.left_because.strip() or "he did not say why"
+        notes.append(f"a reader would have left before the end: {why}")
+    if not verdict.matches_claim:
+        notes.append(
+            f'a reader took away "{verdict.takeaway.strip()}", which is not the claim.'
+            " Make the opening block and the last paragraph say the claim")
+    for place in verdict.lost_at[:READER_LOST]:
+        notes.append(f"a reader lost the thread at: {place.strip()}")
+    fragments = [f.strip() for f in verdict.fragments if f.strip()]
+    if fragments:
+        notes.append(
+            "these are not whole sentences: "
+            + " | ".join(f'"{f}"' for f in fragments[:READER_FRAGMENTS])
+            + ". Give each a subject and a verb")
+    terms = [t.strip() for t in verdict.unexplained if t.strip()]
+    if len(terms) > READER_TERMS:
+        notes.append(
+            "these terms are used without saying what they are: " + ", ".join(terms[:12])
+            + ". Explain each in the sentence that first uses it, and make room by"
+            " removing a finding the claim does not need")
+    return notes
+
+
+def _better(notes: list[str], kept: tuple[PostDraft, list[str]] | None) -> bool:
+    """Whether a draft with these reader notes replaces the one kept. A later
+    draft is not a better one: it is kept only when its reader objected to
+    no more than the last one did."""
+    return kept is None or len(notes) <= len(kept[1])
+
+
 async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any:
-    """A post for his site from one lesson: returned as text, checked and
-    saved by code, rewritten once with what the checks said."""
+    """A post for his site from one lesson: returned as text, measured by
+    code, read once by a stranger, and sent back with what either found.
+    The best draft that passed the measured checks is the one saved."""
     from hq.runner import RunOutcome, emit_step
+
+    def ended(outcome: str, *, output: str = "", error: str | None = None,
+              declined: str = "") -> Any:
+        return RunOutcome(output=output, outcome=outcome, input_tokens=0, output_tokens=0,
+                          cost_usd=0.0, error=error, declined=declined)
 
     payload = dict(task.get("payload") or {})
     md_path = str(payload.get("md_path") or "")
     section = str(payload.get("section") or "writing")
     lesson = await asyncio.to_thread(lt._read_lesson_text, md_path) if md_path else ""
     if not lesson:
-        return RunOutcome(output="", outcome="blocked", input_tokens=0, output_tokens=0,
-                          cost_usd=0.0, error=f"no lesson at {md_path or '(none given)'}")
+        return ended("blocked", error=f"no lesson at {md_path or '(none given)'}")
+    try:
+        rule = site_posts.shape_for(section, str(payload.get("shape") or ""))
+    except ValueError as exc:
+        return ended("blocked", error=str(exc))
+    floor = min(lt.POST_MIN_WORDS, rule.words[0])
     brief = str(task.get("brief") or "")
     instructions = (assemble.assemble("writer-post", spec).text + "\n\n# This task\n\n"
                     + brief.split("## This task", 1)[-1].strip())
     problems: list[str] = []
+    previous = ""
+    kept: tuple[PostDraft, list[str]] | None = None
     with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent=spec.name):
-        for _ in range(2):
+        for _ in range(POST_ATTEMPTS):
             prompt = f"## The lesson ({md_path})\n\n{lesson[:NOTE_CHARS]}"
             if problems:
-                prompt += ("\n\n## Your previous draft was sent back\n\n"
+                # Each call starts with no memory of the last: what was sent
+                # back points at sentences the writer must be able to see.
+                low, high = rule.words
+                size = site_posts.measure(previous).words
+                prompt += ("\n\n## Your previous draft\n\n" + previous
+                           + "\n\n## It was sent back\n\n"
+                           + f"It has {size} words of prose; the shape allows {low} to"
+                           f" {high}.\n"
                            + "\n".join(f"- {p}" for p in problems)
-                           + "\n\nReturn the whole post again with these fixed.")
+                           + "\n\nReturn the whole post again with these fixed."
+                           " Change what they name and keep what worked.")
             draft = PostDraft.model_validate(await _post_step(spec.model, instructions, prompt))
-            try:
-                saved = await _once("post",
-                    section, draft.slug, draft.title, draft.summary, ", ".join(draft.tags),
-                    draft.markdown, md_path, run_id=deps.run_id, agent=deps.agent)
-            except lt.LessonRefused as exc:
-                problems = [str(exc)]
+            previous = draft.markdown
+            if not draft.claim.strip():
+                if kept is not None:
+                    break       # an earlier draft carried a claim: that one stands
+                said = draft.summary.strip() or "the material cannot carry a post"
+                return ended("done", output=said, declined=said)
+            gap = lt.post_problems(draft.markdown, lesson, floor)
+            category = draft.category.strip().lower()
+            measured = (lt.post_field_problems(draft.slug, draft.title, draft.summary,
+                                               draft.tags)
+                        + ([gap] if gap else [])
+                        + site_posts.headline_problems(draft.title, draft.summary, category)
+                        + site_posts.reader_problems(draft.markdown, rule.name))
+            if measured:
+                problems = measured
                 continue
-            await emit_step("tool.called", run_id=deps.run_id, task_id=deps.task_id,
-                            agent=spec.name, payload={"tool": "publish_post", "ok": True,
-                                                      "via": "staged_writer",
-                                                      "args": {"slug": draft.slug}})
-            return RunOutcome(
-                output=(f"Draft written to `{saved['path']}` ({saved['words']} words), marked"
-                        " draft: true. Nothing was committed or published."),
-                outcome="done", input_tokens=0, output_tokens=0, cost_usd=0.0)
-    return RunOutcome(output="", outcome="failed", input_tokens=0, output_tokens=0,
-                      cost_usd=0.0, error=f"post refused twice: {problems[0][:400]}")
+            try:
+                verdict = ReaderVerdict.model_validate(await _post_reader_step(
+                    draft.title, draft.summary, draft.markdown, draft.claim))
+            except Exception as exc:  # noqa: BLE001 — a draft that passed is not lost to its reader
+                log.warning("writer: the post's reader failed: %s", exc)
+                kept = (draft, [f"no reader read it: {type(exc).__name__}"])
+                break
+            notes = reader_notes(verdict)
+            if _better(notes, kept):
+                kept = (draft, notes)
+            if not notes:
+                break
+            problems = notes
+    if kept is None:
+        return ended("failed", error=(f"post refused {POST_ATTEMPTS} times: "
+                                      + "; ".join(problems))[:600])
+    draft, notes = kept
+    try:
+        saved = await _once("post",
+            section, draft.slug, draft.title, draft.summary, ", ".join(draft.tags),
+            draft.markdown, md_path, shape=rule.name,
+            category=draft.category.strip().lower(), run_id=deps.run_id, agent=deps.agent)
+    except lt.LessonRefused as exc:
+        return ended("failed", error=f"post refused: {exc}"[:500])
+    await emit_step("tool.called", run_id=deps.run_id, task_id=deps.task_id,
+                    agent=spec.name, payload={"tool": "publish_post", "ok": True,
+                                              "via": "staged_writer",
+                                              "args": {"slug": draft.slug}})
+    written = (f"Draft written to `{saved['path']}` ({saved['words']} words, {rule.name}),"
+               " marked draft: true. Nothing was committed or published.")
+    lines = [written, "", f"Claim: {draft.claim.strip()}"]
+    spoken = site_posts.first_person(draft.markdown)
+    if spoken:
+        lines += ["", "It speaks as you here. Check that each is true:",
+                  *[f"- {s}" for s in spoken]]
+    left = [x.strip() for x in draft.left_out if x.strip()]
+    if left:
+        lines += ["", "Left out, for another post:", *[f"- {x}" for x in left]]
+    if notes:
+        lines += ["", "A reader still said:", *[f"- {n}" for n in notes]]
+    return ended("done", output="\n".join(lines))
 
 
 def handles(spec: AgentSpec, payload: object) -> bool:
