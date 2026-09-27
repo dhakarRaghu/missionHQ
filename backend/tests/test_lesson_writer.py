@@ -36,12 +36,36 @@ def _concept(**kw: Any) -> dict[str, Any]:
     return {**base, **kw}
 
 
+def _ledger(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The ledger a plan carries: the first teaching section introduces the
+    term, the ones below it assume it and say what they follow from."""
+    out, first = [], True
+    for s in sections:
+        s = dict(s)
+        if not s.get("kind"):
+            if first:
+                s.setdefault("introduces", ["static batch"])
+            else:
+                s.setdefault("assumes", ["static batch"])
+                s.setdefault("bridge", "The section above left the cost of waiting unexplained.")
+            first = False
+        out.append(s)
+    return out
+
+
 def _outline(**kw: Any) -> dict[str, Any]:
+    out = _outline_base(**kw)
+    out["sections"] = _ledger(out["sections"])
+    return out
+
+
+def _outline_base(**kw: Any) -> dict[str, Any]:
     base = {
         "title": "Why does a short request stop waiting for a long one",
         "subtitle": "What changes when the batch is rebuilt every iteration",
         "eyebrow": "paper · Inference Internals Phase 2A · iteration-level scheduling",
         "outcome": "Predict when a request returns in a mixed batch",
+        "running_case": "A chat endpoint that is fast alone and slow under load.",
         "opening": "Your chat endpoint is fast alone and slow under load.",
         "concepts": [_concept()],
         "sections": [
@@ -122,6 +146,8 @@ def _section_html(i: int, s: lw.SectionPlan) -> str:
     predict = ('<details class="predict"><summary>Predict: when does the short request return?'
                '</summary><p>At the end of its own last iteration.</p></details>') if i == 1 else ""
     body = [
+        "<p>A <dfn>static batch</dfn> holds every request until the longest one ends.</p>"
+        if i == 1 else
         "<p>A static batch holds every request until the longest one ends.</p>",
         "<p>The short request is done early. It still waits.</p>",
         (f'<figure class="diagram"><svg viewBox="0 0 100 20"><rect id="s{i}-bar" width="40" height="10"/>'
@@ -630,7 +656,8 @@ def test_the_editor_rewrites_only_the_weak_teaching_sections_with_its_instructio
     lines = [r for r in w.report if r.startswith("editor scores, section")]
     assert len(lines) == 4
     assert lines[1] == ("editor scores, section 2 (How much does rebuilding the batch buy):"
-                        " concept_first 4, asks_before_tells 4, concrete 4, plain 4, transfer 4")
+                        " concept_first 4, asks_before_tells 4, concrete 4, plain 4,"
+                        " connected 4, one_idea 4, transfer 4")
     status, notes = log["reviews"][-1]
     assert status == "passed"
     assert "Editor scores: mean 4.2 of 5 over 4 teaching section(s)" in notes
