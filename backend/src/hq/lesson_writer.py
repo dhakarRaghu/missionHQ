@@ -95,11 +95,12 @@ JUDGE_EFFORT = "low"
 # A post is sent back at most twice, each time with what was measured or
 # what its reader said. The reader is a model that is not the writer and is
 # given none of the writer's instructions: it reads as a stranger does.
-POST_ATTEMPTS = 3
+POST_ATTEMPTS = 5            # a draft refused for one measure must not cost the draft that fixed the rest
 READER_MODEL = "default"
 READER_LOST = 5              # places the reader lost the thread, sent back at most
 READER_TERMS = 2             # unexplained terms a post may carry before it goes back
 READER_FRAGMENTS = 5         # sentences with no verb, quoted back at most
+READER_FIGURES = 8           # figures of speech, quoted back at most
 
 # A step covers every model in the chain timing out in turn, plus a margin,
 # exactly like an agent's model step; two attempts.
@@ -2039,9 +2040,15 @@ class PostDraft(BaseModel):
         default="",
         description='the sentence "After reading this, you can ..." finished;'
                     " empty when the material cannot carry one")
+    adds: str = Field(
+        default="",
+        description="what this post gives that its source does not, in one sentence")
     left_out: list[str] = Field(
         default_factory=list,
         description="each finding in the material that the claim did not need, one line")
+    before_publishing: list[str] = Field(
+        default_factory=list,
+        description="one to three things only he can do that would make a reader trust it")
     markdown: str = Field(description="the whole post as markdown")
 
 
@@ -2059,6 +2066,18 @@ class ReaderVerdict(BaseModel):
     fragments: list[str] = Field(
         default_factory=list,
         description="each sentence with no subject and verb of its own, quoted")
+    figures: list[str] = Field(
+        default_factory=list,
+        description="each phrase that is a picture and not a plain statement, quoted")
+    not_delivered: list[str] = Field(
+        default_factory=list,
+        description="each promise of the title, summary or opening the body does not keep")
+    off_claim: list[str] = Field(
+        default_factory=list,
+        description="the heading of each section the title's promise does not need")
+    unclear_source: list[str] = Field(
+        default_factory=list,
+        description="each place where it is unclear whose words or number it is")
     matches_claim: bool
     would_finish: bool
     left_because: str = ""
@@ -2092,9 +2111,29 @@ async def _post_reader_step(title: str, summary: str, markdown: str,
     return result.output.model_dump()
 
 
-def reader_notes(verdict: ReaderVerdict) -> list[str]:
+def _flat_post(text: str) -> str:
+    return " ".join(re.sub(r"[*_`“”\"']", "", text).casefold().split())
+
+
+def quotes_of_post(items: list[str], markdown: str) -> list[str]:
+    """The items that quote the post. A reader asked for a list fills it even
+    when he found nothing ("none found"), and those words are not in the post."""
+    items = [i.strip() for i in items if i.strip()]
+    if not markdown:
+        return items
+    post = _flat_post(markdown)
+    kept: list[str] = []
+    for item in items:
+        spans = re.findall(r"[\"“]([^\"”]{4,})[\"”]", item) or [item]
+        if any(_flat_post(span).rstrip(". ") in post for span in spans if _flat_post(span)):
+            kept.append(item)
+    return kept
+
+
+def reader_notes(verdict: ReaderVerdict, markdown: str = "") -> list[str]:
     """What a stranger's read sends back to the writer, or [] when he read
-    to the end and left with the claim."""
+    to the end and left with the claim. With the post given, a quotation
+    that is not in the post is dropped."""
     notes: list[str] = []
     if not verdict.would_finish:
         why = verdict.left_because.strip() or "he did not say why"
@@ -2105,7 +2144,27 @@ def reader_notes(verdict: ReaderVerdict) -> list[str]:
             " Make the opening block and the last paragraph say the claim")
     for place in verdict.lost_at[:READER_LOST]:
         notes.append(f"a reader lost the thread at: {place.strip()}")
-    fragments = [f.strip() for f in verdict.fragments if f.strip()]
+    for promise in [p.strip() for p in verdict.not_delivered if p.strip()][:READER_LOST]:
+        notes.append(
+            f"the title, summary or opening promises what the post does not give: {promise}."
+            " Give it in the body or the code, or stop promising it")
+    for heading in [h.strip() for h in verdict.off_claim if h.strip()][:READER_LOST]:
+        notes.append(
+            f'a reader does not need the section "{heading}" to do what the title'
+            " promises. Remove it and name it in left_out")
+    figures = quotes_of_post(verdict.figures, markdown)
+    if figures:
+        notes.append(
+            "these are pictures, not plain statements: "
+            + " | ".join(f'"{f}"' for f in figures[:READER_FIGURES])
+            + ". Say what each means in plain words")
+    whose = quotes_of_post(verdict.unclear_source, markdown)
+    if whose:
+        notes.append(
+            "it is unclear whose words or number these are: "
+            + " | ".join(f'"{w}"' for w in whose[:READER_LOST])
+            + ". Name the author in the sentence")
+    fragments = quotes_of_post(verdict.fragments, markdown)
     if fragments:
         notes.append(
             "these are not whole sentences: "
@@ -2194,7 +2253,7 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
                 log.warning("writer: the post's reader failed: %s", exc)
                 kept = (draft, [f"no reader read it: {type(exc).__name__}"])
                 break
-            notes = reader_notes(verdict)
+            notes = reader_notes(verdict, draft.markdown)
             if _better(notes, kept):
                 kept = (draft, notes)
             if not notes:
@@ -2218,10 +2277,24 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
     written = (f"Draft written to `{saved['path']}` ({saved['words']} words, {rule.name}),"
                " marked draft: true. Nothing was committed or published.")
     lines = [written, "", f"Claim: {draft.claim.strip()}"]
+    if draft.adds.strip():
+        lines += [f"What it adds to the source: {draft.adds.strip()}"]
+    todo = [x.strip() for x in draft.before_publishing if x.strip()]
+    if site_posts.unrun_code(draft.markdown):
+        todo.insert(0, "The post shows code and says it was not run. A reader stops"
+                       " trusting the post at that sentence. Run the code, put its output"
+                       " under it, fix what breaks, then delete the sentence.")
+    if todo:
+        lines += ["", "Before you publish, only you can do these:",
+                  *[f"- {x}" for x in todo]]
     spoken = site_posts.first_person(draft.markdown)
     if spoken:
         lines += ["", "It speaks as you here. Check that each is true:",
                   *[f"- {s}" for s in spoken]]
+    unknown = site_posts.numbers_not_in(draft.markdown, lesson)
+    if unknown:
+        lines += ["", "Numbers that are not in your material. Check each by hand:",
+                  "- " + ", ".join(unknown)]
     left = [x.strip() for x in draft.left_out if x.strip()]
     if left:
         lines += ["", "Left out, for another post:", *[f"- {x}" for x in left]]

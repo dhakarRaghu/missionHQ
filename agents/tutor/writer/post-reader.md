@@ -34,6 +34,22 @@ the subject.
 - `fragments`: each sentence that is not a whole sentence, quoted in full.
   A whole sentence has a subject and a verb of its own. "Tokens per second
   normal, latency normal." has no verb. An empty list when there is none.
+- `figures`: each phrase that is a picture and not a plain statement,
+  quoted: "lies gently", "burn weeks", "was decoration", "sits on top of".
+  A reader who learned English second has to translate each one. An empty
+  list when there is none.
+- `not_delivered`: read the title, the summary and the opening block again.
+  List each thing they promise that the body does not give. Read the code
+  line by line for this: a summary that says a script shows recall per
+  segment, over code that gives every question the same segment, is a
+  promise not delivered. So is a result stated as common ("often", "in
+  many systems") with no number or source for how common. An empty list
+  when every promise is kept.
+- `off_claim`: the heading of each section you could remove and still do
+  what the title promises. An empty list when every section is needed.
+- `unclear_source`: each place where you could not tell whose words or
+  whose number it is: "the post says", "the writeup", "their claim". An
+  empty list when every number has a named owner.
 - `matches_claim`: the writer's claim is given under the post. Is your
   takeaway the same thing? True only when a colleague who heard your
   takeaway could do what the claim says.

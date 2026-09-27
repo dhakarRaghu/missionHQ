@@ -445,7 +445,10 @@ def reader_problems(markdown: str, shape: str = DEFAULT_SHAPE) -> list[str]:
             if not short_low <= size <= short_high:
                 problems.append(
                     f'the "In short" block is {size} words; keep it {short_low} to'
-                    f" {short_high}, two or three sentences")
+                    f" {short_high}, two or three sentences"
+                    + (f". Remove a whole sentence, at least {size - short_high + 15} words:"
+                       " a model that trims a word at a time comes back over the limit"
+                       if size > short_high else ""))
             elif count > IN_SHORT_SENTENCES:
                 problems.append(
                     f'the "In short" block has {count} sentences; state the one result in'
@@ -465,8 +468,18 @@ def reader_problems(markdown: str, shape: str = DEFAULT_SHAPE) -> list[str]:
         # A note is one piece; its first paragraph may be all of it.
         if rule.in_short and _words(first) > FIRST_PARAGRAPH_MAX:
             problems.append(
-                f"the first paragraph is {_words(first)} words; a reader decides to stay in"
-                f" a few seconds, keep it under {FIRST_PARAGRAPH_MAX}")
+                f'the paragraph under the "In short" block, which starts'
+                f' "{first[:40].strip()}...", is {_words(first)} words; a reader decides to'
+                f" stay in a few seconds, keep it under {FIRST_PARAGRAPH_MAX}. Remove a"
+                f" whole sentence, at least {_words(first) - FIRST_PARAGRAPH_MAX + 15} words,"
+                " and keep only where the reader is and what goes wrong there")
+        about = next((s for s in sentences_of(first)
+                      if re.match(r"(?:this|the) (?:post|article|piece|blog) (?:is|covers|"
+                                  r"explains|shows|looks|walks)", s.casefold())), "")
+        if about and not meta:
+            problems.append(
+                f'"{about[:60].strip()}..." talks about the post. The reader is already'
+                " reading it: say the thing itself")
 
     if m.sentences >= MIN_SENTENCES:
         med_low, med_high = SENTENCE_MEDIAN
@@ -547,6 +560,7 @@ def reader_problems(markdown: str, shape: str = DEFAULT_SHAPE) -> list[str]:
     return problems
 
 
+_QUOTED_RE = re.compile(r"\"[^\"\n]*\"|“[^”\n]*”|\*[^*\n]+\*")
 _FIRST_PERSON_RE = re.compile(r"(?<![A-Za-z'’])(?:I|I'm|I've|I'd|I'll|my|me|we|our)(?![A-Za-z])",
                               re.IGNORECASE)
 
@@ -556,15 +570,53 @@ def first_person(markdown: str) -> list[str]:
     these are the sentences he reads first when he checks a draft."""
     text = _FRONT_RE.sub("", markdown.replace("\r\n", "\n").lstrip(), count=1)
     body = _OPEN_FENCE_RE.sub("\n", _FENCE_RE.sub("\n", text))
-    paragraphs, items = _blocks(body)
+    # A title he links to and words he quotes are someone else's.
+    paragraphs, items = _blocks(_QUOTED_RE.sub(" ", _LINK_RE.sub("a link", body)))
     found: list[str] = []
     for block in (*paragraphs, *items):
         for sentence in sentences_of(block):
-            hit = _FIRST_PERSON_RE.search(sentence)
+            own = _QUOTED_RE.sub(" ", sentence)
+            hit = _FIRST_PERSON_RE.search(own)
             # "I" must be the capital letter: "i" is an index or a list mark.
             if hit and not (hit.group().casefold() == "i" and hit.group() != "I"):
                 found.append(sentence)
     return found
+
+
+_FIGURE_RE = re.compile(r"(?<![\w.#/-])\d[\d,]*(?:\.\d+)?")
+
+
+def numbers_not_in(markdown: str, source: str) -> list[str]:
+    """The numbers in the post's prose that its material does not hold, in
+    the order met. Some are sums he can check by hand and some are invented:
+    code cannot tell which, so they are listed for him, not refused."""
+    text = _FRONT_RE.sub("", markdown.replace("\r\n", "\n").lstrip(), count=1)
+    prose = _OPEN_FENCE_RE.sub("\n", _FENCE_RE.sub("\n", text))
+    prose = re.sub(r"\]\([^)]*\)", "]", prose)             # a link's address
+    known = {n.replace(",", "") for n in _FIGURE_RE.findall(source)}
+    known |= {n.rstrip("0").rstrip(".") for n in known if "." in n}
+    missing: list[str] = []
+    for found in _FIGURE_RE.findall(prose):
+        n = found.replace(",", "")
+        if len(n) == 1 or n in known or n in missing:       # "5 attempts", "2 articles"
+            continue
+        # 0.6 in the post is 60% in the material.
+        if "." in n and f"{float(n) * 100:g}" in known:
+            continue
+        missing.append(n)
+    return missing
+
+
+_NOT_RUN_RE = re.compile(
+    r"(?:has|have|was|were) not (?:been )?(?:run|tested|executed)|did not run|"
+    r"(?:un|never )(?:run|tested)", re.IGNORECASE)
+
+
+def unrun_code(markdown: str) -> bool:
+    """Whether the post shows code and says nobody ran it. Two readers out of
+    two lost trust at that sentence, so he is told before he publishes."""
+    text = _FRONT_RE.sub("", markdown.replace("\r\n", "\n").lstrip(), count=1)
+    return bool(_FENCE_RE.search(text)) and bool(_NOT_RUN_RE.search(_FENCE_RE.sub("", text)))
 
 
 def headline_problems(title: str, summary: str, category: str = "") -> list[str]:
@@ -759,7 +811,12 @@ async def posted_sources() -> set[str]:
     rows = await db.fetch(
         "SELECT DISTINCT payload->>'source' AS source FROM hq.events"
         " WHERE kind = 'post.drafted' AND coalesce(payload->>'source', '') <> ''")
-    return {str(r["source"]) for r in rows}
+    sources = {str(r["source"]) for r in rows}
+    # The article a drafted lesson was written from is written about too.
+    read = await db.fetch(
+        "SELECT r.url FROM hq.readings r JOIN hq.lessons l ON l.id = r.lesson_id"
+        " WHERE l.md_path = ANY(%s)", (sorted(sources),))
+    return sources | {str(r["url"]) for r in read}
 
 
 async def gather_candidates(days: int = 21) -> list[Candidate]:

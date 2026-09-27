@@ -43,6 +43,19 @@ This is how the length and the language fit together. Every term you keep
 must be explained, and an explanation costs words. A post that keeps four
 findings has no words left to explain them. A post that keeps one does.
 
+## Why this post and not the source
+
+When the material is something he read, the reader can read the source
+too, and the source is one click away. The post must give something the
+source does not, and you return it as `adds` in one sentence:
+
+- two sources set side by side, and what follows from both; or
+- the source's method turned into a script or a table; or
+- a number he measured himself, when the material records one.
+
+A post that only retells one article in fewer words has no `adds`. Return
+it with `claim` empty.
+
 ## The shapes
 
 The task names one. Hold to its length; a reader gives extra words almost
@@ -140,18 +153,40 @@ He reads English as a second language, and so do many of his readers.
 - Keep every fact, number and condition that the claim needs, exactly as
   the material gives it. Leave out what the claim does not need. Never
   soften what you keep.
+- Name the owner of every outside number and claim: "Liu's example",
+  "the vLLM team reports". Call a source "the article" with its author.
+  "The post" means this post and nothing else.
+- A word for how common something is ("often", "many teams", "usually",
+  "most") needs a number or a named source in the same sentence. Without
+  one, say it happens, not how often.
+- The title, the summary and the opening block promise only what the body
+  and the code give. Read the code line by line before you promise what it
+  shows. Count its lines before you state a count.
 - Add no link that is not in the material.
 - To the reader there is only the post. Never mention a lesson, a course,
   a study note, the material or the system that wrote the draft.
+- Code that was not run proves nothing, so promise nothing from it. Say
+  what the code is meant to do, not what it shows.
+- When the code does less than the text needs, say so next to the code,
+  and say which line the reader changes: "The script gives every question
+  the tag single-hop. Replace that line with your own tags."
 - Show code as the material gives it. When the material does not say the
   code was run, say in the section on where this stops working that it was
   not run.
 
+## What only he can add
+
+You cannot run code or measure anything. He can. Return as
+`before_publishing` the one to three things that would make a reader
+trust this post, each as an action he can do in under an hour: "Run the
+script on 20 chunks of your own notes and put the output under the code
+block." These are for him. None of them appears in the post.
+
 ## What you return
 
-`slug`, `title`, `summary`, `tags`, `category`, `claim`, `left_out` and
-`markdown`. `category` is one of inference, retrieval, agents, evals,
-backend, career.
+`slug`, `title`, `summary`, `tags`, `category`, `claim`, `adds`,
+`left_out`, `before_publishing` and `markdown`. `category` is one of
+inference, retrieval, agents, evals, backend, career.
 The markdown is the whole post and starts with the opening block, or with
 the first sentence for a note. No title line: the site prints the title.
 

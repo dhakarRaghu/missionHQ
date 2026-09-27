@@ -553,7 +553,7 @@ def test_the_readers_notes_send_a_measured_draft_back_once_more(
 def test_a_draft_that_passed_the_measures_is_kept_with_what_the_reader_said(
         tmp_path: Path, monkeypatch) -> None:
     outcome, prompts, site = _run_post(
-        tmp_path, monkeypatch, [_draft(good())], [dict(LEFT), dict(LEFT), dict(LEFT)])
+        tmp_path, monkeypatch, [_draft(good())], [dict(LEFT) for _ in range(lw.POST_ATTEMPTS)])
     assert outcome.outcome == "done" and len(prompts) == lw.POST_ATTEMPTS
     assert "A reader still said:" in outcome.output and "it repeats itself" in outcome.output
     assert (site / "content" / "blog" / "sticky-routing.md").is_file()
@@ -691,3 +691,45 @@ def test_the_opening_block_starts_with_the_finding() -> None:
     problems = "\n".join(sp.reader_problems(post, "brief"))
     assert "starts with the author" in problems
     assert "starts with the author" not in "\n".join(sp.reader_problems(good(), "brief"))
+
+
+def test_a_reader_says_which_promise_was_not_kept_and_which_section_is_extra() -> None:
+    verdict = lw.ReaderVerdict(
+        gets="g", takeaway="t", matches_claim=True, would_finish=True,
+        not_delivered=["recall per segment: the code gives every question one segment"],
+        off_claim=["An agent with retries changes what you should measure"],
+        figures=["lies gently", "burn weeks"], unclear_source=["the post says"])
+    notes = "\n".join(lw.reader_notes(verdict))
+    assert "promises what the post does not give: recall per segment" in notes
+    assert 'does not need the section "An agent with retries' in notes
+    assert '"lies gently" | "burn weeks"' in notes
+    assert 'whose words or number these are: "the post says"' in notes
+
+
+def test_code_nobody_ran_is_told_to_him_not_hidden() -> None:
+    code = "```python\nprint(1)\n```\n"
+    assert sp.unrun_code("Text.\n\n" + code + "\nThis script has not been run.\n")
+    assert not sp.unrun_code("Text.\n\n" + code + "\nIt printed 1 on my laptop.\n")
+    assert not sp.unrun_code("This was not tested.\n")
+    assert sp.first_person('He wrote [Why Grep Beat Embeddings in Our Agent](http://x.y).') == []
+
+
+def test_a_quotation_that_is_not_in_the_post_is_dropped() -> None:
+    post = "**In short:** x.\n\nThe synthetic eval lies gently. Tokens normal, latency normal.\n"
+    verdict = lw.ReaderVerdict(
+        gets="g", takeaway="t", matches_claim=True, would_finish=True,
+        figures=["lies gently", "burn weeks"],
+        fragments=['That is it, none found. Actually: "No." (not present).',
+                   "Tokens normal, latency normal."])
+    notes = "\n".join(lw.reader_notes(verdict, post))
+    assert '"lies gently"' in notes and "burn weeks" not in notes
+    assert "Tokens normal" in notes and "none found" not in notes
+
+
+def test_numbers_the_material_does_not_hold_are_listed_for_him() -> None:
+    source = "Recall of 70% can sit on 5% for one segment. At 60% and 5 tries it is 99%."
+    post = ("**In short:** x.\n\nA system with 95% on simple questions and 5% on others"
+            " averages 70%. With r = 0.6 it is 1 - 0.4^5, about 99%.\n\n"
+            "```\n1 - 0.01024\n```\n\n[a link](https://x.y/2025/01/24/z)\n")
+    assert sp.numbers_not_in(post, source) == ["95", "0.4"]
+    assert sp.first_person("He titled it *Why Grep Beat Embeddings in Our Agent*.") == []
