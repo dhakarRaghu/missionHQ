@@ -1205,18 +1205,32 @@ def course_sequence(catalogue: object, slug: str) -> dict[str, Any]:
     phases later. Both read as badly written to someone working through the
     course, which is how he reads them.
     """
-    course, order = _phase_order(slug)
-    siblings: list[tuple[int, str, str]] = []
+    course, _number = _phase_order(slug)
+
+    def place(s: str) -> tuple[int, str]:
+        # A phase split into parts keeps its number: 2A comes before 2B, and
+        # both come after 1. Compared by number alone, the phase before 2B
+        # was Phase 1 and 2A was its neighbour on neither side.
+        tail = s.partition("-phase-")[2]
+        match = re.match(r"(\d+)([a-z]?)-", tail)
+        return (int(match.group(1)), match.group(2)) if match else (0, "")
+
+    order = place(slug)
+    siblings: list[tuple[tuple[int, str], str, str]] = []
     for item in catalogue if isinstance(catalogue, list) else []:
         if not isinstance(item, dict):
             continue
         other = str(item.get("slug") or "")
-        other_course, other_order = _phase_order(other)
+        other_course, _n = _phase_order(other)
         if other and other_course == course and other != slug:
-            siblings.append((other_order, other, str(item.get("title") or "")))
+            siblings.append((place(other), other, str(item.get("title") or "")))
+    # A whole phase the platform later split is not a neighbour of its parts.
+    parts = {p[0] for p, _s, _t in siblings if p[1]} | ({order[0]} if order[1] else set())
+    siblings = [s for s in siblings if s[0][1] or s[0][0] not in parts]
     before = max((s for s in siblings if s[0] < order), default=None)
     after = min((s for s in siblings if s[0] > order), default=None)
-    def shape(found: tuple[int, str, str] | None) -> dict[str, str] | None:
+
+    def shape(found: tuple[tuple[int, str], str, str] | None) -> dict[str, str] | None:
         return None if found is None else {"slug": found[1], "title": found[2]}
 
     return {"previous": shape(before), "next": shape(after)}
@@ -1260,30 +1274,38 @@ async def read_course_phase(ctx: RunContext[HQDeps], slug: str) -> dict[str, Any
                       "declares_no_lab": not phase.lab.strip()},
             "course_description": course.description,
         }
-    url = f"{settings().study_api_base.rstrip('/')}/api/study"
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(url, headers={"User-Agent": "MissionHQ/1.0"})
-        resp.raise_for_status()
-        catalogue = resp.json()
-    for item in catalogue if isinstance(catalogue, list) else []:
-        if isinstance(item, dict) and item.get("slug") == slug:
-            body = str(item.get("content") or "")
-            await emit("course.phase_read", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
-                       payload={"slug": slug, "chars": len(body)})
-            return {
-                "slug": slug,
-                "title": str(item.get("title") or ""),
-                "summary": str(item.get("summary") or "")[:1000],
-                "sections": item.get("sections") or [],
-                "content": body[:PHASE_MAX_CHARS],
-                "truncated": len(body) > PHASE_MAX_CHARS,
-                # Where this sits in the course, so the lesson can be taught
-                # in order rather than as a standalone article.
-                "sequence": course_sequence(catalogue, slug),
-                # Measured, so no brief or skill has to carry a number.
-                "shape": module_shape(body),
-            }
-    raise ModelRetry(f"no phase with slug {slug!r}; call list_courses first")
+    # Asked for by its slug, never looked up in the list: the platform's list
+    # stops at 100 documents, and with 112 published a phase past the hundredth
+    # "did not exist". Hunter then fetched the whole list twice, 400,000
+    # characters each, and the run ended on a full context window.
+    try:
+        item = await fetch_platform_document(slug)
+    except ValueError:
+        raise ModelRetry(f"no phase with slug {slug!r}; call list_courses first") from None
+    except httpx.HTTPError as exc:
+        raise ModelRetry(f"the study platform did not answer for {slug!r}"
+                         f" ({type(exc).__name__}); try once more, and do not fetch its"
+                         " whole list instead") from None
+    body = str(item.get("content") or "")
+    course_slug, _order = _phase_order(slug)
+    siblings = await db.fetch(
+        "SELECT slug, title FROM hq.course_phases WHERE course = %s AND source = 'platform'",
+        (course_slug,))
+    await emit("course.phase_read", run_id=ctx.deps.run_id, agent=ctx.deps.agent,
+               payload={"slug": slug, "chars": len(body)})
+    return {
+        "slug": slug,
+        "title": str(item.get("title") or ""),
+        "summary": str(item.get("summary") or "")[:1000],
+        "sections": item.get("sections") or [],
+        "content": body[:PHASE_MAX_CHARS],
+        "truncated": len(body) > PHASE_MAX_CHARS,
+        # Where this sits in the course, so the lesson can be taught
+        # in order rather than as a standalone article.
+        "sequence": course_sequence([dict(s) for s in siblings], slug),
+        # Measured, so no brief or skill has to carry a number.
+        "shape": module_shape(body),
+    }
 
 
 # --- the course source and the enhanced page ---------------------------------
@@ -1856,6 +1878,9 @@ _VISUALS = (
     'class="stats"', 'class="bars"', 'class="timeline"',
     'class="compare"', 'class="steps"', 'class="tabs"', 'class="calc"',
     'class="toggle-fig"', 'class="cards"',
+    # Figures drawn in HTML: a flow, lanes to scale, a whole and its parts,
+    # a decision tree.
+    'class="flow"', 'class="lanes"', 'class="stack"', 'class="tree"',
 )
 # These carry their own shape, and a figure inside them would be noise.
 _NO_VISUAL_NEEDED = ("exercise", "answer", "source", "cheat", "reference",

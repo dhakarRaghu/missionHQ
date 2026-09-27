@@ -48,6 +48,7 @@ import html as html_lib
 import json
 import logging
 import re
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -68,12 +69,23 @@ log = logging.getLogger(__name__)
 
 WRITER_DIR = assemble.WRITER_DIR
 SECTION_RETRIES = 2          # a part is rewritten at most twice for its own findings
-PLAN_ATTEMPTS = 3            # a plan is sent back at most twice with what failed
+PLAN_ATTEMPTS = 4            # a plan is sent back at most three times with what failed
 REPAIR_ROUNDS = 1            # whole-page and citation findings: one round of repairs
 NOTE_CHARS = 60_000          # a study note is a few thousand words; this is a ceiling
-SOURCE_CHARS = 40_000
-MATERIAL_CHARS = 120_000     # what the citation judge reads: note, phase and sequence
+# His whole phase reaches the plan: at 40,000 a 55,000-character phase lost
+# its references and its cheatsheet before the plan saw them.
+SOURCE_CHARS = 80_000
+MATERIAL_CHARS = 160_000     # what the citation judge reads: note, phase and sequence
 PREVIOUS_CHARS = 1_500       # the end of the section above, for continuity
+MEMORY_CHARS = 7_000         # the course so far: earlier phases' cases, terms and endings
+MEMORY_TERMS = 14            # terms kept per earlier phase
+LEDGER_TERMS = 3             # new terms one section may introduce
+# A run of very short sentences states facts and drops how they connect:
+# measured on the pages he could not follow, 17 to 21% of sentences were
+# five words or fewer, against 7% in the writer he named as the model.
+SHORT_SENTENCE_WORDS = 5
+SHORT_SHARE = 0.15
+SHORT_MIN_SENTENCES = 12
 CITATION_BATCH = 30
 # The release test and the citation check read claims against material:
 # judgement, not volume, so they use the teacher model at low effort (quick,
@@ -138,6 +150,16 @@ class SectionPlan(BaseModel):
     covers: str = Field(description="what this section does, one or two sentences")
     source_sections: list[str] = Field(
         default_factory=list, description="headings of his phase this section draws on")
+    # The ledger: how the order of ideas is checked before a word is written.
+    introduces: list[str] = Field(default_factory=list, description=(
+        "teaching sections: the terms this section defines for the first time in this"
+        f" lesson, at most {LEDGER_TERMS}"))
+    assumes: list[str] = Field(default_factory=list, description=(
+        "teaching sections: terms it relies on that a section above or an earlier phase"
+        " introduced; general engineering words are not listed"))
+    bridge: str = Field(default="", description=(
+        "every teaching section after the first: one sentence on what the section above"
+        " left unexplained, which this one answers"))
 
 
 class Outline(BaseModel):
@@ -145,7 +167,12 @@ class Outline(BaseModel):
     subtitle: str = Field(description="the question the lesson answers")
     eyebrow: str
     outcome: str = Field(description="what he can do afterwards that he could not before")
+    running_case: str = Field(default="", description=(
+        "the one situation the lesson follows from start to finish, continued from the"
+        " course so far"))
     opening: str = Field(description="the situation where not knowing this costs him")
+    hands_over: str = Field(default="", description=(
+        "what he can do after this, and the question the next phase answers"))
     concepts: list[Concept]
     sections: list[SectionPlan]
     left_out: list[str] = Field(default_factory=list)
@@ -187,7 +214,11 @@ class ArticleOutline(BaseModel):
     subtitle: str = Field(description="the question the piece answers")
     eyebrow: str
     outcome: str = Field(description="what he can do afterwards that he could not before")
+    running_case: str = Field(default="", description=(
+        "the one situation the piece follows, taken from the phase it orbits"))
     opening: str = Field(description="the situation where not knowing this costs him")
+    hands_over: str = Field(default="", description=(
+        "what this changes in how he reads the phase"))
     concept: Concept = Field(description="the one idea; its id is c1")
     sections: list[SectionPlan]
     left_out: list[str] = Field(default_factory=list)
@@ -225,13 +256,20 @@ EDITOR_MODEL = "teacher"
 EDITOR_REWRITES = 3          # at most this many sections are rewritten for the editor
 EDITOR_BAR = 4               # a criterion below this sends its section to the rewrite list
 EDITOR_FLOOR = 3.0           # a section still averaging below this flags the lesson
-CRITERIA = ("concept_first", "asks_before_tells", "concrete", "plain", "transfer")
+CRITERIA = ("concept_first", "asks_before_tells", "concrete", "plain", "connected",
+            "one_idea", "transfer")
 _CRITERIA_FIX = {
     "concept_first": "state the claim in the first lines, then show the cause step by step",
     "asks_before_tells": "ask a predict question with numbers whose obvious answer is wrong,"
-                         " before the answer",
+                         " after the short picture and before the detailed answer",
     "concrete": "give one number with its conditions, or one failure he can picture",
-    "plain": "split long sentences, one idea each; replace idioms with literal verbs",
+    "plain": "split long sentences, one idea each; replace idioms with literal words; join"
+             " a reason to its claim with because, so or but",
+    "connected": "open from the result of the section above, return to the running case,"
+                 " explain each term where it is first used, and end on what the next"
+                 " section answers",
+    "one_idea": "teach one idea in steps: the picture, the mechanism, then the number;"
+                " say where to split, and never cut the detail",
     "transfer": "end with one thing to do or check from his phase or the owner-state"
                 " block, and what to look for",
 }
@@ -247,6 +285,12 @@ class SectionScore(BaseModel):
     asks_before_tells: int = _score_field("a real predict question he could get wrong")
     concrete: int = _score_field("a specific number, failure or trace he can picture")
     plain: int = _score_field("short plain sentences for a second-language reader")
+    # A verdict that leaves these two out reads as a pass on them, not as a
+    # failed run: the scores kept from before they existed carry neither.
+    connected: int = Field(default=EDITOR_BAR, ge=1, le=5, description=(
+        "it follows from the section above and leads to the next"))
+    one_idea: int = Field(default=EDITOR_BAR, ge=1, le=5, description=(
+        "one idea, built in steps, at most three new terms"))
     transfer: int = _score_field("it ends with something he can do or check")
     rewrite: str = Field(default="", description=(
         "for a section below 4 on any criterion: what to change, specifically; else empty"))
@@ -450,17 +494,282 @@ def _source_urls(note: str) -> list[str]:
     return urls
 
 
-async def _course_sequence(course: str, slug: str) -> str:
+_PHASE_NO_RE = re.compile(r"-phase-(\d+)([a-z]?)-")
+
+
+def _without_split_parents(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """A phase the platform split into parts (2 into 2A and 2B) can leave its
+    old whole-phase row behind; the parts are the course, the parent is not."""
+    split = {m.group(1) for r in rows
+             if (m := _PHASE_NO_RE.search(str(r["slug"]))) and m.group(2)}
+    return [r for r in rows
+            if not ((m := _PHASE_NO_RE.search(str(r["slug"])))
+                    and not m.group(2) and m.group(1) in split)]
+
+
+async def _phase_rows(course: str) -> list[Mapping[str, Any]]:
     rows = await db.fetch(
-        "SELECT slug, title FROM hq.course_phases WHERE course = %s"
-        " ORDER BY phase_order, slug", (course,))
+        "SELECT p.slug, p.title, l.html_path FROM hq.course_phases p"
+        " LEFT JOIN hq.lessons l ON l.id = p.lesson_id"
+        " WHERE p.course = %s ORDER BY p.phase_order, p.slug", (course,))
+    return _without_split_parents(rows)
+
+
+def _sequence_text(rows: Sequence[Mapping[str, Any]], slug: str) -> str:
     slugs = [r["slug"] for r in rows]
     if slug not in slugs:
         return ""
     i = slugs.index(slug)
     before = "\n".join(f"- {r['title']}" for r in rows[:i]) or "- nothing"
     after = "\n".join(f"- {r['title']}" for r in rows[i + 1:]) or "- nothing"
-    return f"Earlier phases (known to him):\n{before}\n\nLater phases (not yet):\n{after}"
+    # He read an earlier phase days ago. "Known to him" made the writer use
+    # its terms with no explanation: one phase used "prefill" 35 times and
+    # never said what it is.
+    return ("Earlier phases (he has read them; their terms are explained again, in a"
+            f" clause, where this lesson first uses one):\n{before}\n\n"
+            f"Later phases (not written yet; name one only by the question it answers):\n{after}")
+
+
+async def _course_sequence(course: str, slug: str) -> str:
+    return _sequence_text(await _phase_rows(course), slug)
+
+
+# --- the course so far ----------------------------------------------------------
+# The writer knew the earlier phases by their titles and nothing else, so a
+# lesson could not start from where the last one ended, reuse its situation
+# or know which terms he had been given. Each lesson he has is read here by
+# code and handed on: its situation, the terms it defined, how it ended.
+
+class PhaseMemory(BaseModel):
+    slug: str = ""
+    title: str = ""
+    situation: str = ""
+    terms: dict[str, str] = Field(default_factory=dict)
+    ended: str = ""
+
+
+_DFN_RE = re.compile(r"(?is)<dfn\b[^>]*>(.*?)</dfn>")
+_DEFINES_RE = re.compile(
+    r"(?<![\w-])((?:[A-Z][\w-]*|[a-z]+[A-Z_]\w*)(?: [\w-]+){0,2}|[A-Z][a-z]+(?: [a-z-]+){1,2})"
+    r" (?:is|are|means) (?:the|a|an|each|every|one|how|when) [^.?!]{12,170}[.?!]")
+_P_RE = re.compile(r"(?is)<p\b([^>]*)>(.*?)</p>")
+_BLOCKS_RE = re.compile(r"(?is)<(pre|script|style|nav|svg|figure|table|details)\b.*?</\1>")
+
+
+def _plain(fragment: str) -> str:
+    return " ".join(html_lib.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
+
+
+def _sentence_around(text: str, at: int) -> str:
+    start = max(text.rfind(". ", 0, at), text.rfind("? ", 0, at), text.rfind("! ", 0, at))
+    ends = [e for e in (text.find(". ", at), text.find("? ", at), text.find("! ", at)) if e != -1]
+    end = min(ends) + 1 if ends else len(text)
+    return text[start + 2 if start != -1 else 0:end].strip()
+
+
+_HEADING_RE = re.compile(r"(?is)<h([1-6])\b([^>]*)>(.*?)</h\1>")
+_APPARATUS_HEAD_RE = re.compile(
+    r"(?i)\b(lab|exercises?|checkpoint|check (?:it )?yourself|cheatsheet|reference card"
+    r"|references?|sources|further learning|could not verify|you could post|codebase anchor"
+    r"|in mission hq|set up before|what changed since)\b")
+_HANDOVER_HEAD_RE = re.compile(
+    r"(?i)\b(where does the course go|what comes next|what you can do now|what is next)\b")
+_CODE_LIKE_RE = re.compile(r"[A-Z]{2,}|[a-z][A-Z]|_|\d")
+MEMORY_TERM_USES = 6         # a plain-word term counts when the lesson keeps using it
+
+
+def _paragraphs(fragment: str, least: int) -> list[str]:
+    paras = [_plain(p) for a, p in _P_RE.findall(_BLOCKS_RE.sub(" ", fragment))
+             if not re.search(r"""class=["'](?:why|remember|trap|try)""", a)]
+    return [p for p in paras if len(p.split()) >= least]
+
+
+def _defined_terms(marked: str) -> dict[str, str]:
+    """The terms a page defines, each with the sentence that defines it.
+
+    A marked term (`<dfn>`) is taken as it is. On a page written before
+    terms were marked, a sentence of the form "X is the ..." counts only
+    when X reads as a term: an acronym or an identifier, or words the page
+    goes on using. "They are a third class" and "The fix is a shorter
+    prompt" have the same form and define nothing."""
+    prose = _HEADING_RE.sub(" ", marked)
+    flat = _plain(prose)
+    low = flat.lower()
+    terms: dict[str, str] = {}
+    for m in _DFN_RE.finditer(prose):
+        term = _plain(m.group(1))
+        at = flat.find(term)
+        if term and at != -1 and term.lower() not in {t.lower() for t in terms}:
+            terms[term] = _sentence_around(flat, at)[:220]
+    if len(terms) >= MEMORY_TERMS:
+        return dict(list(terms.items())[:MEMORY_TERMS])
+    found: list[tuple[int, int, str, str]] = []
+    for order, m in enumerate(_DEFINES_RE.finditer(flat)):
+        term = re.sub(r"^(?:A|An|The) ", "", m.group(1).strip())
+        words = term.split()
+        # "JSON is a request, not a guarantee" is a claim in the form of a
+        # definition; so is anything that opens on a number or shouts a word.
+        if (", not " in m.group(0) or not term[0].isalpha() or words[0].isupper()
+                and len(words) > 1 and words[0].lower() not in term.lower().split()[1:]
+                and len(words[0]) > 4):
+            continue
+        if (len(term) < 3 or len(words) > 3 or term.lower() in {t.lower() for t in terms}
+                or any(w.lower() in _NOT_TERMS for w in words[:1])
+                or (len(words) == 1 and words[0].lower() in _PLAIN_WORDS)
+                or words[-1].lower() in _PLAIN_WORDS and len(words) > 1
+                and words[0].lower() in _ORDER_WORDS):
+            continue
+        uses = len(re.findall(rf"(?<![\w-]){re.escape(term.lower())}", low))
+        code_like = bool(_CODE_LIKE_RE.search(term))
+        if code_like or uses >= MEMORY_TERM_USES:
+            found.append((0 if code_like else 1, order, term, m.group(0).strip()[:220]))
+    for _rank, _order, term, sentence in sorted(found):
+        if term.lower() not in {t.lower() for t in terms}:
+            terms[term] = sentence
+    return dict(list(terms.items())[:MEMORY_TERMS])
+
+
+def phase_memory(page_html: str, *, slug: str = "", title: str = "") -> PhaseMemory:
+    """What a later phase needs from this lesson: the situation it opened on,
+    the terms it defined (each with the sentence that defined it) and how it
+    ended. Read from the page, so it holds for a lesson written before terms
+    were marked as well as for one written after."""
+    body = re.split(r"(?i)<main\b[^>]*>", page_html, maxsplit=1)[-1]
+    head, *sections = re.split(r"(?i)(?=<h2\b)", body)
+    teaching: list[tuple[str, str]] = []
+    for section in sections:
+        h = _HEADING_RE.search(section)
+        heading = _plain(h.group(3)) if h else ""
+        kind = re.search(r"""data-kind=["']([^"']+)""", h.group(2)) if h else None
+        if (kind and kind.group(1) != "recall") or _APPARATUS_HEAD_RE.search(heading):
+            continue
+        teaching.append((heading, section))
+
+    # The situation: the paragraphs above the first heading, or, on a page
+    # that opens on a heading, the first ones under it.
+    opening = _paragraphs(head, 12) or (_paragraphs(teaching[0][1], 12) if teaching else [])
+    situation = " ".join(opening[:2])[:700]
+
+    ended = ""
+    handover = [s for heading, s in teaching if _HANDOVER_HEAD_RE.search(heading)]
+    for section in handover[-1:] or [s for _h, s in reversed(teaching)]:
+        paras = _paragraphs(section, 10)
+        if paras:
+            ended = (" ".join(paras[:2]) if handover else paras[-1])[:500]
+            break
+    return PhaseMemory(slug=slug, title=title, situation=situation,
+                       terms=_defined_terms(_BLOCKS_RE.sub(" ", body)), ended=ended)
+
+
+# Sentence openers the definition pattern would take for a term.
+_NOT_TERMS = frozenset({
+    "this", "that", "these", "those", "it", "there", "here", "what", "which", "each",
+    "every", "one", "he", "she", "you", "your", "its", "their", "our", "they", "we", "i",
+    "nothing", "something", "everything", "none", "both", "either", "neither", "and",
+    "but", "so", "or", "not", "why", "how", "when", "where", "who", "if", "then", "now",
+    "story", "step", "phase", "section", "exercise", "part", "figure", "table", "option",
+    "rule", "case", "all", "any", "some", "most", "many", "only", "also", "yes", "no",
+})
+# Words that open an ordinary sentence about an ordinary noun ("the third
+# number is ...", "the newest column is ...").
+_ORDER_WORDS = frozenset({
+    "first", "second", "third", "fourth", "last", "next", "other", "same", "new", "newest",
+    "old", "oldest", "exact", "real", "main", "whole", "only", "right", "wrong", "miss",
+    "best", "worst", "full", "final",
+})
+# Nouns every lesson uses: a sentence that says what one "is" defines nothing.
+_PLAIN_WORDS = frozenset({
+    "fix", "failure", "invoice", "thinking", "number", "column", "case", "signature",
+    "result", "answer", "reason", "problem", "point", "idea", "cost", "price", "time",
+    "way", "thing", "signal", "half", "test", "goal", "trick", "catch", "question",
+    "difference", "rest", "output", "input", "model", "request", "response", "server",
+    "client", "user", "value", "limit", "unit", "pattern", "flags", "slots", "change",
+    "numbers", "page", "pages", "section", "sections", "constraints", "lesson", "course",
+    "document", "example", "examples", "rule", "rules", "step", "steps", "lab",
+})
+
+
+def memory_block(memories: Sequence[PhaseMemory]) -> str:
+    """The course so far, as the plan and every section read it. The phases
+    nearest this one get the room when it runs short."""
+    if not memories:
+        return ""
+    blocks: list[str] = []
+    for m in memories:
+        lines = [f"### {m.title or m.slug}"]
+        if m.situation:
+            lines.append(f"Its situation: {m.situation}")
+        if m.terms:
+            lines.append("Terms it defined:")
+            lines += [f"- {term}: {meaning}" for term, meaning in m.terms.items()]
+        if m.ended:
+            lines.append(f"How it ended: {m.ended}")
+        blocks.append("\n".join(lines))
+    kept: list[str] = []
+    room = MEMORY_CHARS
+    for block in reversed(blocks):
+        if kept and len(block) > room:
+            break
+        kept.append(block[:room])
+        room -= len(block)
+    return ("## The course so far\n\nHe has read these phases. Continue from them: reuse"
+            " the situation, start from how the last one ended, and explain any of"
+            " these terms again in one clause where this lesson first uses it.\n\n"
+            + "\n\n".join(reversed(kept)))
+
+
+def known_terms(memories: Sequence[PhaseMemory]) -> list[str]:
+    seen: dict[str, str] = {}
+    for m in memories:
+        for term in m.terms:
+            seen.setdefault(term.lower(), term)
+    return list(seen.values())
+
+
+def _lesson_page(slug: str, html_path: str = "") -> str:
+    """The page he has for a phase: the recorded lesson, else the newest
+    file written for that slug (a phase rebuilt by hand has no row)."""
+    repo = settings().learning_dir.parent
+    if html_path and (repo / html_path).is_file():
+        return (repo / html_path).read_text()
+    folder = settings().learning_dir / "lessons"
+    pages = sorted(folder.glob(f"*-{lt._clean_slug(slug)}.html")) if folder.is_dir() else []
+    return pages[-1].read_text() if pages else ""
+
+
+async def _course_memory(rows: Sequence[Mapping[str, Any]], slug: str) -> list[PhaseMemory]:
+    slugs = [r["slug"] for r in rows]
+    if slug not in slugs:
+        return []
+    out: list[PhaseMemory] = []
+    for r in rows[:slugs.index(slug)]:
+        page = await asyncio.to_thread(_lesson_page, str(r["slug"]), str(r.get("html_path") or ""))
+        if page:
+            out.append(phase_memory(page, slug=str(r["slug"]), title=str(r["title"])))
+    return out
+
+
+async def _course_so_far(course: str, slug: str) -> tuple[list[PhaseMemory], list[dict[str, str]]]:
+    """(what the earlier lessons gave him, the course map). Help for the
+    writer, so a lesson is never lost to it: when it cannot be read, the
+    lesson is written from the sequence alone, as it was before."""
+    try:
+        rows = await _phase_rows(course)
+        return await _course_memory(rows, slug), course_map(rows, slug)
+    except Exception as exc:  # noqa: BLE001 — see the docstring
+        log.warning("writer: the course so far could not be read for %s: %s", slug, exc)
+        return [], []
+
+
+def course_map(rows: Sequence[Mapping[str, Any]], slug: str) -> list[dict[str, str]]:
+    """Every phase of the course in order, with where he is."""
+    slugs = [r["slug"] for r in rows]
+    if slug not in slugs:
+        return []
+    here = slugs.index(slug)
+    return [{"title": str(r["title"]),
+             "state": "here" if i == here else ("read" if i < here else "later")}
+            for i, r in enumerate(rows)]
 
 
 async def _articles_on(slug: str) -> str:
@@ -485,6 +794,11 @@ class Material(BaseModel):
     owner_state: str = ""
     source_urls: list[str] = Field(default_factory=list)
     payload: dict[str, Any] = Field(default_factory=dict)
+    # The course so far, read by code from the lessons he has: what every
+    # call is given so this lesson continues them.
+    memory: str = ""
+    known_terms: list[str] = Field(default_factory=list)
+    course_map: list[dict[str, str]] = Field(default_factory=list)
 
 
 async def gather(payload: dict[str, Any]) -> Material:
@@ -497,12 +811,16 @@ async def gather(payload: dict[str, Any]) -> Material:
         from hq.tools.review_tools import _study_note
 
         note_path, note = await _study_note(slug)
-        sequence = await _course_sequence(str(payload.get("course") or ""), slug)
+        course = str(payload.get("course") or "")
+        sequence = await _course_sequence(course, slug)
+        memories, phases = await _course_so_far(course, slug)
+        so_far = memory_block(memories)
         articles = await _articles_on(slug)
         lost = await signals.lost_material(str(payload.get("course") or ""), slug)
         prompt = (
             f"# The phase: {payload.get('title')} ({slug})\n\n"
             f"{payload.get('summary') or ''}\n\n{sequence}\n\n"
+            + (f"{so_far}\n\n" if so_far else "")
             + (f"{lost}\n\n" if lost else "")
             + (f"He has already read these articles on this phase; do not retell"
                f" them:\n{articles}\n\n" if articles else "")
@@ -510,7 +828,8 @@ async def gather(payload: dict[str, Any]) -> Material:
             f"## His phase, as he wrote it\n\n{source[:SOURCE_CHARS]}\n\n{his}"
         )
         return Material(article=False, slug=slug, note=note, source=source, prompt=prompt,
-                        owner_state=his, source_urls=_source_urls(note), payload=payload)
+                        owner_state=his, source_urls=_source_urls(note), payload=payload,
+                        memory=so_far, known_terms=known_terms(memories), course_map=phases)
 
     digests = [str(d) for d in payload.get("digests") or []]
     notes = [(d, await _read_vault(d)) for d in digests]
@@ -520,21 +839,30 @@ async def gather(payload: dict[str, Any]) -> Material:
     relationship = str(payload.get("relationship") or "")
     phase_slug = str(payload.get("phase_slug") or "")
     phase = ""
+    orbit: list[PhaseMemory] = []
     if phase_slug:
         source = await asyncio.to_thread(lt.read_course_source_text, phase_slug)
         headings = [h for h, _ in lt.split_sections(source) if h] if source else []
         phase = (f"# The phase it orbits: {payload.get('phase_title')} ({phase_slug})\n\n"
                  f"It asks: {payload.get('phase_question') or '(not stated)'}\n\n"
-                 "Its sections (known to him; do not re-teach them):\n"
+                 "Its sections (he has read them; do not re-teach them, but explain one of"
+                 " their terms again in a clause where the article first uses it):\n"
                  + "\n".join(f"- {h}" for h in headings))
+        page = await asyncio.to_thread(_lesson_page, phase_slug)
+        if page:
+            orbit = [phase_memory(page, slug=phase_slug,
+                                  title=str(payload.get("phase_title") or phase_slug))]
+    so_far = memory_block(orbit)
     prompt = (
         f"# Today's article\n\nKind: {kind}. Relationship to the phase: "
         f"{relationship or 'not stated'}.\nWhat the scan said it adds: "
         f"{payload.get('adds') or '(not given)'}\nHis interests: {payload.get('topics') or ''}\n\n"
-        f"{phase}\n\n## Hunter's digests\n\n{note[:NOTE_CHARS]}\n\n{his}"
+        f"{phase}\n\n" + (f"{so_far}\n\n" if so_far else "")
+        + f"## Hunter's digests\n\n{note[:NOTE_CHARS]}\n\n{his}"
     )
     return Material(article=True, slug="", kind=kind, relationship=relationship, note=note,
-                    prompt=prompt, owner_state=his, source_urls=urls, payload=payload)
+                    prompt=prompt, owner_state=his, source_urls=urls, payload=payload,
+                    memory=so_far, known_terms=known_terms(orbit))
 
 
 # --- checks -------------------------------------------------------------------
@@ -641,6 +969,66 @@ def outline_problems(outline: Outline, note: str, *, article: bool) -> list[str]
     return probs
 
 
+def _term(text: str) -> str:
+    """A term as the ledger compares it: case, plurals and marks aside."""
+    words = re.sub(r"[^a-z0-9 ]+", " ", text.lower()).split()
+    return " ".join(w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words)
+
+
+def ledger_problems(outline: Outline, known: Sequence[str] = ()) -> list[str]:
+    """Where the plan's order would make him read a term before its meaning,
+    or a section with no link to the one above. [] when the order holds.
+
+    A lesson he could not follow used "compaction" at word 291 and explained
+    it at word 5,302. Nothing in a sentence shows that; the order does."""
+    probs: list[str] = []
+    teaching = [s for s in outline.sections if not s.kind]
+    if not teaching:
+        return probs
+    if not outline.running_case.strip():
+        probs.append("running_case is empty: name the one situation the lesson follows"
+                     " from its first section to its last")
+    if not any(s.introduces or s.assumes for s in teaching):
+        probs.append("no section carries its ledger: fill introduces and assumes for each"
+                     " teaching section, so the order of terms can be checked")
+        return probs
+    earlier = {_term(t) for t in known}
+    # What the sections above a teaching section have explained, the
+    # orientation's reminders included: a plan that explained "prefill" again
+    # in its orientation was sent back for assuming it two sections later.
+    above: dict[int, set[str]] = {}
+    seen: set[str] = set()
+    for s in outline.sections:
+        if s.kind:
+            if s.kind == "orientation":
+                seen |= {_term(t) for t in s.introduces}
+            continue
+        above[id(s)] = set(seen)
+        seen |= {_term(t) for t in s.introduces}
+    for n, s in enumerate(teaching):
+        given = above[id(s)]
+        if n and not s.bridge.strip():
+            probs.append(f"section {s.heading!r} has no bridge: one sentence on what the"
+                         " section above it left unexplained")
+        if len(s.introduces) > LEDGER_TERMS:
+            probs.append(f"section {s.heading!r} introduces {len(s.introduces)} terms ("
+                         + ", ".join(s.introduces) + f"); past {LEDGER_TERMS} it carries a"
+                         " second idea. Split it into two sections, and keep every term")
+        new = {_term(t) for t in s.introduces}
+        for term in s.assumes:
+            key = _term(term)
+            if not key or key in given or key in new:
+                continue
+            if key in earlier:
+                probs.append(f"section {s.heading!r} assumes {term!r} from an earlier phase:"
+                             " list it under introduces here, so it is explained again in"
+                             " a clause where he first meets it in this lesson")
+            else:
+                probs.append(f"section {s.heading!r} assumes {term!r}, which no section"
+                             " above introduces: introduce it there, or here")
+    return probs
+
+
 _HTML_FENCE_RE = re.compile(r"^```(?:html)?\s*|\s*```$", re.IGNORECASE)
 _LEADING_H2_RE = re.compile(r"^\s*<h2\b[^>]*>.*?</h2>\s*", re.IGNORECASE | re.DOTALL)
 
@@ -722,6 +1110,122 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
     return probs
 
 
+def connection_problems(html: str, plan: SectionPlan) -> list[str]:
+    """What keeps a teaching section from reading as the next step: a term
+    the plan says it introduces and the section never defines, and prose
+    cut into sentences too short to carry a reason."""
+    if plan.kind:
+        return []
+    probs: list[str] = []
+    marked = [_term(_plain(m)) for m in _DFN_RE.findall(html)]
+    text = _term(lt._page_text(html))
+    for term in plan.introduces:
+        key = _term(term)
+        if not key:
+            continue
+        if not any(key in d or d in key for d in marked if d):
+            where = "uses it and" if key in text else "never uses it and"
+            probs.append(f"the plan says this section introduces {term!r}; the section"
+                         f" {where} does not define it. Explain it in the sentence that"
+                         f" first uses it, with the term inside <dfn>{term}</dfn>")
+    sentences = _all_sentences(html)
+    if len(sentences) >= SHORT_MIN_SENTENCES:
+        short = [s for s in sentences if len(s.split()) <= SHORT_SENTENCE_WORDS]
+        if len(short) / len(sentences) > SHORT_SHARE:
+            probs.append(
+                f"{len(short)} of {len(sentences)} sentences are {SHORT_SENTENCE_WORDS} words"
+                f" or fewer (“{short[0][:60]}”): they state facts and leave out how the"
+                " facts connect. Join each to the sentence it explains with because, so"
+                " or but. Keep every fact")
+    return probs + figure_problems(html) + voice_problems(html)
+
+
+def _all_sentences(html: str) -> list[str]:
+    """Every sentence of the prose he reads, the shortest included and the
+    headings left out: the plainness measure drops any of seven words or
+    fewer, so it cannot see a run of them."""
+    flat = " ".join(lt.teaching_prose(_HEADING_RE.sub(" ", html)).split())
+    return [s for s in lt._SENTENCE_SPLIT_RE.split(flat) if len(s.split()) >= 2]
+
+
+# --- figures he can look at ------------------------------------------------------
+# He asked for the diagrams to be drawn, and to move where they can: "make the
+# diagram and flow with html so it helps me visualise". A rebuilt phase had
+# seven figures typed as characters, one drawn, and no number he could move.
+
+_TYPED_FIGURE_RE = re.compile(r"""(?i)<pre\b[^>]*class=["'][^"']*\bascii\b""")
+_DRAWN_FIGURES = (
+    'class="flow"', 'class="lanes"', 'class="stack"', 'class="tree"', 'class="steps"',
+    'class="toggle-fig"', 'class="calc"', "<figure", "<svg", 'class="bars"',
+    'class="stats"', 'class="compare"', 'class="tabs"', 'class="timeline"', "<table",
+)
+
+
+def figure_problems(html: str) -> list[str]:
+    typed = len(_TYPED_FIGURE_RE.findall(html))
+    if not typed:
+        return []
+    low = html.lower()
+    if typed == 1 and any(mark in low for mark in _DRAWN_FIGURES):
+        return []
+    message = (f"{typed} figure(s) here are typed as characters in <pre class=\"ascii\">. Draw"
+            " each with the kit: steps over time as <div class=\"lanes\" data-play>, an order"
+            " of operations as <ol class=\"flow\">, a whole and its parts as"
+            " <div class=\"stack\">, a choice as <ul class=\"tree\">, a before and after as"
+            " <div class=\"toggle-fig\">, a grid of values as a <table>. Keep every number"
+            " the typed figure carried. A typed figure stays only for a layout he would"
+            " read in a terminal, one to a section, beside a drawn one")
+    return [message]
+
+
+# --- a person's voice --------------------------------------------------------------
+# Measured against the writer he named as the model: a sentence that ends on
+# a colon and a reveal ("it held one open problem: a pause of 764ms") was 4% of
+# his sentences and 13.5% of the rebuilt phase's; "nothing", "never" and
+# "always" were 1.3% against 6.9%; he asked no question inside his prose.
+
+_COLON_REVEAL_RE = re.compile(r": [a-z][^.?!]{10,}[.?!]$")
+_ABSOLUTE_RE = re.compile(r"\b(?:nothing|never|no one|none of|always|every single)\b", re.IGNORECASE)
+_FIGURE_OF_SPEECH_RE = re.compile(
+    r"\b(?:whether [^.?!,]{3,40} or not|like it or not|fights? (?:over|for)"
+    r"|pays? (?:a|two|its|the|that) (?:debts?|price|tax)|the whole menu|bug report on"
+    r"|read the shape|rides? (?:beside|along)|screams?|happily|blindly|the hard way"
+    r"|tells? (?:a|the) (?:different )?story|at the end of the day|the elephant in)\b",
+    re.IGNORECASE)
+COLON_SHARE = 0.08
+ABSOLUTE_SHARE = 0.05
+PROSE_QUESTIONS = 2
+
+
+def voice_problems(html: str) -> list[str]:
+    """Habits that make a page read as generated: the reveal after a colon,
+    the absolute, the question asked of nobody, the figure of speech."""
+    sentences = _all_sentences(html)
+    probs: list[str] = []
+    spoken = [m.group(0) for s in sentences if (m := _FIGURE_OF_SPEECH_RE.search(s))]
+    if spoken:
+        probs.append("figures of speech: " + ", ".join(f"“{x}”" for x in spoken[:4])
+                     + ". Say the literal thing, in the words he would use at a whiteboard")
+    if len(sentences) < SHORT_MIN_SENTENCES:
+        return probs
+    reveals = [s for s in sentences if _COLON_REVEAL_RE.search(s)]
+    if len(reveals) / len(sentences) > COLON_SHARE:
+        probs.append(f"{len(reveals)} of {len(sentences)} sentences end on a colon and a reveal"
+                     f" (“{reveals[0][-90:]}”). Write each as a plain sentence: say the"
+                     " thing, then say what follows from it. Keep a colon for a list")
+    absolute = [s for s in sentences if _ABSOLUTE_RE.search(s)]
+    if len(absolute) / len(sentences) > ABSOLUTE_SHARE:
+        probs.append(f"{len(absolute)} of {len(sentences)} sentences say nothing, never, none"
+                     f" or always (“{absolute[0][:80]}”). Say how often or how much, with"
+                     " the number the material gives, or leave the claim out")
+    asked = [s for s in sentences if s.rstrip().endswith("?")]
+    if len(asked) > PROSE_QUESTIONS:
+        probs.append(f"{len(asked)} questions are asked inside the prose (“{asked[0][:80]}”)."
+                     " The predict box asks the one question; write the others as"
+                     " statements of what the section will show")
+    return probs
+
+
 # --- writing ------------------------------------------------------------------
 
 def _slugify(title: str) -> str:
@@ -745,6 +1249,31 @@ def _sentence(text: str) -> str:
         return ""
     text = text[0].upper() + text[1:]
     return text if text[-1] in ".?!" else text + "."
+
+
+def _map_html(phases: Sequence[Mapping[str, str]]) -> str:
+    """Where he is in the course: every phase in order, this one marked."""
+    if len(phases) < 2:
+        return ""
+    said = {"read": "you have read this", "here": "you are here", "later": "comes later"}
+    items = "".join(
+        f"<li>{'<b>' if p['state'] == 'here' else ''}{_esc(p['title'])}"
+        f"{'</b>' if p['state'] == 'here' else ''} ({said.get(p['state'], '')})</li>"
+        for p in phases)
+    return ('<div class="callout note"><p><b>Where you are in the course</b></p>'
+            f"<ol>{items}</ol></div>\n")
+
+
+def _concept_lead(outline: Outline) -> str:
+    """The list under this is where the lesson ends up, not where it starts:
+    read cold, its claims use words he has not been given yet."""
+    n = len(outline.concepts)
+    if not n:
+        return ""
+    ideas = "one idea" if n == 1 else f"{lt._NUMBER_WORDS.get(n, str(n))} ideas"
+    return (f"<p>This lesson teaches {ideas}. They are listed here so you can see where it"
+            " is going, and they will read more clearly once each has been explained"
+            " below, so come back to this list at the end.</p>\n")
 
 
 def _concept_list(outline: Outline) -> str:
@@ -781,11 +1310,47 @@ def word_budgets(outline: Outline, limit: int) -> dict[int, int]:
     return {**fixed, **{i: share for i in teaching}}
 
 
+def _connection(outline: Outline, i: int, s: SectionPlan, m: Material) -> str:
+    """What ties this section to the rest, said to its writer: the case it
+    returns to, its terms, and the sections on either side of it."""
+    lines: list[str] = []
+    if outline.running_case.strip():
+        lines.append(f"The running case of this lesson: {outline.running_case.strip()}")
+    if not s.kind:
+        teaching = [(n, t) for n, t in enumerate(outline.sections, 1) if not t.kind]
+        at = [n for n, _t in teaching].index(i) if i in [n for n, _t in teaching] else -1
+        if at == 0:
+            lines.append("This is the first teaching section: open from the running case.")
+        elif s.bridge.strip():
+            lines.append(f"The bridge from the section above: {s.bridge.strip()}")
+        if s.introduces:
+            lines.append("Terms this section defines, each in <dfn> in the sentence that"
+                         " first uses it: " + ", ".join(s.introduces))
+        if s.assumes:
+            again = {_term(t) for t in m.known_terms}
+            old = [t for t in s.assumes if _term(t) in again]
+            lines.append("Terms it may use: " + ", ".join(s.assumes)
+                         + (". Explain again in one clause, because an earlier phase"
+                            " defined them: " + ", ".join(old) if old else ""))
+        if 0 <= at < len(teaching) - 1:
+            lines.append("The next section answers: " + teaching[at + 1][1].heading
+                         + ". End by handing over to that question.")
+        elif at == len(teaching) - 1:
+            lines.append("This is the last teaching section. End by saying what he can do"
+                         " now" + (f": {outline.hands_over.strip()}"
+                                   if outline.hands_over.strip() else "."))
+    elif s.kind == "recall" and outline.hands_over.strip():
+        lines.append(f"The hand-over this section ends on: {outline.hands_over.strip()}")
+    return "\n".join(f"- {line}" for line in lines)
+
+
 def _section_prompt(m: Material, outline: Outline, i: int, s: SectionPlan, previous: str,
                     problems: list[str], budget: int = 0) -> str:
-    plan = outline.model_dump(include={"title", "outcome", "concepts", "sections"})
+    plan = outline.model_dump(include={"title", "outcome", "running_case", "hands_over",
+                                       "concepts", "sections"})
     this = {"number": i, **s.model_dump()}
     concept = next((c.model_dump() for c in outline.concepts if c.id == s.concept), None)
+    connection = _connection(outline, i, s, m)
     drawn = ""
     if s.source_sections and m.source:
         parts = lt.split_sections(m.source)
@@ -801,6 +1366,8 @@ def _section_prompt(m: Material, outline: Outline, i: int, s: SectionPlan, previ
         f"## This section\n\n{json.dumps(this, ensure_ascii=False)}\n\n"
         + (f"## The concept it serves\n\n{json.dumps(concept, ensure_ascii=False)}\n\n"
            if concept else "")
+        + (f"## How this section connects\n\n{connection}\n\n" if connection else "")
+        + (f"{m.memory}\n\n" if m.memory else "")
         + (f"## The end of the section above\n\n{previous[-PREVIOUS_CHARS:]}\n\n" if previous else "")
         + f"## The study note\n\n{m.note[:NOTE_CHARS]}\n\n"
         + (f"## His phase, the parts this section draws on\n\n{drawn}\n\n" if drawn else "")
@@ -935,6 +1502,16 @@ class Writer:
                     self.release_flags = problems
                     self.report.append("release test, kept with doubts: " + "; ".join(problems))
                     return outline
+            if not problems and not self.m.page:
+                # The order of terms and the links between sections. Sent
+                # back like any finding, but never the reason a lesson is
+                # lost: on the last try the plan is kept, the doubts are
+                # reported, and each section is still told its own terms.
+                order = ledger_problems(outline, self.m.known_terms)
+                if order and attempt == PLAN_ATTEMPTS - 1:
+                    self.report.append("order of terms, kept with doubts: " + "; ".join(order))
+                    return outline
+                problems = order
             if not problems:
                 return outline
             self.report.append(f"plan attempt {attempt + 1} sent back: " + "; ".join(problems))
@@ -971,6 +1548,8 @@ class Writer:
                                      kind=self.evidence_kind(), apparatus=bool(s.kind),
                                      total_words=total, budget=budget,
                                      source=self.m.source or self.m.lab_source)
+            if not self.m.page:
+                found += connection_problems(html, s)
             if not found:
                 break
         if found:
@@ -985,13 +1564,21 @@ class Writer:
         assert self.outline is not None
         prompt = (
             "## The plan\n\n" + json.dumps(self.outline.model_dump(
-                include={"title", "outcome", "opening", "concepts"}), ensure_ascii=False)
+                include={"title", "outcome", "running_case", "opening", "concepts"}),
+                ensure_ascii=False)
+            + (f"\n\n{self.m.memory}" if self.m.memory else "")
             + "\n\n## This section\n\nThe opening, before the first heading: two short"
-            " paragraphs that put him in the situation where not knowing this costs"
-            " him something, then the question it leaves open. No heading, no list,"
-            " no figure. Return the paragraphs as HTML.\n\nId prefix: s0-\n")
+            " paragraphs. When the course so far is given above, the first paragraph"
+            " returns to its situation: what the last phase let him do, in one sentence,"
+            " then what goes wrong now that it could not explain. With no earlier phase,"
+            " put him in the situation where not knowing this costs him something. The"
+            " second paragraph is the question that leaves open. Use only words he"
+            " already has: a term this lesson will teach is described in plain words"
+            " here, not named. No heading, no list, no figure. Return the paragraphs as"
+            " HTML.\n\nId prefix: s0-\n")
         raw = await _section_step(self.spec.model, prompt)
-        top = (_concept_list(self.outline) if self.outline.concepts else
+        top = (_map_html(self.m.course_map) + _concept_lead(self.outline)
+               + _concept_list(self.outline) if self.outline.concepts else
                f'<div class="keypoints"><p class="remember">{_esc(self.outline.takeaway)}</p></div>')
         html = clean_section(raw) + "\n" + top
         self.parts = [html]

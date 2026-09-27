@@ -46,9 +46,26 @@ make it false.
   the opposite.
 - Incident and evidence days serve the phase as written above.
 
-Do not re-teach the phase. Its terms are known; one clause reconnects one.
+Do not re-teach the phase. But a term from the phase is explained again, in
+one clause, where the article first uses it: he read the phase days ago.
 If the digests cannot support the idea or the relationship, do not stretch
 them: return `cannot_write` with what they actually contain.
+
+## How it connects
+
+The material names the phase the article orbits and, when the course has
+them, the situation that phase used and the terms it defined.
+
+- `running_case`: the one situation the article follows. Take the phase's
+  own situation and ask the article's question about it.
+- `opening`: say in one clause what the phase taught, then the question
+  about it that the phase could not answer.
+- `hands_over`: one sentence on what this changes in how he reads the phase.
+- Each section carries its ledger: `introduces` (the terms it defines, at
+  most three), `assumes` (terms a section above or the phase introduced)
+  and, after the first section, `bridge` (what the section above left
+  unexplained). Every term in `assumes` appears in an `introduces` above it
+  or in the phase's terms.
 
 ## The sections
 
@@ -64,5 +81,6 @@ carrying a second idea; plan less.
 
 The plan, as the structured output: title (the question the article
 answers), subtitle, eyebrow (the header line: relationship · course and
-phase · what it adds), outcome, the opening situation, the one concept, the
-sections, what you left out and why.
+phase · what it adds), outcome, the running case, the opening situation,
+the hand-over, the one concept, the sections with their ledger, what you
+left out and why.

@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-09-26T03:10:15.307452+05:30",
+  "built_at": "2026-09-28T03:00:03.186713+05:30",
   "courses": [
     {
       "slug": "inference-internals",
@@ -20,35 +20,8 @@
           "one_liner": "One request end to end: the uneven token exchange rate, queue+prefill inside TTFT, the KV formula that sizes provider capacity, why output tokens cost 3-8x, the determinism myth with its measured proof, and the streaming instrument that lets you verify every claim yourself.",
           "minutes": 100,
           "date": "2026-09-17",
-          "read": true,
+          "read": false,
           "file": "2026-09-17-inference-internals-phase-01-lifecycle.html"
-        },
-        {
-          "slug": "inference-internals-phase-02a-scheduling-memory",
-          "title": "Scheduling and Memory \u2014 Inference Internals Phase 2A",
-          "one_liner": "How vLLM's scheduler loop, paged KV cache and prefix cache decide your latency, concurrency and bill \u2014 revised: unverifiable Orca Figure 10a claim removed per claims-run c3.",
-          "minutes": 150,
-          "date": "2026-09-20",
-          "read": true,
-          "file": "2026-09-20-inference-internals-phase-02a-scheduling-memory.html"
-        },
-        {
-          "slug": "inference-internals-phase-02b-decoding-context",
-          "title": "Phase 2B \u2014 Decoding and context: the stream freeze, the schema, and the 400",
-          "one_liner": "Chunked prefill and the inter-token gap, what strict schemas do and do not guarantee, and context budgets with constraint-pinning compaction.",
-          "minutes": 150,
-          "date": "2026-09-22",
-          "read": false,
-          "file": "2026-09-22-inference-internals-phase-02b-decoding-context.html"
-        },
-        {
-          "slug": "inference-internals-phase-03a-caching",
-          "title": "The Bill and the Cache",
-          "one_liner": "He can read a real usage object into the right cost for either provider, lay out a prompt so the cache hits and prove it with one number, and derive the reads needed before explicit caching pays.",
-          "minutes": 110,
-          "date": "2026-09-24",
-          "read": false,
-          "file": "2026-09-24-inference-internals-phase-03a-caching.html"
         }
       ]
     },
@@ -64,63 +37,18 @@
           "date": "2026-09-13",
           "read": true,
           "file": "2026-09-13-kubernetes-phase-00-why-k8s-exists.html"
-        },
-        {
-          "slug": "kubernetes-phase-01-core-concepts",
-          "title": "Kubernetes Phase 1 \u2014 Core Concepts (Pods to VPC CNI)",
-          "one_liner": "The load-bearing phase: pods, Deployments, probes, Services and the gRPC pinning problem, ConfigMap staleness, storage, and the EKS ENI layer, corrected against the live platform (native gRPC probes, EndpointSlices, unmaintained ingress-nginx).",
-          "minutes": 120,
-          "date": "2026-09-19",
-          "read": false,
-          "file": "2026-09-19-kubernetes-phase-01-core-concepts.html"
         }
       ]
     }
   ],
   "articles": [
     {
-      "title": "Why did serving Transformers require rethinking batching itself?",
-      "one_liner": "He can predict which operations in a model block iteration-level scheduling and which do not, and he can read the 36.9x headline with its conditions attached.",
-      "topic": "inference-internals",
-      "kind": "paper",
-      "date": "2026-09-25",
-      "read": false,
-      "file": "2026-09-25-why-did-serving-transformers-require-rethinking-batching-its.html"
-    },
-    {
-      "title": "Did the fix work, or did the bug go quiet?",
-      "one_liner": "He can design an alert that fires on the dangerous condition occurring, so he can tell 'fixed' apart from 'dormant' after any rare-failure fix, including his LLM guardrails.",
-      "topic": "",
-      "kind": "frontier",
-      "date": "2026-09-24",
-      "read": false,
-      "file": "2026-09-24-did-the-fix-work-or-did-the-bug.html"
-    },
-    {
-      "title": "Lab card: stream freeze, schema tax, and the 400",
-      "one_liner": "A written table of your own numbers: worst gap and TTFT at two token budgets, the constraint tax on 12 tickets, the compaction trigger turn, and one forced backstop with its log line.",
-      "topic": "inference-internals",
-      "kind": "",
-      "date": "2026-09-24",
-      "read": false,
-      "file": "2026-09-24-lab-inference-internals-phase-02b-decoding-context.html"
-    },
-    {
-      "title": "Week review: batches, budgets, and proof",
-      "one_liner": "The week's five lessons recalled in his own words, three worked questions answered, and a clear first move into next week",
-      "topic": "week review",
-      "kind": "",
-      "date": "2026-09-24",
-      "read": false,
-      "file": "2026-09-24-week-review-2026-w39.html"
-    },
-    {
       "title": "The decision before the lifecycle: does cache-aware routing actually pay?",
       "one_liner": "On agentic traffic (43-turn sessions, 142K tokens in per turn), cache-aware sticky routing beats round-robin 2\u20133\u00d7 where prefill dominates and buys nothing where decode does, and the stickiness limit \u03c4 is derived from one calibration measurement, not tuned.",
       "topic": "",
       "kind": "",
       "date": "2026-09-17",
-      "read": true,
+      "read": false,
       "file": "2026-09-17-routing-before-the-lifecycle.html"
     },
     {

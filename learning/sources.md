@@ -20,7 +20,7 @@ time.
 
 ## Course 1 — Performance, concurrency and the machine · elite-performance
 
-- **Marc Brooker** — brooker.co.za/blog · 2026-07-29 · tail latency, Little's
+- **Marc Brooker** — brooker.co.za/blog · 2026-09-09 · tail latency, Little's
   law, queueing with the maths. "Lorenz and Little: How Much Does Your Tail Cost?"
 - **Daniel Lemire** — lemire.me/blog · 2026-09-16 · SIMD and CPU cost,
   always benchmarked.
@@ -31,9 +31,13 @@ time.
 - **Dan Luu** — danluu.com · 2026-09 · performance culture, real bugs.
 - **Mitchell Hashimoto** — mitchellh.com/writing · 2026-07-22 · SIMD in
   practice.
+- **Alex Kladov (matklad)** — matklad.github.io · 2026-09-19 · systems
+  programming from TigerBeetle: "Static Allocation, Constant Work", "Finding
+  Bugs". Also under course 5. Added 2026-09-27.
 - **Abhinav Upadhyay (Confessions of a Code Addict)** —
-  blog.codingconfessions.com · 2026-06-22 · virtual memory, page tables, CPU
-  basics, in plain English.
+  blog.codingconfessions.com · 2026-08-29 · virtual memory, page tables, CPU
+  basics, in plain English. "Demand Paging: What Happens When Linux Handles a
+  Page Fault".
 - **Polar Signals** — polarsignals.com/blog · 2026-07-28 · profiler internals
   (the company is joining Dash0; the blog may stop).
 - **Uber engineering** — uber.com/blog/engineering · 2026-09-11 · Go CPU work
@@ -68,7 +72,7 @@ Thin here: scalability laws. Only COST covers them.
 
 ## Course 2 — Applied AI systems at scale · elite-applied-ai
 
-- **Hamel Husain** — hamel.dev · 2026-08-12 · evals and error analysis.
+- **Hamel Husain** — hamel.dev · 2026-09-18 · evals and error analysis.
 - **Eugene Yan** — eugeneyan.com/writing · 2026-06-21 · eval design.
 - **Shreya Shankar** — sh-reya.com/blog · 2026-05-21 · evals, data
   flywheels. Recheck: falls outside 120 days on 2026-09-18.
@@ -90,6 +94,10 @@ Thin here: scalability laws. Only COST covers them.
   evals, trace storage.
 - **Vespa** — blog.vespa.ai · 2026-09-13 · retrieval quality with measured
   results.
+- **Honeycomb** — honeycomb.io/blog · 2026-09-21 · mixed · agent
+  observability and OpenTelemetry sampling: "Wide Events vs. Three Pillars:
+  AI Observability Costs", "How Adaptive Tail Sampling Works in the
+  OpenTelemetry Collector". Also under course 6. Added 2026-09-27.
 - **Latent Space** — latent.space · daily · what shipped and why; a finding
   surface more than a source.
 - **arXiv cs.CL / cs.CR** — arxiv.org/list/cs.CL/recent · daily · papers.
@@ -123,7 +131,7 @@ Thin here: rollout and rollback of model changes. No paper found on canary or re
 
 ## Course 3 — Inference and AI platform · elite-inference, inference-internals
 
-- **vLLM blog** — vllm.ai/blog (blog.vllm.ai redirects here) · 2026-09-15 ·
+- **vLLM blog** — vllm.ai/blog (blog.vllm.ai redirects here) · 2026-09-24 ·
   engine internals. Vendor's own numbers: pair every vLLM post with a source
   from another site.
 - **LMSYS / SGLang** — lmsys.org/blog · 2026-08-07 · SGLang kernels,
@@ -136,8 +144,13 @@ Thin here: rollout and rollback of model changes. No paper found on canary or re
   disaggregation on Kubernetes. "Sticky Until Saturated".
 - **LMCache** — blog.lmcache.ai · 2026-09-15 · KV transfer, storage tiers,
   disaggregated prefill and decode.
-- **Anyscale** — anyscale.com/blog · 2026-06-18 · Ray Serve routing and
+- **Anyscale** — anyscale.com/blog · 2026-09-26 · Ray Serve routing and
   throughput, with hardware and workload stated.
+- **Modal** — modal.com/blog · 2026-09-26 · mixed · serving limits and how
+  they were removed, with numbers: "Hitting a billion tokens per minute on one
+  GPU by combining a query planner and an inference engine". Rejected as
+  marketing on 2026-09-17; re-checked through its feed on 2026-09-27. Skip
+  the product posts.
 - **PyTorch blog** — pytorch.org/blog · 2026-09-16 · mixed · kernels and
   low-precision formats.
 - **vLLM bug tracker** —
@@ -146,6 +159,13 @@ Thin here: rollout and rollback of model changes. No paper found on canary or re
 - **SGLang bug tracker** —
   github.com/sgl-project/sglang/issues?q=is%3Aissue+label%3Abug+sort%3Aupdated-desc
   · daily · the same, for a second engine.
+- **vLLM roadmap and RFCs** — github.com/vllm-project/vllm/issues/48168 (Q3
+  2026 roadmap, updated 2026-09-24) and the `RFC` label (222 open on
+  2026-09-27) · what the maintainers call unsolved, in their own words: an
+  unchecked roadmap box is an open problem. Frontier-day material. Added
+  2026-09-27.
+- **SGLang roadmap** — github.com/sgl-project/sglang/issues/22949 (2026 Q2,
+  updated 2026-09-08) · the same for the second engine. Added 2026-09-27.
 - **arXiv cs.DC** — arxiv.org/list/cs.DC/recent · daily · serving research.
 - **OSDI '26** — usenix.org/conference/osdi26/technical-sessions · papers ·
   KV offloading, scheduling. "Strata".
@@ -192,6 +212,15 @@ Thin here: capacity and multi-tenancy. Only Llumnix, and its full text was not r
   migrations.
 - **pganalyze** — pganalyze.com/blog · 2026-08-13 · Postgres internals read
   from the source.
+- **Franck Pachot** — dev.to/franckpachot · 2026-09-24 · execution plans read
+  line by line, Postgres 19 and DocumentDB: "NOT IN can be executed as an
+  Anti-Join (NOT EXISTS) in PG19". Added 2026-09-27.
+- **CedarDB** — cedardb.com/blog · 2026-09-21 · mixed · the Umbra team's
+  engine posts: "Encoding or Compression: Why not both?". Skip the demos.
+  Added 2026-09-27.
+- **ScyllaDB** — scylladb.com/blog · 2026-09-22 · mixed, vendor · engine work
+  such as "Bringing QUIC to Seastar"; skip release and customer posts. Added
+  2026-09-27.
 - **Justin Jaffray (NULL BITMAP)** — buttondown.com/jaffray/archive ·
   2026-06-29 · query engine internals.
 - **Neon** — neon.com/blog · 2026-09-09 · mixed · buffer cache deep dives only.
@@ -234,9 +263,16 @@ Thin here: index structures themselves.
   found. "Finding bugs in Raft implementations".
 - **Jack Vanlightly** — jack-vanlightly.com · 2026-08-28 · log replication
   design, Kafka behaviour. (Not www.vanlightly.com, which does not resolve.)
-- **Marc Brooker** — brooker.co.za/blog · 2026-07-19 · distributed OLTP.
+- **Marc Brooker** — brooker.co.za/blog · 2026-09-09 · distributed OLTP.
   "Aurora DSQL: Scalable, Multi-Region OLTP".
 - **Hillel Wayne** — hillelwayne.com/post · 2026-09-01 · formal methods.
+- **Decentralized Thoughts** — decentralizedthoughts.github.io · 2026-09-26 ·
+  consensus and BFT with the proofs: "Why BFT with Byzantine and Crash Faults
+  Needs Three Rounds". Theory; take the posts that explain a bound. Added
+  2026-09-27.
+- **Alex Kladov (matklad)** — matklad.github.io · 2026-09-19 · deterministic
+  simulation testing and finding bugs, from TigerBeetle. Also under course 1.
+  Added 2026-09-27.
 - **Arpit Bhayani** — arpitbhayani.me/topics/distributed-systems · replication,
   consensus, clocks. Use the topic page: his newest posts are about AI.
 - **Jepsen analyses** — jepsen.io/analyses · archive (2026-03) · consistency
@@ -274,6 +310,9 @@ Thin here: session guarantees. Terry 1994 has no readable free copy.
 
 - **Lorin Hochstein (Surfing Complexity)** — surfingcomplexity.blog ·
   2026-09-12 · public incident reports read for the mechanism.
+- **Adaptive Capacity Labs** — adaptivecapacitylabs.com/blog · 2026-08-25 ·
+  mixed · resilience engineering; take only the posts that analyse a named
+  incident, skip the essays. Added 2026-09-27.
 - **Cloudflare postmortems** — blog.cloudflare.com/tag/post-mortem ·
   2026-05-01 · global config changes; the Nov 2025 feature file, the Dec 2025
   change behind "Fail Small".
@@ -325,7 +364,7 @@ Thin here: SLOs and burn-rate alerting. No paper found; the Google SRE workbook 
 
 ## Course 7 — System design and architecture · elite-system-design
 
-- **Marc Brooker** — brooker.co.za/blog · 2026-07-29 · cost, tail latency and
+- **Marc Brooker** — brooker.co.za/blog · 2026-09-09 · cost, tail latency and
   distributed databases, with the maths.
 - **AWS cell-based architecture guide** —
   docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture
@@ -343,7 +382,15 @@ Thin here: SLOs and burn-rate alerting. No paper found; the Google SRE workbook 
   "Cost Attribution in Discord's API".
 - **Slack engineering** — slack.engineering · 2026-07-14 · platform design
   with staged rollout and automatic rollback.
+- **Spotify engineering** — engineering.atspotify.com · 2026-09-16 · mixed ·
+  experiments and quality with numbers: "Why Spotify Is Not Using Bayesian
+  A/B Testing". Added 2026-09-27.
 - **Fly.io** — fly.io/blog · 2026-09-03 · infrastructure with real numbers.
+- **Netflix tech blog** — netflixtechblog.com · 2026-09-25 · "Building
+  Service Topology at Scale", a real-time distributed graph in three parts,
+  "A Tale of Two Flink Autoscalers". "In-House LLM Serving at Netflix"
+  (2026-07-17) serves course 3. The page blocks this system's fetcher; the
+  feed works (see Feeds). Added 2026-09-27.
 - **Uber engineering** — eng.uber.com · 2026-09-11. Use this host or
   uber.com/blog/engineering; www.uber.com answers 406.
 - **InfoQ presentations** — infoq.com/architecture-design/presentations ·
@@ -377,10 +424,13 @@ Added 2026-09-18 with the course. These are hosts already verified elsewhere
 in this file, pointed at this course's subjects; the next source hunt fills
 the gaps, which are marked at the end.
 
-- **HashiCorp blog** — hashicorp.com/blog · Terraform state, plan and drift,
-  from the people who build it. Mixed: skip the product announcements.
-- **OpenTofu blog** — opentofu.org/blog · the fork's own changes, state
-  encryption and registry work.
+- **HashiCorp blog** — hashicorp.com/blog · 2026-09-27 (feed checked; its
+  newest item is scheduled for 2026-09-29) · Terraform state, plan and drift,
+  from the people who build it. Mixed, mostly product news: skip the
+  announcements.
+- **OpenTofu blog** — opentofu.org/blog · 2026-09-17 · the fork's own changes:
+  "A Vision for Built-in Linting", the 1.12 release notes. Take the design
+  posts.
 - **Gruntwork blog** — gruntwork.io/blog · infrastructure-as-code practice at
   scale, module design and test ladders.
 - **Cloudflare** — blog.cloudflare.com · 2026-09-16 · the config change that
@@ -396,8 +446,18 @@ the gaps, which are marked at the end.
 - **Filippo Valsorda** — words.filippo.io · 2026-07-26 · supply chain,
   dependencies and signing, in plain terms.
 - **The Update Framework and Sigstore blogs** — theupdateframework.io,
-  blog.sigstore.dev · artifact signing and verification, by the projects
-  themselves.
+  blog.sigstore.dev · 2026-06-28 (Sigstore: "Rekor v2 GA", "Cosign v3"; TUF
+  has no feed, its date is not checked) · artifact signing and verification,
+  by the projects themselves.
+- **Flux CD blog** — fluxcd.io/blog · 2026-08-12 · drift as the project sees
+  it: "Selective drift correction with ignore rules", "Flux and OpenBao:
+  Secrets and Signatures". Added 2026-09-27.
+- **Kubernetes blog** — kubernetes.io/blog · 2026-09-22 · mixed · the primary
+  source for what each release changes (the v1.37 feature posts); skip the
+  community spotlights. Added 2026-09-27.
+- **Chainguard Unchained** — chainguard.dev/unchained · 2026-09-24 · mixed,
+  vendor · the "This Shit is Hard" series on FIPS and regulated builds is
+  real engineering; skip the announcements. Added 2026-09-27.
 - **GitHub availability reports** — github.blog/tag/github-availability-report
   · 2026-09-09 · pipeline and platform failures, monthly.
 - **AWS post-event summaries** — aws.amazon.com/premiumsupport/technology/pes/
@@ -441,6 +501,14 @@ practitioners rather than papers.
   Notes") · the shape a paper article should have: a TL;DR with the headline
   numbers, three things worth knowing, then the mechanism explained part by
   part, in plain words.
+  Checked through his feed on 2026-09-27: four such posts exist, all from
+  2024. Two map to a course. "NanoLog" (2024-08-28,
+  arpitbhayani.me/blogs/nanolog-a-nanosecond-scale-logging-system) fits
+  course 1. "On-demand Container Loading in AWS Lambda" (2024-09-15,
+  arpitbhayani.me/blogs/on-demand-container-loading-in-aws-lambda) fits
+  course 7. The other two are "Pipe Syntax in SQL" (2024-09-03) and "The Who
+  to Follow Service at Twitter" (2024-08-21). On a paper day for one of these
+  papers, read his note first for the shape, then write from the paper itself.
 - His shelf links to his own copies. Always find the canonical source (USENIX,
   arXiv, VLDB, ACM open access) and cite that.
 
@@ -495,8 +563,20 @@ Checked 2026-09-12.
 - **Cloudflare outage postmortems** — blog.cloudflare.com/tag/outage/ · newest
   2026-02-21. Real root cause and the follow-up work: the Nov 2025 bot-file
   bug, the Dec 2025 config change that became their "Fail Small" programme.
-- **SRE Weekly** — sreweekly.com · issue #533, 2026-09-06 · weekly. Links out
+- **SRE Weekly** — sreweekly.com · newest 2026-09-21 · weekly. Links out
   to incident analyses across the industry; follow it to the primary report.
+- **OpenAI status history** — status.openai.com/history · newest 2026-09-25 ·
+  every incident, as a feed. The feed item is a title; open the incident page
+  for the write-up, when there is one: the 2026-09-03 "Elevated errors across
+  ChatGPT and Codex" page names "a routing configuration change" (7:43 to
+  8:20 a.m. PDT). Titles alone give the failure class. Added 2026-09-27.
+- **Claude status history** — status.claude.com/history · newest 2026-09-26 ·
+  titles only; the feed carries no root cause. Use it for the failure class
+  and the date. Added 2026-09-27.
+- **Google Cloud status** — status.cloud.google.com · newest 2026-09-10 · the
+  feed holds current incidents only, each with its text and a root-cause
+  section once resolved; the history page holds the rest. Azure has no feed.
+  Added 2026-09-27.
 - **danluu/post-mortems** — github.com/danluu/post-mortems · 200+ incidents,
   still updated. An archive, not a feed: mine it when the current subject
   needs a failure story and nothing recent has one.
@@ -513,16 +593,31 @@ Checked 2026-09-12.
   technical posts on 2026-09-12.
 - **huggingface.co/papers** — daily, upvotes as a practitioner signal.
 - **arxiv.org/list/cs.DC/recent** and **/list/cs.CL/recent** — ~20 a weekday.
+  Also **cs.PF** (performance) and **cs.OS**: about 12 and 2 a weekday on
+  2026-09-25, and the systems papers that cs.DC misses. As feeds:
+  rss.arxiv.org/rss/cs.DC+cs.PF+cs.OS, refreshed at midnight Eastern, empty
+  at weekends, one request every 3 seconds across the whole system.
 - **news.ycombinator.com/best** — high volume, low density: ~3 of 15 were
   technical. Filter hard or skip.
+- **hnrss.org/newest?q=postmortem&points=20** — Hacker News as RSS, filtered
+  to postmortems with 20 or more points. 20 items on 2026-09-27; about half
+  are real incident write-ups (a DDoS postmortem, a kernel soundness bug),
+  the rest are hacks and startup obituaries. Take the engineering ones. The
+  service returned one 502 during testing; try again later rather than
+  dropping the day.
 
 Always record the primary article's own URL, never the aggregator's.
 
 ## Reserve — verified active, use when a slot frees up
 
 Martin Fowler (2026-09-17, now mostly agentic engineering) · Kent Beck
-(2026-09-02) · Vicki Boykis (2026-09-01) · Philipp Schmid (2026-09-01,
-hands-on agents, some API announcements) · Import AI (2026-09-07, weekly
+(2026-09-02) · Vicki Boykis (2026-09-01) · Pinterest engineering
+(2026-09-25, recommender systems; the feed works, the page blocks the
+fetcher) · Philipp Schmid (2026-09-24; mostly Gemini how-tos, about one post
+in four is a real agent post, such as "Evaluating Agents Beyond the First
+Prompt") · Yelp engineering (2026-09-16, search ranking and migrations) ·
+DuckDB news (2026-09-25, mostly product and integrations) · Import AI
+(2026-09-07, weekly
 summary) · Nathan Lambert, interconnects.ai (2026-09-11, post-training
 commentary) · The Pragmatic Engineer (2026-09-17, mostly AI news and
 paywalled) · Dropbox tech (2026-08-31, no example post opened yet) · Dan Luu
@@ -542,18 +637,24 @@ paywalled) · Dropbox tech (2026-08-31, no example post opened yet) · Dan Luu
 2026-05-31 · Horace He (thonking.ai) 2025-03-04 · easyperf 2024-11-11 · High
 Scalability 2024-05-09 · The Morning Paper 2021-02-08 · FoundationDB blog
 2022-04-13 · GeekNarrator blog 2025-06-09 (podcast not checked) · Jepsen
-2026-03-16 (kept under course 5 as an archive; check quarterly).
+2026-03-16 (kept under course 5 as an archive; check quarterly) · pvk.ca
+2025-12-30 · Johnny's Software Lab 2026-02-26 · Bruce Dawson (randomascii)
+2025-11-11 · Piotr Kołaczkowski 2023-05-21 · Brendan Gregg's blog 2026-02-07
+(career posts; the archive entry under course 1 stays) · Simon Eskildsen
+(sirupsen.com) 2024-11-16 · Tanel Poder 2026-04-10 (Oracle). The last seven
+were checked 2026-09-27.
 
 **Mostly marketing or off-subject** (checked 2026-09-17): Hugging Face blog ·
-Modal · Turso · ClickHouse · Sentry · Railway · ByteByteGo · Baseten (no
+Turso · Pulumi and the OpenSSF blog (2026-09-27) · ClickHouse · Sentry · Railway · ByteByteGo · Baseten (no
 dates) · Together · Fireworks · Character.ai · Databricks · NVIDIA Dynamo
 release notes · CockroachDB · Cybertec · etcd blog (release notes) · Resonate
 · S2 · Figma (own agent products) · incident.io ("best tools" lists) ·
 Latacora (recent posts are AI advice) · Google Project Zero (exploits, not
 service boundaries) · PhonePe · Will Larson (management) · aphyr.com (recent
 posts not technical) · Jason Liu (recent posts personal; his 2025 RAG posts
-stay good as archives) · OpenAI status page (no root cause) · AI Incident
-Database (news, not engineering).
+stay good as archives) · AI Incident Database (news, not engineering). Modal
+and the OpenAI status feed left this list on 2026-09-27: see course 3 and the
+incidents section.
 
 **Other:** Adyen — engineering URL 404s. Ethan Mollick, Zvi Mowshowitz —
 not technical enough, or too much overlap with Latent Space.
@@ -563,14 +664,18 @@ not technical enough, or too much overlap with Latent Space.
 - **Rachel by the Bay** (rachelbythebay.com/w) and **Chris Siebenmann**
   (utcc.utoronto.ca/~cks/space/blog) — both block automated fetches, both
   look active, both in the systems lane.
-- **Netflix** (netflixtechblog.com), **Pinterest**, **Razorpay**,
-  **Flipkart**, **Hotstar** — 403 to this system's fetcher. **Swiggy**
+- **Razorpay**, **Flipkart**, **Hotstar** — 403 to this system's fetcher.
+  (Netflix and Pinterest left this list on 2026-09-27: their feeds work.) **Swiggy**
   (bytes.swiggy.com) — fetch failed. These are the Indian engineering blogs
   worth having; a browser check would settle them.
-- **Heidi Howard** — blog URL 404. **Tri Dao** — not checked. **Restate**
-  and **Modal** — pages did not render. **Datadog**, **samwho.dev**,
+- **Heidi Howard** — blog URL 404. **Tri Dao** — not checked. **Restate** —
+  page did not render (Modal: its feed works; see course 3). **Datadog**, **samwho.dev**,
   **Tanya Reilly** (noidea.dog) — no dates on the page.
 - **OpenAI, "Expanding on what we missed with sycophancy"** — 403.
+- Checked 2026-09-27, no feed found or an HTTP error: **Jamie Brandon**
+  (scattered-thoughts.net), **Aleksey Shipilëv** (shipilev.net), **DoorDash**
+  and **Airbnb** engineering (HTTP errors), **Learning From Incidents**
+  (learningfromincidents.io, DNS), **Canva** (canva.dev/blog).
 
 Operator can open these on a feed day and report the newest post date.
 
@@ -615,10 +720,61 @@ numbered labels. Four things to copy:
 Re-measure rather than trusting this table: it was true of six essays on one
 day, and he keeps writing.
 
+## Feeds — one feed per source that has one
+
+Checked with curl on 2026-09-27. A feed lists every post with its date, so a
+code poll can find new posts without a model call and without opening the
+page. Sources not listed here have no feed: Anthropic engineering, LMSYS,
+Fireworks, Baseten, Uber (406), Gruntwork, TUF. Hunter reads those pages.
+
+| Source | Feed | Items · newest |
+|---|---|---|
+| Arpit Bhayani | arpitbhayani.me/rss.xml | 111 · 2026-08-21 |
+| Marc Brooker | brooker.co.za/blog/rss.xml | 163 · 2026-09-09 |
+| Hamel Husain | hamel.dev/index.xml | 20 · 2026-09-18 |
+| Eugene Yan | eugeneyan.com/rss/ | 212 · 2026-06-21 |
+| Sebastian Raschka | magazine.sebastianraschka.com/feed | 20 · 2026-09-09 |
+| Lilian Weng | lilianweng.github.io/index.xml | 53 · 2026-07-04 |
+| Simon Willison | simonwillison.net/tags/prompt-injection.atom (tag feed; all posts: simonwillison.net/atom/everything/, newest 2026-09-25) | tag feed newest 2026-09-17 |
+| Philipp Schmid | philschmid.de/rss | 211 · 2026-09-24 |
+| vLLM blog | vllm.ai/blog/rss.xml | 50 · 2026-09-24 |
+| Anyscale | anyscale.com/rss.xml | 18 · 2026-09-26 |
+| Modal | modal.com/blog/atom.xml | 135 · 2026-09-26 |
+| Honeycomb | honeycomb.io/rss/blog.xml | 50 · 2026-09-21 |
+| Cloudflare | blog.cloudflare.com/rss/ | 20 · 2026-09-25 |
+| Netflix tech blog | netflixtechblog.com/feed | 10 · 2026-09-25 |
+| Pinterest engineering | medium.com/feed/pinterest-engineering | 10 · 2026-09-25 |
+| Latent Space | latent.space/feed | 20 · 2026-09-25 |
+| SRE Weekly | sreweekly.com/feed/ | 5 · 2026-09-21 |
+| OpenAI status | status.openai.com/history.rss | 93 · 2026-09-25 |
+| Claude status | status.claude.com/history.rss | 25 · 2026-09-26 |
+| Abhinav Upadhyay | blog.codingconfessions.com/feed | 16 · 2026-08-29 |
+| Alex Kladov (matklad) | matklad.github.io/feed.xml | 10 · 2026-09-19 |
+| Franck Pachot | dev.to/feed/franckpachot | 7 · 2026-09-24 |
+| CedarDB | cedardb.com/index.xml | 49 · 2026-09-21 |
+| ScyllaDB | scylladb.com/feed/ | 20 · 2026-09-22 |
+| Decentralized Thoughts | decentralizedthoughts.github.io/feed | 20 · 2026-09-26 |
+| Adaptive Capacity Labs | adaptivecapacitylabs.com/feed/ | 10 · 2026-08-25 |
+| Spotify engineering | engineering.atspotify.com/feed | 5 · 2026-09-16 |
+| HashiCorp | hashicorp.com/blog/feed.xml | 20 · 2026-09-29 (scheduled) |
+| OpenTofu | opentofu.org/blog/rss.xml | 19 · 2026-09-17 |
+| Sigstore | blog.sigstore.dev/index.xml | 15 · 2026-06-28 |
+| Flux CD | fluxcd.io/blog/index.xml | 25 · 2026-08-12 |
+| Kubernetes blog | kubernetes.io/feed.xml | 22 · 2026-09-22 |
+| Chainguard | chainguard.dev/api/rss | 603 · 2026-09-24 |
+| Google Cloud status | status.cloud.google.com/en/feed.atom | current incidents only · 2026-09-10 |
+
+Feeds were also verified for Meta, PyTorch, MLCommons, Character.AI,
+Together, LangChain, Stripe, Slack, InfoQ, Lobsters and r/LocalLLaMA (about
+one request a minute); add a row when one of them joins a course.
+
 ## How this file is maintained
 
 - New sources go under the course they serve, with the date of the newest
   post seen. A source that serves two courses is listed in both.
+- A source with a feed also gets one row in the Feeds table, with the item
+  count and newest date on the day it was checked. The feed is for the code
+  poll; the entry above stays the place hunter reads.
 - The weekly hunt adds verified names AND reports sources gone quiet; code
   merges them (`learning_pipeline.merge_roster`): a new name lands under the
   course its topic names, or under "Found by the source hunt", and a quiet
