@@ -157,6 +157,37 @@ the whole must still read as one argument.
   Every number carries its source or its arithmetic, and the arithmetic is
   shown where the number appears.
 
+### Figures and page elements
+
+His site renders HTML, and a reader who skims looks at figures first. An
+explainer carries at least one figure; most carry two to four. Put each
+figure right after the paragraph it explains, and say in that paragraph
+what the reader should see in it. A figure repeats no number the text does
+not give, and gives no number the text does not state.
+
+- **A mechanism is a flow diagram.** A ```mermaid block with a top-down
+  flowchart: `flowchart TD`. At most eight boxes, each label under six
+  words. Put a line `%% caption: ...` first; it is printed under the figure.
+- **Numbers are a chart.** A ```widget chart block whose body is JSON:
+  `{"type": "bar" | "line" | "stack", "title": "...", "unit": "...",
+  "labels": [...], "series": [{"name": "...", "values": [...]}],
+  "caption": "..."}`. One number per label in every series. Use bar to
+  compare a few cases, line for a value that changes with a setting, stack
+  for how one total splits into parts. The caption says where the numbers
+  come from: measured by whom, or computed from which formula.
+- **A formula the reader can play with is a calculator.** The only one is
+  ```widget kv-calculator with JSON props `layers`, `kvHeads`, `headDim`,
+  `bytesPerValue`, `gpuGb`, `util`, `weightsGb`, `context`. Use it only in a
+  post about KV cache memory, with the post's own running example as props.
+- **One point the reader must not miss** is `<aside class="callout">...</aside>`,
+  or `<aside class="callout warn">` for a mistake to avoid. At most two.
+- **Arithmetic most readers can skip** goes in
+  `<details><summary>Show the arithmetic</summary> ... </details>`, with
+  the result stated in the text before it.
+
+No other HTML, no images, no scripts. Code measures each figure block before
+the draft is saved.
+
 ### Brief, lab and paper, in this order
 
 1. **The opening block.** The first paragraph starts with `**In short:**`

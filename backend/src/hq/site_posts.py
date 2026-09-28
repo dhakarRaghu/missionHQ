@@ -53,6 +53,7 @@ class Shape:
     limits: bool                 # a section that says where it stops working
     evidence: bool               # a table or a code block: the thing measured
     numbers_per_1000: float      # at least this many, each with its condition
+    figures: int = 0             # diagrams, charts or calculators it must carry
 
 
 SHAPES: Mapping[str, Shape] = {
@@ -64,7 +65,8 @@ SHAPES: Mapping[str, Shape] = {
     # The main post on his blog: one topic taught from first principles, the
     # essay a reader bookmarks. Long, because the reader came to learn it
     # completely; its first two paragraphs do the work of an opening block.
-    "explainer": Shape("explainer", "blog", (1500, 3500), False, True, True, True, 5.0),
+    "explainer": Shape("explainer", "blog", (1500, 3500), False, True, True, True, 5.0,
+                       figures=1),
     # One idea and the one line to keep. No headings: it is read in a minute.
     "note": Shape("note", "notes", (100, 300), False, False, False, False, 0.0),
     # A paper read closely: the claim, the measurement, where it stops.
@@ -405,6 +407,61 @@ def measure(markdown: str) -> Measure:
     )
 
 
+# --- figures -------------------------------------------------------------------
+#
+# His site renders two kinds of block as figures: ```mermaid for a flow
+# diagram, and ```widget <name> with JSON props for a chart or a calculator.
+# A bad block shows as raw text or breaks the page build, so both are checked
+# here before a draft is saved.
+
+WIDGETS = ("chart", "kv-calculator")
+CHART_TYPES = ("bar", "line", "stack")
+_FIGURE_BLOCK_RE = re.compile(r"^```(mermaid|widget)[ \t]*([\w-]*)[ \t]*\n(.*?)^```[ \t]*$",
+                              re.MULTILINE | re.DOTALL)
+
+
+def figures_in(markdown: str) -> list[tuple[str, str, str]]:
+    """Each figure block as (kind, widget name, body)."""
+    return [(m.group(1), m.group(2), m.group(3)) for m in _FIGURE_BLOCK_RE.finditer(markdown)]
+
+
+def figure_problems(markdown: str) -> list[str]:
+    """What would break a figure on his site, or []."""
+    import json
+
+    problems: list[str] = []
+    for kind, name, body in figures_in(markdown):
+        if kind == "mermaid":
+            first = next((ln.strip() for ln in body.splitlines()
+                          if ln.strip() and not ln.strip().startswith("%%")), "")
+            if not first.startswith(("flowchart", "graph", "sequenceDiagram", "stateDiagram")):
+                problems.append(f"a mermaid block starts with {first[:30]!r}; use it for a"
+                                " flowchart or a sequence diagram, and a widget chart for numbers")
+            continue
+        if name not in WIDGETS:
+            problems.append(f"widget {name!r} does not exist; use one of {', '.join(WIDGETS)}")
+            continue
+        try:
+            props = json.loads(body or "{}")
+        except ValueError:
+            problems.append(f"the props of widget {name} are not valid JSON")
+            continue
+        if name == "chart":
+            if props.get("type", "bar") not in CHART_TYPES:
+                problems.append(f"chart type must be one of {', '.join(CHART_TYPES)}")
+            labels = props.get("labels") or []
+            series = props.get("series") or []
+            if not labels or not series:
+                problems.append("a chart needs labels and at least one series")
+            for one in series:
+                values = one.get("values") or []
+                if len(values) != len(labels) or not all(
+                        isinstance(v, int | float) for v in values):
+                    problems.append(f"chart series {one.get('name', '')!r} needs one number"
+                                    f" per label: {len(labels)} labels, {len(values)} values")
+    return problems
+
+
 def shape_for(section: str, shape: str = "") -> Shape:
     """The shape a post is held to: the one named, or the section's own."""
     name = (shape or SHAPE_OF_SECTION.get(section, DEFAULT_SHAPE)).strip().lower()
@@ -535,7 +592,13 @@ def reader_problems(markdown: str, shape: str = DEFAULT_SHAPE) -> list[str]:
             "no section says where this stops working. Add one, with a heading that says"
             " so: the conditions under which the result does not hold, and what was not"
             " checked")
-    if rule.evidence and not (m.code_blocks or m.tables):
+    shown = figures_in(markdown)
+    if len(shown) < rule.figures:
+        problems.append(
+            f"no figure; {_a(rule.name)} post needs at least {rule.figures}. Draw the"
+            " mechanism as a ```mermaid flowchart, or show the numbers as a ```widget chart")
+    problems += figure_problems(markdown)
+    if rule.evidence and not (m.code_blocks or m.tables or shown):
         problems.append(
             "no table and no code block; show the thing measured: the result table or the"
             " command that produced the number")

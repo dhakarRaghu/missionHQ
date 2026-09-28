@@ -904,3 +904,23 @@ def test_a_post_from_a_lesson_cannot_say_he_wrote_or_ran_the_code(
         tmp_path, monkeypatch, [_draft(mine), _draft(good())], [dict(FINISHED)])
     assert outcome.outcome == "done" and len(prompts) == 2
     assert "say he made or ran something" in prompts[1]
+
+
+FLOW = "```mermaid\n%% caption: The loop.\nflowchart TD\n  A --> B\n```"
+CHART = ('```widget chart\n{"type": "bar", "labels": ["a", "b"],'
+         ' "series": [{"name": "n", "values": [1, 2]}]}\n```')
+
+
+def test_an_explainer_needs_a_figure_and_each_figure_must_render() -> None:
+    assert any("no figure" in p for p in sp.reader_problems(good(), "explainer"))
+    assert not any("no figure" in p for p in sp.reader_problems(good(table=FLOW), "explainer"))
+    assert [k for k, _, _ in sp.figures_in(FLOW + "\n\n" + CHART)] == ["mermaid", "widget"]
+    assert sp.figure_problems(FLOW + "\n\n" + CHART) == []
+    bad = CHART.replace("[1, 2]", "[1]")
+    assert "needs one number per label: 2 labels, 1 values" in sp.figure_problems(bad)[0]
+    assert "not valid JSON" in sp.figure_problems("```widget chart\n{nope\n```")[0]
+    assert "does not exist" in sp.figure_problems("```widget pie\n{}\n```")[0]
+    assert "use it for a flowchart" in sp.figure_problems("```mermaid\npie\n  \"a\" : 1\n```")[0]
+    # A figure counts as the thing measured in a lab.
+    assert not any("no table and no code block" in p
+                   for p in sp.reader_problems(good(table=CHART), "lab"))
