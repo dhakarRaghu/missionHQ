@@ -15,11 +15,14 @@ Two things live here, and neither asks a model anything:
   finishes, not chosen by taste.
 - ``shortlist``: he reads far more than he publishes, so a week's two posts
   are picked from what he read. Candidates are scored on what makes a post
-  worth a stranger's time: he marked it, he has his own result for it, it
+  worth a stranger's time: he has his own result for it, he wrote down what
+  he did, he marked it, readers look for the topic now (``topics.md``), it
   was hard for him, it is recent.
 
 ``python -m hq.site_posts check <file> [--shape lab]`` measures a draft.
 ``python -m hq.site_posts shortlist`` prints this week's five.
+``python -m hq.site_posts field-note <name>`` starts a field note: what he
+did and the number he got, the material a post can say "I" from.
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ class Shape:
     limits: bool                 # a section that says where it stops working
     evidence: bool               # a table or a code block: the thing measured
     numbers_per_1000: float      # at least this many, each with its condition
+    figures: int = 0             # diagrams, charts or calculators it must carry
 
 
 SHAPES: Mapping[str, Shape] = {
@@ -58,8 +62,11 @@ SHAPES: Mapping[str, Shape] = {
     "brief": Shape("brief", "blog", (700, 1200), True, True, True, False, 5.0),
     # He ran something and has a number. The easiest post to make his own.
     "lab": Shape("lab", "blog", (700, 1400), True, True, True, True, 5.0),
-    # A mechanism explained from a situation the reader already knows.
-    "explainer": Shape("explainer", "blog", (1200, 2500), True, True, True, True, 5.0),
+    # The main post on his blog: one topic taught from first principles, the
+    # essay a reader bookmarks. Long, because the reader came to learn it
+    # completely; its first two paragraphs do the work of an opening block.
+    "explainer": Shape("explainer", "blog", (1500, 3500), False, True, True, True, 5.0,
+                       figures=1),
     # One idea and the one line to keep. No headings: it is read in a minute.
     "note": Shape("note", "notes", (100, 300), False, False, False, False, 0.0),
     # A paper read closely: the claim, the measurement, where it stops.
@@ -72,8 +79,10 @@ DEFAULT_SHAPE = "brief"
 SITE_FOLDER: Mapping[str, str] = {
     "writing": "blog", "blog": "blog", "notes": "notes", "papershelf": "papershelf",
 }
+# A blog post is an explainer unless the task names another shape: a
+# retelling of one article is what made his first posts read like anyone's.
 SHAPE_OF_SECTION: Mapping[str, str] = {
-    "writing": "brief", "blog": "brief", "notes": "note", "papershelf": "paper",
+    "writing": "explainer", "blog": "explainer", "notes": "note", "papershelf": "paper",
 }
 
 # --- targets, measured -----------------------------------------------------------
@@ -398,6 +407,61 @@ def measure(markdown: str) -> Measure:
     )
 
 
+# --- figures -------------------------------------------------------------------
+#
+# His site renders two kinds of block as figures: ```mermaid for a flow
+# diagram, and ```widget <name> with JSON props for a chart or a calculator.
+# A bad block shows as raw text or breaks the page build, so both are checked
+# here before a draft is saved.
+
+WIDGETS = ("chart", "kv-calculator")
+CHART_TYPES = ("bar", "line", "stack")
+_FIGURE_BLOCK_RE = re.compile(r"^```(mermaid|widget)[ \t]*([\w-]*)[ \t]*\n(.*?)^```[ \t]*$",
+                              re.MULTILINE | re.DOTALL)
+
+
+def figures_in(markdown: str) -> list[tuple[str, str, str]]:
+    """Each figure block as (kind, widget name, body)."""
+    return [(m.group(1), m.group(2), m.group(3)) for m in _FIGURE_BLOCK_RE.finditer(markdown)]
+
+
+def figure_problems(markdown: str) -> list[str]:
+    """What would break a figure on his site, or []."""
+    import json
+
+    problems: list[str] = []
+    for kind, name, body in figures_in(markdown):
+        if kind == "mermaid":
+            first = next((ln.strip() for ln in body.splitlines()
+                          if ln.strip() and not ln.strip().startswith("%%")), "")
+            if not first.startswith(("flowchart", "graph", "sequenceDiagram", "stateDiagram")):
+                problems.append(f"a mermaid block starts with {first[:30]!r}; use it for a"
+                                " flowchart or a sequence diagram, and a widget chart for numbers")
+            continue
+        if name not in WIDGETS:
+            problems.append(f"widget {name!r} does not exist; use one of {', '.join(WIDGETS)}")
+            continue
+        try:
+            props = json.loads(body or "{}")
+        except ValueError:
+            problems.append(f"the props of widget {name} are not valid JSON")
+            continue
+        if name == "chart":
+            if props.get("type", "bar") not in CHART_TYPES:
+                problems.append(f"chart type must be one of {', '.join(CHART_TYPES)}")
+            labels = props.get("labels") or []
+            series = props.get("series") or []
+            if not labels or not series:
+                problems.append("a chart needs labels and at least one series")
+            for one in series:
+                values = one.get("values") or []
+                if len(values) != len(labels) or not all(
+                        isinstance(v, int | float) for v in values):
+                    problems.append(f"chart series {one.get('name', '')!r} needs one number"
+                                    f" per label: {len(labels)} labels, {len(values)} values")
+    return problems
+
+
 def shape_for(section: str, shape: str = "") -> Shape:
     """The shape a post is held to: the one named, or the section's own."""
     name = (shape or SHAPE_OF_SECTION.get(section, DEFAULT_SHAPE)).strip().lower()
@@ -528,7 +592,13 @@ def reader_problems(markdown: str, shape: str = DEFAULT_SHAPE) -> list[str]:
             "no section says where this stops working. Add one, with a heading that says"
             " so: the conditions under which the result does not hold, and what was not"
             " checked")
-    if rule.evidence and not (m.code_blocks or m.tables):
+    shown = figures_in(markdown)
+    if len(shown) < rule.figures:
+        problems.append(
+            f"no figure; {_a(rule.name)} post needs at least {rule.figures}. Draw the"
+            " mechanism as a ```mermaid flowchart, or show the numbers as a ```widget chart")
+    problems += figure_problems(markdown)
+    if rule.evidence and not (m.code_blocks or m.tables or shown):
         problems.append(
             "no table and no code block; show the thing measured: the result table or the"
             " command that produced the number")
@@ -640,6 +710,166 @@ def headline_problems(title: str, summary: str, category: str = "") -> list[str]
     return problems
 
 
+# --- field notes: what he did, in his own words -------------------------------
+#
+# A post written from a lesson retells an article he read. A stranger can read
+# that article, so the post gives him nothing, and nothing in it is his. A
+# field note is the other source: a few lines he writes after he built or
+# measured something. It is the only record of what he did, so it is the only
+# material that lets a post say "I".
+
+FIELD_NOTES_DIR = "projects/content/field-notes"
+
+# Each heading he fills, and the key the writer reads it by. The first two
+# are required: a post with no deed and no number of his is a retelling.
+FIELD_NOTE_PARTS: Mapping[str, str] = {
+    "what i did": "did",
+    "the number": "number",
+    "what surprised me": "surprised",
+    "what i would do differently": "view",
+    "where i disagree": "view",
+    "links": "links",
+}
+
+FIELD_NOTE_TEMPLATE = """---
+project: ""   # optional: the slug of a project on your site, such as mission-hq
+---
+
+## What I did
+
+What you built, ran or changed, and where. Say "at work" for your job; do not
+name the company. Three to six lines.
+
+## The number
+
+The result you measured, with its conditions: the data, its size, the model,
+the machine. One number is enough. Paste the command and its output if you
+have it.
+
+## What surprised me
+
+What you expected, and what happened instead.
+
+## What I would do differently
+
+Your own view: what you would change, or where you disagree with an article.
+
+## Links
+
+Articles or repositories the post may link to. One url per line.
+"""
+
+_HEADING_LINE_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.MULTILINE)
+_PROJECT_RE = re.compile(r"^project:\s*[\"']?([a-z0-9-]*)[\"']?\s*(?:#.*)?$", re.MULTILINE)
+_TEMPLATE_HINTS = tuple(
+    " ".join(block.split())[:40]
+    for block in re.split(r"^## .*$", FIELD_NOTE_TEMPLATE, flags=re.MULTILINE)[1:]
+)
+
+
+@dataclass(frozen=True)
+class FieldNote:
+    """One field note, read into its parts."""
+
+    text: str
+    parts: Mapping[str, str]
+    project: str = ""
+
+    @property
+    def has_number(self) -> bool:
+        return bool(re.search(r"\d", self.parts.get("number", "")))
+
+
+def read_field_note(text: str) -> FieldNote:
+    """Split a field note by its headings. Text he left from the template
+    counts as empty, so an unfilled note is never taken for a filled one."""
+    front = _FRONT_RE.match(text)
+    project = ""
+    if front:
+        found = _PROJECT_RE.search(front.group(0))
+        project = found.group(1) if found else ""
+    body = _FRONT_RE.sub("", text, count=1)
+    parts: dict[str, str] = {}
+    marks_ = list(_HEADING_LINE_RE.finditer(body))
+    for n, m in enumerate(marks_):
+        key = FIELD_NOTE_PARTS.get(m.group(1).strip().rstrip(":").casefold())
+        if not key:
+            continue
+        end = marks_[n + 1].start() if n + 1 < len(marks_) else len(body)
+        part = body[m.end():end].strip()
+        if " ".join(part.split())[:40] in _TEMPLATE_HINTS:
+            part = ""
+        if part:
+            parts[key] = (parts[key] + "\n\n" + part) if key in parts else part
+    return FieldNote(text=text, parts=parts, project=project)
+
+
+def field_note_problems(note: FieldNote) -> list[str]:
+    """Why this note cannot carry a post yet, or []. Said to him, not to a
+    model: only he can fill these in."""
+    problems: list[str] = []
+    if not note.parts.get("did"):
+        problems.append('fill in "What I did": a post needs something you did')
+    if not note.has_number:
+        problems.append('fill in "The number" with a result you measured; without a'
+                        " number of your own the post is a retelling of the source")
+    return problems
+
+
+def field_note_path(name: str) -> str:
+    """The note's path in the vault, from its name or its path. Raises
+    ValueError for anything outside the field notes folder."""
+    raw = name.strip()
+    if raw.startswith(FIELD_NOTES_DIR + "/"):
+        raw = raw[len(FIELD_NOTES_DIR) + 1:]
+    stem = raw.removesuffix(".md")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", stem):
+        raise ValueError(f"a field note name is lowercase words joined by hyphens: {name!r}")
+    return f"{FIELD_NOTES_DIR}/{stem}.md"
+
+
+def field_note_candidates(vault: Path) -> list[Candidate]:
+    """His field notes, as shortlist candidates. A note with a number is his
+    own result; one without is still his words."""
+    folder = vault / FIELD_NOTES_DIR
+    out: list[Candidate] = []
+    for path in sorted(folder.glob("*.md")) if folder.is_dir() else []:
+        note = read_field_note(path.read_text())
+        if not note.parts.get("did"):
+            continue
+        first_line = note.parts["did"].splitlines()[0]
+        out.append(Candidate(
+            key=f"{FIELD_NOTES_DIR}/{path.name}",
+            title=path.stem.replace("-", " "),
+            kind="field_note",
+            why=" ".join(first_line.split())[:240],
+            own_result=note.has_number,
+            first_seen=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)))
+    return out
+
+
+_HIS_WORK_RE = re.compile(
+    r"\bI (?:wrote|built|ran|measured|made|created|coded|benchmarked)\b"
+    r"|\bmy (?:own )?(?:script|simulator|code|lab|benchmark|run|measurement)s?\b")
+
+
+def claims_his_work(markdown: str) -> list[str]:
+    """Sentences that say he made or ran something. From a lesson these are
+    never his: the lesson's code was written for him, and nothing records
+    that he ran it. Only a field note can carry them."""
+    return [s for s in first_person(markdown) if _HIS_WORK_RE.search(s)]
+
+
+def speaks_as_him(markdown: str) -> str:
+    """Why a post from a field note is refused for not saying what he did, or
+    "". The note is the reason the post exists; a post that hides it in the
+    third person reads like every other retelling."""
+    if first_person(markdown):
+        return ""
+    return ("the post never says what he did. The field note records it: say it"
+            ' with "I", in the situation or in its own section')
+
+
 # --- the week's shortlist --------------------------------------------------------
 
 SHORTLIST_SIZE = 5
@@ -650,8 +880,12 @@ SHORTLIST_PATH = "projects/content/post-shortlist.md"
 # What each reason adds. His own mark outweighs everything the system can
 # infer, because he is the one who knows what changed his mind.
 POINTS: Mapping[str, int] = {
+    # A post with his own number is the one a stranger cannot get from the
+    # source, so it outranks everything else, his mark included.
+    "own_result": 7,    # there is a lab or a number of his behind it
+    "his_words": 3,     # he wrote a field note: what he did, in his words
     "marked": 6,        # he wrote it into worth-sharing.md
-    "own_result": 3,    # there is a lab or a number of his behind it
+    "in_demand": 4,     # it is a topic readers look for now, from topics.md
     "hard_for_him": 2,  # he tapped "lost me": hard for him is hard for others
     "read": 2,          # he read it to the end
     "rated_high": 1,    # the reader who found it scored it 8 or more
@@ -660,6 +894,8 @@ POINTS: Mapping[str, int] = {
 REASON_WORDS: Mapping[str, str] = {
     "marked": "you marked it worth sharing",
     "own_result": "you have your own result for it",
+    "his_words": "you wrote down what you did",
+    "in_demand": "readers look for this topic now",
     "hard_for_him": "it was hard for you, so it is hard for others",
     "read": "you read it",
     "rated_high": "it was rated 8 or more when found",
@@ -675,7 +911,7 @@ class Candidate:
 
     key: str                     # its url, or the lesson's path
     title: str
-    kind: str                    # reading | lesson
+    kind: str                    # reading | lesson | field_note
     why: str = ""                # what it adds, as recorded when it was found
     score: float = 0.0           # the finder's score, 0 to 10
     read: bool = False
@@ -704,7 +940,36 @@ def marks(text: str) -> set[str]:
     return found
 
 
-def score(candidate: Candidate, marked: set[str], now: datetime) -> Ranked:
+TOPICS_PATH = "projects/content/topics.md"
+
+
+def demand_topics(text: str) -> list[str]:
+    """The topics in topics.md, one per list line. Anything after a colon is
+    his own note on the line."""
+    topics: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith(("-", "*")):
+            continue
+        topic = line.lstrip("-* ").split(":", 1)[0].strip().casefold()
+        if topic:
+            topics.append(topic)
+    return topics
+
+
+def in_demand(candidate: Candidate, topics: Sequence[str]) -> str:
+    """The first topic whose every word is in the candidate's title or what
+    it adds, or "". Whole words: "rag" is not "storage"."""
+    words = set(re.findall(r"[a-z0-9]+", f"{candidate.title} {candidate.why}".casefold()))
+    for topic in topics:
+        wanted = re.findall(r"[a-z0-9]+", topic)
+        if wanted and all(w in words for w in wanted):
+            return topic
+    return ""
+
+
+def score(candidate: Candidate, marked: set[str], now: datetime,
+          topics: Sequence[str] = ()) -> Ranked:
     if now.tzinfo is None:
         now = now.replace(tzinfo=UTC)
     reasons = []
@@ -712,6 +977,10 @@ def score(candidate: Candidate, marked: set[str], now: datetime) -> Ranked:
         reasons.append("marked")
     if candidate.own_result:
         reasons.append("own_result")
+    if candidate.kind == "field_note":
+        reasons.append("his_words")
+    if in_demand(candidate, topics):
+        reasons.append("in_demand")
     if candidate.lost_me > 0:
         reasons.append("hard_for_him")
     if candidate.read:
@@ -728,7 +997,8 @@ def score(candidate: Candidate, marked: set[str], now: datetime) -> Ranked:
 
 
 def shortlist(candidates: Iterable[Candidate], marked: set[str], posted: set[str],
-              now: datetime | None = None, size: int = SHORTLIST_SIZE) -> list[Ranked]:
+              now: datetime | None = None, size: int = SHORTLIST_SIZE,
+              topics: Sequence[str] = ()) -> list[Ranked]:
     """The best few, most points first. A thing already on his site is left
     out, and so is one with nothing behind it: a post needs a reason.
 
@@ -736,7 +1006,7 @@ def shortlist(candidates: Iterable[Candidate], marked: set[str], posted: set[str
     by: the lesson path or url a post was drafted from, the file name of a
     post on his site, and the slug of its title."""
     now = now or datetime.now(UTC)
-    ranked = [score(c, marked, now) for c in candidates
+    ranked = [score(c, marked, now, topics) for c in candidates
               if c.key not in posted and _name(c) not in posted]
     ranked = [r for r in ranked if r.points > 0]
     ranked.sort(key=lambda r: (-r.points, -r.candidate.score, r.candidate.title.casefold()))
@@ -890,9 +1160,31 @@ async def _shortlist() -> int:
         await db.close_pool()
     marked_file = settings().vault_dir / WORTH_SHARING_PATH
     marked = marks(marked_file.read_text()) if marked_file.is_file() else set()
+    candidates += field_note_candidates(settings().vault_dir)
+    topics_file = settings().vault_dir / TOPICS_PATH
+    topics = demand_topics(topics_file.read_text()) if topics_file.is_file() else []
     ranked = shortlist(candidates, marked,
-                       posted | posted_titles(settings().portfolio_dir))
+                       posted | posted_titles(settings().portfolio_dir), topics=topics)
     print(shortlist_markdown(ranked, iso_week()))
+    return 0
+
+
+def _new_field_note(argv: Sequence[str], vault: Path | None = None) -> int:
+    if not argv:
+        print("usage: python -m hq.site_posts field-note <name>")
+        return 2
+    try:
+        rel = field_note_path(argv[0])
+    except ValueError as exc:
+        print(exc)
+        return 2
+    path = (vault or settings().vault_dir) / rel
+    if path.exists():
+        print(f"{path} exists already")
+        return 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(FIELD_NOTE_TEMPLATE)
+    print(f"wrote {path}. Fill it in, then draft the post from the console.")
     return 0
 
 
@@ -901,6 +1193,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     command = args[0] if args else ""
     if command == "check":
         return _check(args[1:])
+    if command == "field-note":
+        return _new_field_note(args[1:])
     if command == "shortlist":
         import asyncio
 

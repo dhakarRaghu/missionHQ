@@ -2187,9 +2187,13 @@ def _better(notes: list[str], kept: tuple[PostDraft, list[str]] | None) -> bool:
 
 
 async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any:
-    """A post for his site from one lesson: returned as text, measured by
-    code, read once by a stranger, and sent back with what either found.
-    The best draft that passed the measured checks is the one saved."""
+    """A post for his site from his field note or from one lesson: returned
+    as text, measured by code, read once by a stranger, and sent back with
+    what either found. The best draft that passed the measured checks is the
+    one saved.
+
+    A field note is what he did, in his words; a post from one must say so
+    in the first person. A lesson given with it is background."""
     from hq.runner import RunOutcome, emit_step
 
     def ended(outcome: str, *, output: str = "", error: str | None = None,
@@ -2201,8 +2205,26 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
     md_path = str(payload.get("md_path") or "")
     section = str(payload.get("section") or "writing")
     lesson = await asyncio.to_thread(lt._read_lesson_text, md_path) if md_path else ""
-    if not lesson:
+    note_path, note_text, project = "", "", ""
+    if payload.get("field_note"):
+        try:
+            note_path = site_posts.field_note_path(str(payload["field_note"]))
+        except ValueError as exc:
+            return ended("blocked", error=str(exc))
+        note_text = await _read_vault(note_path)
+        if not note_text:
+            return ended("blocked", error=f"no field note at {note_path}")
+        note = site_posts.read_field_note(note_text)
+        unfilled = site_posts.field_note_problems(note)
+        if unfilled:
+            return ended("blocked", error=f"{note_path}: " + "; ".join(unfilled))
+        project = note.project
+    elif not lesson:
         return ended("blocked", error=f"no lesson at {md_path or '(none given)'}")
+    if md_path and not lesson:
+        return ended("blocked", error=f"no lesson at {md_path}")
+    # Everything the post may take a link or a number from.
+    material = "\n\n".join(t for t in (note_text, lesson) if t)
     try:
         rule = site_posts.shape_for(section, str(payload.get("shape") or ""))
     except ValueError as exc:
@@ -2216,7 +2238,11 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
     kept: tuple[PostDraft, list[str]] | None = None
     with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent=spec.name):
         for _ in range(POST_ATTEMPTS):
-            prompt = f"## The lesson ({md_path})\n\n{lesson[:NOTE_CHARS]}"
+            heading = "Background: a lesson he read" if note_text else "The lesson"
+            prompt = "\n\n".join(
+                ([(f"## His field note ({note_path})\n\nHis own words: the only record"
+                   f" of what he did.\n\n{note_text}")] if note_text else [])
+                + ([f"## {heading} ({md_path})\n\n{lesson[:NOTE_CHARS]}"] if lesson else []))
             if problems:
                 # Each call starts with no memory of the last: what was sent
                 # back points at sentences the writer must be able to see.
@@ -2236,7 +2262,15 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
                     break       # an earlier draft carried a claim: that one stands
                 said = draft.summary.strip() or "the material cannot carry a post"
                 return ended("done", output=said, declined=said)
-            gap = lt.post_problems(draft.markdown, lesson, floor)
+            gap = lt.post_problems(draft.markdown, material, floor)
+            if note_text and not gap:
+                gap = site_posts.speaks_as_him(draft.markdown)
+            if not note_text and not gap:
+                claimed = site_posts.claims_his_work(draft.markdown)
+                if claimed:
+                    gap = ("these say he made or ran something, and nothing records it: "
+                           + " | ".join(claimed[:4])
+                           + '. The lesson\'s code was written for him: write "this script"')
             category = draft.category.strip().lower()
             measured = (lt.post_field_problems(draft.slug, draft.title, draft.summary,
                                                draft.tags)
@@ -2266,8 +2300,9 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
     try:
         saved = await _once("post",
             section, draft.slug, draft.title, draft.summary, ", ".join(draft.tags),
-            draft.markdown, md_path, shape=rule.name,
-            category=draft.category.strip().lower(), run_id=deps.run_id, agent=deps.agent)
+            draft.markdown, note_path or md_path, shape=rule.name,
+            category=draft.category.strip().lower(), run_id=deps.run_id, agent=deps.agent,
+            source_text=material if note_text else "", project=project)
     except lt.LessonRefused as exc:
         return ended("failed", error=f"post refused: {exc}"[:500])
     await emit_step("tool.called", run_id=deps.run_id, task_id=deps.task_id,
@@ -2291,7 +2326,7 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
     if spoken:
         lines += ["", "It speaks as you here. Check that each is true:",
                   *[f"- {s}" for s in spoken]]
-    unknown = site_posts.numbers_not_in(draft.markdown, lesson)
+    unknown = site_posts.numbers_not_in(draft.markdown, material)
     if unknown:
         lines += ["", "Numbers that are not in your material. Check each by hand:",
                   "- " + ", ".join(unknown)]

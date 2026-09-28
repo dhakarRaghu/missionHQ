@@ -33,6 +33,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
+from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -323,6 +324,21 @@ def post_payload(lesson: Mapping[str, Any], section: str, shape: str = "") -> di
     }
 
 
+def field_note_payload(path: str, section: str = "writing", shape: str = "lab",
+                       md_path: str = "") -> dict[str, Any]:
+    """A post from his field note: what he did and the number he got. A
+    lesson, when given, is background the post may draw on."""
+    return {
+        "workflow": WORKFLOW,
+        "stage": POST_STAGE,
+        "section": section,
+        "shape": site_posts.shape_for(section, shape).name,
+        "field_note": site_posts.field_note_path(path),
+        "md_path": md_path,
+        "title": PurePosixPath(path).stem.replace("-", " "),
+    }
+
+
 def post_brief(payload: Mapping[str, Any]) -> str:
     """Tutor: turn one lesson into a post for his own site.
 
@@ -336,6 +352,8 @@ def post_brief(payload: Mapping[str, Any]) -> str:
     rule = site_posts.shape_for(section, str(payload.get("shape") or ""))
     low, high = rule.words
     folder = site_posts.SITE_FOLDER.get(section, section)
+    if payload.get("field_note"):
+        return _field_note_brief(payload, rule.name, low, high, folder)
     return f"""Prepare one post for his own site, from the lesson
 `{payload.get("md_path")}` ("{payload.get("title")}").
 
@@ -1820,3 +1838,36 @@ def course_lesson_brief(
         + f"\n\nPlanned as {_concepts()} concepts, written one section at a time,"
         " checked as a page and sentence by sentence against the note, then recorded."
     )
+
+
+def _field_note_brief(payload: Mapping[str, Any], shape: str, low: int, high: int,
+                      folder: str) -> str:
+    background = (f" A lesson he read, `{payload.get('md_path')}`, is given as background."
+                  if payload.get("md_path") else "")
+    return f"""Prepare one post for his own site, from his field note
+`{payload.get("field_note")}`.{background}
+
+## This task
+
+Shape: **{shape}**, {low} to {high} words, for the `{folder}` section of his site.
+
+The field note is his own words about something he built or measured. It is
+the reason this post exists, and the only record of what he did:
+
+- **The post is about what he did.** Open with his number, with its
+  conditions. Say what he did with "I", in the situation paragraph or in a
+  section of its own. Do not turn his work into advice about work in general.
+- **His view gets its own section.** When the note says what he would do
+  differently or where he disagrees, write it as a section whose heading
+  states that view. Keep his reason with it.
+- **What surprised him is the story.** When the note has it, build the post
+  around the gap between what he expected and what happened.
+- **Background supports, it does not lead.** A lesson or an article is
+  cited where his result needs it, never retold.
+- **Never name his employer**, past or present. Write "at work" and describe
+  the system in general terms: "a support chatbot", "a payments backend".
+- **Add no new links.** Only urls in the field note or the lesson.
+
+Return the post as the format asks. Code measures it and writes it into his
+site's `{folder}` section as a draft. Nothing is committed or published.
+"""
