@@ -2148,9 +2148,14 @@ def post_field_problems(slug: str, title: str, summary: str,
 async def save_post(section: str, slug: str, title: str, summary: str, tags: str,
                     markdown: str, source_lesson: str = "", *, shape: str = "",
                     category: str = "", run_id: str | None = None,
-                    agent: str | None = None) -> dict[str, Any]:
+                    agent: str | None = None, source_text: str = "",
+                    project: str = "") -> dict[str, Any]:
     """Check a post and write it into his site as a draft. Shared by
     `publish_post` and the staged writer. Raises LessonRefused.
+
+    `source_text` is material that is not a lesson file, such as his field
+    note: its links and numbers count as the post's source too. `project`
+    is the slug of the project on his site the post came from.
 
     Two checks, both measured: what must not leave his notes (post_problems)
     and what would make a stranger stop reading (site_posts.reader_problems).
@@ -2172,6 +2177,10 @@ async def save_post(section: str, slug: str, title: str, summary: str, tags: str
     source = ""
     if source_lesson.strip():
         source = await asyncio.to_thread(_read_lesson_text, source_lesson.strip())
+    source = "\n\n".join(t for t in (source, source_text) if t.strip())
+    project = project.strip().lower()
+    if project and not re.fullmatch(r"[a-z0-9][a-z0-9-]*", project):
+        raise LessonRefused(f"project must be a slug such as mission-hq, not {project!r}")
     gap = post_problems(markdown, source, min(POST_MIN_WORDS, rule.words[0]))
     if gap:
         raise LessonRefused(f"this is not ready for his site: {gap}. Fix it and call again")
@@ -2204,6 +2213,7 @@ async def save_post(section: str, slug: str, title: str, summary: str, tags: str
         f'summary: "{summary}"',
         "tags: [" + ", ".join(tag_list) + "]",
         *([f"category: {category}"] if category else []),
+        *([f"project: {project}"] if project else []),
         f"section: {site_section}",
         "draft: true",
         "---",

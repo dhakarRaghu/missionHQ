@@ -5,12 +5,16 @@ A post is read by a stranger who owes him nothing. Write for that reader.
 
 ## The reader decides four times
 
-1. **Click or skip.** He sees the title and one line. The title states the
-   claim or the question in at most 70 characters, with no subtitle after a
-   colon. The summary states what he gets from reading, in at most 160
-   characters.
+1. **Click or skip.** He sees the title and one line. For an explainer,
+   the title names the topic the way a reader would search for it: "BM25",
+   "How LLM Inference Works", "Why the KV Cache Limits Batch Size". For
+   the other shapes, the title states the claim or the question. Either
+   way it has at most 70 characters, with no subtitle after a colon. The summary states what
+   he learns from reading, in at most 160 characters.
 2. **Stay or leave.** He gives the first screen a few seconds. The result
-   is there, in the opening block, not saved for the end.
+   is there, in the opening block, not saved for the end. In an explainer,
+   the first two paragraphs say why the topic matters and what he will be
+   able to explain when he finishes.
 3. **Finish or stop.** He scans the headings and the first words of each
    paragraph. Every heading says what its section says. Every paragraph
    gives him something, or it is cut.
@@ -43,6 +47,30 @@ This is how the length and the language fit together. Every term you keep
 must be explained, and an explanation costs words. A post that keeps four
 findings has no words left to explain them. A post that keeps one does.
 
+## When the material is his field note
+
+A field note is a few lines he wrote after he built or measured something:
+what he did, the number, what surprised him, what he would do differently.
+It is the reason the post exists. A stranger can read any article; only
+this post has what he did.
+
+- The claim comes from his number, not from the background.
+- Say what he did with "I", in the situation or in a section of its own.
+  Everything under "What I did" and "The number" is his, and may be said
+  with "I". Nothing else is.
+- When the note says what surprised him, the post is built around it: what
+  he expected, what happened, and why.
+- When the note gives his view, it gets its own section, with a heading
+  that states the view and the reason he gives. This is the part a reader
+  will quote.
+- A lesson or article given with the note is background. Cite it where his
+  result needs it, in one or two sentences. Never retell it.
+- The note may describe his job. Write "at work" and name the system by
+  what it does: "a support chatbot", "a payments backend". Never the name
+  of the company.
+
+A field note gives the post its `adds` already: his own number.
+
 ## Why this post and not the source
 
 When the material is something he read, the reader can read the source
@@ -65,12 +93,49 @@ counted.
 | Shape | Words | What it is |
 |---|---|---|
 | brief | 700 to 1200 | What something he read says, what he makes of it, where it stops |
-| lab | 700 to 1400 | Something he ran, the number it gave, and the conditions |
-| explainer | 1200 to 2500 | One mechanism, from a situation the reader knows |
+| lab | 700 to 1400 | Something he ran, the number it gave, the conditions, and what he makes of it |
+| explainer | 1500 to 3500 | One mechanism from first principles: the problem, the naive answer, the design, a worked example, the knobs, the limits |
 | paper | 500 to 1400 | A paper: its claim, what it measured, where the result stops |
 | note | 100 to 300 | One idea and the one line to keep |
 
-### Brief, lab, explainer and paper, in this order
+### An explainer, in this order
+
+The explainer is the main post on his blog. It is the essay an engineer
+bookmarks: one topic, taught from first principles, deep enough that the
+reader can explain it to a colleague afterwards. Pick the topic a reader
+would search for, and teach it completely.
+
+1. **Why it matters.** Two or three short paragraphs, no heading. Where
+   the reader meets this topic in real systems, and what he will be able
+   to explain at the end. State it plainly: "This essay explains how BM25
+   scores a document, why each part of the formula exists, and when to
+   use something else." Never "In this post" as the first words.
+2. **The problem it solves.** A heading that names the problem. Start
+   from the simplest approach a reader would try, and show with a small
+   example where it breaks.
+3. **The design, built up one step at a time.** One section per step, each
+   heading naming the step: "Term frequency should saturate". Each step
+   fixes one failure of the step before it. Formulas and code come after
+   the idea they express, never before.
+4. **A worked example.** Real numbers, small enough to follow by hand: a
+   table, a trace or a short script with its output. The reader checks each
+   step. This section is required.
+5. **The knobs.** The parameters or choices an engineer tunes, the usual
+   values, and what changes when each one moves. Name who reports each
+   value.
+6. **In practice.** When the material has his field note or a number of
+   his, what he saw: "At work I ...". Otherwise, where the topic sits in a
+   real system and what it is combined with. Never invent his experience.
+7. **Where this stops working.** Its own section, always. The limits of
+   the mechanism, and what engineers use instead.
+8. **The last section.** Its heading states the one thing to remember, as a
+   claim. Its last paragraph restates it in two or three sentences and asks
+   the reader for nothing.
+
+An explainer does not open with `**In short:**`. Its first two paragraphs
+do that work.
+
+### Brief, lab and paper, in this order
 
 1. **The opening block.** The first paragraph starts with `**In short:**`
    and states the finding with its number, in 20 to 80 words and at most 4
@@ -90,10 +155,14 @@ counted.
    produced the number. An explainer shows a worked example, as a table or
    a code block. State each number with its condition: the model, the size,
    the hardware, who measured it.
-5. **Where this stops working.** Its own section, always. The conditions
+5. **What he makes of it.** When the material gives his view, one section
+   whose heading states it: "I would measure end to end first, even for a
+   single search". Plain, with his reason. Never invent a view the
+   material does not give.
+6. **Where this stops working.** Its own section, always. The conditions
    under which the result does not hold, and what was not checked. This is
    what makes an engineer trust the rest.
-6. **The last section.** Its heading states the one thing, as a claim, like
+7. **The last section.** Its heading states the one thing, as a claim, like
    every other heading. Never "The takeaway", "Takeaways" or "TL;DR". Its
    last paragraph restates the one thing in two or three sentences and asks
    the reader for nothing.
@@ -138,7 +207,8 @@ He reads English as a second language, and so do many of his readers.
   | plumbing | the connecting code |
   | altitude | level of detail |
   | canon | the standard set |
-- Use "you" for the reader. Use "I" only for what he did himself.
+- Use "you" for the reader. Use "I" for what he did himself, and in an
+  explainer also to frame the essay: "I start from TF-IDF because ...".
 
 ## What is his and what is not
 

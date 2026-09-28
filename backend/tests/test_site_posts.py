@@ -235,7 +235,7 @@ def test_a_lab_shows_the_thing_measured_and_every_post_carries_numbers() -> None
 def test_length_is_held_to_the_shape() -> None:
     short = good(two="", three="", four="")
     assert any("has lost the" in p for p in sp.reader_problems(short, "brief"))
-    assert any("an explainer post runs 1200 to 2500" in p
+    assert any("an explainer post runs 1500 to 3500" in p
                for p in sp.reader_problems(good(), "explainer"))
     long = good(extra=_section("One more run under the same load gave the same result", 41,
                                count=45))
@@ -271,7 +271,7 @@ def test_code_tables_and_frontmatter_are_counted_and_left_out_of_the_prose() -> 
 
 def test_a_section_names_a_folder_on_his_site_and_a_shape() -> None:
     assert sp.SITE_FOLDER["writing"] == "blog" == sp.SHAPES["brief"].section
-    assert sp.shape_for("writing").name == "brief"
+    assert sp.shape_for("writing").name == "explainer"
     assert sp.shape_for("notes").name == "note" and sp.shape_for("papershelf").name == "paper"
     assert sp.shape_for("writing", "lab").name == "lab"
     with pytest.raises(ValueError, match="shape must be one of"):
@@ -280,9 +280,9 @@ def test_a_section_names_a_folder_on_his_site_and_a_shape() -> None:
 
     assert set(POST_SECTIONS) <= set(sp.SITE_FOLDER)
     payload = post_payload({"md_path": "learning/lessons/x.md", "title": "T"}, "writing")
-    assert payload["shape"] == "brief"
+    assert payload["shape"] == "explainer"
     brief = post_brief(payload)
-    assert "700 to 1200 words" in brief and "`blog` section" in brief
+    assert "1500 to 3500 words" in brief and "`blog` section" in brief
     assert "State the result first" in brief and "the claim" in brief
 
 
@@ -332,17 +332,20 @@ def _c(title: str, **kw: Any) -> sp.Candidate:
     return sp.Candidate(title=title, **kw)
 
 
-def test_his_own_mark_outranks_everything_the_system_infers() -> None:
+def test_his_own_result_then_his_mark_outrank_what_the_system_infers() -> None:
     marked = _c("A quiet post he liked", read=True)
     strong = _c("A loud post", score=9, read=True, lost_me=2, own_result=True,
                 first_seen=NOW - timedelta(days=2))
     ranked = sp.shortlist([strong, marked], {marked.key}, set(), NOW)
     assert [r.candidate.title for r in ranked] == ["A loud post", "A quiet post he liked"]
-    assert ranked[0].points == 3 + 2 + 2 + 1 + 1 and ranked[1].points == 6 + 2
+    assert ranked[0].points == 7 + 2 + 2 + 1 + 1 and ranked[1].points == 6 + 2
     both = sp.shortlist([strong, _c("A loud post he marked", key=strong.key, read=True)],
                         {strong.key}, set(), NOW)
-    assert both[0].points == 9 + sp.POINTS["marked"]
-    assert sp.POINTS["marked"] > max(v for k, v in sp.POINTS.items() if k != "marked")
+    assert both[0].points == 13 + sp.POINTS["marked"]
+    # A number of his own is what a stranger cannot get from the source.
+    assert sp.POINTS["own_result"] > sp.POINTS["marked"]
+    inferred = ("hard_for_him", "read", "rated_high", "fresh")
+    assert sp.POINTS["marked"] > max(sp.POINTS[k] for k in inferred)
 
 
 def test_the_shortlist_leaves_out_what_is_posted_and_what_has_no_reason() -> None:
@@ -409,7 +412,7 @@ def test_a_post_lands_in_the_folder_his_site_reads(tmp_path: Path, monkeypatch) 
     saved = asyncio.run(lt.save_post(
         "writing", "sticky-routing", "Sticky routing pays on long prompts",
         "When keeping a session on one server doubles throughput, and when it does not",
-        "inference, routing, caching", good()))
+        "inference, routing, caching", good(), shape="brief"))
     path = site / "content" / "blog" / "sticky-routing.md"
     assert saved["path"] == str(path) and path.is_file()
     text = path.read_text()
@@ -430,29 +433,29 @@ def test_a_draft_may_be_written_again_and_a_published_post_may_not(
         tmp_path: Path, monkeypatch) -> None:
     site = _site(tmp_path, monkeypatch)
     args = ("writing", "sticky-routing", "Sticky routing pays", "One line", "a, b", good())
-    asyncio.run(lt.save_post(*args))
-    asyncio.run(lt.save_post(*args))                     # still a draft: written again
+    asyncio.run(lt.save_post(*args, shape="brief"))
+    asyncio.run(lt.save_post(*args, shape="brief"))      # still a draft: written again
     path = site / "content" / "blog" / "sticky-routing.md"
     path.write_text(path.read_text().replace("draft: true", "draft: false") + "\nMy edit.\n")
     with pytest.raises(lt.LessonRefused, match="a published post already has the slug"):
-        asyncio.run(lt.save_post(*args))
+        asyncio.run(lt.save_post(*args, shape="brief"))
     assert "My edit." in path.read_text()
 
 
 def test_a_post_a_reader_would_leave_is_not_written(tmp_path: Path, monkeypatch) -> None:
     site = _site(tmp_path, monkeypatch)
     with pytest.raises(lt.LessonRefused, match="a reader would leave this post"):
-        asyncio.run(lt.save_post("writing", "x", "T", "S", "a, b", good(in_short="")))
+        asyncio.run(lt.save_post("writing", "x", "T", "S", "a, b", good(in_short=""), shape="brief"))
     with pytest.raises(lt.LessonRefused, match="the title is 8[0-9] characters"):
         asyncio.run(lt.save_post("writing", "x", "A title that runs on and on " * 3, "S",
-                                 "a, b", good()))
+                                 "a, b", good(), shape="brief"))
     leak = good(takeaway=TAKEAWAY + " The lesson behind this post has the script.")
     with pytest.raises(lt.LessonRefused, match="private notes"):
-        asyncio.run(lt.save_post("writing", "x", "T", "S", "a, b", leak))
+        asyncio.run(lt.save_post("writing", "x", "T", "S", "a, b", leak, shape="brief"))
     with pytest.raises(lt.LessonRefused, match="1 tag"):
-        asyncio.run(lt.save_post("writing", "x", "T", "S", "only", good()))
+        asyncio.run(lt.save_post("writing", "x", "T", "S", "only", good(), shape="brief"))
     with pytest.raises(lt.LessonRefused, match="the slug"):
-        asyncio.run(lt.save_post("writing", "!!!", "T", "S", "a, b", good()))
+        asyncio.run(lt.save_post("writing", "!!!", "T", "S", "a, b", good(), shape="brief"))
     with pytest.raises(lt.LessonRefused, match="shape must be one of"):
         asyncio.run(lt.save_post("writing", "x", "T", "S", "a, b", good(), shape="essay"))
     assert not (site / "content").exists()
@@ -512,7 +515,7 @@ def _run_post(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drafts: list[dict
                         lambda kind, spec, **kw: type("Bundle", (), {"text": "the procedure"})())
     monkeypatch.setattr(runner, "emit_step", _no_emit)
     spec = type("Spec", (), {"model": "teacher", "name": "tutor"})()
-    task = {"payload": {"stage": "post_draft", "section": "writing",
+    task = {"payload": {"stage": "post_draft", "section": "writing", "shape": "brief",
                         "md_path": "learning/lessons/x.md"},
             "brief": "## This task\n\nShape: brief."}
     outcome = asyncio.run(lw.write_post(
@@ -648,7 +651,7 @@ def test_a_shape_nobody_defined_blocks_the_run_before_any_model_is_asked(
 def test_what_is_already_posted_leaves_the_shortlist(tmp_path: Path, monkeypatch) -> None:
     site = _site(tmp_path, monkeypatch)
     asyncio.run(lt.save_post("writing", "sticky", "Sticky routing pays on long prompts",
-                             "One line", "a, b", good(), "learning/lessons/x.md"))
+                             "One line", "a, b", good(), "learning/lessons/x.md", shape="brief"))
     lesson = _c("Sticky routing pays on long prompts", key="learning/lessons/x.md", read=True)
     renamed = _c("A lesson whose post got another title", key="learning/lessons/y.md",
                  read=True)
@@ -733,3 +736,160 @@ def test_numbers_the_material_does_not_hold_are_listed_for_him() -> None:
             "```\n1 - 0.01024\n```\n\n[a link](https://x.y/2025/01/24/z)\n")
     assert sp.numbers_not_in(post, source) == ["95", "0.4"]
     assert sp.first_person("He titled it *Why Grep Beat Embeddings in Our Agent*.") == []
+
+
+# --- field notes: what he did, in his words ------------------------------------
+
+FIELD_NOTE = """---
+project: mission-hq
+---
+
+## What I did
+
+At work I moved long chat sessions to sticky routing on a support chatbot.
+
+## The number
+
+Throughput went from 16,000 to 46,000 input tokens a second on 10 servers.
+
+## What surprised me
+
+Short prompts gained nothing.
+
+## What I would do differently
+
+I would measure the shared prefix length before changing the router.
+"""
+SITUATION_AS_HIM = ("At work I moved long chat sessions to sticky routing, because turn 37 of a"
+                    " session is 99% the same as turn 36. Before that, each server read all"
+                    " 100,000 tokens again before it could answer.")
+
+
+THIRD_PERSON_LIMITS = LIMITS.replace("I did not check", "Nobody checked")
+
+
+def test_a_field_note_is_read_into_its_parts() -> None:
+    note = sp.read_field_note(FIELD_NOTE)
+    assert note.project == "mission-hq" and note.has_number
+    assert note.parts["did"].startswith("At work I moved")
+    assert note.parts["view"].startswith("I would measure")
+    assert sp.field_note_problems(note) == []
+
+
+def test_a_note_left_as_the_template_cannot_carry_a_post() -> None:
+    note = sp.read_field_note(sp.FIELD_NOTE_TEMPLATE)
+    assert note.parts == {} and note.project == ""
+    problems = sp.field_note_problems(note)
+    assert len(problems) == 2 and "What I did" in problems[0] and "retelling" in problems[1]
+    no_number = sp.read_field_note("## What I did\n\nI moved the router.\n\n## The number\n\nfast")
+    assert sp.field_note_problems(no_number) == [
+        ('fill in "The number" with a result you measured; without a number of your own'
+         " the post is a retelling of the source")]
+
+
+def test_a_field_note_path_stays_in_its_folder() -> None:
+    assert sp.field_note_path("sticky-routing") == f"{sp.FIELD_NOTES_DIR}/sticky-routing.md"
+    assert sp.field_note_path(f"{sp.FIELD_NOTES_DIR}/a-b.md") == f"{sp.FIELD_NOTES_DIR}/a-b.md"
+    for bad in ("../secrets", "memory/core.md", "Sticky Routing", ""):
+        with pytest.raises(ValueError):
+            sp.field_note_path(bad)
+
+
+def test_his_own_result_outranks_what_he_marked(tmp_path: Path) -> None:
+    folder = tmp_path / sp.FIELD_NOTES_DIR
+    folder.mkdir(parents=True)
+    (folder / "sticky-routing.md").write_text(FIELD_NOTE)
+    (folder / "empty.md").write_text(sp.FIELD_NOTE_TEMPLATE)
+    notes = sp.field_note_candidates(tmp_path)
+    assert [c.key for c in notes] == [f"{sp.FIELD_NOTES_DIR}/sticky-routing.md"]
+    assert notes[0].own_result and notes[0].kind == "field_note"
+    article = sp.Candidate(key="https://a.example/post", title="An article", kind="reading",
+                           read=True)
+    ranked = sp.shortlist([article, *notes], {"https://a.example/post"}, set())
+    assert ranked[0].candidate.kind == "field_note"
+    assert set(ranked[0].reasons) >= {"own_result", "his_words"}
+
+
+def test_the_field_note_command_writes_the_template_once(tmp_path: Path, capsys) -> None:
+    assert sp._new_field_note(["sticky-routing"], vault=tmp_path) == 0
+    path = tmp_path / sp.FIELD_NOTES_DIR / "sticky-routing.md"
+    assert path.read_text() == sp.FIELD_NOTE_TEMPLATE
+    assert sp._new_field_note(["sticky-routing"], vault=tmp_path) == 1
+    assert sp._new_field_note(["../x"], vault=tmp_path) == 2
+
+
+def _run_note_post(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, note: str,
+                   drafts: list[dict[str, Any]]) -> tuple[Any, list[str], Path]:
+    site = _site(tmp_path, monkeypatch)
+    vault = tmp_path / "vault"
+    (vault / sp.FIELD_NOTES_DIR).mkdir(parents=True)
+    (vault / sp.FIELD_NOTES_DIR / "sticky-routing.md").write_text(note)
+    monkeypatch.setattr(settings(), "vault_dir", vault)
+    prompts: list[str] = []
+
+    async def post_step(model: str, instructions: str, prompt: str) -> dict[str, Any]:
+        prompts.append(prompt)
+        return drafts[min(len(prompts), len(drafts)) - 1]
+
+    async def reader_step(*a: Any) -> dict[str, Any]:
+        return dict(FINISHED)
+
+    monkeypatch.setattr(lw, "_post_step", post_step)
+    monkeypatch.setattr(lw, "_post_reader_step", reader_step)
+    monkeypatch.setattr(lw.assemble, "assemble",
+                        lambda kind, spec, **kw: type("Bundle", (), {"text": "the procedure"})())
+    monkeypatch.setattr(runner, "emit_step", _no_emit)
+    spec = type("Spec", (), {"model": "teacher", "name": "tutor"})()
+    task = {"payload": {"stage": "post_draft", "section": "writing", "shape": "lab",
+                        "field_note": "sticky-routing"},
+            "brief": "## This task\n\nShape: lab."}
+    outcome = asyncio.run(lw.write_post(
+        task, spec, HQDeps(agent="tutor", task_id="t-1", run_id=None)))  # type: ignore[arg-type]
+    return outcome, prompts, site
+
+
+def test_a_post_from_a_field_note_must_say_what_he_did(tmp_path: Path, monkeypatch) -> None:
+    outcome, prompts, site = _run_note_post(
+        tmp_path, monkeypatch, FIELD_NOTE,
+        [_draft(good(limits=THIRD_PERSON_LIMITS)),
+         _draft(good(situation=SITUATION_AS_HIM, limits=THIRD_PERSON_LIMITS))])
+    assert outcome.outcome == "done" and len(prompts) == 2
+    assert "## His field note" in prompts[0] and "At work I moved" in prompts[0]
+    assert "## The lesson" not in prompts[0]
+    assert "the post never says what he did" in prompts[1]
+    saved = (site / "content" / "blog" / "sticky-routing.md").read_text()
+    assert "project: mission-hq" in saved and "At work I moved" in saved
+
+
+def test_an_unfilled_field_note_blocks_before_any_model_is_asked(
+        tmp_path: Path, monkeypatch) -> None:
+    outcome, prompts, site = _run_note_post(
+        tmp_path, monkeypatch, sp.FIELD_NOTE_TEMPLATE, [_draft(good())])
+    assert outcome.outcome == "blocked" and prompts == []
+    assert "What I did" in (outcome.error or "")
+    assert not (site / "content").exists()
+
+
+def test_a_project_that_is_not_a_slug_is_refused(tmp_path: Path, monkeypatch) -> None:
+    _site(tmp_path, monkeypatch)
+    with pytest.raises(lt.LessonRefused, match="project must be a slug"):
+        asyncio.run(lt.save_post("writing", "sticky-routing", "Sticky routing pays",
+                                 "When keeping a session on one server doubles throughput",
+                                 "inference, routing", good(), project="Mission HQ!", shape="brief"))
+
+
+def test_a_topic_readers_look_for_is_ranked_up() -> None:
+    topics = sp.demand_topics("# Topics\n\n- KV cache: people ask about it\n- RAG\n\nnot a line")
+    assert topics == ["kv cache", "rag"]
+    cache = _c("How the KV cache fills up", read=True)
+    storage = _c("Object storage costs", read=True)       # "rag" is not in "storage"
+    assert sp.in_demand(cache, topics) == "kv cache" and sp.in_demand(storage, topics) == ""
+    ranked = sp.shortlist([storage, cache], set(), set(), NOW, topics=topics)
+    assert ranked[0].candidate is cache and "in_demand" in ranked[0].reasons
+    assert "readers look for this topic now" in sp.shortlist_markdown(ranked, "2026-W40")
+
+
+def test_a_blog_post_is_an_explainer_unless_the_task_names_another_shape() -> None:
+    assert sp.shape_for("writing").name == "explainer"
+    assert sp.shape_for("blog", "lab").name == "lab"
+    assert not sp.SHAPES["explainer"].in_short
