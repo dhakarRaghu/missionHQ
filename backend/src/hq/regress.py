@@ -420,7 +420,11 @@ async def _post_trial(case: Case, spec: loader.AgentSpec, payload: dict[str, Any
 
     async def save_post(section: str, slug: str, title: str, summary: str, tags: str,
                         markdown: str, md_path: str, **kw: Any) -> dict[str, Any]:
-        refused = lt.post_problems(markdown, lt._read_lesson_text(md_path))
+        from hq import site_posts
+
+        rule = site_posts.shape_for(section, str(kw.get("shape") or ""))
+        refused = lt.post_problems(markdown, lt._read_lesson_text(md_path),
+                                   min(lt.POST_MIN_WORDS, rule.words[0]))
         calls.append({"tool": "publish_post", "ok": not refused,
                       "args": {"section": section, "slug": slug, "title": title,
                                "markdown": markdown}})

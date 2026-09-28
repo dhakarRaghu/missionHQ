@@ -709,6 +709,12 @@ SYSTEM_DISPATCHES: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
      {"query": JOB_QUERY, "locations": "India|Bengaluru|Remote", "max_roles": 20}),
     ("learning_run", "0 22 * * *", "start_learning_run", {}),
     ("source_hunt", "0 7 * * 0", "start_source_hunt", {}),
+    # The radar collects before his day starts. Code only: no model is asked.
+    ("radar_collect", "30 6 * * *", "collect_radar", {}),
+    # Then a model names the problem in each new item, and code checks the quote.
+    ("radar_read", "45 6 * * *", "read_radar", {}),
+    # Asked every Sunday; it writes a brief every two weeks (radar.yaml).
+    ("radar_brief", "30 7 * * 0", "brief_radar", {}),
 )
 
 

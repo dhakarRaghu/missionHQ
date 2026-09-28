@@ -35,6 +35,12 @@ share with him.
 
 ## Sources that work
 
-Company careers pages and their boards, engineering blogs, founder posts,
-funding announcements, Glassdoor-style salary pages for a pay signal (as
-signal, not fact), and the company's own team page.
+Roles: `job_feed` with `hn_hiring` (this month's Hacker News "Who is
+hiring?" thread) and the remote boards `himalayas`, `remotive` and
+`remoteok`, newest first. A feed row is a lead: verify it on the company's
+own board before `record_job`. Pass `since_days` to `job_board` to see only
+new roles.
+
+Research: company careers pages and their boards, engineering blogs, founder
+posts, funding announcements, Glassdoor-style salary pages for a pay signal
+(as signal, not fact), and the company's own team page.

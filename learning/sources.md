@@ -736,7 +736,7 @@ Fireworks, Baseten, Uber (406), Gruntwork, TUF. Hunter reads those pages.
 | Sebastian Raschka | magazine.sebastianraschka.com/feed | 20 · 2026-09-09 |
 | Lilian Weng | lilianweng.github.io/index.xml | 53 · 2026-07-04 |
 | Simon Willison | simonwillison.net/tags/prompt-injection.atom (tag feed; all posts: simonwillison.net/atom/everything/, newest 2026-09-25) | tag feed newest 2026-09-17 |
-| Philipp Schmid | philschmid.de/rss | 211 · 2026-09-24 |
+| Philipp Schmid | www.philschmid.de/rss | 211 · 2026-09-24 |
 | vLLM blog | vllm.ai/blog/rss.xml | 50 · 2026-09-24 |
 | Anyscale | anyscale.com/rss.xml | 18 · 2026-09-26 |
 | Modal | modal.com/blog/atom.xml | 135 · 2026-09-26 |

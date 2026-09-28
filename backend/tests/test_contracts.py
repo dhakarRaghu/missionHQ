@@ -77,7 +77,9 @@ def test_the_schedule_is_the_intended_one() -> None:
     }
     starters = {(d[0], d[1]) for d in engine.SYSTEM_DISPATCHES}
     assert starters == {("course_study", "30 18 * * *"), ("job_search", "15 21 * * *"),
-                        ("learning_run", "0 22 * * *"), ("source_hunt", "0 7 * * 0")}
+                        ("learning_run", "0 22 * * *"), ("source_hunt", "0 7 * * 0"),
+                        ("radar_collect", "30 6 * * *"), ("radar_read", "45 6 * * *"),
+                        ("radar_brief", "30 7 * * 0")}
 
 
 def _instruction_files() -> list[Path]:

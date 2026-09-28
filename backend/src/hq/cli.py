@@ -8,6 +8,11 @@
     evals run <agent> [--live] [--all] score the golden set (stored refs; --live re-runs)
     evals history <agent>              recent eval scores for the agent
     reindex                            rebuild the vault full-text index
+    radar collect [--dry-run] [--only KIND]  read the radar's sources once and store what is new
+    radar status                       what the radar has collected, by kind
+    radar read [--limit N]             name the problem in each unread item (model calls)
+    radar problems                     the open problems, most sites first
+    radar brief [--force]              propose project ideas when the brief is due (model calls)
     sync-courses                       pull published course phases from the study platform (run after /study publishes)
     import-course <topic>              copy a platform course written elsewhere into learning/study-material/ (owner's deliberate step)
     board-check                        replay task_events and report tasks whose stored status differs (exit 1 if any)
@@ -25,6 +30,72 @@ import sys
 
 import hq.dbos_app  # noqa: F401 — construct DBOS before decorated imports
 from hq import llm
+
+
+async def cmd_radar(what: str, flags: list[str]) -> int:
+    """`radar collect [--dry-run] [--only github|hn|arxiv|feed]` reads every
+    source once; `radar status` says what the table holds."""
+    from hq import db, radar
+
+    if what == "status":
+        await db.open_pool()
+        try:
+            rows = await db.fetch(
+                "SELECT kind, count(*) n, count(DISTINCT domain) sites,"
+                " count(*) FILTER (WHERE extracted_at IS NULL) unread,"
+                " max(fetched_at) newest FROM hq.radar_items GROUP BY kind ORDER BY n DESC")
+        finally:
+            await db.close_pool()
+        for r in rows:
+            print(f"  {r['kind']:<9} {r['n']:>5} items  {r['sites']:>3} sites"
+                  f"  {r['unread']:>5} unread  newest {r['newest']:%Y-%m-%d %H:%M}")
+        print(f"{sum(r['n'] for r in rows)} items" if rows else "nothing collected yet")
+        return 0
+    if what in {"read", "problems", "brief"}:
+        from hq import radar_ideas, radar_problems
+
+        await db.open_pool()
+        try:
+            if what == "read":
+                limit = (int(flags[flags.index("--limit") + 1]) if "--limit" in flags[:-1]
+                         else radar_problems.RUN_ITEMS)
+                print(radar_problems.summary(await radar_problems.read_new(limit)))
+                grouped = await radar_problems.group_near()
+                print(f"radar: {grouped.asked} near pairs judged, {grouped.merged} merged,"
+                      f" {grouped.different} different, {grouped.failed} failed")
+            elif what == "brief":
+                print(await radar_ideas.brief_and_report(force="--force" in flags))
+            else:
+                rows = await db.fetch(
+                    "SELECT p.id, p.statement, p.origin, count(e.id) n,"
+                    " count(DISTINCT e.domain) sites FROM hq.problems p"
+                    " LEFT JOIN hq.problem_evidence e ON e.problem_id = p.id"
+                    " WHERE p.status = 'open' GROUP BY p.id"
+                    " ORDER BY sites DESC, n DESC, p.id LIMIT 40")
+                for r in rows:
+                    print(f"  {r['id']:>5}  {r['sites']:>2} sites  {r['n']:>2} quotes"
+                          f"  {r['origin']:<5}  {r['statement'][:110]}")
+                print(f"{len(rows)} shown" if rows else "no open problem yet")
+        finally:
+            await db.close_pool()
+        return 0
+    if what != "collect":
+        print(__doc__)
+        return 2
+    dry = "--dry-run" in flags
+    only = flags[flags.index("--only") + 1] if "--only" in flags[:-1] else ""
+    if not dry:
+        await db.open_pool()
+    try:
+        tallies = await radar.collect(dry_run=dry, only=only)
+    finally:
+        if not dry:
+            await db.close_pool()
+    for t in sorted(tallies, key=lambda t: (bool(t.error), -t.kept, t.source)):
+        line = f"  {t.source:<44} found {t.found:>4}  kept {t.kept:>4}  new {t.new:>4}"
+        print(line + (f"  ! {t.error}" if t.error else ""))
+    print(radar.summary(tallies) + ("  (dry run: nothing stored)" if dry else ""))
+    return 0
 
 
 async def cmd_models() -> int:
@@ -446,6 +517,8 @@ def main() -> None:
         raise SystemExit(asyncio.run(cmd_prompt_check(args[1])))
     if args[0] == "vault-health":
         raise SystemExit(asyncio.run(cmd_vault_health(args[1:])))
+    if args[0] == "radar" and len(args) >= 2:
+        raise SystemExit(asyncio.run(cmd_radar(args[1], args[2:])))
     if args[0] == "models":
         raise SystemExit(asyncio.run(cmd_models()))
     if args[0] == "ask" and len(args) >= 3:

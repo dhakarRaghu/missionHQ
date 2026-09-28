@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from pydantic_ai import ModelRetry, RunContext
 
-from hq import board, db, lesson_kit, privacy
+from hq import board, db, lesson_kit, privacy, site_posts
 from hq import courses as courses_spec
 from hq.config import settings
 from hq.learning_pipeline import (
@@ -2060,6 +2060,9 @@ PRIVATE_WORDS = (
     "study note", "quarantine/", "phase_slug", "course phase", "the phase he",
     "the phase you are on", "hunter", "tutor", "sage", "librarian", "scout",
     "record_lesson", "write_lesson", "evening run", "learning/lessons",
+    # The post is not "from a lesson" to its reader: there is only the post.
+    "the lesson behind", "this lesson", "the lesson ships", "the lesson above",
+    "lesson behind this post",
 )
 POST_MIN_WORDS = 400
 _FRONTMATTER_UNSAFE = re.compile(r'["\n\r]')
@@ -2077,12 +2080,13 @@ def _read_lesson_text(path: str) -> str:
     return full.read_text()
 
 
-def post_problems(markdown: str, source: str) -> str:
+def post_problems(markdown: str, source: str, min_words: int = POST_MIN_WORDS) -> str:
     """Why this is not ready to be public, or "".
 
     Measured, not judged: private words, an employer, a placeholder, a link
     the lesson did not have, or a post so short the rewrite dropped the
-    substance instead of the context.
+    substance instead of the context. A note is short by design, so its
+    caller passes its own floor.
     """
     problems = []
     lowered = markdown.lower()
@@ -2106,9 +2110,9 @@ def post_problems(markdown: str, source: str) -> str:
         if new_links:
             problems.append("links the lesson did not have: " + _listed(new_links))
     words = _prose_words(markdown)
-    if words < POST_MIN_WORDS:
+    if words < min_words:
         problems.append(
-            f"{words} words; a post under {POST_MIN_WORDS} has lost the substance,"
+            f"{words} words; a post under {min_words} has lost the substance,"
             " not just the private context"
         )
     dashes = markdown.count("\u2014")
@@ -2117,38 +2121,90 @@ def post_problems(markdown: str, source: str) -> str:
     return "; ".join(problems)
 
 
+def post_field_problems(slug: str, title: str, summary: str,
+                        tags: Sequence[str]) -> list[str]:
+    """What is wrong with the fields around a post, or []. Checked before a
+    draft is read by anyone, so a good post is not lost to a quote mark."""
+    problems: list[str] = []
+    title, summary = title.strip(), " ".join(summary.split())
+    if not title or not summary:
+        problems.append("a post needs a title and a one-line summary")
+    if _FRONTMATTER_UNSAFE.search(title) or _FRONTMATTER_UNSAFE.search(summary):
+        problems.append("the title and summary go in frontmatter: no double quotes"
+                        " or newlines")
+    kept = [t.strip() for t in tags if t.strip()]
+    if not 2 <= len(kept) <= 8:
+        problems.append(f"{len(kept)} tag(s); give two to eight")
+    try:
+        _clean_slug(slug)
+    except (ModelRetry, ValueError) as exc:
+        problems.append(f"the slug: {exc}")
+    named = employer_problem(title, summary, slug, ", ".join(kept))
+    if named:
+        problems.append(f"its title, summary, slug or tags: {named}")
+    return problems
+
+
 async def save_post(section: str, slug: str, title: str, summary: str, tags: str,
-                    markdown: str, source_lesson: str = "", *, run_id: str | None = None,
-                    agent: str | None = None) -> dict[str, Any]:
+                    markdown: str, source_lesson: str = "", *, shape: str = "",
+                    category: str = "", run_id: str | None = None,
+                    agent: str | None = None, source_text: str = "",
+                    project: str = "") -> dict[str, Any]:
     """Check a post and write it into his site as a draft. Shared by
-    `publish_post` and the staged writer. Raises LessonRefused."""
+    `publish_post` and the staged writer. Raises LessonRefused.
+
+    `source_text` is material that is not a lesson file, such as his field
+    note: its links and numbers count as the post's source too. `project`
+    is the slug of the project on his site the post came from.
+
+    Two checks, both measured: what must not leave his notes (post_problems)
+    and what would make a stranger stop reading (site_posts.reader_problems).
+    """
     section = section.strip().lower()
     if section not in POST_SECTIONS:
         raise LessonRefused(f"section must be one of {', '.join(POST_SECTIONS)}")
+    try:
+        rule = site_posts.shape_for(section, shape)
+    except ValueError as exc:
+        raise LessonRefused(str(exc)) from exc
+    tag_list = [t.strip().lower() for t in tags.replace("\n", ",").split(",") if t.strip()]
+    fields = post_field_problems(slug, title, summary, tag_list)
+    if fields:
+        raise LessonRefused("; ".join(fields))
     clean = _clean_slug(slug)
     title, summary = title.strip(), " ".join(summary.split())
-    if not title or not summary:
-        raise LessonRefused("a post needs a title and a one-line summary")
-    if _FRONTMATTER_UNSAFE.search(title) or _FRONTMATTER_UNSAFE.search(summary):
-        raise LessonRefused('the title and summary go in frontmatter: no quotes or newlines')
-    tag_list = [t.strip().lower() for t in tags.replace("\n", ",").split(",") if t.strip()]
-    if not 2 <= len(tag_list) <= 8:
-        raise LessonRefused("give two to eight tags, comma separated")
 
     source = ""
     if source_lesson.strip():
         source = await asyncio.to_thread(_read_lesson_text, source_lesson.strip())
-    gap = post_problems(markdown, source)
-    named = "" if gap else employer_problem(title, summary, slug, ", ".join(tag_list))
-    gap = gap or (f"its title, summary, slug or tags: {named}" if named else "")
+    source = "\n\n".join(t for t in (source, source_text) if t.strip())
+    project = project.strip().lower()
+    if project and not re.fullmatch(r"[a-z0-9][a-z0-9-]*", project):
+        raise LessonRefused(f"project must be a slug such as mission-hq, not {project!r}")
+    gap = post_problems(markdown, source, min(POST_MIN_WORDS, rule.words[0]))
     if gap:
         raise LessonRefused(f"this is not ready for his site: {gap}. Fix it and call again")
+    category = category.strip().lower()
+    reader = (site_posts.headline_problems(title, summary, category)
+              + site_posts.reader_problems(markdown, rule.name))
+    if reader:
+        raise LessonRefused(
+            "a reader would leave this post. " + " | ".join(reader)
+            + ". Fix these and call again")
 
     root = settings().portfolio_dir
     if not root.is_dir():
         raise LessonRefused(f"his site is not at {root}; nothing was written")
-    folder = root / "content" / section
+    site_section = site_posts.SITE_FOLDER[section]
+    folder = root / "content" / site_section
     await asyncio.to_thread(folder.mkdir, parents=True, exist_ok=True)
+    path = folder / f"{clean}.md"
+    # `writing` lands in the folder of his published posts. A draft may be
+    # written again; a post he has published and edited is his.
+    if path.is_file() and not re.search(r"^draft:\s*true\s*$", path.read_text(),
+                                        re.MULTILINE):
+        raise LessonRefused(
+            f"a published post already has the slug {clean!r}; choose another slug")
     body = markdown.strip()
     front = "\n".join([
         "---",
@@ -2156,15 +2212,17 @@ async def save_post(section: str, slug: str, title: str, summary: str, tags: str
         f"date: {_today().date()}",
         f'summary: "{summary}"',
         "tags: [" + ", ".join(tag_list) + "]",
-        f"section: {section}",
+        *([f"category: {category}"] if category else []),
+        *([f"project: {project}"] if project else []),
+        f"section: {site_section}",
         "draft: true",
         "---",
         "",
     ])
-    path = folder / f"{clean}.md"
     await asyncio.to_thread(path.write_text, front + body + "\n")
     await emit("post.drafted", run_id=run_id, agent=agent,
-               payload={"section": section, "slug": clean, "words": _prose_words(body)})
+               payload={"section": site_section, "shape": rule.name, "slug": clean,
+                        "source": source_lesson.strip(), "words": _prose_words(body)})
     return {
         "path": str(path),
         "words": _prose_words(body),
@@ -2185,10 +2243,15 @@ async def publish_post(
     tags: str,
     markdown: str,
     source_lesson: str = "",
+    shape: str = "",
+    category: str = "",
 ) -> dict[str, Any]:
     """Write one post into his own site's content folder, after the checks.
 
-    `section` is "writing" (an article) or "papershelf" (a paper note).
+    `section` is "writing" (an article), "papershelf" (a paper note) or
+    "notes" (one idea, read in a minute). `shape` is brief, lab, explainer,
+    paper or note; left empty, the section decides. `category` is one of
+    inference, retrieval, agents, evals, backend, career.
     `slug` is lowercase words joined by hyphens. `tags` are comma separated.
     `source_lesson` is the lesson path this came from, so the links can be
     checked against it.
@@ -2198,7 +2261,8 @@ async def publish_post(
     """
     try:
         return await save_post(section, slug, title, summary, tags, markdown, source_lesson,
-                               run_id=ctx.deps.run_id, agent=ctx.deps.agent)
+                               shape=shape, category=category, run_id=ctx.deps.run_id,
+                               agent=ctx.deps.agent)
     except LessonRefused as exc:
         raise ModelRetry(str(exc)) from exc
 

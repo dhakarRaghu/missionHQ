@@ -1,0 +1,135 @@
+# The radar: where evidence of real problems is collected from.
+#
+# My file. Add a repo, a query or a category, cross one out, and the next
+# collection uses it. Blogs are not listed here: every feed in the Feeds table
+# of learning/sources.md is collected as well, so there is one list of blogs.
+#
+# The radar collects. It proposes nothing. A model reads what was collected in
+# a later step, and an idea reaches me only when the problem behind it has
+# quotes from two or more sites, or one report that many people joined.
+
+window_days: 21          # older than this is not collected
+
+# Issue trackers. An issue is kept when it shows that more than one person
+# cares: comments, reactions, or a label the maintainers use for open design
+# work. One request per repo a day, which fits the limit without a token.
+github:
+  keep_when:
+    comments: 3
+    reactions: 2
+    labels: [rfc, roadmap, performance, design, "help wanted", "needs investigation",
+             "kind/feature", "kind/bug", regression, proposal, enhancement, sep]
+  skip_labels: [stale, inactive, wontfix, invalid, duplicate, question, "closed-as-slop",
+                "vibe-coded", "lifecycle/rotten", "lifecycle/stale", "model request",
+                "new model", documentation, "good first issue", "kind/cleanup",
+                "kind/flake", "kind/documentation", dependencies, chore, ci]
+  skip_titles:
+    - "^\\[?(new )?model( request)?\\]?[: ]"
+    - "^(add|support) .* model$"
+    - "^\\[usage\\]"
+    - "^\\[installation\\]"
+    - "^\\[doc\\]"
+    - "^\\[aw\\]"                 # a bot's report on its own CI run
+    - "^(ci|chore|build|test)[:(]"
+  repos:
+    - {repo: vllm-project/vllm, area: inference}
+    - {repo: sgl-project/sglang, area: inference}
+    - {repo: ggml-org/llama.cpp, area: inference}
+    - {repo: llm-d/llm-d, area: inference}
+    - {repo: ai-dynamo/dynamo, area: inference}
+    - {repo: LMCache/LMCache, area: inference}
+    - {repo: ml-explore/mlx-lm, area: inference}
+    - {repo: exo-explore/exo, area: inference}
+    - {repo: kubernetes-sigs/kueue, area: scheduling}
+    - {repo: kai-scheduler/KAI-Scheduler, area: scheduling}
+    - {repo: modelcontextprotocol/modelcontextprotocol, area: agents}
+    - {repo: modelcontextprotocol/python-sdk, area: agents}
+    - {repo: pydantic/pydantic-ai, area: agents}
+    - {repo: langchain-ai/langgraph, area: agents}
+    - {repo: dbos-inc/dbos-transact-py, area: agents}
+    - {repo: temporalio/temporal, area: agents}
+    - {repo: langfuse/langfuse, area: observability}
+    - {repo: open-telemetry/semantic-conventions-genai, area: observability}
+    - {repo: UKGovernmentBEIS/inspect_ai, area: evals}
+    - {repo: qdrant/qdrant, area: retrieval}
+
+# Hacker News, through its search. A thread is evidence when people argued
+# about it, so each query carries a floor on points.
+hn:
+  - {query: "postmortem", min_points: 20, area: reliability}
+  - {query: "LLM inference", min_points: 30, area: inference}
+  - {query: "vLLM", min_points: 15, area: inference}
+  - {query: "KV cache", min_points: 15, area: inference}
+  - {query: "GPU utilization", min_points: 30, area: scheduling}
+  - {query: "AI agents production", min_points: 40, area: agents}
+  - {query: "agent evals", min_points: 25, area: evals}
+  - {query: "MCP server", min_points: 40, area: agents}
+  - {query: "prompt injection", min_points: 40, area: security}
+  - {query: "RAG production", min_points: 30, area: retrieval}
+  - {tags: launch_hn, min_points: 30, area: launches}
+
+# Papers. The systems categories are small and taken whole; a paper there is
+# kept when its title or abstract names the subject.
+arxiv:
+  categories: [cs.DC, cs.PF, cs.OS]
+  max_results: 120
+  # Narrow on purpose. With "gpu", "agent" and "scheduling" in this list, a
+  # compiler paper and a matrix factorisation were kept.
+  keep_when_any:
+    - llm
+    - language model
+    - model serving
+    - inference serving
+    - kv cache
+    - kv-cache
+    - agentic
+    - quantiz
+    - speculative decoding
+    - prefill
+    - tokens per second
+    - time to first token
+    - retrieval-augmented
+
+# The brief: project ideas proposed from the problems collected above.
+brief:
+  every_days: 14         # one brief every two weeks
+  ideas: 3               # how many ideas one brief proposes
+  min_domains: 2         # a problem needs quotes from this many different sites
+  # ... or one report this loud. On 2026-09-28, 5 of 97 problems had two sites.
+  strong: {comments: 20, reactions: 5, points: 100}
+  project_days: 14       # how long one project runs
+  candidates: 8          # problems an idea is written for, before the gate
+
+# What I can run. An idea must fit one of these.
+rig:
+  laptop: "Apple M4 Pro, 14 cores, 24 GB memory, macOS. Runs llama.cpp, MLX and vllm-metal."
+  rented: "One rented GPU for a few hours, when the measurement needs it."
+  clusters: "Several processes on the laptop, or kind and k3d for a small Kubernetes cluster."
+
+# The gate. I use a coding assistant every day, so I do not build what it can
+# finish alone in one session. An idea is proposed only when it has at least
+# `needs_you_min` of the first list and none of the second decides it.
+gate:
+  needs_you_min: 4
+  needs_you:
+    - "The result is a number measured on real hardware, with the spread stated."
+    - "The builder must find what to optimise. Nobody names the function."
+    - "The correct answer is not known in advance. No published number exists for this setup."
+    - "The builder must design the measurement: the baseline, the inputs and the metric."
+    - "It needs two or more processes or machines, and an injected failure."
+    - "The behaviour is non-deterministic. It appears in some runs and not in others."
+    - "It needs hardware that a coding session cannot reach: a GPU, a network link, a load generator."
+    - "One check takes more than about 30 minutes."
+    - "It has many dependent steps with no test in between."
+    - "It has a design decision with a trade-off, and the builder must defend it with measured costs."
+    - "The builder must read unfamiliar source code to explain a measured behaviour."
+    - "A cheap shortcut passes the test and is wrong, so a person must guard the check."
+    - "The output must meet a maintainer's standard, not only pass tests."
+    - "Diagnosis must work with noise and more than one fault."
+  one_session:
+    - "One repository, a clear specification, and tests decide success."
+    - "A known algorithm, or a well-known paper with public code."
+    - "A fixed dataset and a fixed metric."
+    - "A setup task that an expert does in under two hours."
+    - "Correctness is the only goal. Speed and quality do not matter."
+    - "A wrapper, a dashboard, a chatbot or a tutorial-sized demo."

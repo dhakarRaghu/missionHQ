@@ -7,6 +7,7 @@ memory: [user, decisions, active_projects]
 tools:
   - discover_companies
   - job_board
+  - job_feed
   - detect_job_board
   - record_job
   - list_jobs

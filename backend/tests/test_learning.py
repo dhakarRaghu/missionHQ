@@ -1926,7 +1926,7 @@ def test_publishing_writes_a_draft_and_nothing_else() -> None:
     for call in ("subprocess", "httpx", "urllib", "git "):
         assert call not in src.split('"""')[2], call
     assert "No commit, no push, no deploy" in inspect.getsource(lt.publish_post)
-    assert POST_SECTIONS == ("writing", "papershelf")
+    assert POST_SECTIONS == ("writing", "papershelf", "notes")
     brief = post_brief(post_payload(
         {"lesson_date": "2026-09-17", "md_path": "learning/lessons/x.md", "title": "T"},
         "papershelf"))

@@ -333,10 +333,11 @@ def test_the_sweep_brief_is_a_short_contract_with_the_state_filled_in() -> None:
     brief = sweep_brief(today=date(2026, 9, 22), known_companies=known, exhausted=skips)
     assert len(brief.split()) <= 150
     assert 'industry="Developer Tools"' in brief  # Tuesday is B2B, backed off
-    assert "Company0" in brief and "and 4 more" in brief
+    assert "Company0" in brief and "and 9 more" in brief
     assert "lever board quiet" in brief and "Skip this week" in brief
     assert "max_roles 8" in brief
     assert "record_job" in brief and "job_board" in brief and "discover_companies" in brief
+    assert "job_feed hn_hiring" in brief
     assert "intern" in brief and "closed itself" in brief
 
 

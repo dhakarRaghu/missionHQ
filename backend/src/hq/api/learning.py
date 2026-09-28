@@ -436,6 +436,57 @@ async def draft_post(lesson_date: str, section: str = "writing", kind: str = "to
     return {"started": True, "task_id": task_id, "title": row["title"]}
 
 
+@router.post("/field-notes/{name}/post", operation_id="draftPostFromFieldNote")
+async def draft_post_from_field_note(name: str, section: str = "writing",
+                                     shape: str = "lab", lesson_date: str = "") -> dict:
+    """Prepare a post for his site from his field note: what he did and the
+    number he got, in his words. `lesson_date` adds that day's lesson as
+    background. Nothing is committed, pushed or published.
+
+    Start a note with `python -m hq.site_posts field-note <name>`.
+    """
+    from hq import engine
+    from hq.learning_pipeline import POST_SECTIONS, field_note_payload, post_brief
+    from hq.site_posts import field_note_path, field_note_problems, read_field_note
+
+    if section not in POST_SECTIONS:
+        raise HTTPException(400, f"section must be one of {', '.join(POST_SECTIONS)}")
+    try:
+        rel = field_note_path(name)
+        payload_ = field_note_payload(rel, section, shape)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    path = settings().vault_dir / rel
+    if not path.is_file():
+        raise HTTPException(404, f"no field note at {rel}")
+    unfilled = field_note_problems(read_field_note(path.read_text()))
+    if unfilled:
+        raise HTTPException(400, "; ".join(unfilled))
+    if lesson_date:
+        row = await db.fetchone(
+            "SELECT md_path FROM hq.lessons WHERE lesson_date = %s::date"
+            " ORDER BY created_at DESC LIMIT 1", (lesson_date,))
+        if not row or not row["md_path"]:
+            raise HTTPException(404, f"no lesson on {lesson_date}")
+        payload_["md_path"] = str(row["md_path"])
+    key = f"post:{section}:{rel}"
+    live = await db.fetchone(
+        "SELECT id::text FROM hq.tasks WHERE dedup_key = %s"
+        " AND status IN ('backlog', 'running')", (key,))
+    if live:
+        return {"started": False, "reason": "already preparing this post",
+                "task_id": live["id"]}
+    task_id = await engine.dispatch(
+        agent="tutor",
+        title=f"Post draft: {payload_['title'][:56]}",
+        brief=post_brief(payload_),
+        source="web",
+        payload=payload_,
+        dedup_key=key,
+    )
+    return {"started": True, "task_id": task_id, "title": payload_["title"]}
+
+
 @router.post("/courses/{course}/phases/{slug}/teach", operation_id="teachPhase")
 async def teach_phase(course: str, slug: str, force: bool = False) -> dict:
     """Study one named phase now, instead of waiting for tonight's run.

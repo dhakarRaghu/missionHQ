@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-09-28T03:00:03.186713+05:30",
+  "built_at": "2026-09-29T03:00:05.198278+05:30",
   "courses": [
     {
       "slug": "inference-internals",
@@ -20,8 +20,17 @@
           "one_liner": "One request end to end: the uneven token exchange rate, queue+prefill inside TTFT, the KV formula that sizes provider capacity, why output tokens cost 3-8x, the determinism myth with its measured proof, and the streaming instrument that lets you verify every claim yourself.",
           "minutes": 100,
           "date": "2026-09-17",
-          "read": false,
+          "read": true,
           "file": "2026-09-17-inference-internals-phase-01-lifecycle.html"
+        },
+        {
+          "slug": "inference-internals-phase-02a-scheduling-memory",
+          "title": "Scheduling and Memory \u2014 Inference Internals Phase 2A",
+          "one_liner": "How vLLM's scheduler loop, paged KV cache and prefix cache decide your latency, concurrency and bill \u2014 revised: unverifiable Orca Figure 10a claim removed per claims-run c3.",
+          "minutes": 150,
+          "date": "2026-09-20",
+          "read": true,
+          "file": "2026-09-20-inference-internals-phase-02a-scheduling-memory.html"
         }
       ]
     },
@@ -37,6 +46,15 @@
           "date": "2026-09-13",
           "read": true,
           "file": "2026-09-13-kubernetes-phase-00-why-k8s-exists.html"
+        },
+        {
+          "slug": "kubernetes-phase-01-core-concepts",
+          "title": "Kubernetes Phase 1 \u2014 Core Concepts (Pods to VPC CNI)",
+          "one_liner": "The load-bearing phase: pods, Deployments, probes, Services and the gRPC pinning problem, ConfigMap staleness, storage, and the EKS ENI layer, corrected against the live platform (native gRPC probes, EndpointSlices, unmaintained ingress-nginx).",
+          "minutes": 120,
+          "date": "2026-09-19",
+          "read": false,
+          "file": "2026-09-19-kubernetes-phase-01-core-concepts.html"
         }
       ]
     }
@@ -48,7 +66,7 @@
       "topic": "",
       "kind": "",
       "date": "2026-09-17",
-      "read": false,
+      "read": true,
       "file": "2026-09-17-routing-before-the-lifecycle.html"
     },
     {

@@ -179,6 +179,9 @@ class Settings(BaseSettings):
     # His own study platform. The catalogue at /api/study is public; the phase
     # pages are readable by slug. Tutor works through them one phase a day.
     study_api_base: str = "https://raghu-monitoring.vercel.app"
+    # Optional, read-only, for the radar's issue trackers. Without it GitHub
+    # allows 60 requests an hour, and the radar makes one a day per repo.
+    github_token: str = ""
     # His current and former employers. Never named in anything an agent
     # loads, writes, searches or posts (``hq.privacy`` is the one gate). The
     # names live only in .env as PRIVATE_EMPLOYERS, comma-separated, so no

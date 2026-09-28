@@ -60,6 +60,11 @@ function invalidateFor(queryClient: QueryClient, event: HqEvent) {
   // Home's "what needs you" and "last night" read the board, the lessons,
   // the jobs and the tickets; any of those moving refreshes it.
   if (/^(task|run|ticket|lesson|job|posts|reading)\./.test(type)) inv(qk.today);
+  // The radar's three steps: collected, read, and the brief.
+  if (type.startsWith("radar.")) {
+    inv(["radar"]);
+    inv(qk.today);
+  }
 
   switch (type) {
     case "task.created":

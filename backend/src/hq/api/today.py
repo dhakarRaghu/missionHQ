@@ -15,12 +15,15 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from dbos._croniter import croniter  # type: ignore[attr-defined]
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from hq import continuity, db, memory, value
+from hq.api.deps import require_auth
 from hq.config import settings
 
-router = APIRouter()
+# The page names his unread lessons, open decisions and job counts, so it is
+# behind the token like every other route. It was not until 2026-09-28.
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 PROPOSALS_DIR = "memory/proposals"
 IDEAS_PATH = "projects/content/ideas.md"
@@ -33,6 +36,9 @@ SYSTEM_LABELS = {
     "job_search": "LinkedIn job discovery",
     "learning_run": "Today's article",
     "source_hunt": "Source hunt",
+    "radar_collect": "Radar: collect",
+    "radar_read": "Radar: read",
+    "radar_brief": "Radar: project ideas",
 }
 
 
@@ -89,6 +95,28 @@ async def _reading() -> list[dict[str, Any]]:
                          f"{'s' if len(other) > 1 else ''} on Learn",
                          f"Newest: {other[0]['title']}.", "/learn", "Open", len(other)))
     return out
+
+
+async def _radar() -> list[dict[str, Any]]:
+    """The project that is due, or the ideas that wait for a choice."""
+    running = await _rows(
+        "SELECT d.title, p.due_at FROM hq.projects p JOIN hq.ideas d ON d.id = p.idea_id"
+        " WHERE p.status = 'building'")
+    if running:
+        left = (running[0]["due_at"] - datetime.now(UTC)).days
+        if left > 2:
+            return []
+        when = "is past its two weeks" if left < 0 else f"ends in {left + 1} days"
+        return [_item("radar", "decide", f"Your project {when}",
+                      f"{running[0]['title']}. Write what you measured.",
+                      "/radar", "Open")]
+    waiting = await _rows(
+        "SELECT title FROM hq.ideas WHERE status = 'proposed' ORDER BY score DESC")
+    if not waiting:
+        return []
+    return [_item("radar", "decide", f"Pick a project: {len(waiting)} idea"
+                  f"{'s' if len(waiting) > 1 else ''} wait",
+                  f"Best first: {waiting[0]['title']}.", "/radar", "Choose", len(waiting))]
 
 
 async def _decisions(today: date) -> list[dict[str, Any]]:
@@ -247,7 +275,8 @@ async def get_today() -> dict[str, Any]:
     now = _local_now()
     today = now.date()
     groups = await asyncio.gather(
-        _reading(), _decisions(today), _proposals(), _posts(today), _jobs(), _stopped())
+        _reading(), _decisions(today), _proposals(), _posts(today), _jobs(), _radar(),
+        _stopped())
     needs = [item for group in groups for item in group]
     return {
         "date": today.isoformat(),

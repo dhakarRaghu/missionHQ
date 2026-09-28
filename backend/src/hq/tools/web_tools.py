@@ -594,6 +594,7 @@ def _one_job(row: dict, provider: str = "", company: str = "") -> dict:
         "url": str(url),
         "posted": _job_date(
             row.get("updated_at")
+            or row.get("publishedAt")
             or row.get("createdAt")
             or row.get("publishedDate")
             or row.get("published_at")
@@ -645,6 +646,7 @@ async def job_board(
     exclude: str = "",
     limit: int = MAX_JOBS,
     offset: int = 0,
+    since_days: int = 0,
 ) -> dict:
     """Every open role a company lists on its applicant tracking system.
 
@@ -664,6 +666,8 @@ async def job_board(
     `exclude`, which matches the title only, so a backend role whose
     description mentions compliance survives while one titled "Risk and
     Compliance" does not. Filtering happens before pagination. `limit` is capped at 100 and `offset` reads the next page.
+    Roles come newest first. `since_days` drops roles posted longer ago than
+    that (0, the default, keeps all).
     """
     provider = (provider or "").strip().lower()
     company = (company or "").strip().strip("/")
@@ -737,7 +741,17 @@ async def job_board(
     jobs = [_one_job(r, provider, company) for r in rows if isinstance(r, dict)]
     jobs = [j for j in jobs if j["title"]]
     jobs = _filter_jobs(jobs, query, location, exclude)
+    before_dates = len(jobs)
+    jobs = _recent(jobs, max(0, int(since_days)))
     matched = len(jobs)
+    if before_dates and not matched:
+        return {
+            "provider": provider,
+            "company": company,
+            "provenance": "web",
+            "error": f"{before_dates} roles match, but none was posted in the last"
+            f" {since_days} days; pass since_days=0 to see them",
+        }
     safe_limit = max(1, min(int(limit), MAX_JOB_RESULTS))
     safe_offset = max(0, int(offset))
     jobs = jobs[safe_offset : safe_offset + safe_limit]
@@ -875,3 +889,205 @@ async def discover_companies(
     with_board = sum(1 for c in out if c.get("board"))
     return {"provenance": "web", "region": region, "industry": industry,
             "found": len(out), "with_board": with_board, "companies": out}
+
+
+# --- job feeds ---------------------------------------------------------------
+# discover_companies only knows Y Combinator companies, so a sweep that starts
+# there never sees a role at anyone else. These feeds list roles directly, from
+# every kind of company, and each one is free public JSON. A feed row is the
+# employer's own post (HN) or a listing the board checked (the others), so it
+# is a lead to verify on the posting, not a verified role.
+
+HN_ITEM_API = "https://hn.algolia.com/api/v1/items/{id}"
+HN_HIRING_API = (
+    "https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=6"
+)
+JOB_FEEDS = ("hn_hiring", "himalayas", "remotive", "remoteok")
+MAX_FEED_RESULTS = 40
+_HN_LINK_RE = re.compile(r"^(?:https?://|www\.)\S+$|^[\w-]+(?:\.[\w-]+)+/?$", re.IGNORECASE)
+
+
+def _hn_row(comment: dict) -> dict:
+    """One HN "Who is hiring?" comment as a posting. By convention its first
+    line is `Company | Role | Location | ...`."""
+    text = html.unescape(str(comment.get("text") or ""))
+    header = _strip_html(text.split("<p>", 1)[0], 400)
+    parts = [p.strip() for p in header.split("|") if p.strip()]
+    # Many posts put the company's site second: "Acme | https://acme.io | Role".
+    parts = parts[:1] + [p for p in parts[1:] if not _HN_LINK_RE.match(p)]
+    return {
+        "external_id": str(comment.get("id") or ""),
+        "company": (parts[0] if parts else "")[:80],
+        "title": (parts[1] if len(parts) > 1 else header)[:200],
+        "location": " | ".join(parts[2:])[:200],
+        "remote_policy": "remote" if "remote" in header.casefold() else "",
+        "url": f"https://news.ycombinator.com/item?id={comment.get('id')}",
+        "posted": _job_date(comment.get("created_at")),
+        "description": _strip_html(text)[:800],
+    }
+
+
+async def _hn_hiring(client: httpx.AsyncClient) -> tuple[str, list[dict]]:
+    """This month's "Ask HN: Who is hiring?" thread and its top-level posts."""
+    resp = await client.get(HN_HIRING_API)
+    resp.raise_for_status()
+    story = next(
+        (h for h in resp.json().get("hits") or []
+         if str(h.get("title", "")).startswith("Ask HN: Who is hiring?")),
+        None,
+    )
+    if story is None:
+        return "", []
+    item = await client.get(HN_ITEM_API.format(id=story["objectID"]))
+    item.raise_for_status()
+    rows = [_hn_row(c) for c in item.json().get("children") or []
+            if isinstance(c, dict) and c.get("text")]
+    return str(story.get("title", "")), rows
+
+
+def _feed_row(source: str, row: dict) -> dict:
+    """One row from a remote-jobs board, in the shape job_board returns."""
+    if source == "himalayas":
+        places = row.get("locationRestrictions") or []
+        return {
+            "external_id": str(row.get("guid") or "")[:160],
+            "company": str(row.get("companyName") or "")[:80],
+            "title": str(row.get("title") or "")[:200],
+            "location": ", ".join(str(p) for p in places)[:200] or "Worldwide",
+            "remote_policy": "remote",
+            "url": str(row.get("applicationLink") or row.get("guid") or ""),
+            "posted": _job_date(row.get("pubDate")),
+            "compensation": (
+                f"{row.get('minSalary')}-{row.get('maxSalary')} {row.get('currency') or ''}"
+                f" per {row.get('salaryPeriod') or 'year'}"
+                if row.get("minSalary") else ""
+            ),
+            "description": _strip_html(str(row.get("excerpt") or row.get("description") or ""))[:800],
+        }
+    if source == "remotive":
+        return {
+            "external_id": str(row.get("id") or ""),
+            "company": str(row.get("company_name") or "")[:80],
+            "title": str(row.get("title") or "")[:200],
+            "location": str(row.get("candidate_required_location") or "")[:200],
+            "remote_policy": "remote",
+            "url": str(row.get("url") or ""),
+            "posted": _job_date(row.get("publication_date")),
+            "compensation": str(row.get("salary") or "")[:80],
+            "description": _strip_html(str(row.get("description") or ""))[:800],
+        }
+    # remoteok
+    low, high = row.get("salary_min") or 0, row.get("salary_max") or 0
+    return {
+        "external_id": str(row.get("id") or ""),
+        "company": str(row.get("company") or "").strip()[:80],
+        "title": str(row.get("position") or "")[:200],
+        "location": str(row.get("location") or "")[:200],
+        "remote_policy": "remote",
+        "url": str(row.get("url") or row.get("apply_url") or ""),
+        "posted": _job_date(row.get("date")),
+        "compensation": f"{low}-{high} USD per year" if low else "",
+        "description": _strip_html(str(row.get("description") or ""))[:800],
+    }
+
+
+def _recent(jobs: list[dict], since_days: int) -> list[dict]:
+    """Newest first, and only those posted in the last `since_days` days.
+
+    A row whose date cannot be read is kept, at the end: dropping it would
+    hide a real role because a board wrote its date oddly."""
+    def when(job: dict) -> datetime | None:
+        # _job_date cuts a date at 25 characters, which can split its offset
+        # ("...45.357+0"). The first 19 are the time itself; read those as UTC,
+        # which is at most a day off and a day does not change "how recent".
+        try:
+            stamp = datetime.fromisoformat(str(job.get("posted") or "")[:19])
+        except ValueError:
+            return None
+        return stamp.replace(tzinfo=UTC)
+
+    now = datetime.now(UTC)
+    dated = [(when(j), j) for j in jobs]
+    if since_days > 0:
+        dated = [(w, j) for w, j in dated
+                 if w is None or (now - w).days <= since_days]
+    dated.sort(key=lambda pair: pair[0] or datetime.min.replace(tzinfo=UTC), reverse=True)
+    return [j for _, j in dated]
+
+
+@hq_tool(action=ActionClass.READ, trust=Trust.WEB, network=True)
+async def job_feed(
+    ctx: RunContext[HQDeps],
+    source: str,
+    query: str = "",
+    location: str = "",
+    exclude: str = "",
+    since_days: int = 30,
+    limit: int = 20,
+) -> dict:
+    """Open roles from a public job feed, newest first. Free, no key.
+
+    `source` is one of:
+    - `hn_hiring`: this month's Hacker News "Who is hiring?" thread. Founders
+      and engineers post there themselves, from companies no directory lists.
+    - `himalayas`, `remotive`, `remoteok`: remote-jobs boards. Most rows are
+      remote roles; pass `location` to keep the ones open to India.
+
+    `query`, `location` and `exclude` work as in job_board: pipe-separated
+    alternatives, and `exclude` matches the title only. For roles open to
+    him, pass location "India|Bengaluru|Bangalore|Worldwide|Anywhere|APAC".
+    `since_days` drops older postings (0 keeps all).
+
+    A feed row is a lead, not a verified role. Before record_job, find the
+    company's own board with detect_job_board and read the role there with
+    job_board. When the company has no board, the HN post or the feed's
+    posting page is the source: record it with that url and say so.
+    """
+    source = (source or "").strip().lower()
+    if source not in JOB_FEEDS:
+        return {"error": f"unknown source {source!r}; use one of {list(JOB_FEEDS)}"}
+    thread = ""
+    try:
+        async with httpx.AsyncClient(
+            timeout=30, follow_redirects=True, headers={"User-Agent": _BOARD_UA}
+        ) as client:
+            if source == "hn_hiring":
+                thread, jobs = await _hn_hiring(client)
+            else:
+                first = query.split("|")[0].strip()
+                url, params = {
+                    "himalayas": ("https://himalayas.app/jobs/api/search",
+                                  {"q": first, "limit": 100}),
+                    "remotive": ("https://remotive.com/api/remote-jobs",
+                                 {"search": first, "limit": 200}),
+                    "remoteok": ("https://remoteok.com/api", {}),
+                }[source]
+                resp = await client.get(url, params={k: v for k, v in params.items() if v})
+                resp.raise_for_status()
+                body = resp.json()
+                rows = body if isinstance(body, list) else (body.get("jobs") or [])
+                # RemoteOK's first row is a legal notice, not a job.
+                jobs = [_feed_row(source, r) for r in rows
+                        if isinstance(r, dict) and (r.get("title") or r.get("position"))]
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"source": source, "provenance": "web",
+                "error": f"could not read the {source} feed ({type(exc).__name__})"}
+
+    jobs = [j for j in jobs if j["title"] and not private_employer(j["company"])]
+    total = len(jobs)
+    jobs = _filter_jobs(jobs, query, location, exclude)
+    jobs = _recent(jobs, max(0, int(since_days)))
+    matched = len(jobs)
+    jobs = jobs[: max(1, min(int(limit), MAX_FEED_RESULTS))]
+
+    await emit("job_feed", run_id=ctx.deps.run_id, task_id=ctx.deps.task_id,
+               agent=ctx.deps.agent,
+               payload={"source": source, "query": query[:120], "jobs": len(jobs)})
+    if not jobs:
+        return {"source": source, "provenance": "web", "total": total,
+                "error": "the feed is reachable but nothing matched; widen query or location"}
+    out = {"source": source, "provenance": "web", "total": total,
+           "matched": matched, "shown": len(jobs), "jobs": jobs}
+    if thread:
+        out["thread"] = thread
+    return out
