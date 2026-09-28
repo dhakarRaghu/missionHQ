@@ -135,6 +135,28 @@ would search for, and teach it completely.
 An explainer does not open with `**In short:**`. Its first two paragraphs
 do that work.
 
+### One connected piece that can be read from any section
+
+Readers do not read in order. They jump in from the contents, a search
+result or a link to one heading. So each section must work on its own, and
+the whole must still read as one argument.
+
+- **Each section opens with its point.** The first sentence says what the
+  section shows and why it follows from the section before: "Prefill is
+  fast because every prompt token is processed at once; decode cannot do
+  that, and this section shows why."
+- **Terms are reminded, not only defined once.** The first time a section
+  uses a key term, give it again in a few words, even if an earlier
+  section defined it.
+- **One running example.** Use the same request, the same numbers and the
+  same model through every section, so a number in section five can be
+  checked against section two.
+- **No loose sections.** Every section answers a question the section
+  before it raised. When a section does not, cut it or move it.
+- **Correct before long.** A longer post is fine. A wrong number is not.
+  Every number carries its source or its arithmetic, and the arithmetic is
+  shown where the number appears.
+
 ### Brief, lab and paper, in this order
 
 1. **The opening block.** The first paragraph starts with `**In short:**`
