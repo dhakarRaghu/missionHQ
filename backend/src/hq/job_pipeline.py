@@ -469,6 +469,7 @@ def _sweep_text(today: date, industry: str, known: str, skip: str, max_roles: in
         f" industry=\"{industry}\"). Read the boards it returns with job_board, passing"
         " query, location and exclude. Open a posting only when the board cannot"
         " answer.\n\n"
+        "Then job_feed hn_hiring and himalayas; verify each lead on its board.\n\n"
         f"Already in the ledger, skip: {known}.\n"
         f"Skip this week, three empty runs in a row: {skip}.\n\n"
         "Record every verified role with record_job, weak fits too. It scores the"
