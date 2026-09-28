@@ -785,6 +785,18 @@ def field_note_candidates(vault: Path) -> list[Candidate]:
     return out
 
 
+_HIS_WORK_RE = re.compile(
+    r"\bI (?:wrote|built|ran|measured|made|created|coded|benchmarked)\b"
+    r"|\bmy (?:own )?(?:script|simulator|code|lab|benchmark|run|measurement)s?\b")
+
+
+def claims_his_work(markdown: str) -> list[str]:
+    """Sentences that say he made or ran something. From a lesson these are
+    never his: the lesson's code was written for him, and nothing records
+    that he ran it. Only a field note can carry them."""
+    return [s for s in first_person(markdown) if _HIS_WORK_RE.search(s)]
+
+
 def speaks_as_him(markdown: str) -> str:
     """Why a post from a field note is refused for not saying what he did, or
     "". The note is the reason the post exists; a post that hides it in the

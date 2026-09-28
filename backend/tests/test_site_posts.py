@@ -893,3 +893,14 @@ def test_a_blog_post_is_an_explainer_unless_the_task_names_another_shape() -> No
     assert sp.shape_for("writing").name == "explainer"
     assert sp.shape_for("blog", "lab").name == "lab"
     assert not sp.SHAPES["explainer"].in_short
+
+
+def test_a_post_from_a_lesson_cannot_say_he_wrote_or_ran_the_code(
+        tmp_path: Path, monkeypatch) -> None:
+    mine = good(situation=SITUATION + " I wrote a small simulator to show this.")
+    assert sp.claims_his_work(mine) == ["I wrote a small simulator to show this."]
+    assert sp.claims_his_work(good()) == []          # "I did not check" is a limit, not a claim
+    outcome, prompts, _ = _run_post(
+        tmp_path, monkeypatch, [_draft(mine), _draft(good())], [dict(FINISHED)])
+    assert outcome.outcome == "done" and len(prompts) == 2
+    assert "say he made or ran something" in prompts[1]

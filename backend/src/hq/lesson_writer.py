@@ -2265,6 +2265,12 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
             gap = lt.post_problems(draft.markdown, material, floor)
             if note_text and not gap:
                 gap = site_posts.speaks_as_him(draft.markdown)
+            if not note_text and not gap:
+                claimed = site_posts.claims_his_work(draft.markdown)
+                if claimed:
+                    gap = ("these say he made or ran something, and nothing records it: "
+                           + " | ".join(claimed[:4])
+                           + '. The lesson\'s code was written for him: write "this script"')
             category = draft.category.strip().lower()
             measured = (lt.post_field_problems(draft.slug, draft.title, draft.summary,
                                                draft.tags)
