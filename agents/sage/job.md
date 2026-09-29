@@ -37,6 +37,7 @@ tools:
   - list_jobs
   - list_lessons
   - read_lesson
+  - list_readings
 caps:
   cost_per_run_usd: 4.00
   tool_calls: 120

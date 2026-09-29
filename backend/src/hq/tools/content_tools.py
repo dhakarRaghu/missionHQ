@@ -66,7 +66,8 @@ def with_batch(existing: str | None, batch: str, day: str, title: str) -> str:
 POSTS_MIN, POSTS_MAX = 3, 5              # how many code keeps and files
 CANDIDATES_MIN, CANDIDATES_MAX = 6, 8    # how many sage writes for the judge
 KEEP_MEAN = 3.5                          # a kept post's mean rubric score, at least
-FLOOR = 3                                # and at least this on `teaches` and `accurate`
+LESSON_POSTS_MAX = 2                     # kept posts that rest on his own lessons
+FLOOR = 3                                # and at least this on `teaches`, `accurate`, `clear`
 JUDGE_ROLE = "teacher"
 JUDGE_PATH = ("sage", "skills", "daily-posts", "judge.md")
 # The judge checks every number and name against its source, so it reads the
@@ -101,6 +102,20 @@ _SYSTEM_RE = re.compile(
     r"|\bmy\s+(?:study|writing|research|learning|course)\s+(?:system|agent|pipeline|course)\b"
     r"|\b(?:my|the)\s+(?:nightly|evening)\s+run\b",
     re.IGNORECASE)
+# Words a reader needs a course in model serving to follow. On 2026-09-29 he
+# read a batch built on "FP8 KV cache", "GSM8K", "batch-invariant kernels" and
+# "312 TFLOPs against 1.5 TB/s" and said it was too technical for him, let
+# alone for people who do not know what he is studying. One such word, said
+# in everyday terms around it, can stay; two make the post a lesson extract.
+_INTERNALS_RE = re.compile(
+    r"\b(?:kv[\s-]?cache|prefill|decode (?:step|phase)|logprobs?|log[\s-]probs?|argmax"
+    r"|logits?|fp8|fp16|bf16|int4|int8|tflops?|flops|tb/s|gb/s|hbm|sram|cuda|kernels?"
+    r"|batch[\s-]invariant|attention heads?|softmax|moe|mixture of experts|gsm8k|mmlu"
+    r"|speculative decoding|paged ?attention|continuous batching|quantiz\w*"
+    r"|tensor parallel\w*|prefix cach\w*|radix (?:tree|cache)|mamba|ssm|sliding[\s-]window"
+    r"|time to first token|ttft|tpot|p99|throughput-bound|memory[\s-]bound|arithmetic intensity)\b",
+    re.IGNORECASE)
+INTERNALS_MAX = 1
 SOURCES_PATH = "projects/content/post-sources.md"
 _POST_SPLIT = re.compile(r"^\s*-{3,}\s*$", re.MULTILINE)
 _PATHISH = re.compile(r"\b[\w./-]+\.md\b|\bquarantine/|\bwhy:|\bsources?:", re.IGNORECASE)
@@ -130,6 +145,11 @@ def post_problems(post: str) -> list[str]:
     if promised:
         probs.append(f"\u201c{promised.group(0)}\u201d promises a future action; a post says"
                      " what happened, never what he will do")
+    inside = sorted({m.group(0).lower() for m in _INTERNALS_RE.finditer(post)})
+    if len(inside) > INTERNALS_MAX:
+        probs.append(f"{len(inside)} words only people who study model serving know ("
+                     + ", ".join(inside) + "); keep at most one, and say what the rest"
+                     " do in everyday words")
     system = _SYSTEM_RE.search(post)
     if system:
         probs.append(f"\u201c{system.group(0)}\u201d is about his agent system, which he keeps"
@@ -213,10 +233,13 @@ class PostScore(BaseModel):
     accurate: int = Field(ge=1, le=5, description="every number and claim is in the material")
     voice: int = Field(ge=1, le=5)
     insight: int = Field(ge=1, le=5)
+    clear: int = Field(ge=1, le=5, description="a developer who uses AI tools but never"
+                       " studied how models are served follows every sentence")
     why: str = Field(description="one line: what holds the post up or lets it down")
 
     def mean(self) -> float:
-        return (self.source + self.teaches + self.accurate + self.voice + self.insight) / 5
+        return (self.source + self.teaches + self.accurate + self.voice + self.insight
+                + self.clear) / 6
 
     def floor_problem(self) -> str:
         """Why a post with a good mean is still not kept, or "". A post that
@@ -226,11 +249,15 @@ class PostScore(BaseModel):
             return f"accurate {self.accurate}: a claim or number is not in its source"
         if self.teaches < FLOOR:
             return f"teaches {self.teaches}: the reader learns nothing concrete"
+        if self.clear < FLOOR:
+            return (f"clear {self.clear}: a developer outside model serving would not"
+                    " follow it")
         return ""
 
     def line(self) -> str:
         return (f"source {self.source}, teaches {self.teaches}, accurate {self.accurate},"
-                f" voice {self.voice}, insight {self.insight}; mean {self.mean():.1f}")
+                f" voice {self.voice}, insight {self.insight}, clear {self.clear};"
+                f" mean {self.mean():.1f}")
 
 
 class PostVerdict(BaseModel):
@@ -333,6 +360,30 @@ async def judge_material(sources: list[str]) -> str:
     return "\n\n".join(parts) or "(no source text could be read; judge from the source labels)"
 
 
+def _from_lessons(source: str) -> bool:
+    return "learning/lessons/" in source
+
+
+def cap_lessons(kept: list[PostScore], sources: list[str],
+                posts: list[str]) -> tuple[list[PostScore], list[str]]:
+    """(kept, left out): at most LESSON_POSTS_MAX of the kept posts rest on
+    his own lessons, best first. His readers have not taken his course; a
+    batch built from it reads as his notes."""
+    out: list[PostScore] = []
+    left: list[str] = []
+    from_lessons = 0
+    for s in kept:
+        if _from_lessons(sources[s.post - 1]):
+            from_lessons += 1
+            if from_lessons > LESSON_POSTS_MAX:
+                left.append(f"candidate {s.post} ({_quote(posts[s.post - 1])}): a"
+                            f" post from his lessons beyond the {LESSON_POSTS_MAX} kept;"
+                            " his readers have not taken his course")
+                continue
+        out.append(s)
+    return out, left
+
+
 def sources_section(kept: list[PostScore], left_out: list[str], sources: list[str]) -> str:
     """The sidecar's section: each filed post's source and scores, in the
     order filed, then every candidate left out and why."""
@@ -373,6 +424,15 @@ async def file_posts(ctx: RunContext[HQDeps], sources: list[str], title: str = "
     checked = gate(posts)
     failed = [f"candidate {n} ({_quote(posts[n - 1])}): " + "; ".join(found)
               for n, found in checked.items() if found]
+    if failed and ctx.retry == 0:
+        # A check names something small to fix: a contraction, a word, a
+        # length. Dropped at once, a good post was lost for it: on
+        # 2026-09-29 the two candidates not taken from his lessons each
+        # failed on one contraction, and the batch that was filed came all
+        # from his course. Once, they go back to be fixed.
+        raise ModelRetry(
+            "fix these candidates and keep every other candidate word for word: "
+            + "; ".join(failed) + "." + again)
     judged = [n for n, found in checked.items() if not found]
     if len(judged) < POSTS_MIN:
         raise ModelRetry(
@@ -387,6 +447,13 @@ async def file_posts(ctx: RunContext[HQDeps], sources: list[str], title: str = "
     verdict = PostVerdict.model_validate(
         await _post_judge_step(candidates, await judge_material(sources)))
     kept, weak = choose(verdict, judged)
+    kept, capped = cap_lessons(kept, sources, posts)
+    weak += capped
+    if len(kept) < POSTS_MIN and capped:
+        raise ModelRetry(
+            f"only {len(kept)} kept after the limit of {LESSON_POSTS_MAX} posts from his"
+            " lessons: " + "; ".join(capped) + ". Replace those with posts from his field"
+            " reading (list_readings), his projects or his view on building with AI." + again)
     if len(kept) < POSTS_MIN:
         raise ModelRetry(
             f"only {len(kept)} of {len(posts)} candidates scored a mean of {KEEP_MEAN:g} or more"

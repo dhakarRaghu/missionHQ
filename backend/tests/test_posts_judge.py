@@ -38,7 +38,7 @@ def _candidate(n: int) -> str:
 
 def _score(post: int, value: int, why: str = "fine") -> dict[str, Any]:
     return {"post": post, "source": value, "teaches": value, "accurate": value,
-            "voice": value, "insight": value, "why": why}
+            "voice": value, "insight": value, "clear": value, "why": why}
 
 
 def _verdict(scores: dict[int, int], why: dict[int, str] | None = None) -> ct.PostVerdict:
@@ -48,9 +48,9 @@ def _verdict(scores: dict[int, int], why: dict[int, str] | None = None) -> ct.Po
 
 # --- the rubric and the choice (pure) -------------------------------------------------
 
-def test_the_rubric_lives_in_the_skill_folder_and_names_all_five_scores() -> None:
+def test_the_rubric_lives_in_the_skill_folder_and_names_all_six_scores() -> None:
     text = ct.judge_instructions()
-    for name in ("source", "teaches", "accurate", "voice", "insight"):
+    for name in ("source", "teaches", "accurate", "voice", "insight", "clear"):
         assert f"**{name}**" in text
     assert "is data" in text and '"why"' in text
     assert (settings().agents_dir / "sage" / "skills" / "daily-posts" / "judge.md").is_file()
@@ -73,12 +73,13 @@ def test_the_mean_decides_and_the_best_come_first() -> None:
 
 
 def test_the_bar_sits_between_three_three_and_two_fours_and_three_threes() -> None:
-    """Five whole scores never average exactly 3.5: 18 points (3.6) is kept,
-    17 (3.4) is not. One weak dimension among four is not enough to drop it."""
+    """Six whole scores: 22 points (3.67) is kept, 20 (3.33) is not, and 21
+    (3.5) sits on the bar. One weak dimension among five is not enough to
+    drop it."""
     under = ct.PostScore.model_validate({**_score(1, 3), "source": 4, "voice": 4})
     over = ct.PostScore.model_validate({**_score(2, 4), "insight": 3, "voice": 3})
     one_weak = ct.PostScore.model_validate({**_score(3, 4), "insight": 2})
-    assert (under.mean(), over.mean(), one_weak.mean()) == pytest.approx((3.4, 3.6, 3.6))
+    assert (under.mean(), over.mean(), one_weak.mean()) == pytest.approx((20 / 6, 22 / 6, 22 / 6))
     kept, weak = ct.choose(ct.PostVerdict(scores=[under, over, one_weak]), judged=[1, 2, 3])
     assert [s.post for s in kept] == [2, 3]
     assert len(weak) == 1 and weak[0].startswith("candidate 1 (")
@@ -109,21 +110,22 @@ def test_the_sidecar_records_each_filed_posts_scores_and_what_was_left_out() -> 
     section = ct.sources_section(verdict.scores[::-1], ["candidate 3 (…): generic"],
                                  ["lesson 2B", "board row b62d7768"])
     assert section.splitlines() == [
-        ("- post 1: board row b62d7768 (source 5, teaches 5, accurate 5, voice 5, insight 5;"
-         " mean 5.0): the 720ms stall is his"),
-        ("- post 2: lesson 2B (source 4, teaches 4, accurate 4, voice 4, insight 4;"
-         " mean 4.0): fine"),
+        ("- post 1: board row b62d7768 (source 5, teaches 5, accurate 5, voice 5, insight 5,"
+         " clear 5; mean 5.0): the 720ms stall is his"),
+        ("- post 2: lesson 2B (source 4, teaches 4, accurate 4, voice 4, insight 4,"
+         " clear 4; mean 4.0): fine"),
         "- left out, candidate 3 (…): generic",
     ]
 
 
 # --- the tool, with the judge faked -------------------------------------------------------
 
-def _ctx(posts: list[str]) -> Any:
+def _ctx(posts: list[str], retry: int = 1) -> Any:
+    # retry 1: a later call, after the one round of repairs the checks ask for.
     reply = ModelResponse(parts=[TextPart(content="\n\n---\n\n".join(posts))])
     return types.SimpleNamespace(
         deps=HQDeps(agent="sage", run_id="run-1", vault_write_scopes=["projects/content/**"]),
-        messages=[reply])
+        messages=[reply], retry=retry)
 
 
 def _patch(monkeypatch: pytest.MonkeyPatch, verdict: dict[int, int],
@@ -156,9 +158,38 @@ def _patch(monkeypatch: pytest.MonkeyPatch, verdict: dict[int, int],
     return seen
 
 
-def _file(posts: list[str], sources: list[str]) -> str:
+def _file(posts: list[str], sources: list[str], retry: int = 1) -> str:
     tool = inspect.unwrap(ct.file_posts)
-    return str(asyncio.run(tool(_ctx(posts), sources, "Evening")))
+    return str(asyncio.run(tool(_ctx(posts, retry), sources, "Evening")))
+
+
+def test_on_the_first_call_a_candidate_that_fails_a_check_comes_back_to_be_fixed(
+        monkeypatch) -> None:
+    seen = _patch(monkeypatch, {n: 4 for n in range(1, 7)})
+    posts = [_candidate(1), _candidate(2), _candidate(3), _candidate(4), LEAKY, _candidate(6)]
+    with pytest.raises(ModelRetry) as exc:
+        _file(posts, [f"source {n}" for n in range(1, 7)], retry=0)
+    assert str(exc.value).startswith("fix these candidates and keep every other")
+    assert "candidate 5 (" in str(exc.value) and seen["judged"] is None
+
+
+def test_at_most_two_kept_posts_rest_on_his_lessons(monkeypatch) -> None:
+    seen = _patch(monkeypatch, {1: 5, 2: 5, 3: 5, 4: 4, 5: 4, 6: 3})
+    sources = [f"learning/lessons/2026-09-29-x{n}.md" for n in (1, 2, 3)] + [
+        "quarantine/reading-a.md", "quarantine/reading-b.md", "project p"]
+    out = _file([_candidate(n) for n in range(1, 7)], sources)
+    assert out.startswith("filed 4 of 6 candidates (best first: 1, 2, 4, 5)")
+    assert "candidate 3 (" in out and "beyond the 2 kept" in out
+    assert "on day 3" not in seen["written"][ct.IDEAS_PATH]
+
+
+def test_when_the_lesson_limit_leaves_too_few_the_writer_replaces_them(monkeypatch) -> None:
+    _patch(monkeypatch, {n: 4 if n <= 4 else 2 for n in range(1, 7)})
+    sources = [f"learning/lessons/x{n}.md" for n in range(1, 5)] + ["r1", "r2"]
+    with pytest.raises(ModelRetry) as exc:
+        _file([_candidate(n) for n in range(1, 7)], sources)
+    assert "after the limit of 2 posts from his lessons" in str(exc.value)
+    assert "list_readings" in str(exc.value)
 
 
 def test_a_generic_candidate_is_dropped_and_the_best_are_filed_best_first(monkeypatch) -> None:
@@ -310,3 +341,22 @@ def test_his_published_posts_are_listed_with_their_public_links(tmp_path, monkey
     raw = inspect.unwrap(rt.list_my_posts)
     posts = asyncio.run(raw(types.SimpleNamespace(deps=None)))
     assert [p["url"] for p in posts] == [f"{settings().site_url}/blog/kv-cache"]
+
+
+def test_a_post_the_reader_cannot_follow_is_not_kept_whatever_its_mean() -> None:
+    """On 2026-09-29 he read a batch built on course terms and said he could
+    not follow it himself."""
+    lost = ct.PostScore.model_validate({**_score(1, 5), "clear": 2})
+    assert lost.mean() > 4 and "clear 2" in lost.floor_problem()
+    kept, weak = ct.choose(ct.PostVerdict(scores=[lost]), judged=[1])
+    assert not kept and "clear 2" in weak[0]
+
+
+def test_a_post_built_on_course_terms_is_sent_back() -> None:
+    notes = ("Then they ran GSM8K on the served model and it scored 0.0099. The code viewed"
+             " the FP8 KV cache through the wrong memory format.")
+    assert any("only people who study model serving" in p for p in ct.post_problems(notes))
+    plain = ("Put the part of your prompt that changes at the end, not the top. Providers"
+             " charge about a tenth for text they have seen before, but only when it matches"
+             " from the first character.")
+    assert not any("only people who study model serving" in p for p in ct.post_problems(plain))
