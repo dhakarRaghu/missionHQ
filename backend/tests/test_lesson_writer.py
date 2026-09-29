@@ -1200,3 +1200,27 @@ def test_the_page_does_not_print_the_course_map(tmp_path: Path, monkeypatch) -> 
     w.m.course_map = [{"title": "Phase 1", "state": "read"}, {"title": "Phase 2", "state": "here"}]
     assert asyncio.run(w.run()) is not None
     assert "Where you are in the course" not in w.parts[0]
+
+
+def test_a_replay_error_is_never_swallowed() -> None:
+    """Every broad handler in the engine and the writer lets a replay
+    mismatch through, so DBOS names the step that really diverged."""
+    import inspect
+
+    from hq import engine
+
+    for module in (engine, lw):
+        lines = inspect.getsource(module).splitlines()
+        for n, line in enumerate(lines):
+            if line.strip().startswith("except Exception"):
+                assert lines[n - 2].strip() == "except REPLAY_ERRORS:", (module.__name__, n)
+
+
+def test_the_code_version_changes_with_what_the_checks_read(monkeypatch) -> None:
+    from hq import dbos_app
+    from hq.config import settings
+
+    first = dbos_app.code_version()
+    assert first == dbos_app.code_version()
+    monkeypatch.setattr(settings(), "private_employers", ("Example Corp",))
+    assert dbos_app.code_version() != first

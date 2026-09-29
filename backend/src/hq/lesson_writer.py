@@ -61,7 +61,7 @@ from pydantic_ai.usage import UsageLimits
 from hq import assemble, db, llm, loader, memory, signals, site_posts
 from hq import learning_pipeline as learning
 from hq.config import settings
-from hq.dbos_app import DBOS
+from hq.dbos_app import DBOS, REPLAY_ERRORS
 from hq.loader import AgentSpec
 from hq.tools import learning_tools as lt
 from hq.tools.registry import HQDeps
@@ -814,6 +814,8 @@ async def _course_so_far(course: str, slug: str) -> tuple[list[PhaseMemory], lis
     try:
         rows = await _phase_rows(course)
         return await _course_memory(rows, slug), course_map(rows, slug)
+    except REPLAY_ERRORS:
+        raise
     except Exception as exc:  # noqa: BLE001 — see the docstring
         log.warning("writer: the course so far could not be read for %s: %s", slug, exc)
         return [], []
@@ -1710,6 +1712,35 @@ def saved_parts(task_id: str | None, slug: str) -> dict[int, str]:
     return out
 
 
+# What the writer reads back from disk, it reads in a step. A run the backend
+# restarts is replayed by DBOS from its recorded steps, and a read in plain
+# workflow code sees the disk as the run left it, not as it was: on
+# 2026-09-29 an article's replay found every part already saved, skipped the
+# section it had written at that point, and DBOS stopped it ("writer.section
+# was recorded when writer.citations was expected"). In a step, the replay
+# gets back what the first run saw. One step name per read: DBOS matches a
+# replay by name, so a replay that diverged into another read fails loudly.
+@DBOS.step(name="writer.saved_outline")
+async def _saved_outline_step(task_id: str | None) -> dict[str, Any] | None:
+    outline = saved_outline(task_id)
+    return outline.model_dump() if outline else None
+
+
+@DBOS.step(name="writer.saved_parts")
+async def _saved_parts_step(task_id: str | None, slug: str) -> dict[int, str]:
+    return saved_parts(task_id, slug)
+
+
+@DBOS.step(name="writer.saved_scores")
+async def _saved_scores_step(task_id: str | None) -> dict[int, dict[str, Any]]:
+    return saved_scores(task_id)
+
+
+async def _saved_outline(task_id: str | None) -> Outline | None:
+    raw = await _saved_outline_step(task_id)
+    return Outline.model_validate(raw) if raw else None
+
+
 class Writer:
     def __init__(self, spec: AgentSpec, deps: HQDeps, m: Material) -> None:
         self.spec, self.deps, self.m = spec, deps, m
@@ -1743,6 +1774,8 @@ class Writer:
         try:
             await emit_step("writer.progress", run_id=self.deps.run_id,
                             task_id=self.deps.task_id, agent=self.deps.agent, payload=payload)
+        except REPLAY_ERRORS:
+            raise
         except Exception:  # a report that fails must not fail the lesson
             log.warning("writer: progress not recorded", exc_info=True)
 
@@ -1817,6 +1850,8 @@ class Writer:
         fallback = asyncio.ensure_future(_section_step(self.spec.model, prompt))
         try:
             return await _rewrite_step(self.spec.model, prompt)
+        except REPLAY_ERRORS:
+            raise
         except Exception as exc:  # noqa: BLE001 — a slow rewrite falls back, never fails the run
             self.report.append(f"medium rewrite did not finish ({type(exc).__name__});"
                                " rewritten at low effort instead")
@@ -1908,6 +1943,8 @@ class Writer:
         note = self._material()
         try:
             reply = await _correct_step(self.spec.model, note, items)
+        except REPLAY_ERRORS:
+            raise
         except Exception as exc:  # noqa: BLE001 — the sentences stay flagged
             self.report.append(f"section {i}: correction failed ({type(exc).__name__})")
             return 0
@@ -1937,6 +1974,8 @@ class Writer:
         try:
             reply = await _tighten_step(self.spec.model, [
                 {"n": n, "html": p, "split_over_words": over} for n, p in enumerate(sent, 1)])
+        except REPLAY_ERRORS:
+            raise
         except Exception as exc:  # noqa: BLE001 — the section is kept as written
             self.report.append(f"section {i}: sentence split failed ({type(exc).__name__})")
             return html
@@ -2243,7 +2282,7 @@ class Writer:
         requeued run) keeps its saved scores and is not sent again."""
         assert self.outline is not None
         task_id = self.deps.task_id
-        cache = saved_scores(task_id)
+        cache = await _saved_scores_step(task_id)
         out: dict[int, SectionScore] = {}
         todo: list[int] = []
         for i in numbers:
@@ -2270,7 +2309,7 @@ class Writer:
         missed = [i for i in todo if i not in out]
         if missed:
             self.report.append(f"editor gave no scores for section(s) {missed}")
-        cache = saved_scores(task_id)
+        cache = await _saved_scores_step(task_id)
         for i in todo:
             if i in out:
                 cache[i] = {**cache.get(i, {}), "sha": _sha(self.parts[i]),
@@ -2295,7 +2334,7 @@ class Writer:
             return []
         scores = await self.score(teaching)
         self.editor_scores = dict(scores)
-        cache = saved_scores(self.deps.task_id)
+        cache = await _saved_scores_step(self.deps.task_id)
         edited = {i for i in teaching if (cache.get(i) or {}).get("edited")}
         for i in edited:
             if (cache.get(i) or {}).get("instruction"):
@@ -2333,7 +2372,7 @@ class Writer:
     async def run(self) -> tuple[str, str, str] | None:
         """Returns (md_path, html_path, lesson_id), or None when not written."""
         task_id = self.deps.task_id
-        self.outline = saved_outline(task_id)
+        self.outline = await _saved_outline(task_id)
         if self.outline is not None:
             self.report.append("resumed from the plan saved by an earlier attempt")
         else:
@@ -2345,7 +2384,7 @@ class Writer:
             self.m.slug = _slugify(self.outline.title)
         if self.m.article and not self.m.page:
             self.budgets = word_budgets(self.outline, lt.ARTICLE_MAX_WORDS)
-        done = saved_parts(task_id, self.m.slug)
+        done = await _saved_parts_step(task_id, self.m.slug)
         if done:
             self.report.append(f"kept {len(done)} part(s) written by an earlier attempt")
         if 1 in done:
@@ -2707,14 +2746,14 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
     payload = dict(task.get("payload") or {})
     md_path = str(payload.get("md_path") or "")
     section = str(payload.get("section") or "writing")
-    lesson = await asyncio.to_thread(lt._read_lesson_text, md_path) if md_path else ""
+    lesson = await _read_lesson_step(md_path) if md_path else ""
     note_path, note_text, project = "", "", ""
     if payload.get("field_note"):
         try:
             note_path = site_posts.field_note_path(str(payload["field_note"]))
         except ValueError as exc:
             return ended("blocked", error=str(exc))
-        note_text = await _read_vault(note_path)
+        note_text = await _read_vault_step(note_path)
         if not note_text:
             return ended("blocked", error=f"no field note at {note_path}")
         note = site_posts.read_field_note(note_text)
@@ -2786,6 +2825,8 @@ async def write_post(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any
             try:
                 verdict = ReaderVerdict.model_validate(await _post_reader_step(
                     draft.title, draft.summary, draft.markdown, draft.claim))
+            except REPLAY_ERRORS:
+                raise
             except Exception as exc:  # noqa: BLE001 — a draft that passed is not lost to its reader
                 log.warning("writer: the post's reader failed: %s", exc)
                 kept = (draft, [f"no reader read it: {type(exc).__name__}"])
@@ -2851,6 +2892,27 @@ def handles(spec: AgentSpec, payload: object) -> bool:
                                     learning.WEEK_REVIEW_STAGE, learning.POST_STAGE}
 
 
+@DBOS.step(name="writer.gather")
+async def _gather_step(task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """The material, read once and recorded, so a replayed run writes from
+    what the first run read (see `_saved_outline_step`)."""
+    if payload.get("stage") in {learning.LAB_CARD_STAGE, learning.WEEK_REVIEW_STAGE}:
+        return (await gather_page(task, payload)).model_dump()
+    return (await gather(payload)).model_dump()
+
+
+@DBOS.step(name="writer.read_lesson")
+async def _read_lesson_step(path: str) -> str:
+    """A lesson's text, read once and recorded."""
+    return await asyncio.to_thread(lt._read_lesson_text, path)
+
+
+@DBOS.step(name="writer.read_vault")
+async def _read_vault_step(path: str) -> str:
+    """A vault file, read once and recorded."""
+    return await _read_vault(path)
+
+
 async def write(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any:
     """Run the staged writer for one task and return the run's outcome."""
     from hq.runner import RunOutcome, emit_step
@@ -2859,10 +2921,7 @@ async def write(task: dict[str, Any], spec: AgentSpec, deps: HQDeps) -> Any:
     if payload.get("stage") == learning.POST_STAGE:
         return await write_post(task, spec, deps)
     with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent=spec.name):
-        if payload.get("stage") in {learning.LAB_CARD_STAGE, learning.WEEK_REVIEW_STAGE}:
-            m = await gather_page(task, payload)
-        else:
-            m = await gather(payload)
+        m = Material.model_validate(await _gather_step(task, payload))
         if not m.note.strip():
             return RunOutcome(output="No study note to write from.", outcome="blocked",
                               input_tokens=0, output_tokens=0, cost_usd=0.0,
