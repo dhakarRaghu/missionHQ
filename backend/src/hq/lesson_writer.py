@@ -1529,9 +1529,13 @@ def _concept_lead(outline: Outline) -> str:
     n = len(outline.concepts)
     if not n:
         return ""
-    ideas = "one idea" if n == 1 else f"{lt._NUMBER_WORDS.get(n, str(n))} ideas"
-    return (f"<p>This lesson teaches {ideas}. They are listed here so you can see where it"
-            " is going, and they will read more clearly once each has been explained"
+    if n == 1:
+        return ("<p>This lesson teaches one idea. It is stated here so you can see where the"
+                " lesson is going. It will read more clearly once it has been explained below,"
+                " so come back to it at the end.</p>\n")
+    ideas = f"{lt._NUMBER_WORDS.get(n, str(n))} ideas"
+    return (f"<p>This lesson teaches {ideas}. They are listed here so you can see where the"
+            " lesson is going. They will read more clearly once each has been explained"
             " below, so come back to this list at the end.</p>\n")
 
 
