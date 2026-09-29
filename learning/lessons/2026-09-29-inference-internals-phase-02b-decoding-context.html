@@ -1,0 +1,1376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chunked Prefill, Constrained Decoding and Context Budgets</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Inference Internals — Phase 2B</div><h1>Chunked Prefill, Constrained Decoding and Context Budgets</h1><p class="subtitle">Why does your stream freeze mid-sentence, why does strict mode not save your parser, and who decides whether your safety rule survives compaction?</p></header>
+<p>Phase 2A gave you the scheduler loop, the token budget and the paged KV cache, so you can now say whose token runs next and how many requests fit in memory. But it ended on a number it could not explain: a worst gap of 764ms between two tokens of one answer. Your dashboard shows median TTFT at 600ms and median total latency at 4.2s, so every chart stays green while your users watch text stop mid-sentence for a second. Averages hide pauses, and this phase opens with the pause.</p>
+
+<p>The same support agent then fails twice more in ways no average shows. You turn on strict schema mode for a classifier and lose 9 accuracy points instead of gaining reliability. A six-hour agent run dies on the same length error you provoked on purpose in Phase 1, and a retry loop resends the identical prompt into the identical rejection. This phase answers three questions: what freezes a stream when the metrics look healthy, why a format rule can cost accuracy before it ever constrains a token, and how an agent's rules and its retries behave when the prompt outgrows the window.</p>
+
+<p>This lesson teaches five ideas. They are listed here so you can see where it is going, and they will read more clearly once each has been explained below, so come back to this list at the end.</p>
+<ol class="concepts"><li id="c1"><b>Prefill and decode share one forward pass and one token budget, so a long prompt either waits or freezes every stream in the batch, and chunking converts that freeze into a small TTFT tax.</b> <span>Explain any mid-stream freeze, choose a token budget for his product, and know which metric to add.</span></li><li id="c2"><b>A grammar mask guarantees which tokens are legal at each step and never when generation stops, so strict mode and finish_reason are independent checks and valid schema does not mean parseable answer.</b> <span>Keep the finish_reason check under strict mode, and diagnose parse failures that appear exactly when prompts are longest.</span></li><li id="c3"><b>Most of the measured accuracy cost of structured output is paid at the prompt, before any decoder constraint runs, so the fix is to let the model reason before the schema forces it to commit.</b> <span>Attribute an accuracy drop to the right cause, test the reasoning-field fix in one afternoon, and refuse any tax number that names no model or parser.</span></li><li id="c4"><b>A compaction summary keeps what the summariser found interesting, so standing constraints are the first content to die; constraints must cross the boundary as literal pinned text.</b> <span>Decide what is copied word for word across a compaction boundary before deciding what is summarised.</span></li><li id="c5"><b>A prompt over the window is rejected deterministically: the same input returns the same 400 at the same speed every time, so waiting between retries cannot change the answer.</b> <span>Separate deterministic input errors from transient load errors, and predict which of his retry loops will succeed and which will burn calls forever.</span></li></ol>
+<h2 data-kind="orientation">The 764ms the dashboard cannot show</h2>
+<p>Phase 2A ended with a number nobody explained: a gap of 764ms between two tokens in your batching simulator. The dashboard around it was green. That gap is where this phase starts.</p>
+
+<p>Your support agent now has three failures its metrics cannot see. Users report the text freezing mid-sentence while median TTFT and total latency look healthy. The new strict-mode classifier returns perfectly shaped JSON and lost 9 accuracy points the day you turned it on. And a long agent run ended on a 400 error. It was the same 400 you provoked on purpose in Phase 1. You sent a prompt larger than the context window. Three failures, three green dashboards.</p>
+
+<p>This phase builds on five ideas you already have. Each comes back in one clause, because you read them days ago.</p>
+
+<div class="cards" data-cols="2">
+  <div class="card"><h4>The scheduler loop</h4><p>From Phase 2A: the server never runs one request. It runs a loop, and each iteration is one forward pass over a batch. Your request shares every iteration with other people's requests.</p></div>
+  <div class="card"><h4>Prefill and decode</h4><p>Prefill is the pass that reads your whole prompt at once. Decode is the loop that emits one token at a time. A request does its prefill once and its decode many times.</p></div>
+  <div class="card"><h4>TTFT and TPOT</h4><p>TTFT is the time from sending the request to the first token coming back. TPOT is the time per output token after that. Both are averages, and this phase shows what an average cannot see.</p></div>
+  <div class="card"><h4>finish_reason</h4><p>From Phase 1: every response carries a field saying why generation stopped, normally <code>stop</code> or <code>length</code>. It is the difference between an answer and an incident, and it comes back when strict mode enters.</p></div>
+  <div class="card"><h4>The context window</h4><p>The model has a fixed maximum input size. In Phase 1 you sent a prompt larger than the window. The provider answered 400 immediately, before any token was generated.</p></div>
+</div>
+
+<p>These five ideas explain how a request moves through a healthy server. They do not yet explain a freeze with green metrics. They also do not explain an accuracy drop under a correctness feature, or the right response to an overflow. That is the work of this phase, and it happens in an order.</p>
+
+<ol class="flow">
+  <li><b>The freeze</b><span>why one long prompt stalls every stream, and the budget split that fixes it</span></li>
+  <li><b>The schema</b><span>what strict mode guarantees per token, and what it can never guarantee</span></li>
+  <li><b>The accuracy drop</b><span>where the 9 points actually went, and the one-afternoon fix</span></li>
+  <li><b>The growing prompt</b><span>caps, compaction, and what must cross the boundary word for word</span></li>
+  <li><b>The 400</b><span>why the same oversized input fails identically forever, and the only correct retry</span></li>
+</ol>
+
+<p>Phase 2A showed that one iteration is one forward pass doing prefill work, decode work, or both. The next section asks the question the 764ms gap leaves open. What happens to every decoding stream when one iteration is all prefill?</p>
+<h2 data-concept="c1">Why does one long prompt freeze every stream?</h2>
+<p class="why">One long prompt can stop every stream in the batch, and your averages hide it.</p>
+
+<p>The orientation ended on a blind spot. The client receives TTFT, TPOT and finish_reason, and none of the three measures the time between two tokens. Phase 2A's simulator closed with an unexplained 764 ms gap of that kind. Users of your support agent now report the same symptom in production. Text stops mid-sentence and continues a moment later. You cannot fix what your numbers do not show, so this section finds the mechanism behind the gap.</p>
+
+<p>Go back to the scheduler loop from Phase 2A. The server runs one iteration after another. One iteration is one <dfn>forward pass</dfn>, a single run of the model over the whole batch. Each pass does prefill work, decode work, or both. Prefill is the pass that reads the whole prompt at once. Decode is the pass that writes one token per waiting stream. Both kinds of work share the pass, so whatever fills the pass decides what every stream gets next.</p>
+
+<ol class="flow">
+  <li><b>pick</b><span>the scheduler chooses the requests for this iteration</span></li>
+  <li class="hot"><b>forward pass</b><span>one run of the model over prefill and decode tokens together</span></li>
+  <li class="ok"><b>emit</b><span>each decoding stream appends its next token</span></li>
+</ol>
+
+<p>The two kinds of work cost very different time. Decode writes one token per stream, so the pass mostly reads the model's weights from memory. The phase's cost model prices a decode iteration at 18 ms plus 0.12 ms per stream. It charges 0.03 ms per prefill token, so 24,000 tokens cost 720 ms.</p>
+
+<p>Now a request arrives with a 24,000-token prompt, and three streams are mid-answer. Your dashboard shows a median TTFT of 600 ms and a median total latency of 4.2 s. TTFT is the time from sending a request to its first token back.</p>
+
+<details class="predict"><summary>Predict: why do TTFT and total latency show nothing, and what one metric do you add?</summary>
+<p>Both numbers are medians over many responses. A median moves when half of all responses move, and one frozen stream in a hundred does not qualify. TTFT also stops measuring at the first token. A hole in the middle of an answer sits outside its view. The one metric to add is the maximum gap between two tokens of a single response. What carves the hole is the rest of this section.</p>
+</details>
+
+<p>The arrival forces one decision on the scheduler, because prefill and decode share the pass. There are two ways to place the prefill, and both are bad.</p>
+
+<ul class="tree">
+  <li><b>Where does the 24,000-token prefill run?</b>
+    <ul>
+      <li class="bad"><em>whole, in the next pass</em><span>the three streams get zero tokens for 720 ms</span></li>
+      <li class="bad"><em>after the running answers</em><span>the new request's TTFT stretches to seconds</span></li>
+    </ul></li>
+</ul>
+
+<p>Choice one runs the whole prefill in the next pass. That pass takes 720 ms, and the three decoding streams get zero tokens during it. From the user's chair, the text stops mid-sentence for almost a second.</p>
+
+<div class="lanes" id="s2-freeze" data-play>
+  <h4>The whole prefill in one pass</h4>
+  <div class="lane" data-label="new prompt">
+    <i class="idle" style="--w:18"></i><i class="idle" style="--w:18"></i>
+    <i class="idle" style="--w:18"></i>
+    <i class="prefill" style="--w:720" data-t="24,000 tokens · 720 ms"></i>
+    <i class="idle" style="--w:18"></i><i class="idle" style="--w:18"></i></div>
+  <div class="lane" data-label="streams A, B, C">
+    <i class="decode" style="--w:18" data-t="18 ms"></i><i class="decode" style="--w:18" data-t="18 ms"></i>
+    <i class="decode" style="--w:18" data-t="18 ms"></i>
+    <i class="frozen" style="--w:720" data-t="zero tokens for 720 ms"></i>
+    <i class="decode" style="--w:18" data-t="18 ms"></i><i class="decode" style="--w:18" data-t="18 ms"></i></div>
+  <p class="at" data-step="1">Iterations 1 to 3: only decodes run, at about 18 ms each.</p>
+  <p class="at" data-step="4">Iteration 4: the prefill takes the pass, and streams A, B and C emit zero tokens for 720 ms.</p>
+  <p class="at" data-step="5">Iteration 5: the decodes resume at 18 ms, and the users saw one long pause.</p>
+  <p class="at" data-step="all">Durations computed from the phase's cost model: 18 ms per decode iteration and 720 ms for the whole prefill. Illustration, not measured on a GPU.</p>
+</div>
+
+<p>Choice two keeps the prefill out of the decode passes and lets the running answers finish first. The three streams stay smooth, but the new request's TTFT waits behind whole generations, so it stretches from milliseconds to seconds. TPOT, the time per token after the first, stays healthy the whole time, because it only counts tokens that already arrived.</p>
+
+<p>Now the green dashboard reads differently. A 720 ms hole inside one response moves neither median, because medians need half the traffic to move. Total latency grows once, for the unlucky responses, and the median hides even that.</p>
+
+<p>This freeze is not a simulator artifact. The Sarathi-Serve paper mixed a full prefill into a decode batch on real GPUs. It measured the time between tokens rising by up to 28.3 times against a decode-only batch, with Mistral-7B on one A100 and LLaMA2-70B on four A100s. The phase's run of batching_sim.py with a 48,000-token prompt shows the same shape. Its worst gap is 1,460 ms without chunking and 81 ms with it.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Sarathi-Serve, OSDI 2024, section 4.2, Figure 9, read 2026-09-28. Its words: "Naive hybrid batching leads to dramatic increase of up to 28.3× in the TBT latency compared to a decode-only batch." TBT stands for time between tokens. The simulator numbers come from the course's batching_sim.py (continuous policy, 48,000-token prompt, 60 requests, rate 10); they show the shape and are not a GPU measurement.</p>
+</details>
+
+<p>The lab's E4 runs this simulator at a token budget of 512 and again at 8,192. Read the chunked row and answer which way mean TTFT and the worst gap each move.</p>
+
+<div class="keypoints">
+  <p class="remember">One long prompt must wait, or it freezes every stream sharing its forward pass.</p>
+  <p class="trap">Mean TTFT and total latency cannot show a 720 ms pause inside one stream.</p>
+  <p class="try">Run batching_sim.py --token-budget 512 and compare its worst gap with the 764 ms.</p>
+</div>
+
+<p>Neither choice is acceptable, so the scheduler needs a way to run both kinds of work at once. The next section asks how sharing one token budget removes the freeze.</p>
+<h2 data-concept="c1">How does sharing one token budget remove the freeze?</h2>
+<p>The last section left the scheduler with two bad choices. Run the prefill in one pass and the three decoding streams freeze for 720ms. Make the new request wait and it pays a very long TTFT. The third choice splits the prefill, so each pass holds a slice plus the decodes.</p>
+
+<p><dfn>Chunked prefill</dfn> splits one long prompt into slices and runs one slice per iteration. Every iteration still runs one forward pass, the sweep through the weights that produces each token. But the pass now holds a prefill slice alongside all waiting decodes. Both sides draw from one shared token budget per iteration. vLLM exposes this budget as the setting <dfn>max_num_batched_tokens</dfn>, sized in tokens per iteration.</p>
+
+<div class="lanes" id="s3-chunked" data-play>
+  <h4>The same prompt, sliced into the budget</h4>
+  <div class="lane" data-label="new prompt">
+    <i class="wait" style="--w:18" data-t="queued"></i>
+    <i class="prefill" style="--w:80" data-t="slice 1 · 2,045 tok"></i>
+    <i class="prefill" style="--w:80" data-t="slice 2"></i>
+    <i class="prefill" style="--w:80" data-t="slice 3"></i>
+    <i class="prefill" style="--w:80" data-t="slice 4"></i>
+    <i class="prefill" style="--w:80" data-t="slice 5"></i>
+  </div>
+  <div class="lane" data-label="stream A">
+    <i class="decode" style="--w:18" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+  </div>
+  <div class="lane" data-label="stream B">
+    <i class="decode" style="--w:18" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+  </div>
+  <div class="lane" data-label="stream C">
+    <i class="decode" style="--w:18" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+    <i class="decode" style="--w:80" data-t="1 token"></i>
+  </div>
+  <p class="at" data-step="1">Step 1: only the three decodes run, so the pass costs 18ms as before.</p>
+  <p class="at" data-step="2">Step 2: the decodes reserve 3 tokens, and the pass fills the other 2,045 with the first slice.</p>
+  <p class="at" data-step="6">Step 6: half the prompt is done, and no stream has missed a token.</p>
+  <p class="at" data-step="all">Twelve such iterations finish the prompt, and no gap exceeds 80ms. Illustration from the lesson's cost model, not measured.</p>
+</div>
+
+<div class="legend"><span><i style="background:var(--violet)"></i>prefill slice</span><span><i style="background:var(--ok)"></i>decode</span><span><i style="background:var(--muted)"></i>waiting</span></div>
+
+<p>The order inside each iteration is fixed, and it is what keeps every stream producing tokens.</p>
+
+<ol class="flow">
+  <li class="ok"><b>reserve decodes</b><span>one token for each of the three waiting streams</span></li>
+  <li><b>fill with prefill</b><span>2,048 minus 3 leaves 2,045 tokens of slice</span></li>
+  <li class="hot"><b>run one pass</b><span>slice and decodes together, about 80ms</span></li>
+</ol>
+
+<p>Your simulator encodes this order in one line at batching_sim.py:122. Decode tokens leave the budget before prefill asks for room.</p>
+
+<pre><code data-lang="python">room = max(token_budget - len(decoding) - prefill_tokens, 0)  # batching_sim.py:122</code></pre>
+
+<details class="predict"><summary>Compute it yourself: three streams decode under a 2,048-token budget when a 24,000-token prompt arrives. How many prefill tokens fit in one iteration, and how many iterations does the prompt need?</summary>
+<p>The decodes reserve 3 tokens, so the pass has 2,045 left for prefill. Dividing 24,000 by 2,045 gives 11.7, so the prompt needs 12 iterations.</p>
+</details>
+
+<p>Now price one sliced iteration with the cost model from Phase 2A. A prefill token costs 0.03ms, so the 2,045-token slice costs 61.4ms. The three decodes cost 18 + 0.12 × 3 = 18.4ms on top. The whole iteration takes 61.4 + 18.4 = 79.8ms, which rounds to about 80ms. Twelve slices spread the same work across 960ms, and each stream still gets a token every 80ms.</p>
+
+<div class="calc" id="s3-slices">
+  <h4>How many slices a prompt needs</h4>
+  <label>Token budget <input type="range" name="budget" min="512" max="8192" step="256" value="2048">
+    <span class="val" data-val="budget"></span></label>
+  <label>Decoding streams <input type="range" name="decodes" min="1" max="32" value="3">
+    <span class="val" data-val="decodes"></span></label>
+  <label>Prompt tokens <input type="range" name="prompt" min="2048" max="48000" step="512" value="24000">
+    <span class="val" data-val="prompt"></span></label>
+  <div class="result">Prefill per iteration <b data-out="slice"></b></div>
+  <div class="result">Iterations to finish prefill <b data-out="iters"></b></div>
+  <script>kit.calc('#s3-slices', function(v){ var s = Math.max(v.budget - v.decodes, 0); var it = s > 0 ? Math.ceil(v.prompt / s) : 0; return {slice: kit.fmt(s,0) + ' tokens', iters: kit.fmt(it,0) + ' passes'}; });</script>
+</div>
+
+<p>The run reported in your phase compares the two policies on a 48,000-token prompt. The freeze of 1,460ms became a worst pause of 81ms. The price was 112ms more mean TTFT, and each new long prompt pays it once.</p>
+
+<div class="stats">
+  <div class="stat"><b>1,460 → 81 ms</b><span>worst gap between two tokens</span></div>
+  <div class="stat"><b>+112 ms</b><span>mean TTFT of new long prompts</span></div>
+  <div class="stat"><b>3.8 rq/s</b><span>throughput, unchanged</span></div>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Numbers from the run reported in your phase: batching_sim.py --long-prompt 48000 --rate 10 --requests 60, chunked row against the continuous row. The simulator shows the shape of the trade, not a GPU measurement. The hardware measurement of the freeze itself (28.3x, Sarathi-Serve) is in the previous section's evidence.</p>
+</details>
+
+<p>Phase 2A's prefix caching helps the same arithmetic. A prefix is the start of a prompt whose keys and values the server kept from an earlier request. A cache hit turns that request's prefill cost into almost nothing. Its TTFT falls, and the freeze it would inflict on other streams shrinks with it.</p>
+
+<p>Chunking is the fix inside one instance. A scale-out fix is <dfn>prefill/decode disaggregation</dfn>, where prefills and decodes run on different instances. No pass ever mixes the two, so no stream can freeze. The cost is moving each request's KV cache from the prefill machine to the decode machine. Chunking is enough until Phase 4, when your agent gets its own GPU and the choice becomes real.</p>
+
+<p>The lab's E4 runs batching_sim.py at a budget of 512 and again at 8,192. Watch the chunked row and answer which way mean TTFT and the worst gap each move.</p>
+
+<div class="keypoints">
+  <p class="remember">Reserve decodes first, then fill the pass with prefill slices, and the freeze is gone.</p>
+  <p class="trap">Mean TTFT stays green through a freeze, because an average cannot show one 720ms pause.</p>
+  <p class="try">Run batching_sim.py --token-budget 512 and watch mean TTFT rise while the worst gap falls.</p>
+</div>
+
+<p>Smaller budgets make smoother streams, so the question is how small the budget can go. The next section answers why you cannot push it to zero.</p>
+<h2 data-concept="c1">Why can you not push the token budget to zero?</h2>
+<p class="why">A budget too small makes every stream smooth but burns throughput on repeated work.</p>
+
+<p>The last section gave you the lever, the token budget in `max_num_batched_tokens`. Smaller gave smoother streams. The natural move is to push it toward zero. This section shows why that move fails.</p>
+
+<p>Remember what one chunk does. A chunk of the prefill reads its own tokens. It also attends to all earlier tokens of the same prompt. Their keys and values sit in the KV cache, the per-request attention state the GPU keeps. So chunk N re-reads the KV of chunks 1 to N-1 before it can do its own work.</p>
+
+<p>That re-read is the repeated cost. Cut the budget in half and the number of chunks doubles. Each one walks the same earlier KV again. On top of this, launching a chunk has a fixed kernel overhead. With many small chunks, that fixed cost repeats many times.</p>
+
+<div class="calc" id="s4-chunks">
+  <h4>Chunks and re-read for one prompt</h4>
+  <label>Prompt tokens <input type="range" name="prompt" min="2048" max="48000" step="2048" value="24000">
+    <span class="val" data-val="prompt"></span></label>
+  <label>Token budget <input type="range" name="budget" min="512" max="8192" step="512" value="2048">
+    <span class="val" data-val="budget"></span></label>
+  <div class="result">
+    Chunks <b data-out="chunks"></b> · total KV tokens re-read <b data-out="reread"></b>
+  </div>
+  <script>kit.calc('#s4-chunks', function(v){
+    var n = Math.ceil(v.prompt / Math.max(v.budget - 3, 1));
+    var reread = (n - 1) * v.prompt / 2;
+    return {chunks: n, reread: kit.fmt(reread, 0)};
+  });</script>
+</div>
+
+<p>Move the budget slider down and two numbers rise together. The chunk count rises. The total KV re-read rises with it, because each new chunk walks the same earlier KV again. At a 512-token budget the 24,000-token prompt needs 47 chunks and re-reads half a million KV tokens of its own prompt. At 2,048 it needs 12 chunks and re-reads a quarter of that. This re-read is why small budgets cost throughput.</p>
+
+<p>Sarathi-Serve measured the cost on real GPUs. At a 512-token budget, chunking cost about 25% overhead on Yi-34B. At 2,048 the overhead was nearly negligible. Your simulator shows the same shape from the user side. The worst gap falls as the budget falls, and mean TTFT climbs at the same time.</p>
+
+<div class="bars">
+  <div class="bar" style="--v:4" data-label="budget 512" data-value="worst gap 35 ms · mean TTFT 1,094 ms"></div>
+  <div class="bar" style="--v:11" data-label="budget 2048" data-value="worst gap 81 ms · mean TTFT 925 ms"></div>
+  <div class="bar" style="--v:35" data-label="budget 8192" data-value="worst gap 265 ms · mean TTFT 908 ms"></div>
+  <div class="bar" style="--v:100" data-label="no chunking" data-value="worst gap 764 ms · mean TTFT 867 ms"></div>
+</div>
+
+<p>Notice that the trade is not one-dimensional. From 8,192 down to 2,048, the worst gap improves 3x and mean TTFT barely moves. From 2,048 down to 512, the gap improves 2x again but mean TTFT starts climbing fast. Somewhere near there the paper's 25% overhead stops being worth the smoothness. Below that floor you buy smoothness with throughput, iteration after iteration, on every prompt in the system.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+Sarathi-Serve (OSDI 2024), section 5.4.1: "even with the smallest chunk size of 512, we observe a moderate overhead of at most ~25%" on Yi-34B with tensor parallelism of 2, and "with the larger token budget of 2048, chunked prefills have almost negligible overhead". The bar values come from your own `batching_sim.py` runs (40 requests, 6 per second, only `--token-budget` changed).
+</details>
+
+<p>Because the trade has a floor, the budget is a product decision. A chat or voice product lives or dies on inter-token smoothness, so it takes a small budget and pays the TTFT. A batch job that summarises documents overnight has nobody watching the stream, so it takes a large budget and keeps the throughput. There is no correct number, only a correct direction per product.</p>
+
+<p>Carry one fact into Phase 4, when the GPU is yours. In vLLM 0.29.0 there is no single default for `max_num_batched_tokens`. The engine resolves it at startup from the GPU class and the usage context: 16,384 on a B200, 8,192 on an H100 through the API server, and 2,048 on an A100. The constant `DEFAULT_MAX_NUM_BATCHED_TOKENS` exists for tests, and the source says so. The flag `enable_chunked_prefill` defaults to `True` for generator models and is forced off for encoder-decoder models.</p>
+
+<div class="keypoints">
+<p class="remember">Small budgets smooth the stream but re-read the KV at every chunk boundary, so the budget has a floor.</p>
+<p class="trap">Pushing the budget toward zero looked free in the gap column and cost 25% throughput at 512.</p>
+<p class="try">Re-run <code>batching_sim.py</code> at 512 and 8192 and check that mean TTFT and worst gap move in opposite directions.</p>
+</div>
+
+<p>The floor, the trade and the defaults are all server-side facts. Your support agent does not run on your server; it runs on a hosted API. The next section asks what is left under your control when the budget belongs to your provider.</p>
+<h2 data-concept="c1">What can you do when the budget belongs to your provider?</h2>
+<p>You now know the budget that decides between a freeze and a wait, and you know its floor. Both facts live on the server. Your support agent calls a hosted API, so the budget belongs to your provider. This section looks at what remains under your control.</p>
+
+<p>Chunked prefill, splitting a long prefill into slices that share each iteration's token budget, is a server configuration. You cannot set it for another company's GPU, and you cannot read its value. What you can control is what you measure and what you send.</p>
+
+<p>Start with measurement. Your dashboard tracks TTFT, the time from sending a request to the first token coming back, and total latency. Both are averages over a whole response. A freeze is a pause between two tokens inside one response, so neither metric touches it. Three hundred tokens can arrive 25ms apart, one pair can sit 800ms apart, and the median per-token time stays 25ms. The dashboard is green because the metric it shows cannot express the failure.</p>
+
+<p>The fix is one more number per response: the <dfn>max inter-token gap</dfn>. That is the longest pause between any two consecutive tokens in that stream. You already receive every chunk's arrival time from the streaming client. It is the same clock you used to measure TTFT in Phase 1. Recording the maximum difference between two arrivals costs a few lines of code and no extra API calls. A stream health alert then reads "max gap above 500ms". This is the condition your users describe as text stopping mid-sentence.</p>
+
+<pre><code data-lang="python">last = None
+worst = 0.0
+async for chunk in stream:
+    now = time.monotonic()
+    if last is not None:
+        worst = max(worst, now - last)
+    last = now
+metrics.record("max_inter_token_gap_ms", worst * 1000)</code></pre>
+
+<p>The second lever is your own prompt size. The freeze comes from prefill and decode sharing one forward pass, and the freeze length grows with the prefill length. Your 24,000-token prompt does not freeze your own stream, because your stream is the one being prefilled. It freezes the other tenants in the provider's batch. This is the same way this phase's 24,000-token prompt froze streams A, B and C. You cannot see those victims and neither can they name you. But the mechanism is symmetric, so every large prompt you send is somebody else's 720ms pause. Trimming a prompt before sending it is not politeness. It is the same scheduling physics applied to the one variable you own.</p>
+
+<div class="stats">
+<div class="stat"><b>25 ms</b><span>median per-token time, healthy</span></div>
+<div class="stat"><b>800 ms</b><span>max inter-token gap, the freeze the median hides</span></div>
+<div class="stat"><b>0 lines</b><span>of server config available to you on a hosted API</span></div>
+</div>
+
+<details class="evidence"><summary>Evidence</summary><p>The freeze itself is measured, not simulated. Naive hybrid batching raised time between tokens up to 28.3x against a decode-only batch. The result covers Mistral-7B on one A100 and LLaMA2-70B on four A100s (Sarathi-Serve, OSDI 2024). Your own simulator showed the user-visible version: continuous batching's worst gap was 1,460ms while its mean TPOT stayed near 25ms.</p></details>
+
+<p>So the division of labour is clear. The provider owns the budget, the chunking and the defaults. You own the per-response gap metric, which is the only number that sees a freeze. You also own the prompt size, which is the only freeze length you control. A green dashboard without the gap metric tells you about the start and the end of an answer. But the user experiences the middle.</p>
+
+<div class="keypoints">
+<p class="remember">On a hosted API you cannot chunk, but you can measure the gap and shrink your prompt.</p>
+<p class="trap">Median TTFT and mean total latency cannot express an 800ms pause between two tokens.</p>
+<p class="try">Add the max-gap line to your streaming client and check it against one long answer.</p>
+</div>
+
+<p>The stream is smooth again, or at least observable. That closes the first failure of the running case. The lesson follows the agent to the second one, the strict-mode classifier that lost 9 accuracy points. The next section asks how the server enforces a schema at all.</p>
+<h2 data-concept="c2">How does the server enforce a schema?</h2>
+<p class="why">Strict mode changes which tokens can come out, and knowing exactly how is how you trust it correctly.</p>
+
+<p>The stream is smooth again after chunking, so the lesson follows the agent to its next failure. The new strict-mode classifier was supposed to guarantee a clean answer, and it lost 9 accuracy points instead. The accuracy question comes later in this phase. First you need to know what strict mode actually does, because its guarantee turned out to be narrower than the team believed.</p>
+
+<p>Your classifier sends 12 labeled ticket types to the model and expects `{"category": ..., "priority": ...}` back. With strict mode on, the parser stopped crashing. Then the accuracy dropped, and the team did not know which blame was right. You cannot answer that until you can say precisely what the server enforces.</p>
+
+<h3>The picture first</h3>
+
+<p>Decoding picks one token at a time. Before each pick, the model scores every token in its vocabulary. These scores are <dfn>logits</dfn>, one number per vocabulary token. A sampling step then turns the scores into a probability and chooses one token.</p>
+
+<p>Constrained decoding inserts one step between the scores and the pick. It builds a state machine from your schema, and the state machine knows which tokens are legal right now. The <dfn>grammar mask</dfn> is that list, and the engine applies it by setting every illegal token's score to negative infinity. Those tokens then have zero probability, so the model can only pick a legal one.</p>
+
+<ol class="flow">
+<li><b>model scores</b><span>one logit for every vocabulary token</span></li>
+<li class="hot"><b>mask</b><span>the state machine marks illegal tokens, and each gets negative infinity</span></li>
+<li class="ok"><b>sample</b><span>one token is chosen from the tokens that remain legal</span></li>
+<li><b>the state moves</b><span>the new token updates the state, so the next step gets a different mask</span></li>
+</ol>
+
+<p>The mask changes at every step, and that is why prose can never appear. The model may want to write "Sure, here is your ticket". Those tokens are illegal while the state machine expects a JSON object. Their score is negative infinity, and the caller never sees them.</p>
+
+<details class="predict"><summary>Predict: every response matches the schema, yet 4% crash your parser on the days prompts are longest. Strict mode is on. Where do you look?</summary>
+<p>Look at truncation, not at the schema. The mask guarantees that each emitted token is legal at its step. It does not guarantee that generation finishes. When prompts are longest, `max_tokens` runs out more often, and the answer is cut mid-object. `finish_reason` returns "length" for those responses, and that is the field your parser path should check.</p>
+</details>
+
+<h3>One decode step, close up</h3>
+
+<p>Here is one step from the classifier. The state machine is at the start of the object, so only `"{"` is legal. The table shows what the model wants and what the mask leaves.</p>
+
+<table>
+<tr><th>token</th><th>model logit</th><th>legal here</th><th>after the mask</th></tr>
+<tr><td><code>"Sure"</code></td><td>4.1</td><td class="bad">no</td><td class="bad">−inf</td></tr>
+<tr class="pick"><td><code>"{"</code></td><td>3.8</td><td class="ok">yes</td><td class="ok">3.8, chosen</td></tr>
+<tr><td><code>"Here"</code></td><td>3.5</td><td class="bad">no</td><td class="bad">−inf</td></tr>
+<tr><td><code>"["</code></td><td>2.9</td><td class="bad">no</td><td class="bad">−inf</td></tr>
+</table>
+
+<p>After `"{"` is chosen, the state moves to "expecting a key or }". The next step gets a new mask for that state. This continues until the model emits the closing brace and an end token.</p>
+
+<h3>Where the mask comes from</h3>
+
+<p>The engine builds the state machine from your schema. It reads the JSON Schema, builds the states, and computes the legal vocabulary tokens for each state. Libraries like XGrammar, Guidance and Outlines do this work, and vLLM and SGLang call them inside.</p>
+
+<p>Building the state machine takes time the first time a distinct schema is seen. On a self-hosted engine, note two things. The compile cost is paid once per distinct schema, so define your schemas once at import time. And a self-hosted engine can silently fall back to a different backend when your schema uses an unsupported keyword, which changes the latency without an error message.</p>
+
+<p>On a hosted API, the provider may charge the same first-call latency or may not, and the documented behaviour changes over time. The durable advice is to measure. Call the API once with a new schema and compare the first-call latency against the steady-state latency. That one measurement tells you what your provider does today.</p>
+
+<h3>The three levels, and the row to read twice</h3>
+
+<table>
+<tr><th></th><th>prompt only</th><th>json_object</th><th>json_schema, strict&nbsp;true</th></tr>
+<tr><td>valid JSON</td><td class="bad">not guaranteed</td><td class="ok">guaranteed</td><td class="ok">guaranteed</td></tr>
+<tr><td>correct keys</td><td class="bad">not guaranteed</td><td class="bad">not guaranteed</td><td class="ok">guaranteed</td></tr>
+<tr><td>values within enum</td><td class="bad">not guaranteed</td><td class="bad">not guaranteed</td><td class="ok">guaranteed</td></tr>
+<tr><td>prose wrapping</td><td class="bad">happens</td><td class="ok">cannot happen</td><td class="ok">cannot happen</td></tr>
+<tr><td>first-call cost</td><td>normal</td><td>normal</td><td>engine compiles the grammar</td></tr>
+<tr><td>can still truncate</td><td>yes</td><td>yes</td><td>yes</td></tr>
+</table>
+
+<p>Read the last row twice. Strict mode controls which tokens are legal, and it does not control when generation stops. In Phase 1 exercise E11 a truncated JSON answer broke your parser, and strict mode does not remove that failure.</p>
+
+<div class="keypoints">
+<p class="remember">Strict mode masks illegal tokens at every step, so the shape is guaranteed and nothing else is.</p>
+<p class="trap">"Strict mode is on" sounds like "the answer parses"; a truncated answer follows the schema and still cannot be parsed.</p>
+<p class="try">Time one first call with a fresh schema against the next call; a large gap means your provider compiles it.</p>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The mask mechanism is stated as an equation in The Format Tax paper (2026 preprint, section 2): the masked probability is proportional to the model's probability times an indicator that the token is valid under the grammar. The first-call compile advice comes from the phase; a specific quote about which provider models pay the delay could not be re-verified this run and stays off the page.</p>
+</details>
+
+<p>The mask guarantees that every emitted token is legal. But a document can follow the schema at every step and still be cut in half when the token budget runs out. The next section asks what the mask cannot guarantee: who says the answer is complete?</p>
+<h2 data-concept="c2">Strict mode says the tokens are legal. Who says the answer is complete?</h2>
+<p class="why">Strict mode guarantees legal tokens at every step, and the cut point is not one of them.</p>
+
+<p>The section above showed the mask deciding which tokens are legal in the current schema state. The table there ended on a row that every mode shares: "can still truncate, yes, yes, yes". This section opens that row, because it is the failure that strict mode's name hides best.</p>
+
+<p>Return to the running case. Your strict-mode classifier now emits clean JSON all day. On the days when the support prompts run longest, longer answers ride along with them. A small share of responses end mid-object, your parser throws, and the on-call sees a crash under a feature whose name promised safety.</p>
+
+<p>The mask works one decode step at a time, and each step is local. At step <i>t</i> it multiplies the model's score for every token by one question: is this token valid under the grammar right now. That is the whole mechanism. The mask equation carries no term for how many tokens remain in the budget, because the math is a per-token product and nothing else. The mask can tell you that <code>"category":</code> is legal here. It has no input that could tell it the closing brace needs 40 more tokens and only 15 are left.</p>
+
+<details class="predict"><summary>Predict: every response matches the schema, yet 4% crash your parser on the days prompts are longest. Strict mode is on. Where do you look first?</summary>
+<p>At <code>finish_reason</code> on the failures. Long prompts make long answers, and long answers are the ones that reach <code>max_tokens</code>. A response cut at the budget followed the schema up to the cut, so schema validation passed and the document still cannot be parsed. <code>finish_reason: "length"</code> is the field that tells the two apart.</p>
+</details>
+
+<p>Walk the failure in order. The model opens the object and writes the reasoning field you added. The mask is satisfied at every step, because open objects are legal states. The output budget hits <code>max_tokens</code> in the middle of a string value. Generation stops there because the server enforces the budget, not because the grammar is finished. Your client receives text that matches the schema's shape for its full length and is missing its closing braces.</p>
+
+<div class="lanes" id="s7-truncate" data-play>
+<h4>A strict answer cut at 15 output tokens (illustration, not measured)</h4>
+<div class="lane" data-label="output">
+<i class="decode" style="--w:60" data-t='{"reasoning": "the'></i>
+<i class="decode" style="--w:60" data-t=' user reports a'></i>
+<i class="decode" style="--w:60" data-t=' billing err'></i>
+<i class="frozen" style="--w:60" data-t='budget stops here'></i></div>
+<p class="at" data-step="1">Tokens 1 to 5: every token is legal in the schema state, so the mask passes each one.</p>
+<p class="at" data-step="2">Tokens 6 to 10: still legal, still inside the string value of an open field.</p>
+<p class="at" data-step="3">Tokens 11 to 15: the string continues, legal at each step, with the closing keys far ahead.</p>
+<p class="at" data-step="4">The 15-token budget stops generation mid-string. The text follows the schema for its whole length, and no parser can close it.</p>
+</div>
+
+<p>In Phase 1 you met <code>finish_reason</code>, the response field that says why generation stopped. <code>"stop"</code> means the model ended on its own and the answer is closed. <code>"length"</code> means the budget ended it. That check and strict mode answer two different questions. Strict mode answers "is every token legal where it stands". <code>finish_reason</code> answers "did the answer reach its end". One cannot substitute for the other, so the Phase 1 rule stays in force: a <code>"length"</code> result is an incident, not an answer, whatever the schema setting says.</p>
+
+<p>This explains why the failures cluster on the longest-prompt days. A longer prompt does not confuse the mask, because the mask does not read the prompt. It pushes the model toward longer reasoning text inside the same output budget, and the truncation rate climbs. In the lab, E10 runs exactly this: a strict-mode request capped at 15 tokens, and the truncated column fills with parse failures although every emitted token was legal.</p>
+
+<div class="keypoints">
+<p class="remember">The mask guarantees legal tokens step by step; only finish_reason says the answer reached its end.</p>
+<p class="trap">Teams delete the finish_reason check when they enable strict mode, and truncation becomes invisible exactly then.</p>
+<p class="try">Log finish_reason next to each parse failure for a week and check how many truncated answers carried legal tokens.</p>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The Format Tax paper (2026 preprint, section 2, equation 1) defines the guarantee as a per-token product: the masked probability is proportional to the model's probability times an indicator that the token is valid under the grammar. No completeness term exists in that definition. The truncation behaviour itself is from the lesson's own lab exercise E10, which truncates a strict answer at 15 tokens and counts parse failures in the truncated column.</p>
+</details>
+
+<p>Legal tokens and a complete answer are both settled now, so the remaining surprise is larger. Your classifier did not only change shape when you enabled strict mode. Its accuracy fell 9 points, and the mask per token is only part of that drop. The next section asks who took those points.</p>
+<h2 data-concept="c3">Strict mode is on and accuracy fell 9 points. Who took them?</h2>
+<p class="why">Strict mode cut your classifier's accuracy by 9 points, and the grammar mask explains only the smaller part of a quality drop.</p>
+
+<p>Strict mode guarantees legal tokens at every step, but your classifier's accuracy fell 9 points anyway. A filter that only removes illegal tokens should never change what the model knows. So the points were lost somewhere else, and finding where decides which fix you try on Monday.</p>
+
+<p>Return to the running case. Your ticket classifier used to reason freely and then you enabled strict mode with three fields: category, priority, a one-line justification. The JSON is now always valid. The answers are now more often wrong. Two colleagues argue about the cause, and each proposes a different fix.</p>
+
+<p>The picture has two suspects. The first suspect is the prompt itself, because asking for a format changes what the model writes. The model must plan its answer to fit a shape, and that planning happens before any constraint runs. The second suspect is the decoder, where the <dfn>grammar mask</dfn>, the per-step filter that sets illegal tokens to negative infinity, removes choices. Researchers argued about which suspect was guilty for two years. A 2026 paper separated the two experimentally, and the measured accuracy drop from structured output is called the <dfn>format tax</dfn>.</p>
+
+<details class="predict"><summary>Predict: Accuracy dropped 9 points when you enabled strict mode. One colleague says turn constraints off, another says add a reasoning field first. Which experiment tells them apart in one afternoon?</summary>
+<p>Run the same prompts in two modes: a free-form answer, and the format requested in the prompt with constraints off. The free-form score is your baseline. If the prompt-only run already lost most of the 9 points, the decoder is nearly innocent, so turning constraints off alone will not restore accuracy. If the prompt-only run matches the baseline, the mask really is the cause and removing it helps. The reasoning-field fix targets the prompt-side cause, so it only pays when the first comparison shows one.</p>
+</details>
+
+<p>The experiment the paper ran is that comparison, at scale. It tested 6 open-weight models on 3 reasoning tasks with 4 format settings. For each setting it measured accuracy three ways: free-form, format requested in the prompt, and constrained decoding on top. The attribution is now arithmetic, not opinion.</p>
+
+<p>The result puts most of the cost on the prompt. Asking for the format cost 3.9 accuracy points on average. Adding the mask on top of that cost 1.6 more. Of the 39 cells with a statistically significant effect, 36 already showed the drop with the prompt alone. Only 3 cells showed a drop that belonged to the decoder by itself.</p>
+
+<div class="bars">
+<div class="bar" style="--v:71" data-label="format request in the prompt" data-value="3.9 points lost"></div>
+<div class="bar" style="--v:29" data-label="constrained decoding on top" data-value="1.6 points lost"></div>
+</div>
+
+<p>This explains why your classifier dropped despite a correct mask. The mask can only remove illegal tokens, but the prompt had already pushed the model into a cramped way of answering. Your schema asks for category and priority, so the model must commit to a label before it has written any reasoning in text. Committing early is the mechanism behind the prompt-side cost, and the mask only inherits it.</p>
+
+<p>The paper has one pair of numbers that shows the split in your own dashboards. Constrained decoding raised format validity from 55.7% to 92.2%. Over the same change, accuracy moved from 57.3% to 55.7%. Compliance went up and reasoning went slightly down, so the two are different dials. A service can get cleaner and dumber at the same time, and a parse-failure metric measures only the first dial.</p>
+
+<p>Every tax number you read from now on must carry two names. The first name is the model. In the same paper, the older gpt-5-nano lost 8.0 points with constraints, while claude-haiku-4.5 gained 1.2. The second name is the parser used for scoring. When the authors switched MATH-500 scoring from a rule-based extractor to a model judge, the measured tax fell from 10.1 to 6.6 points. About a third of one measured tax was the scorer, not the model.</p>
+
+<p>Use it in the lab. Exercise E8 runs the same 12 labelled tickets through prompt-only, json_object, and strict mode, and prints accuracy per mode. The gap between the free-form column and the prompt-only column is your prompt-side tax, and whatever remains under strict is the decoder-side share. The E8 numbers are marked unverified against a live provider, so read the shape of the comparison, not the exact values.</p>
+
+<div class="keypoints">
+<p class="remember">Most of the tax is paid at the prompt: 3.9 points there, 1.6 at the decoder.</p>
+<p class="trap">Blaming the mask and turning constraints off buys the small 1.6 back and leaves the big 3.9 in place.</p>
+<p class="try">Rerun one failed ticket as free text, then with the format requested but constraints off, and compare the two scores.</p>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>All numbers are from The Format Tax (2026 preprint). Across 6 open-weight models, 3 reasoning tasks and 4 formats, the average format-request-prompt cost was −3.9 points and constrained decoding on top added −1.6. The paper states: "Of 39 cells with any statistically significant effect, 36 (92%) are already present under the format-requesting prompt alone." The compliance pair (55.7% to 92.2% validity, 57.3% to 55.7% accuracy) is from the same study, as are the per-model figures (gpt-5-nano −8.0 with GCD, claude-haiku-4.5 +1.2 without) and the parser warning (Appendix G: switching MATH-500 scoring to an LLM judge cut the measured average tax from −10.1 to −6.6 points).</p>
+</details>
+
+<p>The prompt causes most of the loss because the schema forced the model to commit before it reasoned. That cause has a mechanical fix, and the next section shows it: how do you give the model room to reason inside a schema?</p>
+<h2 data-concept="c3">How do you give the model room to reason inside a schema?</h2>
+<p>The last section attributed your lost 9 accuracy points to the prompt, not the mask. The prompt hurt because the schema made the model commit to an answer before it had reasoned in text. That cause has a mechanical fix. You change what the model writes before the schema forces it to commit, and this section shows how.</p>
+
+<p>Decoding is left to right. Each token is chosen from the tokens already written. So a field in your JSON answer can influence only the fields written after it. A field placed at the end reads the answer but cannot change it, because the answer is already chosen by then.</p>
+
+<p>This gives you one rule for the schema's property order. Put the reasoning field first and the constrained fields after it. The <dfn>grammar mask</dfn>, the per-step filter that removes tokens the schema forbids, will still force legal tokens. But by the time the mask locks the answer down, the model has already written its working.</p>
+
+<figure class="diagram"><svg viewBox="0 0 640 150">
+<text x="10" y="30" fill="currentColor" font-size="13">reasoning: "the ticket mentions a chargeback, so…"</text>
+<rect x="10" y="14" width="560" height="26" rx="6" fill="none" stroke="var(--accent, #6d8dff)" stroke-width="1.5"/>
+<text x="10" y="70" fill="currentColor" font-size="13">category: "billing"</text>
+<rect x="10" y="54" width="180" height="26" rx="6" fill="none" stroke="var(--ok, #4caf7d)" stroke-width="1.5"/>
+<text x="10" y="110" fill="currentColor" font-size="13">priority: "high"</text>
+<rect x="10" y="94" width="150" height="26" rx="6" fill="none" stroke="var(--ok, #4caf7d)" stroke-width="1.5"/>
+<path d="M585 27 L625 27 M615 22 L625 27 L615 32" stroke="currentColor" fill="none" stroke-width="1.5"/>
+<text x="10" y="142" fill="currentColor" font-size="12">tokens are produced top to bottom; the answer keys come after the working</text>
+</svg><figcaption>The <code>reasoning</code> key is written first, so its text sits in the context when the mask locks down <code>category</code> and <code>priority</code>.</figcaption></figure>
+
+<p>The order is the whole mechanism. Your lab's <code>--reasoning-field</code> flag does exactly this. From <code>structured_lab.py:90</code>, the docstring says the reasoning field is first on purpose, because a field can only influence fields that come after it. If you move <code>reasoning</code> to the end of <code>properties</code>, the accuracy gain disappears.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Tam et al. (2024) found that all of the gpt-3.5-turbo JSON-mode answers they inspected placed the answer key before the reason key, turning step-by-step reasoning into a direct answer. JSONSchemaBench used the opposite order and measured constrained decoding matching or beating unconstrained decoding on the same tasks. OpenAI's structured outputs page states that outputs follow the key order of the schema.</p>
+</details>
+
+<p>The reasoning field is not the only measured fix. The Format Tax paper measured two heavier mitigations, and both separate reasoning from formatting entirely.</p>
+
+<table>
+<tr><th>mitigation</th><th>cells improved</th><th>cells worsened</th><th>average gain</th></tr>
+<tr class="pick"><td>reasoning field placed first</td><td colspan="3">tested in your lab, E9; cheap, no extra call</td></tr>
+<tr><td>two calls: answer freely, then a second call reformats</td><td>42 of 72</td><td>2 of 72 (3%)</td><td class="ok">+6.8 points</td></tr>
+<tr><td>thinking enabled before the structured answer</td><td>43 of 72</td><td>11 of 72 (15%)</td><td>+9.2 points</td></tr>
+</table>
+
+<p>The two-call pattern is the safer choice. The first call answers the ticket as free text. The second call turns that answer into your schema. It costs one extra billed request per ticket, but it made 42 of 72 measured cells better and only 2 worse. Thinking buys a larger gain, 9.2 points on average, but it made 15% of cells worse, and the gain concentrates on maths tasks rather than writing. Measure both against your own tickets before you pick one.</p>
+
+<p>Three schema rules sit under all of this, and strict mode enforces them from day one.</p>
+
+<ol class="steps">
+<li><b>Every property appears in <code>required</code>.</b> A key outside <code>required</code> is one the model may omit, and your parser then meets a missing field.</li>
+<li><b><code>additionalProperties</code> is <code>false</code>.</b> Without it the model may add keys your code does not read.</li>
+<li><b>An optional field is a union with null.</b> Write <code>"type": ["string", "null"]</code> and keep the key in <code>required</code>, so the field is always present and sometimes empty.</li>
+</ol>
+
+<p>The set of unsupported JSON Schema keywords changes on the provider's side, so treat it as a page to bookmark rather than a list to memorise. Test a keyword before your design depends on it.</p>
+
+<p>Exercise E9 in the lab runs this fix directly. The <code>--reasoning-field</code> flag adds the free-text field ahead of the constrained ones on the same 12 tickets, and the accuracy columns for the two runs answer whether your classifier's 9 points come back. That run is still marked unverified against a live provider, so read the direction, and rerun it yourself.</p>
+
+<div class="keypoints">
+<p class="remember">Decoding is left to right, so the reasoning field goes before the answer keys or it adds nothing.</p>
+<p class="trap">A reasoning field at the end of the schema reads the answer; it cannot change it.</p>
+<p class="try">Move <code>reasoning</code> to the end of your schema's <code>properties</code> and rerun E9; watch the accuracy column.</p>
+</div>
+
+<p>With the freeze fixed and the classifier's accuracy recovered, two of the agent's three failures are explained. The third is a long run that can end on the same 400 you caused on purpose in Phase 1 exercise E7. The obvious fix is a bigger context window, and the next section asks why a million-token window does not end that problem.</p>
+<h2 data-concept="c4">Why does a million-token window not end the problem?</h2>
+<p>Your agent now enforces its schema the right way, so the lesson turns to the failure that killed the six-hour run. The 400 said the prompt was too large, and the obvious fix is to buy a model with a larger window.</p>
+
+<p>That fix fails, and this section shows why in three independent reasons. Each one has measured evidence, and none of them is fixed by a bigger window.</p>
+
+<p>The <dfn>context window</dfn> is the maximum number of tokens the model accepts in one call. It is a hard limit, so a prompt over it never runs at all. Your agent's conversation grows on every step because each loop turn appends messages and tool results. A larger window only moves the limit further away; it does not stop the growth or change how the model reads what is inside.</p>
+
+<details class="predict"><summary>Predict: your agent runs long conversations, and you upgrade from a 128k window to a 1M window. Which of these disappear: rising cost per answer, wrong answers on long inputs, and the risk of a 400?</summary>
+<p>None of them. Cost still grows with every input token, so longer runs cost more, not less. Accuracy still falls as the input grows, because the model reads a large window less reliably than a small one. The 400 risk only moves: a history that grows without a cap reaches 1M tokens the same way it reached 128k, in more time.</p>
+</details>
+
+<p><strong>Reason 1: accuracy falls as the input grows.</strong> The Chroma context-rot study tested 18 models from the Claude, GPT, Gemini and Qwen families on retrieval tasks at many input lengths. Performance fell as length grew in every family. On one test, every model scored higher on a focused input of about 300 tokens than on the full 113,000-token input that contained the same answer.</p>
+
+<p><strong>Reason 2: where a fact sits in the window changes whether the model uses it.</strong> The Lost in the Middle study moved the needed document to different positions and measured accuracy at each one. GPT-3.5-Turbo scored 75.8% when the answer was first and 53.8% when it sat in the middle. The middle score was even below the 56.1% it scored with no documents at all. These are 2023 models, so read the numbers as the shape of the effect, not as values you would measure today.</p>
+
+<div class="callout note">These two curves come from older studies. They support the direction, that more input does not mean better answers, and you should not quote their exact numbers against current models.</div>
+
+<p><strong>Reason 3: a large window you actually fill is expensive.</strong> Every input token is billed, every step, so a long agent loop multiplies one large prompt by the number of steps. A 400,000-token prompt on every step of a 50-step loop is 20 million input tokens. At $2.00 per million input tokens, one conversation costs $40 for input alone.</p>
+
+<div class="calc" id="s10-loop-cost">
+  <h4>Input cost of one agent run</h4>
+  <label>Prompt per step (thousand tokens) <input type="range" name="promptk" min="10" max="400" step="10" value="400">
+    <span class="val" data-val="promptk"></span></label>
+  <label>Steps <input type="range" name="steps" min="10" max="200" step="10" value="50">
+    <span class="val" data-val="steps"></span></label>
+  <div class="result">Input cost at $2.00 / 1M tokens <b data-out="cost"></b></div>
+  <script>kit.calc('#s10-loop-cost', function(v){ return {cost: '$' + kit.fmt(v.promptk*1000*v.steps*2/1e6, 2)}; });</script>
+</div>
+
+<p>The three reasons point the same way. Each extra input token costs money, and past some point it also helps less. So the model's maximum window size is not a resource to consume but a wall to stay away from.</p>
+
+<details class="evidence">
+<summary>Evidence</summary>
+<p>The LongMemEval comparison (about 300 tokens focused versus about 113,000 full) and the 18-model context-rot sweep come from Chroma's context-rot study, as quoted by the phase. The position numbers (75.8% first, 53.8% middle, 56.1% no documents) come from the Lost in the Middle study, 2023 models. The $40 figure is arithmetic: 400,000 tokens × 50 steps = 20M tokens, priced at $2.00 per million from the phase's prices.yaml, gpt-4.1 input. Prices change; treat the number as the shape of the cost, not a quote.</p>
+</details>
+
+<p>Use the calculator on your own agent. Take the largest prompt your loop builds today, put it in as the prompt per step, and set your median step count. The number that comes out is what "the window is big enough" costs you per run, before any answer is billed.</p>
+
+<div class="keypoints">
+<p class="remember">A bigger window moves the problem; cost grows per token and accuracy falls as the window fills.</p>
+<p class="trap">Buying a million-token window and calling context solved, then paying $40 per run for worse answers.</p>
+<p class="try">Compute your loop's input cost at its largest prompt and median step count, and write the number down.</p>
+</div>
+
+<p>The window cannot be bought away, so it has to be managed. The next section answers how you keep a growing prompt inside a finite window.</p>
+<h2 data-concept="c5">How do you keep a growing prompt inside a finite window?</h2>
+<p>A six-hour agent run died on a 400 because no source of text in its prompt had a cap. The window must be managed, and management starts with one fact: growth inside a finite space must be capped before the space runs out.</p>
+
+<p>Several sources write into one prompt on every loop step. The system prompt, the tool definitions, the carry-over notes, the conversation history, and the retrieved text each grow on their own schedule. Without caps, the largest source takes the space, and the largest source is usually a tool that returned more than you expected.</p>
+
+<p>The fix is a <dfn>context budget</dfn>: a split of the window into zones, where each zone is one source of text with its own cap. A source that reaches its cap gets shortened, so one loud tool cannot evict the conversation. Here is an example split for a 32,000-token window.</p>
+
+<div class="stack" id="s11-budget">
+<h4>A 32,000-token window as a budget</h4>
+<div class="whole">
+<i style="--w:1000;--c:var(--accent)" data-label="system" data-value="1,000" data-note="first in the prompt, changes rarely"></i>
+<i style="--w:6000;--c:var(--violet)" data-label="tools" data-value="6,000" data-note="changes on deploy only"></i>
+<i style="--w:2000;--c:var(--ok)" data-label="carry-over" data-value="2,000" data-note="written by compaction"></i>
+<i style="--w:10000;--c:var(--warn)" data-label="history" data-value="10,000" data-note="oldest turns leave first"></i>
+<i style="--w:6000;--c:var(--muted)" data-label="retrieval" data-value="6,000" data-note="truncate results, keep pointers"></i>
+<i style="--w:7000;--c:var(--bad)" data-label="headroom" data-value="7,000" data-note="the reply, and the summarising call"></i>
+</div>
+</div>
+
+<p>The headroom row is left out most often, and it is the one the system depends on. <dfn>Compaction</dfn> replaces old conversation turns with a shorter summary so the prompt fits again. That summarising call is itself an LLM call, so it needs prompt space too. Fill the window to the limit and the call that would fix the problem cannot run.</p>
+
+<details class="predict"><summary>Predict: your cap on history is 10,000 tokens and a tool returns 8,000 tokens in one result. What happens to the run?</summary>
+<p>The retrieval zone caps the tool result at 6,000, so the history keeps its 10,000 and the run continues. Without zones, that one result eats most of the remaining window and the history is what silently disappears. The cap converts a run-ending overflow into a routine truncation.</p></details>
+
+<p>The budget says where text may live. It does not say when to compact, because caps shorten sources and compaction shrinks the whole history at once. The second half of the system is when that shrink happens.</p>
+
+<h3>Count before every call, fire before the limit</h3>
+
+<p>The safe design counts the tokens before every call and compacts when the total passes a <dfn>trigger</dfn>, a fixed threshold chosen in advance below the window. Waiting for the provider's 400 is the alternative, and that alternative is the failure this lesson opened with. Shipped products use the same pattern with fixed numbers (Anthropic's context editing tool triggers at 100,000 input tokens, and its compaction feature defaults to 150,000; these defaults were not re-checked this run).</p>
+
+<p>The course's <code>compactor.py</code> shows the mechanic with a 60% trigger on a 32,000-token window, which is 19,200 tokens:</p>
+
+<pre><code data-lang="text">python phase02_internals/compactor.py --simulate --turns 40</code></pre>
+
+<pre><code data-lang="text">  24 │     18,631 │
+  25 │     19,409 │ trigger fired
+    COMPACTED (threshold): 19,409 -&gt; 2,270 tokens, 45 turns summarised, 4 kept verbatim
+  25 │      2,270 │</code></pre>
+
+<p>Turn 25 is the first turn above 19,200, and the prompt drops from 19,409 to 2,270 tokens in that step. One output detail is worth reading closely: at loop turn 25 the history holds 49 messages, 45 are summarised, and the 4 most recent are kept word for word. Compaction does not erase the recent past, only the old one.</p>
+
+<p>A threshold can fire at an awkward moment, such as in the middle of a calculation. A newer line of work lets the model pick the moment with a rubric, compacting when a sub-task ends. Treat that as a direction to watch, and start with a threshold because a threshold is simple and testable.</p>
+
+<p>Run the simulator with the trigger off and you reach the Phase 1 E7 failure directly: the prompt passes 32,000 at turn 42 and the run stops. With the trigger on, the run stays under 20,000 tokens for its full length.</p>
+
+<div class="keypoints">
+<p class="remember">Cap every source that writes into the window, and fire compaction at a threshold below the limit.</p>
+<p class="trap">Reserving no headroom: at a full window, the summarising call that would fix the problem cannot run either.</p>
+<p class="try">Run compactor.py --simulate --turns 40 and check that the trigger fires at 19,200, before turn 42.</p>
+</div>
+
+<p>The trigger decides when the history collapses into a summary. It does not decide what that summary keeps, and what survives the boundary is where the dangerous failures live. The next section answers what must cross the compaction boundary word for word.</p>
+<h2 data-concept="c4">What must cross the compaction boundary word for word?</h2>
+<p>The previous section gave you a compaction trigger that fires at a threshold you chose. The trigger decides when old messages collapse into a summary, but it says nothing about what the summary keeps. What survives that boundary is where the dangerous failures live.</p>
+
+<p>Return to the six-hour agent run from the start of this lesson. Your agent has a standing rule: it must never refund a customer more than 200 EUR. Over six hours it makes hundreds of tool calls, and the trigger fires twice. Each time, the older messages collapse into one summary written by a language model. The rule started the run inside the prompt. Whether it is still there at hour five decides whether the agent behaves.</p>
+
+<p>A summary is not a compressed copy. A summary is a new text that a language model wrote, and that model kept what it found interesting. Summarisers are trained and prompted to keep task continuity: what the agent is doing right now, and what happened last. A standing rule is old and quiet. It never produces new events, so it loses the competition for the summary's limited space against the active task state. This is the one direction in which compaction is lossy that you cannot afford.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 720 260" role="img" aria-label="What crosses the compaction boundary">
+  <text x="140" y="24" text-anchor="middle" fill="currentColor" font-size="13">before: 19,409 tokens</text>
+  <text x="580" y="24" text-anchor="middle" fill="currentColor" font-size="13">after: 2,270 tokens</text>
+  <rect x="30" y="40" width="220" height="34" fill="none" stroke="currentColor" rx="4"/>
+  <text x="140" y="62" text-anchor="middle" fill="currentColor" font-size="12">system · tools</text>
+  <rect x="30" y="82" width="220" height="96" fill="none" stroke="currentColor" rx="4"/>
+  <text x="140" y="126" text-anchor="middle" fill="currentColor" font-size="12">messages 1 to 45</text>
+  <rect x="30" y="186" width="220" height="34" fill="none" stroke="currentColor" rx="4"/>
+  <text x="140" y="208" text-anchor="middle" fill="currentColor" font-size="12">messages 46 to 49</text>
+  <rect x="470" y="40" width="220" height="34" fill="none" stroke="currentColor" rx="4"/>
+  <text x="580" y="62" text-anchor="middle" fill="currentColor" font-size="12">system · tools, verbatim</text>
+  <rect x="470" y="96" width="220" height="58" fill="none" stroke="currentColor" rx="4"/>
+  <text x="580" y="121" text-anchor="middle" fill="currentColor" font-size="12">summary by a model</text>
+  <text x="580" y="140" text-anchor="middle" fill="currentColor" font-size="11">constraints: COPIED, not summarised</text>
+  <rect x="470" y="186" width="220" height="34" fill="none" stroke="currentColor" rx="4"/>
+  <text x="580" y="208" text-anchor="middle" fill="currentColor" font-size="12">messages 46 to 49, verbatim</text>
+  <line x1="250" y1="57" x2="470" y2="57" stroke="var(--ok)" stroke-width="2" marker-end="url(#s12-arr)"/>
+  <text x="360" y="50" text-anchor="middle" fill="currentColor" font-size="11">verbatim</text>
+  <line x1="250" y1="130" x2="470" y2="130" stroke="var(--warn)" stroke-width="2" marker-end="url(#s12-arr)"/>
+  <text x="360" y="122" text-anchor="middle" fill="currentColor" font-size="11">summarised</text>
+  <line x1="250" y1="203" x2="470" y2="203" stroke="var(--ok)" stroke-width="2" marker-end="url(#s12-arr)"/>
+  <text x="360" y="196" text-anchor="middle" fill="currentColor" font-size="11">verbatim</text>
+  <defs><marker id="s12-arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="currentColor"/></marker></defs>
+</svg>
+<figcaption>The compaction boundary at turn 25 in <code>compactor.py --simulate</code>: system, tools and the four recent messages cross unchanged, 45 messages become the summary, and constraints must be marked as copied, never summarised.</figcaption>
+</figure>
+
+<details class="predict"><summary>Predict: your agent has a standing rule, "never refund above 200 EUR". It runs 200 tool calls over six hours and compacts twice. Where exactly does the rule need to live, and why is the summary the wrong place?</summary>
+<p>The rule needs to live outside the history that gets summarised: in the system zone, or in a dedicated zone that your compactor copies word for word into the prompt after every compaction. The summary is the wrong place because the summarising model rewrites it. Most of the time it shortens or drops the rule, because the rule produces no events and loses against the active task in the summary's token budget. Once dropped, the rule is gone for good, because nothing later in the run can recreate a constraint that was never re-injected.</p>
+</details>
+
+<p>The cost of a dropped constraint is not vagueness. It is a wrong action that a program can count. The Governance Decay paper built a benchmark called ConstraintRot: 1,323 episodes across seven model families, each stating policy constraints in the context, with a program grading the tool calls rather than another model. The result is the number for this section.</p>
+
+<div class="stats">
+<div class="stat"><b>0%</b><span>violations with the policy visible</span></div>
+<div class="stat"><b>38%</b><span>violations when the summary dropped the constraint (n=315)</span></div>
+<div class="stat"><b>0%</b><span>violations when the constraint survived (n=90)</span></div>
+</div>
+
+<p>Read the split carefully because it isolates the cause. The same models, after the same compactions, violate 0% of the time when the constraint survives and 38% of the time when it does not. So the failure is deletion, not a long context confusing the model. Pooled across all episodes, compaction took the violation rate from 0% to 30%, and two model families reached 59%.</p>
+
+<p>The paper adds one detail that should shape your priorities. Hard safety norms, the kind a model often refuses on its own, decayed little after compaction, about +6 points of violation. Soft organisational rules, like your refund limit, decayed by about +50. Those rules exist nowhere except your context, because the model never saw them in training, so they are exactly the content the summary must not touch.</p>
+
+<p>The fix is mechanical and cheap. <dfn>Constraint pinning</dfn> is the practice of copying standing constraints across the compaction boundary as literal text, outside the summary, so no model ever decides whether a rule is worth keeping. The paper's version re-injects about 47 tokens after each compaction, and it restored 0% violations across every model family tested. Forty-seven tokens is nothing against a 32,000-token window. This is also why the context budget from the previous section gives constraints a home: your compactor.py output marks the constraints line as COPIED for exactly this reason.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>ConstraintRot benchmark from the Governance Decay paper (June 2026), Table 2 and section 5: 1,323 episodes, 7 model families, violation grading done by a program on the tool call. Survival split, quoted: "when the constraint survives, the violation rate is 0% (n=90); when it is dropped, it is 38% (n=315)". Pinning of about 47 tokens restored 0% across all models. Caveat: this is a single-author preprint and not peer-reviewed, and the survival split itself was judge-scored, so teach the rule rather than the exact percentages.</p>
+</details>
+
+<p>Use it in your own agent this week. Open the code path that builds the prompt after a compaction, and find the line where the summary is inserted. The question it answers: if your refund rule sat in a history message and the summariser dropped it, would anything put it back? If the answer is no, add a pinning step that concatenates your standing constraints as literal text after every compaction, before the agent's next call.</p>
+
+<div class="keypoints">
+<p class="remember">Copy constraints across every compaction as literal pinned text, never through the summary.</p>
+<p class="trap">Trusting the summariser to keep important rules: measured violations go from 0% to 38% when it drops one.</p>
+<p class="try">Find your compactor's prompt-building code and check what happens to a constraint it drops; five minutes.</p>
+</div>
+
+<p>Pinning protects rules across a compaction you planned. No threshold catches every input, because one oversized tool result can jump over any cap you chose. The next section answers what to do when the cap missed and the 400 arrived.</p>
+<h2 data-concept="c5">The cap missed and the 400 arrived. What now?</h2>
+<p class="why">A trigger can miss, and only the right reaction to the 400 saves the run.</p>
+
+<p>Pinning protects your rules across a compaction you planned. It does nothing for a compaction that should have fired and did not. Your support agent could prove this. Six hours in, one tool result far larger than any turn before it could jump the total. That jump could pass the 19,200-token trigger and past the 32,000-token window in one step. Then the run could die on the same 400 you provoked on purpose in Phase 1 exercise E7. This section designs for that miss.</p>
+
+<p>The core fact first. A <dfn>deterministic error</dfn> is a failure the provider decides from the input alone, before load, timing or chance enter. An oversized prompt is checked against a fixed window at validation time. The same input returns the same 400 at about the same speed every time. Waiting between attempts changes nothing, because the check does not read the clock. The only thing that can change the answer is a smaller input.</p>
+
+<p>The second fact. You cannot predict every input, so you add a second layer under the trigger. A <dfn>backstop</dfn> is the code that catches the overflow 400 after the trigger missed, changes the input and retries once. The trigger handles gradual growth. The backstop handles the single jump that no threshold caught. Each layer catches what the other one misses.</p>
+
+<details class="predict"><summary>Predict: a colleague ships a retry loop. On any exception it sleeps 2^n, resends and tries three times. Walk one context overflow through it. How many times does it fail, and why?</summary>
+<p>It fails all three times. Each attempt sends the identical oversized prompt, and the provider rejects an identical input identically, at validation time. The backoff sleeps add delay without changing the input, so the loop burns three billed calls, reports three failures and the user still has no answer.</p>
+</details>
+
+<p>Here are the two paths side by side.</p>
+
+<div class="compare">
+<div class="wrong">
+<pre><code data-lang="python"># wrong: resends the SAME oversized prompt
+for attempt in range(3):
+    try:
+        return client.chat.completions.create(
+            model=m, messages=msgs)
+    except Exception:
+        time.sleep(2 ** attempt)  # waiting changes nothing</code></pre>
+</div>
+<div class="right">
+<pre><code data-lang="python"># right: change the input, retry exactly once
+try:
+    return client.chat.completions.create(
+        model=m, messages=msgs)
+except Exception as e:
+    if not is_context_overflow(e):
+        raise
+    log.error("trigger missed; backstop fired")
+    msgs = compact(msgs)          # the input changed
+    return client.chat.completions.create(
+        model=m, messages=msgs)</code></pre>
+</div>
+</div>
+
+<p>Walk the right path in order. The first check separates the error kind, because a retry helps against transient load and hurts against an overflow. You separate them on machine-readable fields, in this order: HTTP status 400, then error code <code>context_length_exceeded</code>, then error type <code>invalid_request_error</code>, and message text last. Text comes last because a provider can reword a message without notice, while the status and type fields are part of the error schema. A 429 or a 5xx is transient load and is not an overflow, even when its text mentions length. One caution on the detail: the exact code and type fields come from your phase and were not re-checked against the provider this run, so treat <code>is_context_overflow</code> at <code>compactor.py:227</code> as the reference implementation and re-read it when you upgrade your client.</p>
+
+<p>The second step logs loudly. A fired backstop means the trigger let a prompt through that the window rejected, so the log line is evidence that your threshold or your caps are wrong. A silent backstop converts a bug in your sizing into a routine event, and you stop looking at it.</p>
+
+<p>The third step compacts, which is what makes the retry meaningful. A retry is only useful if the input changed, and compaction is the change. The fourth step retries exactly once. Once is enough because the compacted prompt either fits or your compactor itself is broken, and a third attempt cannot tell you which.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Phase 1 exercise E7 sent an oversized prompt and received a fast 400. The determinism claim rests on the mechanism, not on a benchmark: the provider checks the input against a fixed window at validation time, so the identical resend gets the identical 400. Your phase puts it this way, quoted: "the classic blind retry resends the identical oversized prompt and fails identically, so the retry is only meaningful if the input changed". The status, type and code triple is stated in the phase and was not re-verified against the provider this run. One more cost hides here: the summarising call inside <code>compact()</code> is a second billed call, and one report says its tokens can sit outside the top-level usage counts, also not checked this run.</p>
+</details>
+
+<p>Use it in Mission HQ terms. Open <code>compactor.py:660</code> to <code>compactor.py:671</code>, the shipped version of the right path. The question it answers: does <code>cm.compact</code> run before the retry, so the second call sends a different prompt? Then ask the harder one: when this code fires in your own agent, what log do you read the next morning, and what number in your budget table does that log make you change?</p>
+
+<div class="keypoints">
+<p class="remember">An overflow 400 is deterministic, so shrink the input and retry once, never wait and resend.</p>
+<p class="trap">Backoff retries on any exception: the same oversized prompt fails identically, three billed calls deep.</p>
+<p class="try">Run compactor.py --simulate --turns 12 --inject-overflow 5 and read the backstop lines.</p>
+</div>
+
+<p>You can now size a token budget for a streaming product, read a schema guarantee as a per-step mask rather than a contract, and explain why a prompt over the window rejects identically every time and what client code must do about it. Two loose ends from this lesson point at money: the 400k-token loop cost $40, and the summarising call is a second billed call. The recall section collects what you can do now, and the next phase answers the question both ends raise: what does all of this cost, and how does the provider price the cache?</p>
+<h2 data-kind="recall">What you can do now, and what comes next</h2>
+<p>You started this phase with three failures no dashboard could see. Each section below gave you the mechanism behind one of them. Read the claims again; they should now feel like things you would say yourself.</p>
+
+<div class="cards" data-cols="1">
+<div class="card"><h4>One long prompt freezes every stream, and chunking turns the freeze into a small TTFT tax</h4>
+<p>Prefill and decode share one forward pass and one token budget. A 24,000-token prompt run whole gives every decoding stream zero tokens for that pass. Chunked prefill fills the budget left over after decodes, so the freeze becomes about 112ms of extra mean TTFT. Your worst gap fell from 1,460ms to 81ms in the simulator. Mean TTFT and total latency cannot see a mid-stream pause, so you added the maximum inter-token gap. Taught in <em>Why does one long prompt freeze every stream?</em> through <em>What can you do when the budget belongs to your provider?</em></p></div>
+<div class="card"><h4>Strict mode guarantees legal tokens, never a complete answer</h4>
+<p>The grammar mask removes illegal tokens at each step, and that is all it does. It says nothing about max_tokens running out mid-object. A truncated reply follows the schema up to the cut and still breaks your parser. finish_reason stays an independent check that strict mode never replaces. Taught in <em>How does the server enforce a schema?</em> and <em>Strict mode says the tokens are legal. Who says the answer is complete?</em></p></div>
+<div class="card"><h4>Most of the format tax is paid at the prompt, and the fix is a reasoning field first</h4>
+<p>The format-request prompt cost 3.9 points on average, and constrained decoding added only 1.6. Of 39 significant cells, 36 already showed the drop with the prompt alone. Decoding runs left to right, so a field influences only what comes after it. Put the reasoning field first in the property order, or it does nothing. Taught in <em>Strict mode is on and accuracy fell 9 points. Who took them?</em> and <em>How do you give the model room to reason inside a schema?</em></p></div>
+<div class="card"><h4>A summary keeps what the summariser found interesting, so constraints cross the boundary as pinned text</h4>
+<p>Violation rates went from 0% with the policy visible to 38% when the summary dropped it. Pinning about 47 tokens of literal constraint text restored 0% across all seven model families in that preprint. A language model never decides whether a safety rule is worth keeping. Taught in <em>What must cross the compaction boundary word for word?</em></p></div>
+<div class="card"><h4>An overflow 400 is deterministic, so the fix is a smaller input, never a wait</h4>
+<p>The same oversized prompt returns the same 400 at the same speed every time. A blind retry loop burns three billed calls and reports three outages. Check the machine-readable error fields, compact so the retry sends a different input, retry once, and log loudly. The same lesson sizes your budget: every source gets a cap, and the trigger fires before the window fills, with headroom left for the summarising call itself. Taught in <em>How do you keep a growing prompt inside a finite window?</em> and <em>The cap missed and the 400 arrived. What now?</em></p></div>
+</div>
+
+<p>Your support agent now explains all three of its failures. The mid-sentence freeze was a scheduling choice, measured by the gap metric. The 9 lost accuracy points were paid at the prompt, fixed by field order. The 400 on the six-hour run was a cap that missed, answered by one modified retry.</p>
+
+<p>Two numbers from this lesson point somewhere you have not gone yet. The 400k-token prompt on every step of a 50-step loop costs $40 at $2.00 per million input tokens. The summarising call is a second billed call on top, and its own tokens may not even appear in your top-level usage counts. Phase 0 told you that a cached prefix gets a discount of about 90 percent, and Phase 2A showed you the tree that makes the discount possible. What this phase never answered is how the pricing works. The next phase asks exactly that: what does all of this cost, and how does the provider price the cache?</p>
+<h2 data-kind="lab">Hands-on lab</h2>
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E4</b> <span class="tag">offline</span></label> <b>Find the token budget trade.</b> Run:
+    <pre><code data-lang="bash">python phase02_internals/batching_sim.py --token-budget 512
+python phase02_internals/batching_sim.py --token-budget 8192</code></pre>
+    In the <code>chunked</code> row, expect mean TTFT 1,094ms and worst gap 35ms at 512. Expect mean TTFT 908ms and worst gap 265ms at 8,192. The two numbers move in opposite directions. That is the trade from the chunked prefill sections, in your own output. The simulator does not model chunking overhead. Sarathi-Serve measured about 25% overhead at a 512-token budget on Yi-34B, so a very small budget has a real throughput cost.</li>
+
+<li><label><input type="checkbox"> <b>E8</b> <span class="tag">live</span> <span class="tag">unverified</span></label> <b>Measure the constraint tax on a real task.</b> Run the self-test offline first:
+    <pre><code data-lang="bash">python phase02_internals/structured_lab.py --self-test</code></pre>
+    Confirm all six parser cases pass and the last line is "all self-tests passed". Then run:
+    <pre><code data-lang="bash">python phase02_internals/structured_lab.py --model gpt-4.1-mini --role cheap</code></pre>
+    Expect <code>prompt</code> mode to record at least one parse failure across 12 tickets. Expect <code>json</code> and <code>strict</code> to record zero. The accuracy column shows your tax, and it can be positive or negative. Cost is at most about $0.02 for all three modes. This splits the shape guarantee from the quality question, the split from the format tax sections. Needs an API key and was not run against a live provider.</li>
+
+<li><label><input type="checkbox"> <b>E9</b> <span class="tag">live</span> <span class="tag">unverified</span></label> <b>Test the reasoning field.</b> Run:
+    <pre><code data-lang="bash">python phase02_internals/structured_lab.py --model gpt-4.1-mini --role cheap --reasoning-field</code></pre>
+    Expect output tokens, cost and latency to rise. Accuracy may or may not rise. Compare with E8 and decide whether the trade is worth it on this task. The field sits first in the property order, because decoding is left to right. Needs an API key and was not run against a live provider.</li>
+
+<li><label><input type="checkbox"> <b>E10</b> <span class="tag">break-it</span> <span class="tag">unverified</span></label> <b>Truncate an answer that follows the schema.</b> Run:
+    <pre><code data-lang="bash">python phase02_internals/structured_lab.py --model gpt-4.1-mini --role cheap --modes strict --reasoning-field --max-tokens 15</code></pre>
+    Expect the <code>truncated</code> column to fill up. Parse failures appear even though every answer followed the schema until it stopped. This is the mask guarantee in one output: legal tokens, never a complete answer. <code>finish_reason</code> stays required. Needs an API key and was not run against a live provider.</li>
+
+<li><label><input type="checkbox"> <b>E11</b> <span class="tag">offline</span></label> <b>Watch the compaction trigger fire.</b> Run:
+    <pre><code data-lang="bash">python phase02_internals/compactor.py --simulate --turns 40</code></pre>
+    Expect the prompt to grow to 19,409 tokens and the trigger to fire at turn 25. The prompt drops to 2,270 tokens, with 45 turns summarised and 4 kept verbatim. Then run:
+    <pre><code data-lang="bash">python phase02_internals/compactor.py --simulate --turns 40 --trigger-ratio 0.3</code></pre>
+    Expect the trigger to move to 9,600 tokens and fire three times, at turns 13, 23 and 33. Then run:
+    <pre><code data-lang="bash">python phase02_internals/compactor.py --simulate --turns 40 --keep-last 10</code></pre>
+    Expect one compaction at turn 25, down to 4,604 tokens, with 10 kept verbatim. The trigger is a number you choose, and the token counts show the effect of that choice.</li>
+
+<li><label><input type="checkbox"> <b>E12</b> <span class="tag">break-it</span> <span class="tag">offline</span></label> <b>Reproduce the Phase 1 E7 failure, then catch it.</b> Run:
+    <pre><code data-lang="bash">python phase02_internals/compactor.py --simulate --turns 60 --no-compaction</code></pre>
+    Expect the run to stop at turn 42 with 32,635 tokens and the line "STOP: prompt exceeds the window. This is the E7 failure." Then run:
+    <pre><code data-lang="bash">python phase02_internals/compactor.py --simulate --turns 12 --inject-overflow 5</code></pre>
+    Expect call 5 to fail with a context-length error. The backstop compacts from 3,849 to 2,270 tokens, one retry succeeds, and the run continues. The summary line reports <code>backstops: 1</code>, and the next line tells you to lower <code>--trigger-ratio</code>. A backstop that fires is a bug report on the threshold.</li>
+</ul>
+
+<div class="callout note">Setup is <code>cd ~/Desktop/project/code/study-material/inference-internals/code &amp;&amp; pip install -e .</code>. E4, E11 and E12 need no API key. E8, E9 and E10 need <code>export OPENAI_API_KEY=sk-...</code> or another OpenAI-compatible endpoint through <code>--base-url</code> and <code>--key-env</code>, and they are marked unverified because nobody ran them against a live provider. Record every number you see, because Phase 5B uses your gap measurements.</div>
+<h2 data-kind="checkpoint">Checkpoint</h2>
+<p>Write your own answer before you open the sketch underneath each question. These five scenarios are the lesson's five claims, in your own words.</p>
+
+<details class="answer"><summary><b>Q1.</b> This is broken. Your streaming support answers look fine on the dashboard. Median TTFT is 600ms and median total time is 4.2s. Users report that the text "stops for a second" in the middle, and nothing in your metrics shows it. (a) Name the server behaviour that causes this. (b) Name the one metric you must add. (c) Your provider will not change its token budget for you, so name two things you can still change.</summary>
+<p>(a) Another request's long prefill ran in one iteration without chunking, the pass the scheduler section described as one forward pass doing prefill work, and every decoding request got no token during that pass. (b) The maximum inter-token gap per response, recorded while the stream runs, because median TTFT and total latency are averages and cannot show a freeze. (c) Shorten your own prompts so your prefills are small, and move long-context work to a separate endpoint or a batch path so it does not share a batch with interactive traffic. A fallback provider for interactive traffic is a third option.</p>
+</details>
+
+<details class="answer"><summary><b>Q2.</b> Walk through what happens, and show the arithmetic. A server uses the cost model from <code>batching_sim.py</code>. Three requests are decoding, a 24,000-token prompt arrives, and the token budget is 2,048. (a) How long do the three streams freeze without chunking? (b) With chunking, how many prefill tokens fit in each iteration and how many iterations does the prompt need? (c) How long is each chunked iteration?</summary>
+<p>(a) The prefill-only pass costs 24,000 × 0.03 = 720ms, and the three streams get no token during that pass. With the decode passes on each side, the measured worst gap in the default run is 764ms. (b) The budget reserves 3 tokens for the decodes, so 2,048 − 3 = 2,045 prefill tokens fit per iteration, and 24,000 / 2,045 = 11.7, so the prompt needs 12 iterations. (c) Each iteration costs 2,045 × 0.03 + 18 + 0.12 × 3 = 61.4 + 18.4 = 79.8ms, so the streams now pause about 80ms per token instead of 720ms once. The measured worst gap is 81ms, because the real batch holds more decodes.</p>
+</details>
+
+<details class="answer"><summary><b>Q3.</b> This is broken. Your classification service returns valid JSON that matches the schema on every call, and <code>finish_reason</code> is <code>stop</code>. Accuracy dropped 9 points after you enabled strict mode last week. (a) Give the most likely cause. (b) Describe the exact schema change you would test, including its place in the property order. (c) Name the measurement that would settle it, and say why one run is not enough.</summary>
+<p>(a) The schema forces the label early, so the model commits to a label with no room to reason in text first. This is the prompt-side format tax, the larger half of the drop. (b) Add a <code>reasoning</code> string as the first property, before the constrained fields, add it to <code>required</code>, and keep <code>additionalProperties: false</code>. A reasoning field placed last changes nothing, because decoding runs left to right. (c) Run the same labelled set through both schemas with <code>structured_lab.py</code>, and fix your parser first, because part of a measured drop can come from the scorer. One run is not enough because sampling varies: a 9-point gap can appear by chance on 12 items, so use <code>--repeat</code> and compare across runs.</p>
+</details>
+
+<details class="answer"><summary><b>Q4.</b> Given these constraints, design the context strategy. Your agent runs 200 tool-calling steps over several hours, and a policy rule says it must never issue a refund above 200 EUR. Cover the trigger, the text you copy word for word, the summary, what you drop, and cost records, and use the ConstraintRot numbers to justify one choice.</summary>
+<p>Set the trigger at a fixed token threshold well below the window, for example 50% to 60%, and check it before every call. Copy word for word across the boundary: the refund limit rule, every other policy constraint, and the last few turns. Summarise the earlier conversation into decisions, constraints and open items. Drop full tool results and replace them with pointers, such as an order id you can fetch again. The justification is the ConstraintRot split: 0% violations when the constraint survived compaction and 38% when it was dropped, so the refund rule must never depend on a summariser's choice. For cost records, the summarising call is a second billed call, so add it to the same run record, because your meter will count too little if those tokens sit outside top-level usage.</p>
+</details>
+
+<details class="answer"><summary><b>Q5.</b> A colleague says: "Compaction fixed our long-running agent. We compact at 60%, and tasks now finish." Give the counter-argument, name the finding about step count and context length, and say what you would measure to tell the two explanations apart.</summary>
+<p>The 2026 study of 10,664 trajectories found that task success falls with the number of steps, not with context length, and a smaller context window made the fall steeper, with a logit slope of −0.69 against −0.44. So the win may come from lower cost or from chance, not from fixing the decline. To separate the explanations, run two tests: hold the step count fixed and vary the context length, then hold the context length fixed and vary the step count, measuring task success in each. If success follows the step count in both tests, compaction was not the cause.</p>
+</details>
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+<pre class="cheatsheet" id="s17-cheatsheet">CHUNKED PREFILL
+  no chunking : one big prefill freezes every stream in the batch
+  chunking    : prefill shares max_num_batched_tokens with the decodes
+                decodes are reserved first: 2048 - 3 decodes = 2045 prefill
+  smaller budget → better inter-token smoothness, worse TTFT
+  larger budget  → better TTFT, worse smoothness
+  measured (batching_sim, chunked row): budget 512 → gap 35ms, TTFT 1094ms
+                                        budget 2048 → gap 81ms, TTFT 925ms
+                                        budget 8192 → gap 265ms, TTFT 908ms
+  48k prompt: chunking +112ms mean TTFT, worst gap 1460ms → 81ms
+  vLLM 0.29.0: no single default; H100 API server 8192, A100 2048
+  measure MAX INTER-TOKEN GAP; TTFT and total latency cannot see a freeze
+
+CONSTRAINED DECODING
+  mask illegal tokens each step → shape guaranteed, stopping NOT guaranteed
+  prompt only → no guarantee | json_object → valid JSON
+  json_schema + strict → schema obeyed
+  finish_reason still required: a truncated answer is a parse failure
+  schema rules: every key in required, additionalProperties false,
+    optional = union with null
+  THE TAX: format request in prompt ≈ -3.9 pts, the decoder ≈ -1.6 pts
+  reasoning field goes FIRST, or it does nothing
+  fixes: two calls (+6.8 avg, worsens 3%), thinking (+9.2 avg, worsens 15%)
+  report every tax number with its model and its parser
+
+CONTEXT BUDGET AND COMPACTION
+  zones with caps + headroom for the reply AND for the summarising call
+  TRIGGER on a token threshold you chose, before the call
+    compactor.py: 0.60 x 32,000 = 19,200 → fires at turn 25
+    shipped: context editing 100k, compaction API 150k (min 50k)
+  COPY WORD FOR WORD: constraints. 0% violations when kept, 38% when dropped
+  SUMMARISE: decisions, open items.   DROP: tool results, keep pointers
+  BACKSTOP: HTTP 400 + code context_length_exceeded → compact → retry ONCE
+    never match on message text; never resend the same prompt unchanged
+  compaction is billed: your summarising call is a second call
+  400k-token prompt x 50 steps x $2.00/M (gpt-4.1) = $40 per conversation
+
+THE COMMANDS (all offline except the live structured_lab run)
+  batching_sim.py --token-budget N          structured_lab.py --self-test
+  compactor.py --simulate --turns 40        compactor.py ... --no-compaction
+  compactor.py --simulate --turns 12 --inject-overflow 5</pre>
+<h2 data-kind="post">Post</h2>
+<div class="callout tip">
+<p><b>Post 1.</b> Your TTFT and total latency are averages, and an average cannot see a frozen stream: one neighbour's large prefill can pause your tokens for 800 ms while every dashboard stays green. Record the maximum gap between two tokens per response. It is the only metric that sees the pause.</p>
+</div>
+
+<div class="callout tip">
+<p><b>Post 2.</b> Strict mode with a JSON schema guarantees every emitted token is legal. It guarantees nothing about completeness: run out of tokens mid-object and the answer obeys the schema up to the cut and still crashes your parser. Keep the <code>finish_reason</code> check. Strict mode never replaces it.</p>
+</div>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+<li><a href="https://ar5iv.labs.arxiv.org/html/2403.02310">Sarathi-Serve (OSDI 2024)</a>: the measured freeze, up to 28.3 times the time between tokens, and the overhead floor at a 512-token budget.</li>
+<li><a href="https://ar5iv.labs.arxiv.org/html/2604.03616">The Format Tax (2026 preprint)</a>: the mask equation, the 3.9 versus 1.6 point split between the prompt and the decoder, and the two measured mitigations.</li>
+<li><a href="https://ar5iv.labs.arxiv.org/html/2606.22528">Governance Decay / ConstraintRot (2026 preprint)</a>: the compaction violation numbers and the pinning fix. A single-author preprint, not peer-reviewed, so treat the exact percentages as direction.</li>
+<li><a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/config/scheduler.py">vLLM v0.29.0 scheduler config</a>: the raw defaults for the token budget and chunked prefill, read at the tag.</li>
+<li><a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/engine/arg_utils.py">vLLM v0.29.0 engine argument utils</a>: where the budget is really resolved at startup, from GPU class and usage context.</li>
+<li><a href="https://developers.openai.com/api/docs/guides/structured-outputs">OpenAI structured outputs guide</a>: the three strictness levels, the first-request schema delay, and the list of unsupported schema keywords.</li>
+</ul>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

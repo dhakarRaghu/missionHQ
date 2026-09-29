@@ -74,8 +74,6 @@ Thin here: scalability laws. Only COST covers them.
 
 - **Hamel Husain** — hamel.dev · 2026-09-18 · evals and error analysis.
 - **Eugene Yan** — eugeneyan.com/writing · 2026-06-21 · eval design.
-- **Shreya Shankar** — sh-reya.com/blog · 2026-05-21 · evals, data
-  flywheels. Recheck: falls outside 120 days on 2026-09-18.
 - **Simon Willison, prompt-injection tag** — simonwillison.net/tags/prompt-injection
   · 2026-08-27 · attacks, defences, links to incidents. Take his own posts
   over the link notes.
@@ -313,9 +311,6 @@ Thin here: session guarantees. Terry 1994 has no readable free copy.
 - **Adaptive Capacity Labs** — adaptivecapacitylabs.com/blog · 2026-08-25 ·
   mixed · resilience engineering; take only the posts that analyse a named
   incident, skip the essays. Added 2026-09-27.
-- **Cloudflare postmortems** — blog.cloudflare.com/tag/post-mortem ·
-  2026-05-01 · global config changes; the Nov 2025 feature file, the Dec 2025
-  change behind "Fail Small".
 - **GitHub availability reports** — github.blog/tag/github-availability-report
   · 2026-09-09 · monthly. Open the individual report; the index is often just
   a count.
@@ -659,6 +654,9 @@ incidents section.
 **Other:** Adyen — engineering URL 404s. Ethan Mollick, Zvi Mowshowitz —
 not technical enough, or too much overlap with Latent Space.
 
+- **Shreya Shankar** — sh-reya.com/blog · newest post 2026-05-31 (moved by the source hunt 2026-09-28)
+- **Cloudflare postmortems (tag page)** — blog.cloudflare.com/tag/post-mortem · newest post 2026-05-01 (moved by the source hunt 2026-09-28)
+
 ## Could not verify — worth a manual look in the browser
 
 - **Rachel by the Bay** (rachelbythebay.com/w) and **Chris Siebenmann**
@@ -784,3 +782,10 @@ one request a minute); add a row when one of them joins a course.
 - When the unread backlog drops below six, a hunt starts on its own.
 - Every entry carries the date of the newest post seen.
 - The owner's edits win. Cross out anything you do not want to hear from.
+
+## Found by the source hunt
+
+- **Anton Zhiyanov** — antonz.org · 2026-09-26 · rebuilds Go and C concurrency and allocator machinery from first principles with his own benchmark tables (mutexes, channels, pthread vs goroutine costs); newest post 'Go concurrency distilled' dated 2026-09-26, eight posts since June · performance, concurrency and the machine; also storage (SQL/SQLite deep dives) (found 2026-09-28)
+- **Colfax Research** — research.colfax-intl.com · 2026-09-07 · optimization diaries with real TFLOP/s vs peak numbers, posted weekly; newest post 2026-09-07 · inference-internals and GPU performance (courses 3 and 1): Blackwell kernel internals, FlashAttention-4, GEMM (found 2026-09-28)
+- **Ashwani Jha** — ashwanijha.dev/blog · 2026-08-15 · writes TTFT-vs-TPOT and chunk-size tradeoffs from his own serving cluster; 18 inference posts and 41 paper breakdowns; newest 2026-08-15 · inference-internals: LLM serving, chunked prefill, MoE economics, paper breakdowns (found 2026-09-28)
+- **Soil & Silicon (Evan Carlson)** — soilandsilicon.dev · 2026-07-18 · implements, measures, and admits failures (Qwen3 pairing collapse, RNG noise across devices); newest read 2026-07-18 · inference-internals: from-scratch spec decoding, KV cache, local inference, with measured numbers (found 2026-09-28)
