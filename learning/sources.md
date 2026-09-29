@@ -551,6 +551,36 @@ paper a week, on the paper day.
 - A shelf is not fixed. A paper that turns out to be wrong for the phase goes,
   and the frontier days add new ones.
 
+## Building with AI — tools, products and practice
+
+For his field reading and his posts: what developers who use AI at work
+learn, ship and argue about. His posts are for that developer, not for
+people who study model serving, and the course sections above feed only
+the second. Take the post, never the announcement. All opened 2026-09-29.
+
+- **Simon Willison, the whole blog** — simonwillison.net · 2026-09-28 · new
+  models and tools tried the day they ship, with what they cost and where
+  they fail. Take his entries; skip the link notes.
+- **Addy Osmani** — addyosmani.com/blog · 2026-09-14 · how teams run AI
+  coding agents on real codebases. "Brownfield Agentic Engineering".
+- **The Pragmatic Engineer (Gergely Orosz)** — newsletter.pragmaticengineer.com
+  · 2026-09-24 · mixed · how AI changes engineering work: code review,
+  hiring, teams moving simple workloads to open models to cut AI bills. Many
+  deepdives are paywalled; use the free parts only.
+- **Ben's Bites** — bensbites.com · 2026-09-29 · mixed · what a builder
+  learns using agents each week, and tools worth trying. Skip the product
+  roundups; take the "how I built this" sessions.
+- **Harper Reed** — harper.blog · 2026-09-22 · mixed · working with coding
+  agents day to day. "Why Don't My Agents Break Containment?" The notes are
+  personal; take the posts.
+- **GitHub blog, AI & ML** — github.blog/ai-and-ml · 2026-09-25 · mixed ·
+  take the engineering posts ("Rendering huge pull requests in the GitHub
+  Copilot app", "Migrating the GitHub Copilot runtime to Rust"), skip the
+  feature announcements.
+- **Cursor blog** — cursor.com/blog · 2026-09-23 · mixed · how an AI coding
+  tool is built: token use in long agent runs, how it picks a model for a
+  task. Take the research posts, skip the company news.
+
 ## Production incidents — the highest-value reading
 
 Checked 2026-09-12.
