@@ -96,14 +96,17 @@ def register_problems(text: str) -> list[str]:
     plain = body.replace("’", "'")
     problems: list[str] = []
 
+    # A one-line take is too short to be judged on its contractions: "at
+    # this point, what we really need is more tok/sec" has none and is his.
+    short = len(body.split()) < int(gate.get("short_post_words", 0))
     apostrophes = len(_APOSTROPHE_RE.findall(body))
-    need = int(gate.get("min_apostrophes", 0))
+    need = 0 if short else int(gate.get("min_apostrophes", 0))
     if apostrophes < need:
         problems.append(
             f"{apostrophes} contraction(s); he writes at least {need} (it's, don't, I've)"
         )
     written = _count_phrases(plain, list(gate.get("written_out_forms") or []))
-    most = int(gate.get("max_written_out_forms", 99))
+    most = 99 if short else int(gate.get("max_written_out_forms", 99))
     if written > most:
         problems.append(
             f"{written} written-out forms (it is, do not, cannot); at most {most}, contract them"

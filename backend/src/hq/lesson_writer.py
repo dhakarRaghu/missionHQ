@@ -43,6 +43,7 @@ finished part are kept on disk per task until the lesson is recorded.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import html as html_lib
 import json
@@ -70,7 +71,9 @@ log = logging.getLogger(__name__)
 WRITER_DIR = assemble.WRITER_DIR
 SECTION_RETRIES = 2          # a part is rewritten at most twice for its own findings
 PLAN_ATTEMPTS = 4            # a plan is sent back at most three times with what failed
-REPAIR_ROUNDS = 1            # whole-page and citation findings: one round of repairs
+REPAIR_ROUNDS = 1            # citation findings: one round of repairs
+PAGE_REPAIR_ROUNDS = 2       # whole-page findings: each round repairs every finding named
+HEAVY_MIN_SENTENCES = 4      # a part shorter than this is not measured for plainness
 NOTE_CHARS = 60_000          # a study note is a few thousand words; this is a ceiling
 # His whole phase reaches the plan: at 40,000 a 55,000-character phase lost
 # its references and its cheatsheet before the plan saw them.
@@ -123,7 +126,9 @@ SECTION_EFFORT = "low"
 # out behind them, so the medium attempt is one model with a hard limit,
 # and a low-effort rewrite with the same instruction is the fallback.
 REWRITE_EFFORT = "medium"
-REWRITE_LIMIT_S = 1200.0
+# 15 minutes: the good medium rewrites measured 627 and 738 seconds; one that
+# ran to 1,200 seconds finished nothing.
+REWRITE_LIMIT_S = 900.0
 OUTLINE_LIMIT_S = 900.0
 _OUTLINE_STEP: dict[str, Any] = {**_STEP, "timeout_seconds": OUTLINE_LIMIT_S * 3 + 30.0}
 
@@ -403,6 +408,50 @@ async def _section_step(spec_model: str, prompt: str, effort: str = SECTION_EFFO
                   model_settings=_with(model_settings, reasoning_effort=effort))
     result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=2))
     return str(result.output)
+
+
+class Tightened(BaseModel):
+    n: int
+    html: str
+
+
+class TightenedSet(BaseModel):
+    paragraphs: list[Tightened] = Field(default_factory=list)
+
+
+def tighten_instructions() -> str:
+    return (writer_dir() / "tighten.md").read_text()
+
+
+@DBOS.step(name="writer.tighten", **_STEP)
+async def _tighten_step(spec_model: str, paragraphs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Split the long sentences of these paragraphs and change nothing else."""
+    model, model_settings = _model_for(spec_model)
+    agent = Agent(model, output_type=PromptedOutput(TightenedSet), retries=2,
+                  instructions=tighten_instructions(),
+                  model_settings=_with(model_settings, reasoning_effort=SECTION_EFFORT))
+    result = await agent.run(
+        "<paragraphs>\n" + json.dumps(paragraphs, ensure_ascii=False, indent=1)
+        + "\n</paragraphs>", usage_limits=UsageLimits(request_limit=3))
+    return result.output.model_dump()
+
+
+def correct_instructions() -> str:
+    return (writer_dir() / "correct.md").read_text()
+
+
+@DBOS.step(name="writer.correct", **_STEP)
+async def _correct_step(spec_model: str, note: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Correct the unsupported sentences of each of these paragraphs."""
+    model, model_settings = _model_for(spec_model)
+    agent = Agent(model, output_type=PromptedOutput(TightenedSet), retries=2,
+                  instructions=correct_instructions(),
+                  model_settings=_with(model_settings, reasoning_effort=SECTION_EFFORT))
+    result = await agent.run(
+        f"<note>\n{note[:MATERIAL_CHARS]}\n</note>\n\n<paragraphs>\n"
+        + json.dumps(items, ensure_ascii=False, indent=1) + "\n</paragraphs>",
+        usage_limits=UsageLimits(request_limit=3))
+    return result.output.model_dump()
 
 
 @DBOS.step(name="writer.release_test", **_STEP)
@@ -1049,8 +1098,14 @@ def clean_section(raw: str) -> str:
 
 def section_problems(html: str, *, earlier: str, article: bool, kind: str,
                      apparatus: bool, total_words: int, budget: int = 0,
-                     source: str = "") -> list[str]:
-    """What the page check would say about this one part, as refusals."""
+                     source: str = "", orientation: bool = False,
+                     quoted: bool = False) -> list[str]:
+    """What the page check would say about this one part, as refusals.
+
+    `orientation`: the orientation section is apparatus, but the page check
+    counts it among the teaching sentences, so its rules are held here too.
+    On 2026-09-28 a dated sentence in "Where this phase starts" passed its
+    part, then refused the page after two and a half hours of writing."""
     probs: list[str] = []
     if not html.strip():
         return ["the section is empty"]
@@ -1064,7 +1119,8 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
         probs.append(f"a figure cannot work: {broken}")
     # No em dashes, as the charter and teacher.md say; the page tolerates a
     # few as a backstop, so the part is where the rule is held.
-    if "\u2014" in lt._page_text(html):
+    # A source list quotes page titles as their authors wrote them.
+    if not quoted and "\u2014" in lt._page_text(html):
         probs.append("an em dash; he uses none. Split the sentence or use a comma")
     # His lab, kept exactly: checked on the part that quotes it.
     if source:
@@ -1090,7 +1146,7 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
     words = lt._visible_words(html)
     # A checked-on date inside a teaching sentence: the page refuses it, so
     # the part that carries it is sent back now, not the whole page later.
-    if not apparatus:
+    if not apparatus or orientation:
         prose = lt._ASIDE_RE.sub(" ", html)
         stamped = [s for s in lt._sentences(lt._page_text(prose)) if lt._ISO_DATE_RE.search(s)]
         if stamped:
@@ -1117,6 +1173,198 @@ def section_problems(html: str, *, earlier: str, article: bool, kind: str,
                      f" {budget}. Cut it to that: keep the mechanism and the one piece of"
                      " evidence, drop restatement and history")
     return probs
+
+
+# Findings about sentence length and em dashes are mechanical: the section
+# teaches, but its sentences are too long for him. A whole rewrite for them
+# made new long sentences as fast as it split old ones: on 2026-09-29, 9 of
+# 19 sections of Phase 2B were still over the limit after three rewrites
+# each. These are repaired by a targeted edit of the paragraphs that carry
+# them, and a paragraph whose edit changes anything else keeps its text.
+_MECHANICAL = ("sentences average", "an em dash")
+LONG_WORDS = lt.LONG_SENTENCE_WORDS
+# When the average is what is over, sentences of 21 to 25 words carry it: on
+# 2026-09-29 six 2B sections averaged 18 to 20 words with almost none over 25,
+# so a split of the over-25 sentences alone could not bring them down.
+AVERAGE_SPLIT_WORDS = 20
+TIGHTEN_MAX = 24             # paragraphs sent in one call
+_PARA_RE = re.compile(r"(?is)<p\b[^>]*>.*?</p>")
+_TAG_RE = re.compile(r"(?i)<(/?)(\w+)\b[^>]*>")
+_HREF_RE = re.compile(r'(?i)href="([^"]*)"')
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+# Findings that make a section wrong, not only harder to read. A repair may
+# never bring one in: on 2026-09-29 the page check sent the lab section to a
+# rewrite for sentence length, the rewrite invented a Run: command, and the
+# page was refused for it after five hours of writing.
+_HARD_SECTION = ("send the section body only", "placeholders left in", "a figure cannot work",
+                 "exercise ids that his lab does not have",
+                 "these Run: commands are not in his lab",
+                 "it names one of the owner's employers")
+
+
+def hard_findings(findings: Sequence[str]) -> list[str]:
+    return [f for f in findings if f.startswith(_HARD_SECTION)]
+
+
+def hard_items(findings: set[str] | Sequence[str]) -> set[tuple[str, str]]:
+    """Each finding as its separate items. A page finding lists its items
+    ("links that are in neither ...: A, B"), and a repair that clears A
+    changes the string without bringing anything in; compared item by item,
+    only a new link, id or concept counts as brought in."""
+    out: set[tuple[str, str]] = set()
+    for f in findings:
+        head, sep, rest = f.partition(": ")
+        if not sep:
+            out.add((f, ""))
+            continue
+        listed = rest.split(". ", 1)[0]
+        listed = re.sub(r" and \d+ more$", "", listed)
+        out |= {(head, item.strip()) for item in listed.split(", ") if item.strip()}
+    return out
+
+
+def _rank(findings: Sequence[str]) -> tuple[int, int]:
+    """How bad an attempt is: hard findings first, then all findings."""
+    return len(hard_findings(findings)), len(findings)
+
+
+# An unsupported sentence is one sentence. The citation repair used to
+# rewrite its whole section, and on 2026-09-29 that cut Phase 2B's 18
+# unsupported sentences to 7 while writing new ones into the rewrites. Now
+# the paragraph that holds it is sent with the sentence and the reason, and
+# a correction that changes anything else in the paragraph is not used.
+_BLOCK_RE = re.compile(r"(?is)<(p|li|td|figcaption)\b[^>]*>.*?</\1>")
+CORRECT_MAX = 16             # paragraphs corrected in one call
+
+
+def _flat(text: str) -> str:
+    return " ".join(lt._page_text(text).split())
+
+
+def block_holding(html: str, sentence: str) -> str:
+    """The paragraph, list item or cell whose text holds this sentence, or ""."""
+    want = " ".join(sentence.split())[:120]
+    for m in _BLOCK_RE.finditer(html):
+        if want and want in _flat(m.group(0)):
+            return m.group(0)
+    return ""
+
+
+_OPEN_RE = re.compile(r"<(\w+)\b([^>]*)>")
+
+
+def _spans(html: str) -> list[tuple[str, str, str]]:
+    """Every element with its closing tag, nested ones too, as (tag, its
+    attributes, its text), the paragraph's own element first."""
+    out = []
+    for m in _OPEN_RE.finditer(html):
+        tag = m.group(1).lower()
+        whole = re.compile(rf"(?is)<{tag}\b[^>]*>(.*?)</{tag}>").match(html, m.start())
+        if whole:
+            out.append((tag, " ".join(m.group(2).split()), " ".join(_flat(whole.group(1)).split())))
+    return out
+
+
+def corrected_ok(before: str, after: str, sentences: str | Sequence[str], note: str) -> bool:
+    """Whether a corrected paragraph changed only its flagged sentences: every
+    other sentence word for word with its markup, no markup or link that was
+    not there, at least one flagged sentence changed, no number that is in
+    neither the paragraph nor the note, and no em dash. A flagged sentence
+    may lose its markup: the note may support none of it."""
+    if not after.strip().startswith("<") or "\u2014" in _flat(after):
+        return False
+    flagged = [" ".join(f.split()) for f in ([sentences] if isinstance(sentences, str)
+                                             else sentences) if f.strip()]
+    old, new = _spans(before), _spans(after)
+    if not old or not new or old[0][:2] != new[0][:2]:
+        return False                      # the paragraph's own element changed
+    left = list(old[1:])
+    for span in new[1:]:
+        if span not in left:
+            return False                  # markup or a link that was not there
+        left.remove(span)
+    if any(not any(text in f for f in flagged) for _tag, _attrs, text in left):
+        return False                      # markup lost outside the flagged sentences
+    if _HREF_RE.findall(after) and not set(_HREF_RE.findall(after)) <= set(_HREF_RE.findall(before)):
+        return False
+    new_text = _flat(after)
+    # Every sentence, short ones too: `lt._sentences` keeps only those over
+    # seven words, and a short one deleted or changed passed unseen.
+    for other in lt._SENTENCE_SPLIT_RE.split(" ".join(_flat(before).split())):
+        other = other.strip()
+        if other and not any(other in f or f in other for f in flagged) \
+                and other not in new_text:
+            return False
+    if flagged and all(f in new_text for f in flagged):
+        return False                      # nothing was corrected
+    known = set(_NUMBER_RE.findall(_flat(before))) | set(_NUMBER_RE.findall(note))
+    return set(_NUMBER_RE.findall(new_text)) <= known
+
+
+def mechanical_page(findings: Sequence[str]) -> bool:
+    """Whether every page finding is about sentence length or em dashes."""
+    return bool(findings) and all("reads heavier" in f or "em dashes in the prose" in f
+                                  for f in findings)
+
+
+def mechanical(findings: Sequence[str]) -> bool:
+    """Whether every finding is one a targeted edit can repair."""
+    return bool(findings) and all(f.startswith(_MECHANICAL) for f in findings)
+
+
+def split_target(findings: Sequence[str]) -> int:
+    """The longest sentence a split may leave: 20 words when a finding is
+    about the average, else the long-sentence limit."""
+    average = any(f.startswith("sentences average") or "reads heavier" in f for f in findings)
+    return AVERAGE_SPLIT_WORDS if average else LONG_WORDS
+
+
+def heavy_paragraphs(html: str, over: int = LONG_WORDS) -> list[str]:
+    """The paragraphs with a sentence over `over` words or an em dash, in order."""
+    out = []
+    for para in _PARA_RE.findall(html):
+        text = lt._page_text(para)
+        if "\u2014" in text or any(len(x.split()) > over for x in lt._sentences(text)):
+            out.append(para)
+    return out
+
+
+def _signature(para: str) -> tuple[list[str], list[str], list[str], list[str]]:
+    text = lt._page_text(para)
+    tags = sorted(m.group(1) + m.group(2).lower() for m in _TAG_RE.finditer(para))
+    words = [w for w in re.findall(r"<dfn\b[^>]*>(.*?)</dfn>", para, re.IGNORECASE | re.DOTALL)]
+    # Code is his lab's or a command's exact text: kept character for character.
+    words += re.findall(r"<code\b[^>]*>(.*?)</code>", para, re.IGNORECASE | re.DOTALL)
+    return sorted(_NUMBER_RE.findall(text)), tags, sorted(_HREF_RE.findall(para)), words
+
+
+def tightened_ok(before: str, after: str, over: int = LONG_WORDS) -> bool:
+    """Whether an edited paragraph kept everything and is easier to read:
+    the same numbers, tags, links and defined terms, no em dash, no sentence
+    over the long limit, and not more than a tenth shorter."""
+    if not after.strip().lower().startswith("<p") or "\u2014" in lt._page_text(after):
+        return False
+    if _signature(before) != _signature(after):
+        return False
+    new = lt._page_text(after)
+    if any(len(x.split()) > over for x in lt._sentences(new)):
+        return False
+    return len(new.split()) >= 0.9 * len(lt._page_text(before).split())
+
+
+def apply_tightened(html: str, sent: Sequence[str], reply: Mapping[str, Any],
+                    over: int = LONG_WORDS) -> tuple[str, int]:
+    """(html with the accepted edits, how many were accepted)."""
+    by_n = {int(p.get("n", 0)): str(p.get("html") or "") for p in reply.get("paragraphs") or []}
+    accepted = 0
+    for n, para in enumerate(sent, 1):
+        new = by_n.get(n, "")
+        if new and tightened_ok(para, new, over) and para in html:
+            html = html.replace(para, new, 1)
+            accepted += 1
+    return html, accepted
 
 
 def connection_problems(html: str, plan: SectionPlan) -> list[str]:
@@ -1477,6 +1725,26 @@ class Writer:
         # finding does not undo the teaching fix.
         self.editor_scores: dict[int, SectionScore] = {}
         self.teaching_notes: dict[int, str] = {}
+        # Quality findings the page repairs did not clear; the lesson is kept
+        # and flagged with them.
+        self.page_flags: list[str] = []
+
+    async def _progress(self, stage: str, text: str, done: int | None = None,
+                        total: int | None = None) -> None:
+        """One line on the run's Steps pane. The writer's work happens in its
+        own durable steps, which the pane does not show, so a two-hour
+        write-up read as a run that had only started. Never raises: a report
+        that fails must not fail the lesson."""
+        from hq.runner import emit_step
+
+        payload: dict[str, Any] = {"stage": stage, "text": text[:400]}
+        if done is not None and total is not None:
+            payload.update(done=done, total=total)
+        try:
+            await emit_step("writer.progress", run_id=self.deps.run_id,
+                            task_id=self.deps.task_id, agent=self.deps.agent, payload=payload)
+        except Exception:  # a report that fails must not fail the lesson
+            log.warning("writer: progress not recorded", exc_info=True)
 
     # Parts: 1 is the opening (story + concept list); section k is part k + 1.
     async def _save(self, part: int, html: str) -> dict[str, Any]:
@@ -1510,6 +1778,8 @@ class Writer:
                     # is, so he sees the doubt without losing the run.
                     self.release_flags = problems
                     self.report.append("release test, kept with doubts: " + "; ".join(problems))
+                    await self._progress("plan", "plan kept on the last attempt, with the"
+                                         " release test's doubts flagged")
                     return outline
             if not problems and not self.m.page:
                 # The order of terms and the links between sections. Sent
@@ -1519,23 +1789,43 @@ class Writer:
                 order = ledger_problems(outline, self.m.known_terms)
                 if order and attempt == PLAN_ATTEMPTS - 1:
                     self.report.append("order of terms, kept with doubts: " + "; ".join(order))
+                    await self._progress("plan", "plan kept on the last attempt, with doubts"
+                                         " about the order of terms")
                     return outline
                 problems = order
             if not problems:
+                await self._progress("plan", f"plan accepted on attempt {attempt + 1}:"
+                                     f" {len(outline.concepts)} concepts,"
+                                     f" {len(outline.sections)} sections")
                 return outline
             self.report.append(f"plan attempt {attempt + 1} sent back: " + "; ".join(problems))
+            await self._progress("plan", f"plan attempt {attempt + 1} sent back: "
+                                 + "; ".join(problems)[:300], attempt + 1, PLAN_ATTEMPTS)
         raise lt.LessonRefused(f"the plan still fails after {PLAN_ATTEMPTS} attempts: "
                                + "; ".join(problems))
 
     async def _rewrite_or_draft(self, prompt: str) -> str:
-        """The editor's rewrite: medium effort when it finishes in time, else
-        the ordinary draft call with the same instruction in the prompt."""
+        """The editor's rewrite: the higher-effort call when it finishes
+        within its limit, else the ordinary section call.
+
+        Both start together. The higher effort writes better sections
+        (measured 2026-09-25: it defined its terms first and drew a fuller
+        trace), but it can run long: on 2026-09-29 one ran out its whole
+        limit and the section waited twenty minutes for a fallback that then
+        took 81 seconds. Started together, the fallback is ready when the
+        limit is reached, so a slow rewrite costs no extra wait."""
+        fallback = asyncio.ensure_future(_section_step(self.spec.model, prompt))
         try:
             return await _rewrite_step(self.spec.model, prompt)
         except Exception as exc:  # noqa: BLE001 — a slow rewrite falls back, never fails the run
             self.report.append(f"medium rewrite did not finish ({type(exc).__name__});"
                                " rewritten at low effort instead")
-            return await _section_step(self.spec.model, prompt)
+            return await fallback
+        finally:
+            if not fallback.done():
+                # Kept, not cancelled: a step cut off mid-call leaves no record.
+                with contextlib.suppress(Exception):
+                    await fallback
 
     async def write_section(self, i: int, problems: list[str] | None = None) -> str:
         assert self.outline is not None
@@ -1547,27 +1837,113 @@ class Writer:
         html = ""
         budget = self.budgets.get(i, 0)
         standing = self.teaching_notes.get(i, "")
+        best: tuple[str, list[str]] | None = None
         for _ in range(SECTION_RETRIES + 1):
             asked = found + ([standing] if standing and standing not in found else [])
             prompt = _section_prompt(self.m, self.outline, i, s, previous, asked, budget)
             raw = await self._rewrite_or_draft(prompt) if standing else await _section_step(
                 self.spec.model, prompt)
             html = _h2(i, s) + "\n" + clean_section(raw)
-            found = section_problems(html, earlier=earlier, article=self.m.article,
-                                     kind=self.evidence_kind(), apparatus=bool(s.kind),
-                                     total_words=total, budget=budget,
-                                     source=self.m.source or self.m.lab_source)
-            if not self.m.page:
-                found += connection_problems(html, s)
+            found = self._section_findings(i, html, earlier, total, budget)
+            if mechanical(found):
+                html = await self._tighten(i, html, split_target(found))
+                found = self._section_findings(i, html, earlier, total, budget)
+            if best is None or _rank(found) < _rank(best[1]):
+                best = (html, list(found))
             if not found:
                 break
+        # The best attempt is kept, not the last: a third attempt that brought
+        # in a hard finding must not replace a second that had none.
+        assert best is not None
+        html, found = best
         if found:
             self.report.append(f"section {i} ({s.heading}) kept with: " + "; ".join(found))
+        await self._progress("section", f"section {i} written: {s.heading}"
+                             + (f" (kept with {len(found)} finding(s))" if found else ""),
+                             i, len(self.outline.sections))
         if len(self.parts) <= i:
             self.parts.extend([""] * (i + 1 - len(self.parts)))
         self.parts[i] = html
         await self._save(i + 1, html)
         return html
+
+    def _section_findings(self, i: int, html: str, earlier: str, total: int,
+                          budget: int) -> list[str]:
+        assert self.outline is not None
+        s = self.outline.sections[i - 1]
+        found = section_problems(html, earlier=earlier, article=self.m.article,
+                                 kind=self.evidence_kind(), apparatus=bool(s.kind),
+                                 total_words=total, budget=budget,
+                                 source=self.m.source or self.m.lab_source,
+                                 orientation=s.kind == "orientation",
+                                 quoted=s.kind == "sources")
+        if not self.m.page:
+            found += connection_problems(html, s)
+        return found
+
+    def _findings_of(self, i: int, html: str) -> list[str]:
+        """Section i's own findings for this text, in its place on the page."""
+        earlier = "\n".join(self.parts[:i])
+        total = sum(lt._visible_words(p) for p in self.parts[:i])
+        return self._section_findings(i, html, earlier, total, self.budgets.get(i, 0))
+
+    async def _correct(self, i: int, found: Sequence[Mapping[str, Any]]) -> int:
+        """Correct part i's unsupported sentences one paragraph at a time, in
+        one call; returns how many corrections were used."""
+        html = self.parts[i]
+        # One item per paragraph, with every flagged sentence it holds: a
+        # paragraph sent once per sentence would have its second sentence
+        # held unchanged by the check on the first correction.
+        by_block: dict[str, list[dict[str, str]]] = {}
+        for c in found:
+            block = block_holding(html, str(c.get("claim") or ""))
+            if block and (block in by_block or len(by_block) < CORRECT_MAX):
+                by_block.setdefault(block, []).append(
+                    {"sentence": str(c["claim"]), "why": str(c.get("why", ""))})
+        items: list[dict[str, Any]] = [
+            {"n": n, "html": block, "sentences": flagged}
+            for n, (block, flagged) in enumerate(by_block.items(), 1)]
+        if not items:
+            return 0
+        note = self._material()
+        try:
+            reply = await _correct_step(self.spec.model, note, items)
+        except Exception as exc:  # noqa: BLE001 — the sentences stay flagged
+            self.report.append(f"section {i}: correction failed ({type(exc).__name__})")
+            return 0
+        by_n = {int(p.get("n", 0)): str(p.get("html") or "") for p in reply.get("paragraphs") or []}
+        used = 0
+        for item in items:
+            new = by_n.get(int(item["n"]), "")
+            if new and corrected_ok(item["html"], new,
+                                    [f["sentence"] for f in item["sentences"]], note) \
+                    and item["html"] in html:
+                html = html.replace(item["html"], new, 1)
+                used += 1
+        if used:
+            self.parts[i] = html
+            await self._save(i + 1, html)
+        await self._progress("citations", f"section {i}: {used} of {len(items)} unsupported"
+                             " sentence(s) corrected in place")
+        return used
+
+    async def _tighten(self, i: int, html: str, over: int = LONG_WORDS) -> str:
+        """Split the long sentences of section i's paragraphs, in one call,
+        and keep only the edits that changed nothing else. `over` is the
+        longest sentence the split may leave."""
+        sent = heavy_paragraphs(html, over)[:TIGHTEN_MAX]
+        if not sent:
+            return html
+        try:
+            reply = await _tighten_step(self.spec.model, [
+                {"n": n, "html": p, "split_over_words": over} for n, p in enumerate(sent, 1)])
+        except Exception as exc:  # noqa: BLE001 — the section is kept as written
+            self.report.append(f"section {i}: sentence split failed ({type(exc).__name__})")
+            return html
+        new, accepted = apply_tightened(html, sent, reply, over)
+        await self._progress("section", f"section {i}: {accepted} of {len(sent)} paragraph(s)"
+                             " split into shorter sentences")
+        return new
 
     async def opening(self) -> None:
         assert self.outline is not None
@@ -1586,7 +1962,9 @@ class Writer:
             " here, not named. No heading, no list, no figure. Return the paragraphs as"
             " HTML.\n\nId prefix: s0-\n")
         raw = await _section_step(self.spec.model, prompt)
-        top = (_map_html(self.m.course_map) + _concept_lead(self.outline)
+        # The console shows where he is in the course, so the page does not;
+        # the writer still gets the course map in its own prompt (m.memory).
+        top = (_concept_lead(self.outline)
                + _concept_list(self.outline) if self.outline.concepts else
                f'<div class="keypoints"><p class="remember">{_esc(self.outline.takeaway)}</p></div>')
         html = clean_section(raw) + "\n" + top
@@ -1641,37 +2019,146 @@ class Writer:
                     self.parts[i], earlier=earlier, article=self.m.article, kind=self.m.kind,
                     apparatus=bool(self.outline.sections[i - 1].kind),
                     total_words=sum(lt._visible_words(p) for p in self.parts[:i]),
-                    budget=self.budgets.get(i, 0), source=self.m.source or self.m.lab_source):
+                    budget=self.budgets.get(i, 0), source=self.m.source or self.m.lab_source,
+                    orientation=self.outline.sections[i - 1].kind == "orientation",
+                    quoted=self.outline.sections[i - 1].kind == "sources"):
                 out.append(i)
         return out
 
-    async def assemble(self) -> tuple[str, str]:
+    def _heavy_parts(self) -> list[int]:
+        """For the page's plainness finding, which names no part: the parts
+        whose own sentences are over the page's limits, heaviest first."""
+        heavy = []
+        for i in range(1, len(self.parts)):
+            text = lt.teaching_prose(self.parts[i])
+            if len(lt._sentences(text)) < HEAVY_MIN_SENTENCES:
+                continue
+            avg, long = lt.reading_ease(text)
+            if avg > lt.PLAIN_SENTENCE_WORDS or long > lt.PLAIN_LONG_SHARE:
+                heavy.append((avg + 40 * long, i))
+        return sorted(i for _w, i in sorted(heavy, reverse=True))
+
+    def _page_hard(self, parts: Sequence[str]) -> set[str]:
+        """The hard findings the page check would raise for these parts: its
+        links, its concepts, its figures. A section's own check cannot see
+        them, and a repair may never bring one in."""
+        html = "\n".join(parts)
+        if self.m.page:
+            found = lt.page_findings(self.m.lab_source, html, self.m.note, least=0, most=0)
+        elif self.m.source:
+            found = lt.page_findings(self.m.source, html, self.m.note)
+        else:
+            found = lt.page_findings("", html, "", least=1, most=1)
+        broken = lt.page_script_problems(html)
+        return set(found.hard) | ({f"a figure on the page cannot work: {broken}"} if broken else set())
+
+    def _hard_now(self, i: int) -> set[tuple[str, str]]:
+        return hard_items(set(hard_findings(self._findings_of(i, self.parts[i])))
+                          | self._page_hard(self.parts))
+
+    async def _rewrite_kept(self, i: int, notes: list[str], stage: str) -> None:
+        """Rewrite section i, and put the earlier text back when the rewrite
+        brings in a hard finding. On 2026-09-29 a rewrite for sentence length
+        invented a Run: command in the lab, and the page was refused for it
+        after five hours of writing. A rewrite never makes a page wrong."""
+        before = self.parts[i]
+        before_hard = self._hard_now(i)
+        await self.write_section(i, notes)
+        brought = self._hard_now(i) - before_hard
+        if brought:
+            self.parts[i] = before
+            await self._save(i + 1, before)
+            self.report.append(f"section {i}: the {stage} rewrite brought in "
+                               + "; ".join(f"{h}: {x}" if x else h
+                                           for h, x in sorted(brought))[:200]
+                               + ", so the earlier version was kept")
+            await self._progress(stage, f"section {i}: rewrite reverted, it brought"
+                                 " in a hard finding")
+
+    def _parts_for(self, finding: str) -> list[int]:
+        """The sections one page finding points at: by a quote, a url or a
+        heading it names; for a page-wide measure, the parts over it; else
+        the parts that fail their own checks, else the largest."""
+        if "reads heavier" in finding:
+            return self._heavy_parts() or self._largest_parts()
+        return (self._parts_quoting(finding) or self._over_budget(finding)
+                or self._failing_parts() or self._largest_parts())
+
+    async def _finish(self, *, quality_ok: bool = False) -> tuple[str, str]:
         assert self.outline is not None
-        for round_ in range(REPAIR_ROUNDS + 1):
+        return await _once("finish",
+            self.deps.task_id, self.m.slug, title=self.outline.title,
+            subtitle=self.outline.subtitle, eyebrow=self.outline.eyebrow,
+            article_kind=self.m.kind or None, run_id=self.deps.run_id,
+            agent=self.deps.agent, page=bool(self.m.page),
+            material=self.m.note if self.m.page else "",
+            lab_source=self.m.lab_source, quality_ok=quality_ok)
+
+    async def assemble(self) -> tuple[str, str]:
+        """Check the whole page, and repair what it names.
+
+        Each finding is sent to the sections that cause it, all findings in
+        one round, for up to PAGE_REPAIR_ROUNDS rounds. When what is left is
+        only quality measures, the page is kept and the lesson is flagged
+        with them: two runs of Phase 2B were lost after about two and a half
+        hours each, for one dated sentence and for an average sentence length
+        two words over its limit. A hard finding still refuses the page."""
+        assert self.outline is not None
+        last: lt.LessonRefused | None = None
+        for round_ in range(PAGE_REPAIR_ROUNDS + 1):
             try:
-                return await _once("finish",
-                    self.deps.task_id, self.m.slug, title=self.outline.title,
-                    subtitle=self.outline.subtitle, eyebrow=self.outline.eyebrow,
-                    article_kind=self.m.kind or None, run_id=self.deps.run_id,
-                    agent=self.deps.agent, page=bool(self.m.page),
-                    material=self.m.note if self.m.page else "",
-                    lab_source=self.m.lab_source)
+                done = await self._finish()
+                await self._progress("page", "the page passed its checks and was written")
+                return done
             except lt.LessonRefused as exc:
-                message = str(exc)
-                # Named by a quote, a url or a heading; failing that, the
-                # parts that fail their own checks, which mirror the page's.
-                parts = (self._parts_quoting(message) or self._over_budget(message)
-                         or self._failing_parts() or self._largest_parts())
-                self.report.append(f"page check: {message[:300]}"
-                                   + (f" (sections {parts})" if parts else ""))
-                if round_ == REPAIR_ROUNDS or not parts:
-                    raise
-                for i in parts:
-                    note = f"the whole-page check said: {message}"
+                last = exc
+                todo: dict[int, list[str]] = {}
+                for finding in exc.findings:
+                    for i in self._parts_for(finding):
+                        todo.setdefault(i, []).append(finding)
+                self.report.append(f"page check, round {round_ + 1}: {str(exc)[:300]}"
+                                   + (f" (sections {sorted(todo)})" if todo else ""))
+                await self._progress(
+                    "page", f"page check round {round_ + 1}: {len(exc.findings)} finding(s)"
+                    + (f", sent to sections {sorted(todo)}" if todo else "")
+                    + ("" if exc.quality_only else ", at least one of them hard"),
+                    round_ + 1, PAGE_REPAIR_ROUNDS + 1)
+                if round_ == PAGE_REPAIR_ROUNDS or not todo:
+                    break
+                for i, findings in sorted(todo.items()):
+                    kind = self.outline.sections[i - 1].kind if i <= len(self.outline.sections) else ""
+                    before = self.parts[i]
+                    if kind == "lab" and not any(f in exc.hard for f in findings):
+                        # His lab is his exact text. A quality finding does not
+                        # rewrite it; at most its sentences are split.
+                        if mechanical_page(findings):
+                            fixed = await self._tighten(i, before, split_target(findings))
+                            if fixed != before:
+                                self.parts[i] = fixed
+                                await self._save(i + 1, fixed)
+                        continue
+                    if mechanical_page(findings):
+                        # Sentence length only: split in place, as a section's
+                        # own length finding is. A rewrite of seven sections for
+                        # it cost half an hour a round and made new long ones.
+                        fixed = await self._tighten(i, self.parts[i], split_target(findings))
+                        if fixed != self.parts[i]:
+                            self.parts[i] = fixed
+                            await self._save(i + 1, fixed)
+                        continue
+                    note = "the whole-page check said: " + "; ".join(findings)
                     if i in self.budgets:
                         note += f" This section's share is about {self.budgets[i]} words."
-                    await self.write_section(i, [note])
-        raise AssertionError("unreachable")
+                    await self._rewrite_kept(i, [note], "page")
+        assert last is not None
+        if not last.quality_only:
+            raise last
+        self.page_flags = list(last.findings)
+        self.report.append("page kept with quality findings the repairs did not clear: "
+                           + "; ".join(self.page_flags)[:400])
+        await self._progress("page", f"page kept and flagged with {len(self.page_flags)}"
+                             " quality finding(s) the repairs did not clear")
+        return await self._finish(quality_ok=True)
 
     def _material(self) -> str:
         """What the writer was given, so what the citation judge checks against:
@@ -1725,13 +2212,11 @@ class Writer:
             unsupported = await self._unsupported(claims)
             if not unsupported or not repair or round_ == REPAIR_ROUNDS:
                 break
-            by_part: dict[int, list[str]] = {}
+            by_part: dict[int, list[dict[str, Any]]] = {}
             for c in unsupported:
-                by_part.setdefault(c["part"], []).append(f"“{c['claim'][:200]}” ({c['why']})")
-            for i, sentences in by_part.items():
-                await self.write_section(i, [
-                    "these sentences are not supported by the study note; remove each, or"
-                    " state only what the note supports: " + "; ".join(sentences)])
+                by_part.setdefault(c["part"], []).append(c)
+            for i, found in by_part.items():
+                await self._correct(i, found)
             todo = sorted(by_part)
         return unsupported
 
@@ -1826,7 +2311,7 @@ class Writer:
             cache.setdefault(i, {}).update(edited=True, instruction=self.teaching_notes[i])
             save_scores(self.deps.task_id, cache)
             self.report.append(f"editor sent back section {i}: {self.teaching_notes[i][:300]}")
-            await self.write_section(i, [self.teaching_notes[i]])
+            await self._rewrite_kept(i, [self.teaching_notes[i]], "editor")
         return chosen
 
     def editor_summary(self) -> tuple[list[str], str, list[int]]:
@@ -1873,18 +2358,34 @@ class Writer:
                 kept, earlier="\n".join(self.parts[:i]), article=self.m.article,
                 kind=self.m.kind, apparatus=bool(self.outline.sections[i - 1].kind),
                 total_words=sum(lt._visible_words(p) for p in self.parts[:i]),
-                budget=self.budgets.get(i, 0), source=self.m.source or self.m.lab_source)
-            if kept and not stale:
+                budget=self.budgets.get(i, 0), source=self.m.source or self.m.lab_source,
+                orientation=self.outline.sections[i - 1].kind == "orientation",
+                quoted=self.outline.sections[i - 1].kind == "sources")
+            if kept and mechanical(list(stale or [])):
+                # Its teaching was accepted; only its sentences are too long.
                 self.parts.append(kept)
+                fixed = await self._tighten(i, kept, split_target(list(stale or [])))
+                if fixed != kept:
+                    self.parts[i] = fixed
+                    await self._save(i + 1, fixed)
+                stale = []
+            if kept and not stale:
+                if len(self.parts) <= i:
+                    self.parts.append(kept)
             else:
                 # Missing, or written before the checks it now fails.
                 await self.write_section(i, list(stale or []) or None)
+        await self._progress("citations", "checking every sentence against the study note")
         unsupported = await self.cite()
+        await self._progress("citations", f"{len(unsupported)} sentence(s) the note does not"
+                             " support, after one round of repairs")
         # The teaching editor: after every part is written and cited, before
         # the page is assembled. The parts it sent back are cited again (a
         # repair keeps the editor's instruction) and scored once more on
         # their final text; nothing loops further.
         rewritten = await self.edit()
+        await self._progress("editor", "the teaching editor scored every section"
+                             + (f" and sent back sections {rewritten}" if rewritten else ""))
         if rewritten:
             unsupported = ([c for c in unsupported if c["part"] not in rewritten]
                            + await self.cite(rewritten))
@@ -1904,7 +2405,7 @@ class Writer:
             self.review_status = "flagged"
             self.report.append(f"{len(unsupported)} sentence(s) the note does not support;"
                                " listed on the lesson")
-        if self.release_flags:
+        if self.release_flags or self.page_flags:
             self.review_status = "flagged"
         if weak:
             self.review_status = "flagged"
@@ -1914,6 +2415,8 @@ class Writer:
              if unsupported else ""),
             ("Concepts the release test doubted:\n"
              + "\n".join(f"- {f}" for f in self.release_flags) if self.release_flags else ""),
+            ("Page checks still open after the repairs:\n"
+             + "\n".join(f"- {f}" for f in self.page_flags) if self.page_flags else ""),
             score_notes,
         ) if part)
         await _once("review", lesson_id, self.review_status, notes)

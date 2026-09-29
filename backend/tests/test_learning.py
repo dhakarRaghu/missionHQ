@@ -1633,7 +1633,7 @@ def test_a_published_phase_gets_an_enhanced_page_and_a_planned_one_is_never_writ
     assert not lesson_writer.handles(tutor, {"workflow": "learning_journey", "stage": "course_lesson", "source": "local"})
     assert engine._advance_learning is not None
     write = inspect.getsource(lt.finish_lesson)
-    assert "page_coverage(source, html, note)" in write and "lesson_kit.wrap_page" in write
+    assert "page_findings(source, html, note)" in write and "lesson_kit.wrap_page" in write
     assert 'review = "none"' in inspect.getsource(lt.record_lesson_row)
     # Tutor reads the repo copy (what he and Claude wrote), never the platform.
     assert "read_course_source" in load_tutor_tools()
@@ -2433,3 +2433,28 @@ def test_a_quantity_is_not_a_year() -> None:
         assert not _YEAR_RE.search(text), text
     for text in ("in 2024 they measured it", "the 2019 paper", "since 1998"):
         assert _YEAR_RE.search(text), text
+
+
+def test_a_quality_refusal_does_not_hide_a_broken_figure(monkeypatch) -> None:
+    """Every page check runs before the lesson is refused. A refusal for
+    quality measures alone used to stop first, so a figure that cannot work
+    was found only on the writer's last call, with no repair left."""
+    import asyncio
+
+    import pytest
+
+    from hq.tools import learning_tools as lt
+
+    monkeypatch.setattr(lt, "read_course_source_text", lambda slug: "")
+    monkeypatch.setattr(lt, "page_shortfall", lambda md, html: "")
+    monkeypatch.setattr(lt, "page_findings", lambda *a, **k: lt.Findings(
+        quality=["the page reads heavier than it should"]))
+    html = '<section><div id="a1"></div><div id="a1"></div></section>'
+    for quality_ok in (False, True):
+        with pytest.raises(lt.LessonRefused) as got:
+            asyncio.run(lt.finish_lesson(None, "demo", markdown="# Demo\n\ntext", html=html,
+                                         article_kind="", quality_ok=quality_ok))
+        assert not got.value.quality_only
+        assert [h for h in got.value.hard if "cannot work" in h]
+        # The writer is told about everything in one refusal.
+        assert "the page reads heavier than it should" in got.value.findings

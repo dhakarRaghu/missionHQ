@@ -164,6 +164,9 @@ class Settings(BaseSettings):
     browser_chrome_path: str = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     browser_debug_port: int = 9223
     browser_profile_dir: Path = REPO_DIR / "data" / "browser-profile"
+    # Tool results taken out of a run's conversation to fit the model's
+    # window, kept whole so the agent can read them again (hq.context_budget).
+    context_store_dir: Path = REPO_DIR / "data" / "context"
     # Seconds between page loads. A burst of requests is what looks automated;
     # reading at human pace is both politer and safer.
     browser_min_interval_s: float = 3.0
@@ -190,6 +193,9 @@ class Settings(BaseSettings):
     # His own site, beside this repo. Posts are written into its content
     # folder and never committed or pushed from here: publishing is his.
     portfolio_dir: Path = REPO_DIR.parent / "portfolio"
+    # His public site. A post may link to one of his own published posts
+    # there and to nothing else.
+    site_url: str = "https://www.raghvendra.xyz"
     halt_file: Path = REPO_DIR / "HALT"
     models_file: Path = BACKEND_DIR / "models.yaml"
 

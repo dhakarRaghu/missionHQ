@@ -21,6 +21,8 @@ tools:
   - vault_read
   - vault_write
   - file_posts
+  - list_my_projects
+  - list_my_posts
   - file_shortlist
   - vault_list
   - memory_search

@@ -342,7 +342,7 @@ def build_agent(
     The model is bound here (DBOS forbids choosing it at run time). The manifest
     names a role or registry name; llm.py is the only place a provider appears.
     """
-    from hq import assemble, llm
+    from hq import assemble, context_budget, llm
 
     # One Tool per base name: several scoped entries like vault_write:a/** and
     # vault_write:b/** share the tool; the scopes live in deps.vault_write_scopes.
@@ -362,6 +362,12 @@ def build_agent(
     if not spec.base_tool_names() & web_read_tools():
         policy_tools.append("propose_policy")
     tool_names.extend(t for t in policy_tools if t not in spec.base_tool_names())
+    # A result shortened to fit the model's window is saved whole and read
+    # back with one of these (hq.context_budget); which one follows the trust
+    # of what this agent reads.
+    recall_tool = ("recall_web_text" if spec.base_tool_names() & web_read_tools()
+                   else "recall_text")
+    tool_names.append(recall_tool)
     tools = [
         Tool(t.fn, requires_approval=t.requires_approval, max_retries=TOOL_MAX_RETRIES)
         for t in get_tools(tool_names)
@@ -380,5 +386,9 @@ def build_agent(
         # the run; the runner relies on receiving DeferredToolRequests.
         output_type=[str, DeferredToolRequests],
         model_settings=llm.registry().model_settings_for(spec.model),
-        capabilities=[durability],
+        # The conversation is kept inside the model's window before each
+        # request: hunter's study reached 222,886 tokens and was refused.
+        capabilities=[durability,
+                      context_budget.capability(llm.registry().input_budget(spec.model),
+                                                recall_tool)],
     )

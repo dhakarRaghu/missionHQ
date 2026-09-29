@@ -330,6 +330,18 @@ def _fake_writer(tmp_path: Path, monkeypatch, *, fail_at: int | None = None,
     async def record_row(**kw: Any) -> str:
         return "lesson-1"
 
+    async def correct_step(model: str, note: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+        # Removes each flagged sentence, one of the two outcomes the step allows.
+        log.setdefault("corrected", []).extend(
+            f["sentence"][:40] for i in items for f in i["sentences"])
+        out = []
+        for item in items:
+            html = item["html"]
+            for f in item["sentences"]:
+                html = html.replace(f["sentence"], "", 1).replace("  ", " ")
+            out.append({"n": item["n"], "html": html})
+        return {"paragraphs": out}
+
     finish = lt.finish_lesson
 
     async def finish_once_failing(*a: Any, **k: Any) -> Any:
@@ -356,6 +368,7 @@ def _fake_writer(tmp_path: Path, monkeypatch, *, fail_at: int | None = None,
     # The editor's rewrites go through their own step; same fake.
     monkeypatch.setattr(lw, "_rewrite_step", lambda model, prompt: section_step(model, prompt))
     monkeypatch.setattr(lw, "_citation_step", citation_step)
+    monkeypatch.setattr(lw, "_correct_step", correct_step)
     monkeypatch.setattr(lw, "_editor_step", editor_step)
     monkeypatch.setattr(lt, "finish_lesson", finish_once_failing)
     monkeypatch.setattr(lt, "record_lesson_row", record_row)
@@ -395,10 +408,11 @@ def test_every_part_is_cited_and_an_unmapped_sentence_flags_without_blocking(
     # The fake sections carry checkable sentences in sections 2 and 4 only;
     # both are sent, tagged with their section, in one batch.
     assert log["cited"][0] == ["p2-c1", "p4-c1"]
-    assert log["sections"].count(4) == 2          # section 4 was sent back once
-    assert log["cited"][1] == ["p4-c1"]           # and only it was checked again
-    status, notes = log["reviews"][-1]
-    assert status == "flagged" and "not in the note" in notes
+    # The one unsupported sentence is corrected in place; its section is
+    # never rewritten for it.
+    assert len(log["corrected"]) == 1
+    assert log["sections"].count(4) == 1
+    assert "flagged" not in [status for status, _notes in log["reviews"]]
 
 
 def test_model_text_in_a_heading_is_escaped() -> None:
@@ -649,10 +663,12 @@ def test_the_editor_rewrites_only_the_weak_teaching_sections_with_its_instructio
     assert asyncio.run(w.run()) is not None, w.report
     # Every teaching section is scored once; the sources section never is.
     assert log["edited"] == [[1, 2, 3, 4], [2, 4]]
-    assert log["sections"] == [1, 2, 3, 4, 5, 2, 4]  # exactly 2 and 4 written again
+    # Exactly 2 and 4 written again: each rewrite runs with its fallback beside it.
+    assert log["sections"] == [1, 2, 3, 4, 5, 2, 2, 4, 4]
     assert "INSTR-2" in log["prompts"][2][-1] and "asks_before_tells (2)" in log["prompts"][2][-1]
     assert "INSTR-4" in log["prompts"][4][-1] and "transfer (2)" in log["prompts"][4][-1]
-    assert not any("INSTR" in p for p in log["prompts"][2][:-1] + log["prompts"][1])
+    # The rewrite and its fallback carry the instruction; no earlier prompt does.
+    assert not any("INSTR" in p for p in log["prompts"][2][:-2] + log["prompts"][1])
     lines = [r for r in w.report if r.startswith("editor scores, section")]
     assert len(lines) == 4
     assert lines[1] == ("editor scores, section 2 (How much does rebuilding the batch buy):"
@@ -685,7 +701,7 @@ def test_the_editor_rewrites_at_most_three_sections(tmp_path: Path, monkeypatch)
     assert asyncio.run(w.run()) is not None, w.report
     # Sections 2 and 4 score lowest (plain 2); of 1 and 3 (plain 3), 1 comes first.
     assert log["edited"] == [[1, 2, 3, 4], [1, 2, 4]]
-    assert log["sections"][5:] == [1, 2, 4]
+    assert log["sections"][5:] == [1, 1, 2, 2, 4, 4]
 
 
 def test_a_requeued_run_reuses_the_editors_scores(tmp_path: Path, monkeypatch) -> None:
@@ -700,7 +716,7 @@ def test_a_requeued_run_reuses_the_editors_scores(tmp_path: Path, monkeypatch) -
     w = make()
     assert asyncio.run(w.run()) is not None, w.report
     assert log["edited"] == [[1, 2, 3, 4], [2, 4]]  # no editor call: every text unchanged
-    assert log["sections"] == [1, 2, 3, 4, 5, 2, 4]  # nothing rewritten again
+    assert log["sections"] == [1, 2, 3, 4, 5, 2, 2, 4, 4]  # nothing rewritten again
     assert w.teaching_notes[2].count("INSTR-2") == 1  # a later repair would still carry it
     status, notes = log["reviews"][-1]
     assert status == "passed" and "Editor scores: mean 4.2" in notes
@@ -778,7 +794,9 @@ def test_a_section_the_editor_sent_back_is_rewritten_with_more_thought(tmp_path:
     efforts.clear()
     w.teaching_notes[1] = "concept_first: state the claim before the mechanism"
     asyncio.run(w.write_section(1))
-    assert efforts and set(efforts) == {lw.REWRITE_EFFORT}
+    # The higher effort writes the section; the ordinary call runs beside it.
+    assert efforts[0] == lw.REWRITE_EFFORT and set(efforts) == {lw.REWRITE_EFFORT, lw.SECTION_EFFORT}
+    assert not any("rewritten at low effort instead" in r for r in w.report)
     efforts.clear()
     slow["on"] = True                       # medium runs past its limit
     asyncio.run(w.write_section(1))
@@ -796,3 +814,389 @@ def test_the_length_rule_counts_what_he_reads() -> None:
     counted = lt.reading_words(prose + predict + hidden)
     assert counted == lt.reading_words(prose + predict)
     assert counted > lt.reading_words(prose)          # predict answers are read
+
+
+# --- the page check: every finding is repaired, and a quality finding flags ------------
+
+def _refusing_finish(monkeypatch, log: dict[str, Any], findings: list[str], *,
+                     hard: bool = False, times: int = 99) -> None:
+    """finish_lesson that refuses `times` times with these findings, then
+    passes; with quality_ok it passes when every finding is a quality one."""
+    real = lt.finish_lesson
+
+    async def finish(*a: Any, **k: Any) -> Any:
+        log.setdefault("finish_calls", []).append(bool(k.get("quality_ok")))
+        if k.get("quality_ok") and not hard:
+            return await real(*a, **k)
+        if len(log["finish_calls"]) <= times:
+            raise lt.LessonRefused("the page is not ready yet: " + "; ".join(findings),
+                                   findings=findings, quality_only=not hard)
+        return await real(*a, **k)
+    monkeypatch.setattr(lt, "finish_lesson", finish)
+
+
+def test_each_finding_is_sent_to_the_section_that_causes_it(tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch)
+    plan = lw.Outline.model_validate(_outline())
+    heading = plan.sections[1].heading          # section 2, named by its heading
+    _refusing_finish(monkeypatch, log, [f"these sections run long with nothing to look at: {heading}"],
+                     times=1)
+    w = make()
+    assert asyncio.run(w.run()) is not None, w.report
+    assert log["finish_calls"] == [False, False]      # refused once, passed after the repair
+    assert log["sections"].count(2) == 2              # only section 2 was written again
+    assert all(log["sections"].count(n) == 1 for n in (1, 3, 4, 5, 6))
+    assert log["reviews"][-1][0] != "flagged"
+
+
+def test_quality_findings_the_repairs_cannot_clear_flag_the_lesson_instead_of_losing_it(
+        tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch)
+    finding = "1 sentence(s) carry a verification date, such as “checked 2026-09-20…”"
+    _refusing_finish(monkeypatch, log, [finding])
+    w = make()
+    assert asyncio.run(w.run()) is not None, w.report     # written, not thrown away
+    # Refused, repaired twice, and then kept on the last call.
+    assert log["finish_calls"] == [False] * (lw.PAGE_REPAIR_ROUNDS + 1) + [True]
+    status, notes = log["reviews"][-1]
+    assert status == "flagged"
+    assert "Page checks still open after the repairs" in notes and "verification date" in notes
+
+
+def test_a_hard_finding_still_refuses_the_page(tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch)
+    _refusing_finish(monkeypatch, log, ["c2 is promised at the top and never taught"], hard=True)
+    with pytest.raises(lt.LessonRefused):
+        asyncio.run(make().run())
+    assert True not in log["finish_calls"]                  # never asked to keep it
+
+
+def test_the_plainness_finding_goes_to_the_heavy_sections(tmp_path: Path, monkeypatch) -> None:
+    make, _log = _fake_writer(tmp_path, monkeypatch)
+    w = make()
+    sentence = ("This sentence keeps going with one more clause and one more"
+                " clause after that and another clause until it is long.")
+    long = " ".join([sentence] * 6)
+    short = " ".join(["It is short."] * 6)
+    w.parts = ["<p>opening</p>", f"<p>{short}</p>", f"<p>{long}</p>", f"<p>{short}</p>"]
+    w.outline = lw.Outline.model_validate(_outline())
+    assert w._parts_for("the page reads heavier than it should: sentences average 19") == [2]
+
+
+def test_the_refusal_keeps_its_findings_through_pickling() -> None:
+    import pickle
+
+    exc = lt.LessonRefused("the page is not ready yet: a; b", findings=["a", "b"],
+                           quality_only=True)
+    back = pickle.loads(pickle.dumps(exc))
+    assert str(back) == "the page is not ready yet: a; b"
+    assert back.findings == ["a", "b"] and back.quality_only is True
+
+
+def test_the_page_check_sorts_hard_from_quality() -> None:
+    page = _lesson_page_with_a_dated_sentence()
+    found = lt.page_findings("", page, "", least=1, most=5)
+    assert not found.hard
+    assert any("verification date" in f for f in found.quality)
+
+
+def _lesson_page_with_a_dated_sentence() -> str:
+    body = " ".join(f"Prefill fills the cache for request {n} before decode starts." for n in range(45))
+    return ('<ol class="concepts"><li id="c1"><b>Prefill and decode share one forward pass'
+            '</b><span>plan batches</span></li></ol>'
+            '<h2 data-concept="c1">Prefill</h2><details class="predict"><summary>Predict'
+            '</summary><p>x</p></details><table><tr><td>1</td></tr></table>'
+            f"<p>{body} This was checked against the source tree on 2026-09-20.</p>")
+
+
+def test_the_orientation_section_is_held_to_the_date_rule_the_page_uses() -> None:
+    html = "<h2 data-kind='orientation'>Where this phase starts</h2><p>Mode two shipped, checked 2026-09-20.</p>"
+    base = {"earlier": "", "article": False, "kind": "", "apparatus": True, "total_words": 0}
+    assert not any("carries a date" in p for p in lw.section_problems(html, **base))
+    assert any("carries a date" in p
+               for p in lw.section_problems(html, **base, orientation=True))
+
+
+def test_the_writer_reports_each_stage_to_the_runs_steps(tmp_path: Path, monkeypatch) -> None:
+    """A two-hour write-up showed only "Run started" on its Steps pane."""
+    from hq import runner
+
+    make, _log = _fake_writer(tmp_path, monkeypatch)
+    seen: list[dict[str, Any]] = []
+
+    async def capture(kind: str, **kw: Any) -> int:
+        if kind == "writer.progress":
+            seen.append(kw["payload"])
+        return 0
+    monkeypatch.setattr(runner, "emit_step", capture)
+    assert asyncio.run(make().run()) is not None
+    stages = [p["stage"] for p in seen]
+    assert stages[0] == "plan" and "accepted" in seen[0]["text"]
+    sections = [p for p in seen if p["stage"] == "section"]
+    total = len(lw.Outline.model_validate(_outline()).sections)
+    assert [p["done"] for p in sections] == list(range(1, total + 1))
+    assert all(p["total"] == total for p in sections)
+    assert "citations" in stages and "editor" in stages
+    assert seen[-1]["stage"] == "page" and "passed" in seen[-1]["text"]
+
+
+def test_a_running_run_shows_the_cost_of_its_calls_so_far() -> None:
+    from hq.api import rest
+
+    for col in ("input_tokens", "output_tokens", "cost_usd"):
+        assert f"CASE WHEN r.ended_at IS NULL THEN coalesce((SELECT sum(mc.{col})" in rest.RUN_COLUMNS
+
+
+def test_a_course_run_is_guarded_by_liveness_not_age() -> None:
+    """Phase 2B was cancelled at 210 minutes while it was still writing."""
+    import inspect
+
+    from hq import engine
+
+    assert engine.COURSE_TIMEOUT_S >= 6 * 60 * 60
+    assert engine.hang_after_s() < engine.COURSE_TIMEOUT_S
+    src = inspect.getsource(engine._close_timed_out_runs)
+    # A run its limit cancelled is closed and queued again, a bounded number of times,
+    assert "w.status IN ('CANCELLED', 'ERROR')" in src and "TIMEOUT_REQUEUES" in src
+    # on every watchdog tick, not only at boot.
+    assert "_close_timed_out_runs()" in inspect.getsource(engine._watchdog_tick)
+    assert "_close_timed_out_runs()" in inspect.getsource(engine.reap)
+
+
+# --- long sentences are split in place, not rewritten ------------------------------------
+
+LONG_PARA = ('<p>When a long prompt of 24,000 tokens arrives, the server runs its whole'
+             ' <dfn>prefill</dfn> in one step, so every stream that was decoding waits for'
+             ' that step to finish before it can produce its next token, which users see as'
+             ' a freeze of about 720 ms.</p>')
+SPLIT_PARA = ('<p>When a long prompt of 24,000 tokens arrives, the server runs its whole'
+              ' <dfn>prefill</dfn> in one step. Every stream that was decoding waits for'
+              ' that step to finish. Only then can it produce its next token. Users see'
+              ' this as a freeze of about 720 ms.</p>')
+
+
+def test_only_the_paragraphs_with_long_sentences_are_sent() -> None:
+    html = f"<h2>x</h2><p>Short and plain here.</p>{LONG_PARA}<p>An em — dash here.</p>"
+    assert lw.heavy_paragraphs(html) == [LONG_PARA, "<p>An em — dash here.</p>"]
+
+
+def test_a_split_that_keeps_everything_is_accepted() -> None:
+    assert lw.tightened_ok(LONG_PARA, SPLIT_PARA)
+    html, n = lw.apply_tightened(f"<h2>x</h2>{LONG_PARA}", [LONG_PARA],
+                                 {"paragraphs": [{"n": 1, "html": SPLIT_PARA}]})
+    assert n == 1 and SPLIT_PARA in html and LONG_PARA not in html
+
+
+@pytest.mark.parametrize("bad", [
+    SPLIT_PARA.replace("720 ms", "700 ms"),                      # a number changed
+    SPLIT_PARA.replace("<dfn>prefill</dfn>", "prefill"),         # a tag dropped
+    SPLIT_PARA.replace("Users see this as a freeze of about 720 ms.", ""),  # content cut
+    LONG_PARA,                                                   # still long
+    SPLIT_PARA.replace("step. Every", "step — every"),      # an em dash added
+])
+def test_a_split_that_changes_anything_else_is_refused(bad: str) -> None:
+    assert not lw.tightened_ok(LONG_PARA, bad)
+    html, n = lw.apply_tightened(LONG_PARA, [LONG_PARA], {"paragraphs": [{"n": 1, "html": bad}]})
+    assert n == 0 and html == LONG_PARA
+
+
+def test_only_mechanical_findings_go_to_the_split() -> None:
+    assert lw.mechanical(["sentences average 21 words and 23% run over 25 (limits 17 and 18%)"])
+    assert lw.mechanical(["an em dash; he uses none. Split the sentence or use a comma"])
+    assert not lw.mechanical(["sentences average 21 words", "c1 is told, not yet asked"])
+    assert not lw.mechanical([])
+
+
+def test_a_section_too_long_in_its_sentences_is_split_not_rewritten(
+        tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch)
+    real = lw.section_problems
+
+    def problems(html: str, **kw: Any) -> list[str]:
+        if "LONG-MARK" in html:
+            return ["sentences average 21 words and 23% run over 25 (limits 17 and 18%)"]
+        return real(html, **kw)
+    monkeypatch.setattr(lw, "section_problems", problems)
+    real_step = lw._section_step
+    marked: dict[str, bool] = {}
+
+    async def section_step(model: str, prompt: str, effort: str = "low") -> str:
+        html = await real_step(model, prompt, effort)
+        if "Id prefix for this section: s2-" in prompt and not marked:
+            marked["done"] = True
+            return html + "<p>LONG-MARK</p>"
+        return html
+    monkeypatch.setattr(lw, "_section_step", section_step)
+    split: list[int] = []
+
+    async def tighten(self: lw.Writer, i: int, html: str, over: int = 25) -> str:
+        split.append(i)
+        return html.replace("<p>LONG-MARK</p>", "")
+    monkeypatch.setattr(lw.Writer, "_tighten", tighten)
+    assert asyncio.run(make().run()) is not None
+    assert split == [2]                       # split once, in place
+    assert log["sections"].count(2) == 1      # and never rewritten for it
+
+
+def test_an_average_over_the_limit_splits_sentences_over_twenty_words() -> None:
+    assert lw.split_target(["sentences average 19 words and 4% run over 25"]) == 20
+    assert lw.split_target(["the page reads heavier than it should: sentences average 19"]) == 20
+    assert lw.split_target(["an em dash; he uses none"]) == 25
+    twenty_two = ("<p>" + " ".join(["word"] * 21) + " end.</p>")
+    assert lw.heavy_paragraphs(twenty_two, 20) == [twenty_two]
+    assert lw.heavy_paragraphs(twenty_two, 25) == []
+
+
+def test_the_page_wide_length_finding_goes_to_the_split() -> None:
+    assert lw.mechanical_page(["the page reads heavier than it should: sentences average 19"])
+    assert not lw.mechanical_page(["c2 is promised at the top and never taught"])
+
+
+def test_a_source_list_may_quote_a_title_with_an_em_dash() -> None:
+    html = "<h2 data-kind='sources'>Sources</h2><ul class='sources'><li>vLLM — anatomy</li></ul>"
+    base = {"earlier": "", "article": False, "kind": "", "apparatus": True, "total_words": 0}
+    assert any("em dash" in p for p in lw.section_problems(html, **base))
+    assert not any("em dash" in p for p in lw.section_problems(html, **base, quoted=True))
+
+
+# --- a repair never makes a section wrong -------------------------------------------------
+
+def test_the_split_keeps_command_text_exactly() -> None:
+    before = ("<p>Run <code>python lab.py --turns 12</code> and watch the queue grow for a"
+              " while until the first request that crosses the window is refused with a 400,"
+              " which is the moment the cap should have fired.</p>")
+    after = before.replace("--turns 12", "--turns 12 --inject 5").replace(", which", ". That")
+    assert not lw.tightened_ok(before, after)
+
+
+def test_a_section_keeps_its_best_attempt_not_its_last(tmp_path: Path, monkeypatch) -> None:
+    make, _log = _fake_writer(tmp_path, monkeypatch)
+    real = lw.section_problems
+    tries: dict[int, int] = {}
+
+    def problems(html: str, **kw: Any) -> list[str]:
+        if "ATTEMPT-A" in html:
+            return ["c1 is told, not yet asked"]                       # quality only
+        if "ATTEMPT-B" in html:
+            return ["these Run: commands are not in his lab, so nobody has run them: `x`",
+                    "c1 is told, not yet asked"]                       # a hard one too
+        return real(html, **kw)
+    monkeypatch.setattr(lw, "section_problems", problems)
+    real_step = lw._section_step
+
+    async def section_step(model: str, prompt: str, effort: str = "low") -> str:
+        html = await real_step(model, prompt, effort)
+        if "Id prefix for this section: s2-" in prompt:
+            tries[2] = tries.get(2, 0) + 1
+            return html + ("<p>ATTEMPT-A</p>" if tries[2] == 1 else "<p>ATTEMPT-B</p>")
+        return html
+    monkeypatch.setattr(lw, "_section_step", section_step)
+    w = make()
+    assert asyncio.run(w.run()) is not None
+    assert tries[2] == lw.SECTION_RETRIES + 1
+    assert "ATTEMPT-A" in w.parts[2] and "ATTEMPT-B" not in w.parts[2]
+
+
+def test_a_page_repair_that_brings_in_a_hard_finding_is_reverted(tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch)
+    plan = lw.Outline.model_validate(_outline())
+    heading = plan.sections[1].heading
+    _refusing_finish(monkeypatch, log, [f"these sections run long with nothing to look at: {heading}"],
+                     times=1)
+    real = lw.section_problems
+
+    def problems(html: str, **kw: Any) -> list[str]:
+        if "INVENTED-RUN" in html:
+            return ["these Run: commands are not in his lab, so nobody has run them: `y`"]
+        return real(html, **kw)
+    monkeypatch.setattr(lw, "section_problems", problems)
+    real_step = lw._section_step
+
+    repairing: dict[str, bool] = {}
+
+    async def section_step(model: str, prompt: str, effort: str = "low") -> str:
+        html = await real_step(model, prompt, effort)
+        if "whole-page check said" in prompt:
+            repairing["on"] = True
+        # Every attempt of the repair invents the command: only a revert helps.
+        is_two = "Id prefix for this section: s2-" in prompt
+        return html + "<p>INVENTED-RUN</p>" if repairing and is_two else html
+    monkeypatch.setattr(lw, "_section_step", section_step)
+    w = make()
+    assert asyncio.run(w.run()) is not None
+    assert "INVENTED-RUN" not in w.parts[2]
+    assert any("earlier version was kept" in r for r in w.report)
+
+
+def test_his_lab_is_not_rewritten_for_a_quality_finding(tmp_path: Path, monkeypatch) -> None:
+    make, log = _fake_writer(tmp_path, monkeypatch)
+    plan = lw.Outline.model_validate(_outline())
+    lab = next(s.heading for s in plan.sections if s.kind == "lab")
+    _refusing_finish(monkeypatch, log, [f"these sections run long with nothing to look at: {lab}"],
+                     times=1)
+    assert asyncio.run(make().run()) is not None
+    assert log["sections"].count(3) == 1              # the lab was written once, never again
+
+
+# --- an unsupported sentence is corrected in place ------------------------------------------
+
+FLAGGED_PARA = ('<p>Strict mode keeps every token legal. The grammar mask cannot explain a quality'
+                ' drop. The <dfn>format tax</dfn> is paid at the prompt.</p>')
+FLAGGED = "The grammar mask cannot explain a quality drop."
+NOTE_TEXT = "The mask causes a small measured share of the drop, about 1.6 points."
+
+
+def test_the_paragraph_holding_a_sentence_is_found() -> None:
+    html = f"<h2>x</h2><p>Other text here.</p>{FLAGGED_PARA}"
+    assert lw.block_holding(html, FLAGGED) == FLAGGED_PARA
+    assert lw.block_holding(html, "A sentence that is not on the page.") == ""
+
+
+def test_a_correction_that_changes_only_the_sentence_is_used() -> None:
+    fixed = FLAGGED_PARA.replace(FLAGGED, "The grammar mask explains about 1.6 points of the drop.")
+    assert lw.corrected_ok(FLAGGED_PARA, fixed, FLAGGED, NOTE_TEXT)
+    assert lw.corrected_ok(FLAGGED_PARA, FLAGGED_PARA.replace(FLAGGED + " ", ""), FLAGGED, NOTE_TEXT)
+
+
+@pytest.mark.parametrize("bad", [
+    FLAGGED_PARA,                                                             # nothing corrected
+    FLAGGED_PARA.replace(FLAGGED, "The mask explains 12 points of the drop."),  # a number from nowhere
+    FLAGGED_PARA.replace("Strict mode keeps every token legal.", "Strict mode is safe."),  # another sentence
+    FLAGGED_PARA.replace("<dfn>format tax</dfn>", "format tax"),              # a tag dropped
+])
+def test_a_correction_that_changes_anything_else_is_not_used(bad: str) -> None:
+    assert not lw.corrected_ok(FLAGGED_PARA, bad, FLAGGED, NOTE_TEXT)
+
+
+def test_two_flagged_sentences_in_one_paragraph_are_corrected_together() -> None:
+    second = "Strict mode keeps every token legal."
+    both = FLAGGED_PARA.replace(second + " ", "").replace(
+        FLAGGED, "The grammar mask explains about 1.6 points of the drop.")
+    assert lw.corrected_ok(FLAGGED_PARA, both, [FLAGGED, second], NOTE_TEXT)
+    # With only the first flagged, the second may not change.
+    assert not lw.corrected_ok(FLAGGED_PARA, both, [FLAGGED], NOTE_TEXT)
+
+
+def test_a_flagged_sentence_with_markup_may_be_removed() -> None:
+    para = ('<p>Strict mode keeps every token legal. The <b>grammar mask</b> cannot explain'
+            ' a quality drop. The <dfn>format tax</dfn> is paid at the prompt.</p>')
+    flagged = "The grammar mask cannot explain a quality drop."
+    removed = ('<p>Strict mode keeps every token legal. The <dfn>format tax</dfn> is paid'
+               ' at the prompt.</p>')
+    assert lw.corrected_ok(para, removed, flagged, NOTE_TEXT)
+    # Markup is still new or lost only inside the flagged sentences.
+    assert not lw.corrected_ok(para, removed.replace("<dfn>format tax</dfn>", "format tax"),
+                               flagged, NOTE_TEXT)
+    assert not lw.corrected_ok(para, removed.replace("Strict mode", "<b>Strict mode</b>"),
+                               flagged, NOTE_TEXT)
+    assert not lw.corrected_ok(para, removed.replace("<p>", "<li>").replace("</p>", "</li>"),
+                               flagged, NOTE_TEXT)
+
+
+def test_the_page_does_not_print_the_course_map(tmp_path: Path, monkeypatch) -> None:
+    """The console shows where he is; the writer still gets the map in its prompt."""
+    make, _log = _fake_writer(tmp_path, monkeypatch)
+    w = make()
+    w.m.course_map = [{"title": "Phase 1", "state": "read"}, {"title": "Phase 2", "state": "here"}]
+    assert asyncio.run(w.run()) is not None
+    assert "Where you are in the course" not in w.parts[0]

@@ -14,6 +14,11 @@ models:
   kimi:
     provider: gateway
     model: kimi-latest    # 256k context
+    # The whole window, input and answer. hq.context_budget keeps a run's
+    # conversation under it: this less max_tokens less a margin. Stated by
+    # the gateway's refusal on 2026-09-23: 246,533 input plus 64,000 for the
+    # answer exceeded 262,144.
+    context_tokens: 262144
     input_per_mtok: 0.60
     output_per_mtok: 2.50
     # kimi-latest is a reasoning model. "low" answered in tens of seconds and
@@ -52,6 +57,7 @@ models:
   kimi_deep:
     provider: gateway
     model: kimi-latest
+    context_tokens: 262144   # see kimi
     input_per_mtok: 0.60
     output_per_mtok: 2.50
     settings:
@@ -84,6 +90,7 @@ models:
   kimi_k3:
     provider: gateway
     model: kimi-k3        # 256k context
+    context_tokens: 262144   # see kimi
     input_per_mtok: 0.60
     output_per_mtok: 2.50
     settings:

@@ -15,6 +15,7 @@ import logging
 import re
 import shutil
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -381,7 +382,55 @@ async def list_readings(
 
 
 class LessonRefused(Exception):
-    """A lesson check said no. The message says what to fix."""
+    """A lesson check said no. The message says what to fix.
+
+    `findings` are the separate things the page check found, so the staged
+    writer can send each to the sections that cause it. `hard` are the ones
+    that make the page wrong; the rest are quality measures (plainness,
+    dates, figures, repeats). With no hard one (`quality_only`) the page may
+    be kept and flagged rather than thrown away. A refusal that names no
+    findings is one hard finding. All of it rides in `args`, so the refusal
+    survives the pickling a durable step does."""
+
+    def __init__(self, message: str, findings: Sequence[str] = (),
+                 quality_only: bool = False, hard: Sequence[str] | None = None) -> None:
+        self.message = message
+        self.findings = list(findings) or [message]
+        self.hard = [] if quality_only else list(hard if hard is not None else self.findings)
+        self.quality_only = not self.hard
+        super().__init__(message, list(findings), quality_only, self.hard)
+
+    def __str__(self) -> str:
+        return self.message
+
+
+@dataclass
+class Findings:
+    """What a page check found, sorted by what may be done about it.
+
+    `hard`: the page is wrong or unsafe to keep. A concept is promised and
+    never taught, a section serves nothing, his lab text was changed, a link
+    comes from outside the sources, a figure cannot work.
+    `quality`: the page teaches, but it is harder to read or to see than the
+    measures allow. Dates in sentences, long sentences, repeats, a section
+    with nothing to look at.
+
+    The two were one refusal until 2026-09-28. Two runs of Phase 2B each
+    wrote for about two and a half hours and were then thrown away, one for
+    a single dated sentence and one for sentences averaging 19 words against
+    a limit of 17."""
+    hard: list[str] = field(default_factory=list)
+    quality: list[str] = field(default_factory=list)
+
+    def all(self) -> list[str]:
+        return [*self.hard, *self.quality]
+
+    def text(self) -> str:
+        return "; ".join(self.all())
+
+    def add(self, other: Findings) -> None:
+        self.hard += other.hard
+        self.quality += other.quality
 
 
 # One row per unit of work: one article a day, one lesson and one lab card per
@@ -820,13 +869,27 @@ async def lesson_draft(ctx: RunContext[HQDeps], slug: str) -> dict[str, Any]:
             "parts": await asyncio.to_thread(_draft_parts, folder)}
 
 
+def _refuse_page(found: Findings, quality_ok: bool, template: str) -> None:
+    """Raise when the page check found something it may not keep. A hard
+    finding always refuses. Quality findings refuse too, unless the writer
+    has repaired and asked to keep the page with them (`quality_ok`)."""
+    if not found.hard and (quality_ok or not found.quality):
+        return
+    raise LessonRefused(template.format(gap=found.text()), findings=found.all(),
+                        quality_only=not found.hard, hard=found.hard)
+
+
 async def finish_lesson(
     task_id: str | None, slug: str, *, markdown: str = "", html: str = "",
     title: str = "", subtitle: str = "", eyebrow: str = "",
     article_kind: str | None = None, run_id: str | None = None, agent: str | None = None,
     page: bool = False, material: str = "", lab_source: str = "",
+    quality_ok: bool = False,
 ) -> tuple[str, str]:
     """Check the whole lesson, wrap its page in the kit and write both files.
+    `quality_ok`: the staged writer has already repaired what the page check
+    named, and asks to keep a page whose remaining findings are all quality
+    measures. It flags that lesson with them. A hard finding still refuses.
     `page`: a lab card or week review, held to every check but the concept
     contract, with his lab (`lab_source`) kept exactly and links only from
     the lessons it drew on (`material`).
@@ -874,26 +937,21 @@ async def finish_lesson(
             " carry it with write_lesson_part, then call write_lesson again"
         )
 
+    # Every page check runs, and the lesson is refused once with all they
+    # found. A refusal for quality measures alone used to stop here, so the
+    # checks below first ran on the writer's last call, with no repair left:
+    # a figure that cannot work would have thrown the page away.
+    found = Findings()
     source = await asyncio.to_thread(read_course_source_text, clean)
     if html.strip() and source:
         # Late import: review_tools imports this module.
         from hq.tools.review_tools import _study_note
 
         _note_path, note = await _study_note(clean)
-        gap = page_coverage(source, html, note)
-        if gap:
-            raise LessonRefused(
-                f"the page is not ready yet: {gap}."
-                " Rewrite ONLY the parts this names, with write_lesson_part and the"
-                " same part numbers; every other part is saved and stays as it is."
-                " Then call write_lesson again."
-            )
+        found.add(page_findings(source, html, note))
     broken = page_script_problems(html) if html.strip() else ""
     if broken:
-        raise LessonRefused(
-            f"a figure on the page cannot work: {broken}. Fix the parts with"
-            " write_lesson_part, then call write_lesson again"
-        )
+        found.hard.append(f"a figure on the page cannot work: {broken}")
     if html.strip():
         page_title = title.strip() or next(
             (ln[2:].strip() for ln in markdown.splitlines() if ln.startswith("# ")), clean)
@@ -902,21 +960,16 @@ async def finish_lesson(
 
     left_behind = placeholders_in(markdown) + placeholders_in(html)
     if left_behind:
-        raise LessonRefused(
+        found.hard.append(
             "these placeholders are still in the lesson: " + ", ".join(left_behind[:8])
-            + ". Write the thing itself, in both the markdown and the page, then"
-            " call write_lesson again"
+            + ". Write the thing itself, in both the markdown and the page"
         )
 
     shortfall = "" if source else page_shortfall(markdown, html)
+    what = "page"
     if page and html.strip():
-        gap = page_coverage(lab_source, html, material, least=0, most=0,
-                            dated_share=ARTICLE_DATED_SHARE)
-        if gap:
-            raise LessonRefused(
-                f"the page is not ready yet: {gap}. Rewrite ONLY the parts this"
-                " names with write_lesson_part, then call write_lesson again"
-            )
+        found.add(page_findings(lab_source, html, material, least=0, most=0,
+                                dated_share=ARTICLE_DATED_SHARE))
     elif not source and html.strip():
         # An article is one idea, delivered: the same contract as a phase with
         # the count set to one, plus the same plainness and repeat measures.
@@ -925,24 +978,25 @@ async def finish_lesson(
         # first run on the new contract was refused at 6% for exactly that.
         # The review detector (sentences about a source) keeps its ceiling.
         kind = article_kind if article_kind is not None else await _task_article_kind(task_id)
-        gap = page_coverage("", html, "", least=1, most=1, dated_share=ARTICLE_DATED_SHARE,
-                            evidence_share=PAPER_EVIDENCE_SHARE if kind == PAPER else EVIDENCE_SHARE)
-        if gap:
-            raise LessonRefused(
-                f"the article is not ready yet: {gap}. Rewrite ONLY the parts this"
-                " names with write_lesson_part, then call write_lesson again"
-            )
+        what = "article"
+        found.add(page_findings(
+            "", html, "", least=1, most=1, dated_share=ARTICLE_DATED_SHARE,
+            evidence_share=PAPER_EVIDENCE_SHARE if kind == PAPER else EVIDENCE_SHARE))
         words = reading_words(html)
         if words > ARTICLE_MAX_WORDS:
-            raise LessonRefused(
+            found.hard.append(
                 f"the article is {words} words, which is about {words // 200} minutes;"
                 f" past {ARTICLE_MAX_WORDS} it is carrying a second idea or a survey."
                 " Find which and cut it, not the evidence"
             )
     if shortfall:
         if from_parts:
-            shortfall += " — fix the parts whose page_words fall short with write_lesson_part"
-        raise LessonRefused(shortfall)
+            shortfall += ". Fix the parts whose page_words fall short"
+        found.hard.append(shortfall)
+    _refuse_page(found, quality_ok,
+                 f"the {what} is not ready yet: {{gap}}. Rewrite ONLY the parts this names,"
+                 " with write_lesson_part and the same part numbers; every other part is"
+                 " saved and stays as it is. Then call write_lesson again.")
 
     name = f"{_today().date()}-{clean}"
     lessons = settings().learning_dir / "lessons"
@@ -1783,15 +1837,26 @@ def lesson_contract(page_html: str, *, least: int = CONCEPTS_MIN, most: int = CO
     reads well, and 2B read well. A phase carries three to five concepts; an
     article carries one, and passes `least=most=1`.
     """
-    problems: list[str] = []
+    return contract_findings(page_html, least=least, most=most, dated_share=dated_share,
+                             evidence_share=evidence_share).text()
+
+
+def contract_findings(page_html: str, *, least: int = CONCEPTS_MIN,
+                      most: int = CONCEPTS_MAX, dated_share: float = DATED_SHARE,
+                      evidence_share: float = EVIDENCE_SHARE) -> Findings:
+    """`lesson_contract`, sorted into hard faults and quality measures."""
+    found = Findings()
+    problems = found.hard
     block = _CONCEPTS_RE.search(page_html)
     concepts = _CONCEPT_LI_RE.findall(block.group(1)) if block else []
     ids = [cid for cid, _ in concepts]
     if not block or not concepts:
-        return ('the page does not say what it teaches. Open it with <ol class="concepts">,'
-                ' one <li id="c1"><b>the claim</b><span>what it lets him do</span></li> per'
-                f" idea, {least} to {most} of them. A claim is a sentence he"
-                " could test or use to predict something, not a topic name")
+        problems.append(
+            'the page does not say what it teaches. Open it with <ol class="concepts">,'
+            ' one <li id="c1"><b>the claim</b><span>what it lets him do</span></li> per'
+            f" idea, {least} to {most} of them. A claim is a sentence he"
+            " could test or use to predict something, not a topic name")
+        return found
     if not least <= len(ids) <= most:
         problems.append(
             f"{len(ids)} concepts; this page carries {least} to {most}."
@@ -1830,12 +1895,13 @@ def lesson_contract(page_html: str, *, least: int = CONCEPTS_MIN, most: int = CO
             continue
         joined = " ".join(s["html"] for s in mine).lower()
         if 'class="predict"' not in joined:
-            problems.append(
+            found.quality.append(
                 f"{cid} is told, never asked. Before the explanation, put a"
                 ' <details class="predict"><summary>Predict: …</summary> with the answer'
                 " and the reason inside. A concept he guessed wrong is one he keeps")
         if not any(mark in joined for mark in _VISUALS):
-            problems.append(f"{cid} has nothing to look at: show the mechanism, not only describe it")
+            found.quality.append(
+                f"{cid} has nothing to look at: show the mechanism, not only describe it")
 
     prose = _ASIDE_RE.sub(" ", page_html)
     teaching = " ".join(s["html"] for s in page_sections(prose)
@@ -1846,26 +1912,26 @@ def lesson_contract(page_html: str, *, least: int = CONCEPTS_MIN, most: int = CO
         stamped = [x for x in sentences if _ISO_DATE_RE.search(x)]
         talk = [x for x in sentences if _EVIDENCE_TALK_RE.search(x)]
         if stamped:
-            problems.append(
+            found.quality.append(
                 f"{len(stamped)} sentence(s) carry a verification date, such as"
                 f" “{stamped[0][:70]}…”. When something was checked belongs in the"
                 " sources list, not in the sentence teaching it")
         if len(dated) / len(sentences) > dated_share:
-            problems.append(
+            found.quality.append(
                 f"{len(dated)} of {len(sentences)} teaching sentences name a year"
                 f" ({len(dated) / len(sentences):.0%}, ceiling {dated_share:.0%}), such as"
                 f" “{dated[0][:70]}…”. He is not reading a history. Teach what is true"
                 " now as the plain fact. Keep a date only where the concept cannot be"
                 ' understood without it, and move the rest into <details class="evidence">')
         if len(talk) / len(sentences) > evidence_share:
-            problems.append(
+            found.quality.append(
                 f"{len(talk)} of {len(sentences)} teaching sentences are about a source"
                 f" rather than the mechanism ({len(talk) / len(sentences):.0%}, ceiling"
                 f" {evidence_share:.0%}), such as “{talk[0][:70]}…”. State the mechanism and"
                 " the one number that proves it, with its conditions. Who measured it, the"
                 " argument between groups and the table it came from go in"
                 ' <details class="evidence"> under the claim')
-    return "; ".join(problems)
+    return found
 
 
 # A course phase is not an article: he asked for the page to work like a
@@ -1957,7 +2023,17 @@ def page_coverage(source: str, page_html: str, note: str = "", *,
                   least: int = CONCEPTS_MIN, most: int = CONCEPTS_MAX,
                   dated_share: float = DATED_SHARE,
                   evidence_share: float = EVIDENCE_SHARE) -> str:
-    """Why this page is not ready for him to learn from, or "".
+    """Why this page is not ready for him to learn from, or "". Every
+    finding of `page_findings`, hard and quality alike, in one line."""
+    return page_findings(source, page_html, note, least=least, most=most,
+                         dated_share=dated_share, evidence_share=evidence_share).text()
+
+
+def page_findings(source: str, page_html: str, note: str = "", *,
+                  least: int = CONCEPTS_MIN, most: int = CONCEPTS_MAX,
+                  dated_share: float = DATED_SHARE,
+                  evidence_share: float = EVIDENCE_SHARE) -> Findings:
+    """What keeps this page from being ready for him to learn from.
 
     Measured checks only, because a same-model reviewer passes what reads
     well. His phase (`source`) is a reference: nothing here asks how much of
@@ -1974,14 +2050,14 @@ def page_coverage(source: str, page_html: str, note: str = "", *,
     """
     have = _visible_words(page_html)
     measurable = have >= MEASURABLE_SOURCE_WORDS
-    problems = []
+    found = Findings()
+    problems = found.quality     # the measures below; the hard ones say so
 
     # A page he builds or recalls from (most=0) teaches no concept of its
     # own; everything else here still holds for it.
-    contract = lesson_contract(page_html, least=least, most=most, dated_share=dated_share,
-                               evidence_share=evidence_share) if most else ""
-    if contract:
-        problems.append(contract)
+    if most:
+        found.add(contract_findings(page_html, least=least, most=most,
+                                    dated_share=dated_share, evidence_share=evidence_share))
 
     if measurable:
         # He reads English as a second language. The bar is absolute: a page is
@@ -2022,7 +2098,7 @@ def page_coverage(source: str, page_html: str, note: str = "", *,
             " box he can move a number in"
         )
 
-    problems += lab_fidelity_problems(page_html, source)
+    found.hard += lab_fidelity_problems(page_html, source)
 
     allowed = source + "\n" + note
     # SVG and XHTML namespace strings look like links and are not ones. With
@@ -2032,7 +2108,7 @@ def page_coverage(source: str, page_html: str, note: str = "", *,
                       if u.rstrip(".,;:") not in allowed
                       and not u.startswith(("http://www.w3.org/", "https://www.w3.org/"))}) if allowed.strip() else []
     if foreign:
-        problems.append(
+        found.hard.append(
             "links that are in neither the phase nor hunter's note: " + _listed(foreign)
         )
 
@@ -2046,7 +2122,7 @@ def page_coverage(source: str, page_html: str, note: str = "", *,
             " and a dash hides a second sentence. Split those sentences"
         )
 
-    return "; ".join(problems)
+    return found
 
 
 # --- publishing to his own site ----------------------------------------------

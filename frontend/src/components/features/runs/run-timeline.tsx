@@ -104,6 +104,23 @@ function eventStep(event: RunEvent, tickets: Map<string, Ticket>): Step {
     case "run.started":
       return { ...base, tone: "running", title: "Run started" };
 
+    // The staged writer's own steps: plan, each section, citations, the
+    // editor and the page check. Without these a two-hour write-up showed
+    // only "Run started".
+    case "writer.progress": {
+      const done = typeof p.done === "number" ? p.done : null;
+      const total = typeof p.total === "number" ? p.total : null;
+      return {
+        ...base,
+        tone: "running",
+        title: str(p.text, "writer progress"),
+        badge:
+          done !== null && total !== null
+            ? { label: `${done} of ${total}`, tone: "muted" as Tone }
+            : { label: str(p.stage, "writer"), tone: "muted" as Tone },
+      };
+    }
+
     case "tool.called": {
       const call = p as unknown as ToolCalledPayload;
       const args = call.args && typeof call.args === "object" ? call.args : {};

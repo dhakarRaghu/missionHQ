@@ -17,7 +17,14 @@ measured:
 gate:
   min_apostrophes: 2
   max_written_out_forms: 1
-  min_i_think_family: 1
+  # A view is required, but "I think" is not. Of 41 posts read from nine
+  # accounts in his field, almost none used the family; the strongest state
+  # the view flatly ("the main appeal of X isn't Y, it's Z"). Required, it
+  # made every post end on the same formula.
+  min_i_think_family: 0
+  # Shorter than this, a post is a one-line take: the contraction count and
+  # the written-out limit do not apply to it.
+  short_post_words: 40
   max_em_dashes: 0
   forbid: [emoji, hashtags, bullets, numbered_lists, thread_markers]
   # The full forms his posts contract. Counted as whole words, any case.
@@ -51,7 +58,6 @@ gate:
     - "Here's the thing"
     - "Let's be honest"
     - "In today's world"
-    - rhetorical_question
   banned_closers:
     - "The lesson is"
     - "And that is why"
@@ -84,20 +90,31 @@ gate:
     - "Reason:"
     - "Needs:"
     - "What's needed:"
+# The accounts read for these rules, and what their own posts showed. Only
+# posts the account wrote, not reposts: 41 posts from nine accounts.
+studied:
+  accounts: [simonw, swyx, karpathy, eugeneyan, GergelyOrosz, chipro, rasbt, arpit_bhayani, nijansh]
+  posts: 41
+  seen:
+    one_line_take: "a claim in one or two sentences, stated flatly (arpit_bhayani, rasbt, GergelyOrosz, simonw, nijansh)"
+    add_to_news: "a comment on someone else's release or post that adds one number, mechanism or limit (simonw, chipro, rasbt, eugeneyan, karpathy, swyx)"
+    breakdown: "an incident or a design explained in a few short lines, then a view (arpit_bhayani)"
+    real_question: "a question he wants answered, with the reason he asks (chipro, GergelyOrosz)"
+    how_i_work: "one pattern he uses and why it works (karpathy, simonw, eugeneyan)"
+  not_seen: "none of them wrote a confession ending, a teaser that holds the point back, or an engagement ask"
 rules:
-  - 'Anchor on "I": every post starts or pivots on his lived experience.'
-  - 'Flat claims; "I think" is him, not a hedge. Cut "maybe", "arguably", "it is worth noting".'
-  - Trigger, then reflection, then insight.
-  - Short lines, no furniture.
+  - 'One view per post, stated as his: flatly, or with "I think" when he is not sure.'
+  - 'Every post stands on a fact: a number with its conditions, a mechanism, or a named event.'
+  - 'Plain words; a claim he can defend in a reply. No hedges: cut "maybe", "arguably", "it is worth noting".'
+  - Short lines, no furniture. No lists, no dashes, no emoji, no hashtags.
+  - 'End on the view, the number or a question he means. Never a confession or a teaser.'
   - 'Invite, do not sell: "happy to help", never "DM me".'
-  - Introspective and forward at once.
 openers:
-  - "I broke production three times last month."
-  - "I don't think most support teams have a support problem."
-  - "I've seen teams blame the AI when the real problem is..."
-  - "Most support bots fail before they even reply."
-  - "No one tells you this about..."
+  - "At this point the prefill is the cheap part."
+  - "vLLM doesn't run a long prompt in one step."
+  - "Cloudflare had an interesting incident this week, and it is all about one reused block."
+  - "Why does every serving benchmark report the mean and not the tail?"
+  - "One pattern I use when an agent keeps failing:"
 reading_openers:
-  - "I was reading about how retrieval actually fails and it made me look at ours."
-  - "Someone wrote this week that agents fail before they even start. I think that is right."
-  - "Read a good breakdown of KV caching today. One line stuck."
+  - "I was reading how vLLM schedules prefill, and one detail changes how I read latency charts."
+  - "A team measured this and the number surprised me."
