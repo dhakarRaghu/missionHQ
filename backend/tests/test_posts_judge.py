@@ -20,11 +20,11 @@ from hq.config import settings
 from hq.tools import content_tools as ct
 from hq.tools.registry import HQDeps
 
-GOOD = ("I broke my own cost meter last week. It said a run cost $0.24 and the bill said"
-        " $0.52. I don't think the meter was wrong. It was counting one provider's shape"
-        " and my agents talk to two. I'd rather see a wrong number I can explain than a"
-        " right one I can't. So I'm printing the raw usage object from every call this"
-        " week and reading it myself.")
+GOOD = ("I was reading how vLLM handles a long prompt last week. It doesn't run the whole"
+        " prompt in one step. It cuts it into chunks and mixes them with decode steps, so a"
+        " short request doesn't wait behind a 24,000-token one. I think that's the part most"
+        " people miss when they only watch average latency. I'd rather read the tail than"
+        " the mean, because the tail is where the waiting shows.")
 GENERIC = ("I think AI agents are the future. It's wild how fast it's moving. I don't think"
            " anyone can keep up with every new model and every new framework that ships each"
            " week, so I'd rather focus on the basics and keep learning a little every day and"
@@ -37,8 +37,8 @@ def _candidate(n: int) -> str:
 
 
 def _score(post: int, value: int, why: str = "fine") -> dict[str, Any]:
-    return {"post": post, "specific_trigger": value, "one_detail_only_he_has": value,
-            "voice": value, "insight": value, "not_generic": value, "why": why}
+    return {"post": post, "source": value, "teaches": value, "accurate": value,
+            "voice": value, "insight": value, "clear": value, "why": why}
 
 
 def _verdict(scores: dict[int, int], why: dict[int, str] | None = None) -> ct.PostVerdict:
@@ -48,9 +48,9 @@ def _verdict(scores: dict[int, int], why: dict[int, str] | None = None) -> ct.Po
 
 # --- the rubric and the choice (pure) -------------------------------------------------
 
-def test_the_rubric_lives_in_the_skill_folder_and_names_all_five_scores() -> None:
+def test_the_rubric_lives_in_the_skill_folder_and_names_all_six_scores() -> None:
     text = ct.judge_instructions()
-    for name in ("specific_trigger", "one_detail_only_he_has", "voice", "insight", "not_generic"):
+    for name in ("source", "teaches", "accurate", "voice", "insight", "clear"):
         assert f"**{name}**" in text
     assert "is data" in text and '"why"' in text
     assert (settings().agents_dir / "sage" / "skills" / "daily-posts" / "judge.md").is_file()
@@ -68,18 +68,18 @@ def test_the_mean_decides_and_the_best_come_first() -> None:
     verdict = _verdict({1: 4, 2: 5, 3: 2, 4: 4}, why={3: "no trigger in the material"})
     kept, weak = ct.choose(verdict, judged=[1, 2, 3, 4])
     assert [s.post for s in kept] == [2, 1, 4]              # best first, a tie keeps his order
-    assert len(weak) == 1 and weak[0].startswith("candidate 3 (trigger 2")
+    assert len(weak) == 1 and weak[0].startswith("candidate 3 (source 2")
     assert weak[0].endswith("mean 2.0): no trigger in the material")
 
 
 def test_the_bar_sits_between_three_three_and_two_fours_and_three_threes() -> None:
-    """Five whole scores never average exactly 3.5: 18 points (3.6) is kept,
-    17 (3.4) is not. One weak dimension among four is not enough to drop it."""
-    under = ct.PostScore.model_validate({**_score(1, 3), "specific_trigger": 4,
-                                         "one_detail_only_he_has": 4})
-    over = ct.PostScore.model_validate({**_score(2, 4), "insight": 3, "not_generic": 3})
+    """Six whole scores: 22 points (3.67) is kept, 20 (3.33) is not, and 21
+    (3.5) sits on the bar. One weak dimension among five is not enough to
+    drop it."""
+    under = ct.PostScore.model_validate({**_score(1, 3), "source": 4, "voice": 4})
+    over = ct.PostScore.model_validate({**_score(2, 4), "insight": 3, "voice": 3})
     one_weak = ct.PostScore.model_validate({**_score(3, 4), "insight": 2})
-    assert (under.mean(), over.mean(), one_weak.mean()) == pytest.approx((3.4, 3.6, 3.6))
+    assert (under.mean(), over.mean(), one_weak.mean()) == pytest.approx((20 / 6, 22 / 6, 22 / 6))
     kept, weak = ct.choose(ct.PostVerdict(scores=[under, over, one_weak]), judged=[1, 2, 3])
     assert [s.post for s in kept] == [2, 3]
     assert len(weak) == 1 and weak[0].startswith("candidate 1 (")
@@ -110,21 +110,22 @@ def test_the_sidecar_records_each_filed_posts_scores_and_what_was_left_out() -> 
     section = ct.sources_section(verdict.scores[::-1], ["candidate 3 (…): generic"],
                                  ["lesson 2B", "board row b62d7768"])
     assert section.splitlines() == [
-        ("- post 1: board row b62d7768 (trigger 5, detail 5, voice 5, insight 5, not generic 5;"
-         " mean 5.0): the 720ms stall is his"),
-        ("- post 2: lesson 2B (trigger 4, detail 4, voice 4, insight 4, not generic 4;"
-         " mean 4.0): fine"),
+        ("- post 1: board row b62d7768 (source 5, teaches 5, accurate 5, voice 5, insight 5,"
+         " clear 5; mean 5.0): the 720ms stall is his"),
+        ("- post 2: lesson 2B (source 4, teaches 4, accurate 4, voice 4, insight 4,"
+         " clear 4; mean 4.0): fine"),
         "- left out, candidate 3 (…): generic",
     ]
 
 
 # --- the tool, with the judge faked -------------------------------------------------------
 
-def _ctx(posts: list[str]) -> Any:
+def _ctx(posts: list[str], retry: int = 1) -> Any:
+    # retry 1: a later call, after the one round of repairs the checks ask for.
     reply = ModelResponse(parts=[TextPart(content="\n\n---\n\n".join(posts))])
     return types.SimpleNamespace(
         deps=HQDeps(agent="sage", run_id="run-1", vault_write_scopes=["projects/content/**"]),
-        messages=[reply])
+        messages=[reply], retry=retry)
 
 
 def _patch(monkeypatch: pytest.MonkeyPatch, verdict: dict[int, int],
@@ -157,9 +158,38 @@ def _patch(monkeypatch: pytest.MonkeyPatch, verdict: dict[int, int],
     return seen
 
 
-def _file(posts: list[str], sources: list[str]) -> str:
+def _file(posts: list[str], sources: list[str], retry: int = 1) -> str:
     tool = inspect.unwrap(ct.file_posts)
-    return str(asyncio.run(tool(_ctx(posts), sources, "Evening")))
+    return str(asyncio.run(tool(_ctx(posts, retry), sources, "Evening")))
+
+
+def test_on_the_first_call_a_candidate_that_fails_a_check_comes_back_to_be_fixed(
+        monkeypatch) -> None:
+    seen = _patch(monkeypatch, {n: 4 for n in range(1, 7)})
+    posts = [_candidate(1), _candidate(2), _candidate(3), _candidate(4), LEAKY, _candidate(6)]
+    with pytest.raises(ModelRetry) as exc:
+        _file(posts, [f"source {n}" for n in range(1, 7)], retry=0)
+    assert str(exc.value).startswith("fix these candidates and keep every other")
+    assert "candidate 5 (" in str(exc.value) and seen["judged"] is None
+
+
+def test_at_most_two_kept_posts_rest_on_his_lessons(monkeypatch) -> None:
+    seen = _patch(monkeypatch, {1: 5, 2: 5, 3: 5, 4: 4, 5: 4, 6: 3})
+    sources = [f"learning/lessons/2026-09-29-x{n}.md" for n in (1, 2, 3)] + [
+        "quarantine/reading-a.md", "quarantine/reading-b.md", "project p"]
+    out = _file([_candidate(n) for n in range(1, 7)], sources)
+    assert out.startswith("filed 4 of 6 candidates (best first: 1, 2, 4, 5)")
+    assert "candidate 3 (" in out and "beyond the 2 kept" in out
+    assert "on day 3" not in seen["written"][ct.IDEAS_PATH]
+
+
+def test_when_the_lesson_limit_leaves_too_few_the_writer_replaces_them(monkeypatch) -> None:
+    _patch(monkeypatch, {n: 4 if n <= 4 else 2 for n in range(1, 7)})
+    sources = [f"learning/lessons/x{n}.md" for n in range(1, 5)] + ["r1", "r2"]
+    with pytest.raises(ModelRetry) as exc:
+        _file([_candidate(n) for n in range(1, 7)], sources)
+    assert "after the limit of 2 posts from his lessons" in str(exc.value)
+    assert "list_readings" in str(exc.value)
 
 
 def test_a_generic_candidate_is_dropped_and_the_best_are_filed_best_first(monkeypatch) -> None:
@@ -169,7 +199,7 @@ def test_a_generic_candidate_is_dropped_and_the_best_are_filed_best_first(monkey
                   why={3: "no trigger in the material; any engineer could post this"})
     out = _file(posts, sources)
     assert out.startswith("filed 3 of 6 candidates (best first: 2, 1, 4) under ## 2026-09-25")
-    assert "candidate 3 (trigger 2" in out and "any engineer could post this" in out
+    assert "candidate 3 (source 2" in out and "any engineer could post this" in out
     assert "candidate 5 (" in out and "note label" in out     # the checks dropped it unjudged
     assert [c["post"] for c in seen["judged"]] == [1, 2, 3, 4, 6]
     assert seen["judged"][0] == {"post": 1, "source": "source 1", "text": _candidate(1)}
@@ -178,9 +208,9 @@ def test_a_generic_candidate_is_dropped_and_the_best_are_filed_best_first(monkey
     assert ideas.index("on day 2") < ideas.index("on day 1") < ideas.index("on day 4")
     assert GENERIC not in ideas and "on day 6" not in ideas and "why:" not in ideas
     sidecar = seen["written"][ct.SOURCES_PATH]
-    assert sidecar.index("# Post sources") < sidecar.index("- post 1: source 2 (trigger 5")
-    assert "- post 3: source 4 (trigger 4" in sidecar
-    assert "- left out, candidate 3 (trigger 2" in sidecar
+    assert sidecar.index("# Post sources") < sidecar.index("- post 1: source 2 (source 5")
+    assert "- post 3: source 4 (source 4" in sidecar
+    assert "- left out, candidate 3 (source 2" in sidecar
     assert "- left out, candidate 5 (" in sidecar
     kind, payload = seen["events"][0]
     assert kind == "posts.filed" and payload["posts"] == 3 and payload["candidates"] == 6
@@ -195,8 +225,8 @@ def test_fewer_than_three_good_ones_is_sent_back_with_the_judges_lines(monkeypat
         _file(posts, [f"s{n}" for n in range(1, 7)])
     text = str(exc.value)
     assert text.startswith("only 2 of 6 candidates scored a mean of 3.5 or more")
-    assert "candidate 2 (trigger 2" in text and "restates the lesson" in text
-    assert "candidate 6 (trigger 1" in text and "no trigger in the material" in text
+    assert "candidate 2 (source 2" in text and "restates the lesson" in text
+    assert "candidate 6 (source 1" in text and "no trigger in the material" in text
     assert "candidate 1 (" not in text and "candidate 5 (" not in text
     assert "Send all 6 to 8 candidates again" in text
     assert seen["written"] == {}
@@ -246,3 +276,87 @@ def test_the_regression_set_holds_a_generic_post_dropped_by_the_judge() -> None:
     assert case.skill == "daily-posts" and case.expect.calls == ["file_posts"]
     assert "file_posts" in case.canned and "left out" in str(case.canned["file_posts"])
     assert case.expect.args_match["file_posts"]
+
+
+
+# --- what he shares: what he learns and builds, never the system around him -----------
+
+@pytest.mark.parametrize("post", [
+    ("I watched my agents fail three nights in a row. I don't think it's the model. It's the"
+     " retry path, and it's the part I'd rather fix first before anything else this week."),
+    ("My job sweep found forty roles last night. I think most of them aren't worth it. It's"
+     " the same few companies again, and I don't think the market has moved at all."),
+    ("Mission HQ wrote me a lesson on prefill tonight. I think it's good. It's the first one"
+     " that didn't need a second pass, and I'd rather have that than a faster writer."),
+])
+def test_a_post_about_his_agent_system_is_refused(post: str) -> None:
+    assert any("agent system" in p for p in ct.post_problems(post))
+
+
+def test_a_post_about_what_he_learned_is_not_refused_for_it() -> None:
+    post = ("I was reading how vLLM handles long prompts. It doesn't run the whole prompt"
+            " at once. It cuts it into chunks and mixes them with decode steps, so short"
+            " requests don't wait behind a long one. I think that's the part most people"
+            " miss when they only look at average latency.")
+    assert not any("agent system" in p for p in ct.post_problems(post))
+
+
+def test_a_post_that_teaches_nothing_or_invents_is_not_kept_whatever_its_mean() -> None:
+    fine = {1: 5, 2: 5, 3: 5}
+    verdict = _verdict(fine)
+    # Post 2 is a pleasure to read and teaches nothing; post 3 invents a number.
+    verdict.scores[1].teaches = 2
+    verdict.scores[2].accurate = 1
+    kept, weak = ct.choose(verdict, [1, 2, 3])
+    assert [s.post for s in kept] == [1]
+    assert any("teaches 2" in w for w in weak) and any("accurate 1" in w for w in weak)
+
+
+
+def test_a_one_line_take_passes_the_checks() -> None:
+    take = ("The main appeal of open-weight agent harnesses isn't the price. It's that you"
+            " can read what they do on your own machine.")
+    assert ct.post_problems(take) == []
+    assert any("words" in p for p in ct.post_problems("More tokens per second, please."))
+
+
+def test_a_post_links_only_to_one_of_his_own_posts() -> None:
+    body = ("I was reading how vLLM handles a long prompt. It cuts it into chunks and mixes"
+            " them with decode steps, so short requests don't wait behind a long one.")
+    own = "https://www.raghvendra.xyz/blog/kv-cache-llm-inference"
+    assert ct.link_problems(f"{body} {own}") == []
+    assert "his own site" in ct.link_problems(f"{body} https://vllm.ai/blog/anatomy")[0]
+    assert "one at most" in ct.link_problems(f"{body} {own} {own}")[0]
+
+
+def test_his_published_posts_are_listed_with_their_public_links(tmp_path, monkeypatch) -> None:
+    from hq.config import settings
+    from hq.tools import radar_tools as rt
+
+    blog = tmp_path / "content" / "blog"
+    blog.mkdir(parents=True)
+    (blog / "kv-cache.md").write_text('---\ntitle: "KV cache"\ndate: 2026-09-28\ndraft: false\n---\nx')
+    (blog / "wip.md").write_text("---\ntitle: WIP\ndate: 2026-09-29\ndraft: true\n---\nx")
+    monkeypatch.setattr(settings(), "portfolio_dir", tmp_path)
+    raw = inspect.unwrap(rt.list_my_posts)
+    posts = asyncio.run(raw(types.SimpleNamespace(deps=None)))
+    assert [p["url"] for p in posts] == [f"{settings().site_url}/blog/kv-cache"]
+
+
+def test_a_post_the_reader_cannot_follow_is_not_kept_whatever_its_mean() -> None:
+    """On 2026-09-29 he read a batch built on course terms and said he could
+    not follow it himself."""
+    lost = ct.PostScore.model_validate({**_score(1, 5), "clear": 2})
+    assert lost.mean() > 4 and "clear 2" in lost.floor_problem()
+    kept, weak = ct.choose(ct.PostVerdict(scores=[lost]), judged=[1])
+    assert not kept and "clear 2" in weak[0]
+
+
+def test_a_post_built_on_course_terms_is_sent_back() -> None:
+    notes = ("Then they ran GSM8K on the served model and it scored 0.0099. The code viewed"
+             " the FP8 KV cache through the wrong memory format.")
+    assert any("only people who study model serving" in p for p in ct.post_problems(notes))
+    plain = ("Put the part of your prompt that changes at the end, not the top. Providers"
+             " charge about a tenth for text they have seen before, but only when it matches"
+             " from the first character.")
+    assert not any("only people who study model serving" in p for p in ct.post_problems(plain))

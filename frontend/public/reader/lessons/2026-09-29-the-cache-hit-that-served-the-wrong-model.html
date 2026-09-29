@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The cache hit that served the wrong model</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">fails · Inference Internals, Phase 3A: The Bill and the Cache · a cache hit that matches the key and lies about the value</div><h1>The cache hit that served the wrong model</h1><p class="subtitle">Phase 3A priced a prefix-cache hit as free compute; what happens when the key matches and the value is wrong?</p></header>
+<p>Phase 3A of your course is about implicit prefix caching, which makes a repeated prefix cheap. The failures it catalogues are all lost hits: a misaligned breakpoint, a cache write below the break-even length, money spent on a lookup that missed. Each of those failures costs latency or money, and your hit rate makes them visible. In September 2026 an SGLang user on one H200 found the failure the phase did not price: with the cache warm, repeated prompts returned different greedy tokens than cold-cache repeats of the same prompts, and the cache hit rate looked healthy the whole time.</p>
+
+<p>The cause was not a bad lookup. The lookup was perfect. The cache held two kinds of model state that can only be saved at different token positions, one at any token and one only every 64 tokens, and the code stored them under one shared length. A later request matched the stored key exactly and resumed from a state 96 tokens in the future, so the cache reported a hit and served the wrong model. This article explains how a hit becomes a lie your metrics cannot see, and the one check that catches it.</p>
+<p>This lesson teaches one idea. It is stated here so you can see where the lesson is going. It will read more clearly once it has been explained below, so come back to it at the end.</p>
+<ol class="concepts"><li id="c1"><b>A prefix-cache hit is only free when key and value live on the same geometry; when they do not, clamping silently stores a correct key against a wrong state.</b> <span>Decide when a cache hit can be trusted, and write the one regression check that detects a value lie.</span></li></ol>
+<h2 data-concept="c1">What does a hit look like when the value is wrong?</h2>
+<p class="why">A cache hit that reads healthy can still serve the wrong model state.</p>
+
+<p>Your chat workload sends the same long system prompt on every request. The serving stack notices the repeated prefix and reuses it. This is <dfn>implicit prefix caching</dfn>, the automatic reuse of tokens the server already computed, with no flag from you. A <dfn>cache hit</dfn> is a lookup where the stored prefix covers your request's prefix, so those tokens are billed as cached instead of computed. The phase priced these hits as nearly free, and the failure modes it priced were all misses.</p>
+
+<p>A SGLang user ran exactly that shape: repeated prompts sharing a long prefix. With a warm cache, the output logprobs drifted. In one of three input groups, the greedy output token changed. With a cold cache, the same repeats matched exactly. That split clears the model, because the same weights produced identical cold output every time. The cache was the only thing that changed between the two runs.</p>
+
+<details class="predict"><summary>Predict: a request shares exactly 96 tokens with a cached prefix and the lookup returns a hit. Does the hit rate change? Does the user see anything cache-related?</summary>
+<p>The hit rate rises, because the lookup matched the stored key exactly. The user sees a wrong answer with no cache-related error. Hit rate measures keys, so it cannot report that the stored value behind the key was wrong. That is what happened here.</p>
+</details>
+
+<p>The name for this failure is a <dfn>value lie</dfn>: a hit where the key is correct and the resumed state behind it is not. In the incident, the cache held a state computed 96 tokens past the branch point, stored under a key that ends at the branch. A later request matching 96 tokens resumed from token 192's state, so it skipped work it should have done.</p>
+
+<p>Every metric the phase taught you to watch read this as success. The hit rate climbed. Cached-token billing looked right. Latency improved, because resuming saved prefill work. A miss costs time or money and metrics show it, because the lookup fails. A value lie keeps every saving and costs correctness instead, and no hit counter counts it.</p>
+
+<div class="stats">
+  <div class="stat"><b>1 of 3</b><span>input groups changed their greedy token with a warm cache</span></div>
+  <div class="stat"><b>0 of 3</b><span>changed with a cold cache</span></div>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Warm-cache repeats of three input corpora produced drifting logprobs, and in one of the three the greedy token changed, while cold-cache repeats matched exactly. SGLang issue #38815, one H200, model thinkingmachines/Inkling, page size 1, commit bd087fc, read 2026-09-28. The reporter diagnosed it on paper, not from a crash: nothing in the logs pointed at the insert path.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">A hit is two promises, key and value, and hit rate checks only the key.</p>
+<p class="trap">"A hit means the resumed state is right" costs you wrong tokens that every metric calls a success.</p>
+<p class="try">Repeat one cached prompt twice and diff the greedy output; drift with a warm cache means the value lied.</p>
+</div>
+
+<p>The symptom shows a hit can lie, but not how a serving cache stores a right key next to a wrong value. The next section traces the exact insert that wrote state192 under key96, and why the cache never noticed.</p>
+<h2 data-concept="c1">How did min(96, 192) store a state from the future?</h2>
+<p>Warm runs drifted while every cache metric read success. But the symptom alone cannot show who put the wrong value in the entry. The put happened in the insert, on the same shared-prefix traffic as your metered chat workload.</p>
+
+<p>This hybrid model keeps two kinds of resume state, and the bug lives between them. The first is the <dfn>KV cache</dfn>, the attention keys and values the GPU holds for each request. It is <dfn>divisible state</dfn>, a per-token array where any prefix length is a valid slice. A cut at token 96 is exactly the model's state at token 96. The Mamba state is <dfn>indivisible state</dfn>, one compressed value that summarizes every token so far. That value updates in place as tokens arrive, so state192 cannot be rolled back into state96. It exists only on a <dfn>checkpoint grid</dfn>. Those are the fixed points 64 tokens apart, here 64, 128 and 192, where the system snapshots it.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 720 240" role="img" aria-label="Two tracks. KV state has a valid mark at every token. Mamba state has marks only at checkpoints 64, 128 and 192. An arrow from the branch at token 96 to the checkpoint at 192 reads: writes key96 with state192.">
+<defs><marker id="s2-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="none" stroke="var(--bad)" stroke-width="1.5"/></marker></defs>
+<text x="40" y="22" font-size="13" fill="currentColor">KV state, a valid mark at every token</text>
+<line x1="40" y1="68" x2="664" y2="68" stroke="currentColor" opacity="0.35" stroke-width="2"/>
+<line x1="40"  y1="61" x2="40"  y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="83"  y1="61" x2="83"  y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="126" y1="61" x2="126" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="169" y1="61" x2="169" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="211" y1="61" x2="211" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="254" y1="61" x2="254" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="297" y1="61" x2="297" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="340" y1="61" x2="340" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="383" y1="61" x2="383" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="426" y1="61" x2="426" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="469" y1="61" x2="469" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="511" y1="61" x2="511" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="554" y1="61" x2="554" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="597" y1="61" x2="597" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="640" y1="61" x2="640" y2="75" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="297" y1="42" x2="297" y2="188" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="304" y="52" font-size="12" fill="currentColor">branch at 96</text>
+<text x="40" y="112" font-size="13" fill="currentColor">Mamba state, valid only on the grid</text>
+<line x1="40" y1="164" x2="664" y2="164" stroke="currentColor" opacity="0.35" stroke-width="2"/>
+<line x1="211" y1="154" x2="211" y2="174" stroke="var(--accent)" stroke-width="3"/>
+<line x1="383" y1="154" x2="383" y2="174" stroke="var(--accent)" stroke-width="3"/>
+<line x1="554" y1="154" x2="554" y2="174" stroke="var(--accent)" stroke-width="3"/>
+<text x="211" y="194" font-size="12" fill="currentColor" text-anchor="middle">64</text>
+<text x="383" y="194" font-size="12" fill="currentColor" text-anchor="middle">128</text>
+<text x="554" y="194" font-size="12" fill="currentColor" text-anchor="middle">192</text>
+<circle cx="297" cy="164" r="6" fill="var(--warn)"/>
+<circle cx="554" cy="164" r="6" fill="var(--bad)"/>
+<text x="290" y="214" font-size="12" fill="currentColor" text-anchor="middle">key96</text>
+<text x="560" y="214" font-size="12" fill="currentColor" text-anchor="middle">state192</text>
+<path d="M 307 160 C 370 126, 480 126, 545 152" fill="none" stroke="var(--bad)" stroke-width="2" marker-end="url(#s2-arr)"/>
+<text x="432" y="120" font-size="12" fill="currentColor" text-anchor="middle">min(96, 192) writes key96 → state192</text>
+</svg>
+<figcaption>The two geometries in one insert. The key sits at the branch, token 96, and the attached value is the checkpoint prefill produced at 192. Illustration of the incident arithmetic, not measured.</figcaption>
+</figure>
+
+<details class="predict"><summary>Predict: sliding-window attention, the attention layer that keeps keys only for recent tokens, proposes a branch at token 96. Mamba rounds 96 down to 64, finds 64 already cached, and asks for no new write. Prefill runs on to token 192. What entry does the insert write?</summary>
+<p>The reasonable guess is key96 → state64, because 64 is Mamba's nearest grid point below the branch. The insert actually writes key96 → state192. It stamps the key at 96, the shortest length any component requested. It attaches the only Mamba value the prefill produced, the state at 192.</p>
+</details>
+
+<p>Here is that insert in the order the scheduler ran it.</p>
+
+<ol class="flow">
+<li><b>SWA proposes 96</b><span>its page-aligned branch point</span></li>
+<li><b>Mamba rounds to 64</b><span>already cached, so it asks for no new write</span></li>
+<li><b>prefill runs to 192</b><span>the one fresh Mamba value is state192</span></li>
+<li class="hot"><b>insert takes min(96, 192)</b><span>the key's length becomes 96</span></li>
+<li class="bad"><b>store key96 → state192</b><span>a correct key against a state from the future</span></li>
+</ol>
+
+<p>A later request sharing those exact 96 tokens now gets a clean cache hit on key96. It resumes from state192, so the model reads the request as if it had already processed tokens 97 to 192. Those tokens belong to the earlier request's continuation, not to this one. That is the value lie the metrics counted as a hit.</p>
+
+<p>PR #37584 repairs the write in two moves. Each Mamba value now carries the length it was produced at, passed along in InsertParams. Both commit sites skip the stamp when that length does not match the key's. A truncated finish then stores no checkpoint, so later requests find no wrong state. The sliding-window component also leaves the insertion length to Mamba, so each checkpoint stays attached to its true prefix depth.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The guard was validated in PR #37584, merged 2026-09-12. Warm-cache token IDs and logprobs matched cold-cache output exactly across the three input corpora. Removing the guard made all three subcases fail again with <code>96 != 64</code>. The in-place property the bug abused is stated in the SGLang team's PyTorch Foundation blog, read 2026-09-28. It says: "SSM states are updated in-place, so a request's states cannot be rolled back to represent its prefixes."</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">Match the stored value's length to the key's length; the minimum of the two is not a match.</p>
+<p class="trap">"Minimum is conservative" stamps a short key on a newer state, and every later hit lies.</p>
+<p class="try">In one cache you own, log each stored value's length next to its key.</p>
+</div>
+
+<p>The insert is explained, but the hit-rate gauge that scored it green is unchanged. The next section asks what catches a value lie before your users do.</p>
+<h2 data-concept="c1">What catches a value lie before your users do?</h2>
+<p class="why">The fix guards one insert path, and this check guards every cache you run.</p>
+
+<p>The guard in PR #37584 repaired one insert path. The gauge that scored the incident green is unchanged, because a hit rate counts lookups and never values. That gauge sits in every cache you run, so the incident pays off only as a check you can rerun.</p>
+
+<p>The rule generalizes to any composite cache. When components disagree on a boundary, refuse to store rather than clamp silently. The old insert took <dfn>clamp-to-min</dfn>, the shortest length every component asked for. That is an arithmetic decision made at the wrong layer. The key layer cannot know which geometry produced a value.</p>
+
+<ul class="tree">
+  <li><b>Does the stored value's length match the key's length?</b>
+    <ul>
+      <li class="ok"><em>yes</em><span>store the entry</span></li>
+      <li class="bad"><em>no</em><span>store nothing, because a miss costs time and a wrong value costs correctness</span></li>
+    </ul>
+  </li>
+</ul>
+
+<details class="predict"><summary>Predict: the guard is merged and the team's regression check passes on all three test corpora. Now remove the guard and rerun the same check. How many of the three subcases pass?</summary>
+<p>None. With the guard removed, all three subcases fail again with <code>96 != 64</code>. The harness fails exactly when the bug is present. This is what makes it worth copying into your own cache work.</p>
+</details>
+
+<p>Applied to any cache, that harness becomes the <dfn>warm-cold equality check</dfn>. You repeat the same prompts on a cold cache and then on a warm one. You require greedy token IDs and logprobs to match exactly. Hit rate cannot see a value lie, because a correct cache changes cost only and never content. So any drift at temperature 0 on a warm cache is the lie itself, caught before a user sees it.</p>
+
+<p>The shape is not a GPU problem. A row cache keyed per record and a summary cache keyed per span of tokens are two geometries over the same data, and one shared insert length lies for one of them. Your prompt-caching experiments have this shape whenever two state types share a key, so run the equality check there too.</p>
+
+<p>One risk stays open. The reviewer ispobock said the next step is "to align the swa checkpoint with the mamba checkpoint". The two geometries are guarded, not unified. The class of bug is contained, not eliminated, and the check stays necessary.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Under the merged guard, warm-cache and cold-cache outputs matched exactly on three input corpora. With the guard removed all three subcases fail with <code>96 != 64</code> (PR #37584, merged 2026-09-12). The incident ran on one H200, model thinkingmachines/Inkling, page size 1, at commit bd087fc (SGLang issue #38815). ispobock's quote is from the issue comment thread, read 2026-09-28.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">A hit proves the key matched, and only output equality proves the value did.</p>
+<p class="trap">Hit rate counts lookups, so your dashboard stays green while warm hits serve wrong states.</p>
+<p class="try">Repeat one cached prompt cold and warm at temperature 0 and diff the token IDs.</p>
+</div>
+
+<p>What silently destroys a cache hit now splits in two. Misses lose their savings, and value lies keep the savings and spend correctness. You can now write the one test that detects the second kind. The lab runs it next, proving warm equals cold on your own prompts in fifteen minutes.</p>
+<h2 data-kind="lab">Lab: prove warm equals cold in fifteen minutes</h2>
+<p>The section above named the check: warm-cache greedy tokens and logprobs must match cold-cache output exactly. Now you run it. The idea is one sentence: a correct cache changes only cost, never content. So any drift at temperature 0 with a warm cache is a value lie, full stop.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1</b> <span class="tag">online</span></label> <b>Cold baseline.</b> Take your workload's long shared system prompt and fix the generation config: temperature 0 and logprobs requested. To force a cold run, prepend a fresh random nonce string to the prompt, because the cache cannot have seen it before. Save the output token IDs and the logprobs.
+</li>
+<li><label><input type="checkbox"> <b>E2</b> <span class="tag">online</span></label> <b>Warm repeat.</b> Send the exact same prompt again at once, so implicit prefix caching, the automatic reuse of already-computed prefix tokens, hits the prefix the first request left behind. Save the same two fields.
+</li>
+<li><label><input type="checkbox"> <b>E3</b> <span class="tag">offline</span></label> <b>Diff.</b> Compare the two runs field by field.
+
+<div class="lab">
+<pre><code data-lang="bash">diff cold_tokens.json warm_tokens.json && \
+diff cold_logprobs.json warm_logprobs.json && echo EQUAL</code></pre>
+<p>You should see <code>EQUAL</code>. Any difference, even one logprob in the fourth decimal, means the warm run resumed from a different model state.</p>
+</div>
+</li>
+<li><label><input type="checkbox"> <b>E4</b> <span class="tag">online</span></label> <b>Off the boundary.</b> Nudge the split so the shared prefix ends one token after a cache write breakpoint: change one character before the shared body ends. Rerun the cold and warm comparisons with the new prompt. The outputs must still match exactly, because a correct cache on any boundary changes only what you pay.</li>
+</ul>
+
+<p>Two things to notice. First, the warm run should report cached prompt tokens, so a passing diff costs you almost nothing. You have proven the savings are real and the content is untouched. Second, the nonce trick generalizes. Any provider whose cache you cannot flush directly gives you a cold run. That happens whenever you change one throwaway token at the front.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>This is the same acceptance test the SGLang team used. Warm-cache token IDs and logprobs match cold-cache output exactly. With the guard removed all three subcases fail (PR #37584, read 2026-09-28).</p>
+</details>
+
+<p>If all four exercises pass, your cache tells the truth today. The checkpoint next asks the harder question. What changes when your own multi-agent system adds a second cache tier with its own geometry?</p>
+<h2 data-kind="checkpoint">Checkpoint: whose state is it anyway?</h2>
+<p>Here is the same bug shape, moved onto infrastructure you would build yourself. Answer each question before opening the answer.</p>
+
+<div class="callout note">Your multi-agent system shares an 8,000-token harness prompt across agents. The main cache, the implicit prefix caching that reuses already-computed prefix tokens, keys on exact prefixes. You add a second tier that snapshots derived summaries every 512 tokens. Last night an agent branched at token 8,000 and the insert path clamped the two lengths to one: it stored the summary snapshot written at token 8,192 under the key for token 8,000. This morning a new agent shared exactly 8,000 tokens, got a hit, and resumed from a state 192 tokens in the future.</div>
+
+<ol class="steps">
+<li>What does the hit-rate dashboard report for this morning's request?</li>
+<li>What does the user of that agent actually see?</li>
+<li>Which single counter pair, and which one equality test, would you add this week?</li>
+</ol>
+
+<details class="answer"><summary>Answer sketch</summary>
+<p><b>1.</b> A healthy hit. The dashboard counts cached tokens against computed tokens, so the request reads as 8,000 tokens saved. Every cost metric shows the cache working. This is the value lie, a hit whose stored state is not the right state: the key matched, so no hit-rate number can see the value was wrong.</p>
+<p><b>2.</b> Output that is subtly wrong, not an error. The resumed state carries 192 tokens of context the agent never sent, so its answers reference a branch it cannot quote. At temperature 0 the outputs are stable and confident, which makes it worse: no retry changes them, and nothing in the logs says why.</p>
+<p><b>3.</b> The counter pair is one counter per geometry at insert time: keys written at branch length, and snapshots written at snapshot length. A gap between the two is a clamp that fired. The equality test is the warm-cold equality check from the lab: a CI job runs the shared harness prompt cold and then warm at temperature 0 and asserts the output token IDs match exactly. A correct cache changes only cost, never content, so any drift fails the build before a user sees it.</p>
+</details>
+
+<p>The checkpoint shows the incident cost nothing to detect once the right test existed. Next, two short post sketches turn that test into something you can say in public.</p>
+<h2 data-kind="post">What you could say about this</h2>
+<p>The incident and the check are now yours to use. Two sketches you could publish from them.</p>
+
+<div class="cards" data-cols="2" id="s6-posts">
+<div class="card">
+<h4>A cache hit is two promises, not one</h4>
+<p>The key promise is "this prefix matches". The value promise is "this state belongs to that prefix". SGLang stored state192 under key96, and every hit after that resumed a model 96 tokens in the future. The rule for any composite cache: when components disagree on a boundary, refuse to store instead of clamping to the shortest length. It is yours because you can show the arithmetic and the guard, not a retweet of the issue.</p>
+</div>
+<div class="card">
+<h4>Hit rate cannot see a wrong value</h4>
+<p>Every cache metric in the incident read green while the output drifted. The one test that caught it fits in CI: run the same prompt cold and warm at temperature 0, and assert the token IDs match exactly. A correct cache changes cost, never content. It is yours because you can run this against your own prompt-caching provider this week, and the diff is the proof.</p>
+</div>
+</div>
+
+<p>Neither post needs new research. Both need the receipts, which the next section lists.</p>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+  <li><a href="https://github.com/sgl-project/sglang/issues/38815">SGLang issue #38815</a>: the incident itself. The warm-versus-cold symptom, the key96 to state192 arithmetic, and the reproduction setup (one H200, model thinkingmachines/Inkling, page size 1, commit bd087fc). Read 2026-09-28.</li>
+  <li><a href="https://github.com/sgl-project/sglang/pull/37584">SGLang PR #37584</a>: the merged guard. The length check at both commit sites, and the validation that all three input groups fail with 96 != 64 when the guard is removed. Merged 2026-09-12.</li>
+  <li><a href="https://pytorch.org/blog/hybrid-models-meet-sglang-more-than-full-attention/">Hybrid models meet SGLang, PyTorch Foundation blog</a>: the quoted property behind the checkpoint grid. SSM states update in place and cannot be rolled back to a prefix. Same team as the code, so corroboration rather than independence.</li>
+  <li><a href="https://api.github.com/repos/sgl-project/sglang/issues/38815/comments">Issue #38815 comment thread</a>: he-yufeng's independent re-derivation of the mechanism before writing the guard, and the reviewer's follow-up that the two geometries are guarded, not unified.</li>
+</ul>
+
+<p>Two things stay unverified. Whether issue #38815 is closed now: the PR carries "Fixes #38815", but the reviewer's follow-up suggests partial closure only, and no closing event appeared in the comments read. And the vLLM design doc on its hybrid KV cache manager returned HTTP 429, so the vLLM-side answer to the same geometry problem is unread. All pages above were read on 2026-09-28.</p>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

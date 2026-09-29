@@ -379,6 +379,8 @@ class ModelEntry:
     # ModelAPIError (a timeout, a connection drop, a gateway 5xx). One flaky
     # gateway model must not be able to stop the whole system.
     fallback: tuple[str, ...] = ()
+    # The model's whole window, input and answer together. 0 when not stated.
+    context_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -427,6 +429,7 @@ class ModelRegistry:
                 output_per_mtok=float(cfg["output_per_mtok"]),
                 settings=cfg.get("settings"),
                 fallback=tuple(cfg.get("fallback", ())),
+                context_tokens=int(cfg.get("context_tokens") or 0),
             )
             for name, cfg in raw["models"].items()
         }
@@ -548,6 +551,21 @@ class ModelRegistry:
         if "timeout_s" in cfg:
             out["timeout"] = float(cfg["timeout_s"])
         return OpenAIChatModelSettings(**out) if out else None
+
+    def input_budget(self, name_or_role: str, margin: int = 8_000) -> int:
+        """How many input tokens one request may carry: the window less the
+        room kept for the answer and a margin, for this entry and every
+        fallback, since a fallback is sent the same conversation. 0 when any
+        of them does not state its window."""
+        first = self.canonical(name_or_role)
+        budgets = []
+        for name in (first, *self.entries[first].fallback):
+            e = self.entries.get(name)
+            if e is None or not e.context_tokens:
+                return 0
+            answer = int((e.settings or {}).get("max_tokens") or 0)
+            budgets.append(e.context_tokens - answer - margin)
+        return max(0, min(budgets))
 
     def cost_usd(self, name_or_role: str, input_tokens: int, output_tokens: int) -> float:
         e = self.entries[self.canonical(name_or_role)]

@@ -21,6 +21,8 @@ tools:
   - vault_read
   - vault_write
   - file_posts
+  - list_my_projects
+  - list_my_posts
   - file_shortlist
   - vault_list
   - memory_search
@@ -35,6 +37,7 @@ tools:
   - list_jobs
   - list_lessons
   - read_lesson
+  - list_readings
 caps:
   cost_per_run_usd: 4.00
   tool_calls: 120

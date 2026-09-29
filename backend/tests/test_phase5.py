@@ -112,13 +112,15 @@ def test_a_posts_batch_goes_on_top_and_keeps_the_rest() -> None:
 def test_a_post_is_filed_only_in_his_voice() -> None:
     from hq.tools import content_tools as ct
 
-    good = ("I broke my own cost meter last week. It said a run cost $0.24 and the bill said"
-            " $0.52. I don't think the meter was wrong. It was counting one provider's shape"
-            " and my agents talk to two. I'd rather see a wrong number I can explain than a"
-            " right one I can't. So I'm printing the raw usage object from every call this"
-            " week and reading it myself.")
+    good = ("I was reading how vLLM handles a long prompt last week. It doesn't run the whole"
+           " prompt in one step. It cuts it into chunks and mixes them with decode steps, so a"
+           " short request doesn't wait behind a 24,000-token one. I think that's the part most"
+           " people miss when they only watch average latency. I'd rather read the tail than"
+           " the mean, because the tail is where the waiting shows.")
     assert ct.post_problems(good) == []
     notes = ("A cost-tracking tool recorded $0.238 for a run the provider billed at $0.522."
+             " The tool did not count the cached input tokens, and it did not count the"
+             " reasoning tokens either, so the gap grows with every long agent run."
              " why: Langfuse issue 13807, verified by hunter. Sources: quarantine/x-study.md")
     probs = " ".join(ct.post_problems(notes))
     assert "private words" in probs and "file path" in probs and "contraction" in probs

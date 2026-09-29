@@ -212,11 +212,11 @@ def test_a_quantity_like_2048_is_not_a_year() -> None:
 
 # --- posts ------------------------------------------------------------------
 
-GOOD_POST = ("I broke my own cost meter last week. It said a run cost $0.24 and the bill said"
-             " $0.52. I don't think the meter was wrong. It was counting one provider's shape"
-             " and my agents talk to two. I'd rather see a wrong number I can explain than a"
-             " right one I can't. So I'm printing the raw usage object from every call this"
-             " week and reading it myself.")
+GOOD_POST = ("I was reading how vLLM handles a long prompt last week. It doesn't run the whole"
+            " prompt in one step. It cuts it into chunks and mixes them with decode steps, so a"
+            " short request doesn't wait behind a 24,000-token one. I think that's the part most"
+            " people miss when they only watch average latency. I'd rather read the tail than"
+            " the mean, because the tail is where the waiting shows.")
 
 
 def test_a_post_in_his_register_passes() -> None:

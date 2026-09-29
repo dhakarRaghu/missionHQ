@@ -410,7 +410,8 @@ def test_the_voice_file_carries_the_measured_gate() -> None:
     gate = data["gate"]
     assert gate["min_apostrophes"] == 2
     assert gate["max_written_out_forms"] == 1
-    assert gate["min_i_think_family"] == 1
+    # A view is required by the skill and the judge; the "I think" words are not.
+    assert gate["min_i_think_family"] == 0 and gate["short_post_words"] == 40
     assert gate["max_em_dashes"] == 0
     assert {"emoji", "hashtags", "bullets"} <= set(gate["forbid"])
 
@@ -426,7 +427,6 @@ def test_a_draft_with_no_contractions_fails() -> None:
     joined = " ".join(problems)
     assert "contraction" in joined
     assert "written-out" in joined
-    assert "I think" in joined
     assert "The lesson is" in joined
 
 

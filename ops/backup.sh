@@ -96,12 +96,17 @@ do_sync_remote() {
   mkdir -p "$SNAP"
   local tmp="$SNAP/remote-sync.sql"
   log "dumping local database for the mirror"
+  # hq.learning_files is the mirror's own table, written by mirror_files.py
+  # below. A copy of it in the local database (one restored from the mirror)
+  # must not replace it: on 2026-09-29 a local copy without its primary key
+  # did, and the file upsert then failed.
   # The vault's memory stays on this machine. hq.memory_chunks and hq.facts
   # are what the agents remember, not what he learns, and he asked for the
   # mirror to carry the courses and the learning, nothing else.
   pg_dump --no-owner --no-privileges --clean --if-exists \
           --schema=hq --schema=public \
           --exclude-table=hq.memory_chunks --exclude-table=hq.facts \
+          --exclude-table=hq.learning_files \
           "$DATABASE_URL" > "$tmp"
   log "dump ready: $(du -h "$tmp" | cut -f1); pushing to the mirror"
   # ON_ERROR_STOP is off on purpose: DROP of an object the mirror has never
@@ -124,7 +129,7 @@ do_sync_remote() {
   local report missing=0
   report="$(
     psql -tA "$DATABASE_URL" -c "SELECT tablename FROM pg_tables WHERE schemaname = 'hq'
-          AND tablename NOT IN ('memory_chunks', 'facts') ORDER BY 1" |
+          AND tablename NOT IN ('memory_chunks', 'facts', 'learning_files') ORDER BY 1" |
     while read -r t; do
       [ -z "$t" ] && continue
       local_n="$(psql -tA "$DATABASE_URL" -c "SELECT count(*) FROM hq.\"$t\"" 2>/dev/null || echo '?')"

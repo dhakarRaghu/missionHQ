@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-09-29T03:00:05.198278+05:30",
+  "built_at": "2026-09-30T03:27:56.090486+05:30",
   "courses": [
     {
       "slug": "inference-internals",
@@ -31,6 +31,24 @@
           "date": "2026-09-20",
           "read": true,
           "file": "2026-09-20-inference-internals-phase-02a-scheduling-memory.html"
+        },
+        {
+          "slug": "inference-internals-phase-02b-decoding-context",
+          "title": "Chunked Prefill, Constrained Decoding and Context Budgets",
+          "one_liner": "He can explain a mid-stream freeze as a scheduling choice and fix it with a metric and a budget, predict that a strict schema guarantees legal tokens but never a parseable answer, and design a context system where growth is capped before the window, constraints cross the boundary as copied text, and an overflow is answered with a smaller input rather than a repeated one.",
+          "minutes": 150,
+          "date": "2026-09-29",
+          "read": true,
+          "file": "2026-09-29-inference-internals-phase-02b-decoding-context.html"
+        },
+        {
+          "slug": "inference-internals-phase-03a-caching",
+          "title": "The Bill and the Cache",
+          "one_liner": "Read a real invoice from the usage object on both providers, lay out a prompt so the cache hits, prove the hit with one number, and decide from break-even arithmetic whether explicit caching pays.",
+          "minutes": 110,
+          "date": "2026-09-29",
+          "read": false,
+          "file": "2026-09-29-inference-internals-phase-03a-caching.html"
         }
       ]
     },
@@ -60,6 +78,24 @@
     }
   ],
   "articles": [
+    {
+      "title": "The server said 200. It never enforced your constraint.",
+      "one_liner": "The caller set parallel_tool_calls=false, the server accepted it, the model sent two tool calls. Who kept the guarantee?",
+      "topic": "inference-internals",
+      "kind": "",
+      "date": "2026-09-30",
+      "read": true,
+      "file": "2026-09-30-the-server-said-200-it-never-enforced-your.html"
+    },
+    {
+      "title": "The cache hit that served the wrong model",
+      "one_liner": "He can recognize a class of cache bug no hit-rate metric shows, name the mechanism that produces it (clamping two state geometries to one length), and add a warm-versus-cold equality check to any cache he builds, including his own prompt-caching experiments.",
+      "topic": "inference-internals",
+      "kind": "spine_incident",
+      "date": "2026-09-29",
+      "read": false,
+      "file": "2026-09-29-the-cache-hit-that-served-the-wrong-model.html"
+    },
     {
       "title": "The decision before the lifecycle: does cache-aware routing actually pay?",
       "one_liner": "On agentic traffic (43-turn sessions, 142K tokens in per turn), cache-aware sticky routing beats round-robin 2\u20133\u00d7 where prefill dominates and buys nothing where decode does, and the stickiness limit \u03c4 is derived from one calibration measurement, not tuned.",

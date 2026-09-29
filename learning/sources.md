@@ -74,8 +74,6 @@ Thin here: scalability laws. Only COST covers them.
 
 - **Hamel Husain** — hamel.dev · 2026-09-18 · evals and error analysis.
 - **Eugene Yan** — eugeneyan.com/writing · 2026-06-21 · eval design.
-- **Shreya Shankar** — sh-reya.com/blog · 2026-05-21 · evals, data
-  flywheels. Recheck: falls outside 120 days on 2026-09-18.
 - **Simon Willison, prompt-injection tag** — simonwillison.net/tags/prompt-injection
   · 2026-08-27 · attacks, defences, links to incidents. Take his own posts
   over the link notes.
@@ -313,9 +311,6 @@ Thin here: session guarantees. Terry 1994 has no readable free copy.
 - **Adaptive Capacity Labs** — adaptivecapacitylabs.com/blog · 2026-08-25 ·
   mixed · resilience engineering; take only the posts that analyse a named
   incident, skip the essays. Added 2026-09-27.
-- **Cloudflare postmortems** — blog.cloudflare.com/tag/post-mortem ·
-  2026-05-01 · global config changes; the Nov 2025 feature file, the Dec 2025
-  change behind "Fail Small".
 - **GitHub availability reports** — github.blog/tag/github-availability-report
   · 2026-09-09 · monthly. Open the individual report; the index is often just
   a count.
@@ -556,6 +551,36 @@ paper a week, on the paper day.
 - A shelf is not fixed. A paper that turns out to be wrong for the phase goes,
   and the frontier days add new ones.
 
+## Building with AI — tools, products and practice
+
+For his field reading and his posts: what developers who use AI at work
+learn, ship and argue about. His posts are for that developer, not for
+people who study model serving, and the course sections above feed only
+the second. Take the post, never the announcement. All opened 2026-09-29.
+
+- **Simon Willison, the whole blog** — simonwillison.net · 2026-09-28 · new
+  models and tools tried the day they ship, with what they cost and where
+  they fail. Take his entries; skip the link notes.
+- **Addy Osmani** — addyosmani.com/blog · 2026-09-14 · how teams run AI
+  coding agents on real codebases. "Brownfield Agentic Engineering".
+- **The Pragmatic Engineer (Gergely Orosz)** — newsletter.pragmaticengineer.com
+  · 2026-09-24 · mixed · how AI changes engineering work: code review,
+  hiring, teams moving simple workloads to open models to cut AI bills. Many
+  deepdives are paywalled; use the free parts only.
+- **Ben's Bites** — bensbites.com · 2026-09-29 · mixed · what a builder
+  learns using agents each week, and tools worth trying. Skip the product
+  roundups; take the "how I built this" sessions.
+- **Harper Reed** — harper.blog · 2026-09-22 · mixed · working with coding
+  agents day to day. "Why Don't My Agents Break Containment?" The notes are
+  personal; take the posts.
+- **GitHub blog, AI & ML** — github.blog/ai-and-ml · 2026-09-25 · mixed ·
+  take the engineering posts ("Rendering huge pull requests in the GitHub
+  Copilot app", "Migrating the GitHub Copilot runtime to Rust"), skip the
+  feature announcements.
+- **Cursor blog** — cursor.com/blog · 2026-09-23 · mixed · how an AI coding
+  tool is built: token use in long agent runs, how it picks a model for a
+  task. Take the research posts, skip the company news.
+
 ## Production incidents — the highest-value reading
 
 Checked 2026-09-12.
@@ -658,6 +683,9 @@ incidents section.
 
 **Other:** Adyen — engineering URL 404s. Ethan Mollick, Zvi Mowshowitz —
 not technical enough, or too much overlap with Latent Space.
+
+- **Shreya Shankar** — sh-reya.com/blog · newest post 2026-05-31 (moved by the source hunt 2026-09-28)
+- **Cloudflare postmortems (tag page)** — blog.cloudflare.com/tag/post-mortem · newest post 2026-05-01 (moved by the source hunt 2026-09-28)
 
 ## Could not verify — worth a manual look in the browser
 
@@ -784,3 +812,10 @@ one request a minute); add a row when one of them joins a course.
 - When the unread backlog drops below six, a hunt starts on its own.
 - Every entry carries the date of the newest post seen.
 - The owner's edits win. Cross out anything you do not want to hear from.
+
+## Found by the source hunt
+
+- **Anton Zhiyanov** — antonz.org · 2026-09-26 · rebuilds Go and C concurrency and allocator machinery from first principles with his own benchmark tables (mutexes, channels, pthread vs goroutine costs); newest post 'Go concurrency distilled' dated 2026-09-26, eight posts since June · performance, concurrency and the machine; also storage (SQL/SQLite deep dives) (found 2026-09-28)
+- **Colfax Research** — research.colfax-intl.com · 2026-09-07 · optimization diaries with real TFLOP/s vs peak numbers, posted weekly; newest post 2026-09-07 · inference-internals and GPU performance (courses 3 and 1): Blackwell kernel internals, FlashAttention-4, GEMM (found 2026-09-28)
+- **Ashwani Jha** — ashwanijha.dev/blog · 2026-08-15 · writes TTFT-vs-TPOT and chunk-size tradeoffs from his own serving cluster; 18 inference posts and 41 paper breakdowns; newest 2026-08-15 · inference-internals: LLM serving, chunked prefill, MoE economics, paper breakdowns (found 2026-09-28)
+- **Soil & Silicon (Evan Carlson)** — soilandsilicon.dev · 2026-07-18 · implements, measures, and admits failures (Qwen3 pairing collapse, RNG noise across devices); newest read 2026-07-18 · inference-internals: from-scratch spec decoding, KV cache, local inference, with measured numbers (found 2026-09-28)

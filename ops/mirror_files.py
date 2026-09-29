@@ -43,7 +43,18 @@ CREATE TABLE IF NOT EXISTS hq.learning_files (
     sha256     text NOT NULL,
     updated_at timestamptz NOT NULL DEFAULT now(),
     content    text NOT NULL
-)
+);
+-- A table restored without its key (a dump of a copy that had none) is
+-- given it back; the upsert below needs it. Duplicate paths keep one row.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'hq.learning_files'::regclass AND contype = 'p') THEN
+    DELETE FROM hq.learning_files a USING hq.learning_files b
+      WHERE a.path = b.path AND a.ctid < b.ctid;
+    ALTER TABLE hq.learning_files ADD PRIMARY KEY (path);
+  END IF;
+END $$;
 """
 
 

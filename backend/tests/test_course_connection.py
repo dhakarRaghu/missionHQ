@@ -214,7 +214,11 @@ def test_a_plan_is_never_lost_over_the_order_of_its_terms(monkeypatch) -> None:
 def test_the_opening_shows_where_he_is_before_the_list_of_ideas() -> None:
     plan = _plan([{"heading": "One", "concept": "c1", "covers": "c", "introduces": ["a"]}])
     lead = lw._concept_lead(plan)
-    assert "teaches one idea" in lead and "come back to this list at the end" in lead
+    assert "teaches one idea" in lead and "come back to it at the end" in lead
+    assert "They" not in lead                      # one idea is "it", not "they"
+    two = plan.model_copy(update={"concepts": [plan.concepts[0], plan.concepts[0]]})
+    assert "teaches two ideas" in lw._concept_lead(two)
+    assert "come back to this list at the end" in lw._concept_lead(two)
     assert lw._concept_lead(plan.model_copy(update={"concepts": []})) == ""
 
 

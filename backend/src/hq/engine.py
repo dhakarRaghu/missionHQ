@@ -46,7 +46,7 @@ from hq import (
 )
 from hq import learning_pipeline as learning
 from hq.config import settings
-from hq.dbos_app import DBOS
+from hq.dbos_app import DBOS, REPLAY_ERRORS
 from hq.job_pipeline import (
     SWEEP_PROMPT,
     extract_discovery_leads,
@@ -70,7 +70,15 @@ TASK_TIMEOUT_S = 40 * 60   # a cron/board run may not exceed 40 minutes
 # recorded, so the course lane gets its own.
 # A rebuilt phase took 147 minutes and was refused at the page check with no
 # time left for the repair: three editor rewrites alone are 45 of them.
-COURSE_TIMEOUT_S = 210 * 60   # a phase plus the editor's medium-effort rewrites
+# 210 minutes cancelled Phase 2B on 2026-09-29 while it was still writing: its
+# plan took four attempts and its editor rewrites ran to their own limits, so
+# a productive run passed three and a half hours. A course run is guarded by
+# liveness (`_cap_overrunning_tasks`), which blocks a run that has gone
+# silent; this age limit is only the backstop for a run that never ends.
+COURSE_TIMEOUT_S = 8 * 60 * 60
+# A run whose workflow was cancelled or failed is queued again at most this
+# many times (`_close_timed_out_runs`).
+TIMEOUT_REQUEUES = 3
 # A chat turn: one full model call of sage's (llm entry timeout, 25 minutes
 # for a long answer), plus an approval wait, plus tool calls. Twelve minutes
 # cancelled any turn whose one call ran long, and any turn waiting on him.
@@ -301,6 +309,12 @@ async def bootstrap_post_launch() -> None:
     # signed-in browser. On 2026-09-24 the nightly discovery's fifteen-minute
     # browser run held one of two task workers while three sage runs and the
     # job sweep queued behind it.
+    # DBOS queues scheduled ticks under the latest version it has seen, and
+    # a version it saw before (code reverted to an earlier state) keeps its
+    # old timestamp. The ticks would then go to a version no process runs,
+    # and the watchdog and the outbox would stop. This process's version is
+    # the latest, because it is the one running.
+    await DBOS.set_latest_application_version_async(DBOS.application_version)
     _queues["tasks"] = await DBOS.register_queue_async("tasks", worker_concurrency=3)
     _queues["browser"] = await DBOS.register_queue_async("browser", worker_concurrency=1)
     # Course work gets its own lane, one at a time. On 2026-09-17 two course
@@ -478,7 +492,7 @@ async def run_task(task_id: str) -> str:
     agent_name = task["agent"]
     spec, agent = AGENTS[agent_name]
 
-    reason = await _preflight(agent_name, spec)
+    reason = await _preflight_step(agent_name)
     if reason:
         await runner.apply_step(task_id, "blocked", status="blocked", data={"reason": reason})
         await _deliver_task_result_step(
@@ -521,6 +535,8 @@ async def run_task(task_id: str) -> str:
             outcome = await lesson_writer.write(task, spec, deps)
         else:
             outcome = await runner.execute(agent, spec, prompt=prompt, deps=deps)
+    except REPLAY_ERRORS:
+        raise
     except Exception as exc:  # noqa: BLE001 — a run must never wedge the board
         exc_text = friendly_error(exc)
         p_in, p_out, p_cost = _partial_usage(exc)
@@ -642,7 +658,7 @@ async def chat_turn(session_id: str, text: str) -> str:
     spec, agent = AGENTS[agent_name]
     via_telegram = session["channel"] == "telegram"
 
-    reason = await _preflight(agent_name, spec)
+    reason = await _preflight_step(agent_name)
     if reason:
         if via_telegram:
             await _reply_outbound(f"Cannot run: {reason}",
@@ -656,6 +672,8 @@ async def chat_turn(session_id: str, text: str) -> str:
     try:
         outcome = await runner.execute(agent, spec, prompt=text, deps=deps,
                                        message_history=history)
+    except REPLAY_ERRORS:
+        raise
     except Exception as exc:  # noqa: BLE001 — the owner must hear back either way
         exc_text = friendly_error(exc)
         p_in, p_out, p_cost = _partial_usage(exc)
@@ -761,6 +779,8 @@ async def _run_system_dispatch(name: str, tool: str, kwargs: dict[str, Any],
         return
     try:
         result = await _system_dispatch_step(tool, kwargs)
+    except REPLAY_ERRORS:
+        raise
     except Exception as exc:  # noqa: BLE001 — a failed start must be retryable
         await _release_slot_step(key)
         log.warning("system dispatch %s failed: %s", key, exc)
@@ -932,6 +952,7 @@ async def _watchdog_tick(scheduled: datetime, context: Any) -> None:
         return
     await db.execute("DELETE FROM hq.control WHERE key = 'halt_notified'")
     await _catch_up_missed(scheduled)
+    await _close_timed_out_runs()
     await _reconcile_backlog()
     await _deadman_check(scheduled)
     await _cap_overrunning_tasks(slept=slept)
@@ -1044,6 +1065,8 @@ async def _release_workflow(task_id: str) -> None:
         return
     try:
         await DBOS.cancel_workflow_async(wf_id)
+    except REPLAY_ERRORS:
+        raise
     except Exception as exc:  # noqa: BLE001 — a workflow that already ended is fine
         log.warning("could not cancel workflow %s for task %s: %s", wf_id, task_id, exc)
 
@@ -1131,6 +1154,70 @@ async def _daily_digest_tick(scheduled: datetime, context: Any) -> None:
     await digest.send_digest(now=scheduled)
 
 
+async def _close_timed_out_runs() -> None:
+    # A run whose workflow DBOS cancelled or failed is not recorded anywhere:
+    # its task and its run both stayed "running". Phase 2B sat like that for
+    # an hour on 2026-09-29, cancelled at its age limit (SetWorkflowTimeout),
+    # with its plan and every part saved on disk. The same day an article's
+    # workflow ended in ERROR on replay after a restart on new code ("emit_step
+    # was recorded when _finish_run was expected"). A run that fails in its
+    # own code closes its own row, and an owner's cancel closes the row before
+    # it cancels, so an open run on a cancelled or failed workflow is one of
+    # these. Close the run with what it spent and queue the task again on a
+    # new workflow; the writer resumes from its saved parts. After
+    # TIMEOUT_REQUEUES such runs it stays blocked.
+    # An older run of the task left open (a restart blocks a stale task
+    # without closing its run, and Retry starts a new one) is closed here and
+    # never moves the board: only the task's newest run speaks for it.
+    await db.execute(
+        "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now(),"
+        f" error = 'superseded by a newer run', {safety.CALLS_COSTED}"
+        " FROM dbos.workflow_status w"
+        " WHERE w.workflow_uuid = r.wf_id AND r.ended_at IS NULL"
+        " AND w.status IN ('CANCELLED', 'ERROR')"
+        " AND EXISTS (SELECT 1 FROM hq.runs n WHERE n.task_id = r.task_id"
+        "             AND n.started_at > r.started_at)")
+    for row in await db.fetch(
+        "SELECT t.id::text AS task_id, t.status AS task_status, r.id::text AS run_id,"
+        " r.wf_id, w.status AS wf_status,"
+        " (SELECT count(*) FROM hq.runs x WHERE x.task_id = t.id"
+        "  AND (x.error LIKE 'workflow stopped before its run closed%%'"
+        "       OR x.error LIKE 'cancelled at its age limit%%')) AS timeouts"
+        " FROM hq.tasks t"
+        " JOIN hq.runs r ON r.task_id = t.id AND r.ended_at IS NULL"
+        " JOIN dbos.workflow_status w ON w.workflow_uuid = r.wf_id"
+        " WHERE t.status IN ('running', 'needs_approval')"
+        " AND w.status IN ('CANCELLED', 'ERROR')"
+        " AND NOT EXISTS (SELECT 1 FROM hq.runs n WHERE n.task_id = t.id"
+        "                 AND n.started_at > r.started_at)"
+    ):
+        wf_status = row["wf_status"].lower()
+        await db.execute(
+            "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now(), error = %s,"
+            f" {safety.CALLS_COSTED} WHERE r.id = %s",
+            (f"workflow stopped before its run closed (workflow {wf_status})", row["run_id"]),
+        )
+        if row["task_status"] == "needs_approval":
+            # It stopped while it waited for him. Nothing waits on its ticket
+            # any more, so the ticket is expired; queued again, it would do
+            # the paid work a second time and ask the same question.
+            for ticket in await db.fetch(
+                "SELECT id::text FROM hq.tickets WHERE wf_id = %s AND status = 'pending'",
+                (row["wf_id"],),
+            ):
+                await board.resolve_ticket(ticket["id"], "expired", via="watchdog")
+            await board.apply(row["task_id"], "workflow_stopped", status="blocked",
+                              data={"reason": f"its workflow ended as {wf_status} while it"
+                                    " waited for an approval; the approval was expired"})
+            continue
+        reason = f"its workflow ended as {wf_status} before the run closed"
+        await board.apply(row["task_id"], "workflow_stopped", status="blocked",
+                          data={"reason": reason})
+        if int(row["timeouts"]) < TIMEOUT_REQUEUES:
+            await board.apply(row["task_id"], "requeued_after_stop", status="backlog",
+                              data={"reason": "queued again; its saved work is kept"})
+
+
 async def reap() -> None:
     """Boot-time reconciliation. DBOS recovery resumes live workflows; anything
     still marked running with no fresh activity is stale — block it visibly."""
@@ -1151,7 +1238,7 @@ async def reap() -> None:
     await db.execute(
         "UPDATE dbos.workflow_status SET application_version = %s"
         " WHERE status = 'ENQUEUED' AND application_version IS DISTINCT FROM %s"
-        " AND workflow_uuid LIKE 'task-%%'",
+        " AND (workflow_uuid LIKE 'task-%%' OR workflow_uuid LIKE 'chat-%%')",
         (DBOS.application_version, DBOS.application_version),
     )
     # A scheduled tick (watchdog, outbox, digest, a cron slot) queued under
@@ -1178,6 +1265,8 @@ async def reap() -> None:
     ):
         try:
             await DBOS.cancel_workflow_async(row["wf_id"])
+        except REPLAY_ERRORS:
+            raise
         except Exception as exc:  # noqa: BLE001
             log.warning("could not release stuck workflow %s: %s", row["wf_id"], exc)
 
@@ -1187,16 +1276,21 @@ async def reap() -> None:
     # watchdog only notices once it has been silent for an hour and a half.
     # Cancel it, close its run with what it spent, and queue the task again
     # on the new code. Its durable pieces (a lesson's saved parts) survive.
+    # A run that was waiting for an approval is stopped the same way, and its
+    # ticket expired: nothing on the new code waits on it.
     for row in await db.fetch(
-        "SELECT t.id::text AS task_id, r.id::text AS run_id, r.wf_id FROM hq.tasks t"
+        "SELECT t.id::text AS task_id, t.status AS task_status, r.id::text AS run_id,"
+        " r.wf_id FROM hq.tasks t"
         " JOIN hq.runs r ON r.task_id = t.id AND r.ended_at IS NULL"
         " JOIN dbos.workflow_status w ON w.workflow_uuid = r.wf_id"
-        " WHERE t.status = 'running' AND w.status = 'PENDING'"
+        " WHERE t.status IN ('running', 'needs_approval') AND w.status = 'PENDING'"
         " AND w.application_version IS DISTINCT FROM %s",
         (DBOS.application_version,),
     ):
         try:
             await DBOS.cancel_workflow_async(row["wf_id"])
+        except REPLAY_ERRORS:
+            raise
         except Exception as exc:  # noqa: BLE001
             log.warning("could not cancel old-version workflow %s: %s", row["wf_id"], exc)
         await db.execute(
@@ -1204,12 +1298,24 @@ async def reap() -> None:
             f" error = 'stopped by a deploy', {safety.CALLS_COSTED} WHERE r.id = %s",
             (row["run_id"],),
         )
+        if row["task_status"] == "needs_approval":
+            for ticket in await db.fetch(
+                "SELECT id::text FROM hq.tickets WHERE wf_id = %s AND status = 'pending'",
+                (row["wf_id"],),
+            ):
+                await board.resolve_ticket(ticket["id"], "expired", via="deploy")
+            await board.apply(row["task_id"], "stopped_by_deploy", status="blocked",
+                              data={"reason": "the backend restarted on new code while it"
+                                    " waited for an approval; the approval was expired"})
+            continue
         # running -> blocked -> backlog: the board's legal path, and the
         # backlog loop below gives it the next attempt's workflow id.
         await board.apply(row["task_id"], "stopped_by_deploy", status="blocked",
                           data={"reason": "the backend restarted on new code mid-run"})
         await board.apply(row["task_id"], "requeued_after_deploy", status="backlog",
                           data={"reason": "queued again on the new code"})
+
+    await _close_timed_out_runs()
 
     # A crash between create_task and enqueue leaves a task in backlog forever.
     # Re-enqueue is safe: the workflow id is derived from the task id.
@@ -1297,6 +1403,8 @@ async def _file_external_output(
         if problem:
             raise ValueError(problem)
         await memory.write(rel, content, actor=spec.name)
+    except REPLAY_ERRORS:
+        raise
     except Exception as exc:  # noqa: BLE001 — the reading still happened
         await runner.emit_step(
             "run.no_artifact", run_id=run_id, task_id=task_id, agent=spec.name,
@@ -1321,6 +1429,16 @@ async def _preflight(agent_name: str, spec: AgentSpec) -> str | None:
     if await safety.agent_paused(agent_name):
         return f"agent {agent_name} is paused"
     return await safety.spend_cap_hit(agent_name, spec.caps.daily_usd)
+
+
+@DBOS.step(name="engine.preflight")
+async def _preflight_step(agent_name: str) -> str | None:
+    """`_preflight`, recorded. It reads the halt file, the pause row and
+    today's spend, which a replay after a restart sees changed: the run's own
+    spend can pass the cap, and the replay then took the blocked branch
+    where the first run had started."""
+    spec, _agent = AGENTS[agent_name]
+    return await _preflight(agent_name, spec)
 
 
 async def _load_task(task_id: str) -> dict:
@@ -1399,6 +1517,8 @@ async def _safe_advance_job_search(
     """
     try:
         return await _advance_job_search(task, task_id, run_id, result, output), None
+    except REPLAY_ERRORS:
+        raise
     except Exception as exc:  # noqa: BLE001 — handoff must not orphan source output
         error = friendly_error(exc)
         await runner.emit_step(
@@ -1489,6 +1609,8 @@ async def _safe_record_referrals(
             payload={"job_id": payload.get("job_id"), "count": written},
         )
         return written
+    except REPLAY_ERRORS:
+        raise
     except Exception as exc:  # noqa: BLE001 — the reading still happened
         await runner.emit_step(
             "referral.record_failed", run_id=run_id, task_id=task.get("id"),
@@ -1552,6 +1674,8 @@ async def _safe_route_operator_requests(
             payload={"workflow": "operator_request_review", "run_id": run_id},
             dedup_key=f"operator-request-review:{run_id}",
         )
+    except REPLAY_ERRORS:
+        raise
     except Exception as exc:  # noqa: BLE001 — the findings still stand
         await runner.emit_step(
             "operator.request_routing_failed",
@@ -1966,6 +2090,8 @@ async def _safe_advance_learning(
         return None
     try:
         return await _advance_learning(task, task_id, run_id, result, output)
+    except REPLAY_ERRORS:
+        raise
     except Exception as exc:  # noqa: BLE001 — the digests still stand
         await runner.emit_step(
             "learning.advance_failed",
@@ -2058,6 +2184,8 @@ async def _safe_record_operator_answers(
         )
         await _mark_requests_answered_step([r["id"] for r in reqs])
         return answers_task
+    except REPLAY_ERRORS:
+        raise
     except Exception as exc:  # noqa: BLE001 — operator's reading still stands
         await runner.emit_step(
             "operator.answer_routing_failed",
@@ -2274,6 +2402,8 @@ async def _publish_reader() -> None:
     try:
         await runner.emit_step("reader.published", payload={
             k: result.get(k) for k in ("branch", "committed", "pushed", "error", "pages")})
+    except REPLAY_ERRORS:
+        raise
     except Exception:
         log.warning("reader.published event not recorded", exc_info=True)
 
@@ -2308,6 +2438,8 @@ async def _reconcile_backlog() -> None:
                 await requeue(row["id"])
             else:
                 await _enqueue(row["id"], lane=await _lane_of(row["id"]))
+        except REPLAY_ERRORS:
+            raise
         except Exception as exc:  # noqa: BLE001 — one bad row must not stop the tick
             log.warning("could not enqueue backlog task %s: %s", row["id"], exc)
 

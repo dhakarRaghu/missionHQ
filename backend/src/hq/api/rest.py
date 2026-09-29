@@ -96,6 +96,18 @@ async def cancel_task(task_id: str) -> dict:
     if rows[0]["status"] not in {"running", "needs_approval", "backlog"}:
         return {"cancelled": False, "reason": f"task is {rows[0]['status']}"}
 
+    # The workflow cannot close its own run row once cancelled, and a row left
+    # with outcome NULL would count against the success rate in `hq.cli health`.
+    # A deliberate stop is not a failure, so record it as its own outcome. The
+    # row is closed before the workflow is cancelled: the watchdog closes and
+    # requeues an open run whose workflow was cancelled, and must not take
+    # the owner's cancel for one.
+    await db.execute(
+        "UPDATE hq.runs r SET outcome = 'cancelled', ended_at = now(),"
+        f" {safety.CALLS_COSTED}"
+        " WHERE r.task_id = %s AND r.ended_at IS NULL",
+        (task_id,),
+    )
     wf_id = rows[0]["wf_id"]
     if wf_id:
         try:
@@ -103,15 +115,6 @@ async def cancel_task(task_id: str) -> dict:
         except Exception as exc:  # noqa: BLE001 — mark the board even if it already ended
             log.warning("cancel of workflow %s failed: %s", wf_id, exc)
 
-    # The workflow cannot close its own run row once cancelled, and a row left
-    # with outcome NULL would count against the success rate in `hq.cli health`.
-    # A deliberate stop is not a failure, so record it as its own outcome.
-    await db.execute(
-        "UPDATE hq.runs r SET outcome = 'cancelled', ended_at = now(),"
-        f" {safety.CALLS_COSTED}"
-        " WHERE r.task_id = %s AND r.ended_at IS NULL",
-        (task_id,),
-    )
     await board.apply(
         task_id,
         "cancelled",
@@ -373,16 +376,28 @@ async def _hunt_referral(job_id: str) -> str | None:
 @router.get("/runs", operation_id="listRuns")
 async def list_runs(limit: int = 50) -> list[dict]:
     return await db.fetch(
-        "SELECT id::text, task_id::text, agent, model, job_hash, started_at, ended_at,"
-        " outcome, input_tokens, output_tokens, cost_usd, error"
-        " FROM hq.runs ORDER BY started_at DESC LIMIT %s",
+        "SELECT r.id::text, r.task_id::text, r.agent, r.model, r.job_hash, r.started_at,"
+        " r.ended_at, r.outcome, " + ", ".join(_live(c) for c in LIVE_COLS) + ", r.error"
+        " FROM hq.runs r ORDER BY r.started_at DESC LIMIT %s",
         (limit,),
     )
 
 
+# A running run's totals are the sum of its recorded model calls so far. The
+# row itself is written when the run ends, so a two-hour write-up showed $0
+# and 0 tokens until then and looked hung.
+LIVE_COLS = ("input_tokens", "output_tokens", "cost_usd")
+
+
+def _live(col: str) -> str:
+    return (f"CASE WHEN r.ended_at IS NULL THEN coalesce({safety.CALLS_SUM.format(col=col)},"
+            f" r.{col}) ELSE r.{col} END AS {col}")
+
+
 RUN_COLUMNS = (
     "r.id::text, r.task_id::text, r.wf_id, r.agent, r.model, r.job_hash, r.started_at,"
-    " r.ended_at, r.outcome, r.input_tokens, r.output_tokens, r.cost_usd, r.stall_count, r.error"
+    " r.ended_at, r.outcome, " + ", ".join(_live(c) for c in LIVE_COLS)
+    + ", r.stall_count, r.error"
 )
 # hq.messages has no run reference. A chat run's history row is written right
 # after ended_at; this is how long after ended_at we still accept it.
