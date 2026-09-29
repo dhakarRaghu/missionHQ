@@ -97,7 +97,10 @@ MAX_SOURCE_LEADS = 12
 # truncating them means his edits quietly stop working. The model has 256k of
 # context; a few thousand more characters is not the constraint.
 INJECT_CHARS = 12_000
-ROSTER_CHARS = 2 * INJECT_CHARS
+# The roster grows with every source hunt: on 2026-09-29 three sources found
+# on his other laptop, merged in, took each course's slice past 24,000 and
+# the newest line fell off. 40,000 is about 10,000 tokens of a 256k window.
+ROSTER_CHARS = 40_000
 # Unread candidates the ledger should hold: about four days of reading. The
 # roster's own writers produce roughly two deep posts a day between them
 # (measured 2026-09-12), and a lesson wants three or four, so the morning has

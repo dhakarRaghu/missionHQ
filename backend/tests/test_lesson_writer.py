@@ -768,9 +768,11 @@ def test_a_section_the_editor_sent_back_is_rewritten_with_more_thought(tmp_path:
     (learning / "lessons").mkdir(parents=True)
     monkeypatch.setattr(lt.settings(), "learning_dir", learning)
     efforts: list[str] = []
+    prompts: list[str] = []
 
     async def section_step(model: str, prompt: str, effort: str = lw.SECTION_EFFORT) -> str:
         efforts.append(effort)
+        prompts.append(prompt)
         plan = lw.Outline.model_validate(_outline())
         return _section_html(1, plan.sections[0])
 
@@ -792,14 +794,25 @@ def test_a_section_the_editor_sent_back_is_rewritten_with_more_thought(tmp_path:
     asyncio.run(w.write_section(1))
     assert set(efforts) == {lw.SECTION_EFFORT}
     efforts.clear()
+    prompts.clear()
     w.teaching_notes[1] = "concept_first: state the claim before the mechanism"
-    asyncio.run(w.write_section(1))
-    # The higher effort writes the section; the ordinary call runs beside it.
+    # A later repair of a section the editor sent back keeps the instruction
+    # but uses the ordinary effort.
+    asyncio.run(w.write_section(1, ["the article is 2806 words"]))
+    assert set(efforts) == {lw.SECTION_EFFORT}
+    assert all("concept_first: state the claim" in p for p in prompts)
+    efforts.clear()
+    # The page repair goes through the guarded rewrite, and the same holds.
+    asyncio.run(w._rewrite_kept(1, ["the whole-page check said: too long"], "page"))
+    assert set(efforts) == {lw.SECTION_EFFORT}
+    efforts.clear()
+    asyncio.run(w.write_section(1, teach=True))
+    # The higher effort writes the editor's rewrite; the ordinary call runs beside it.
     assert efforts[0] == lw.REWRITE_EFFORT and set(efforts) == {lw.REWRITE_EFFORT, lw.SECTION_EFFORT}
     assert not any("rewritten at low effort instead" in r for r in w.report)
     efforts.clear()
     slow["on"] = True                       # medium runs past its limit
-    asyncio.run(w.write_section(1))
+    asyncio.run(w.write_section(1, teach=True))
     assert efforts[:2] == [lw.REWRITE_EFFORT, lw.SECTION_EFFORT]
     assert any("rewritten at low effort instead" in r for r in w.report)
 

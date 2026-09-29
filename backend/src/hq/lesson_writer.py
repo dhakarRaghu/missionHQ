@@ -1751,9 +1751,10 @@ class Writer:
         self.release_flags: list[str] = []
         self.budgets: dict[int, int] = {}
         # The editor's final scores by section, and its instruction for each
-        # section it sent back: kept on every later rewrite of that section
-        # (a retry, a citation repair, a page repair), so a fix for one
-        # finding does not undo the teaching fix.
+        # section it sent back: kept in the prompt of every later rewrite of
+        # that section (a retry, a page repair), so a fix for one finding
+        # does not undo the teaching fix. A citation repair edits sentences
+        # in place and needs none.
         self.editor_scores: dict[int, SectionScore] = {}
         self.teaching_notes: dict[int, str] = {}
         # Quality findings the page repairs did not clear; the lesson is kept
@@ -1862,7 +1863,15 @@ class Writer:
                 with contextlib.suppress(Exception):
                     await fallback
 
-    async def write_section(self, i: int, problems: list[str] | None = None) -> str:
+    async def write_section(self, i: int, problems: list[str] | None = None, *,
+                            teach: bool = False) -> str:
+        """Write section i, up to SECTION_RETRIES more times while it has
+        findings, and keep the best attempt. `teach`: this is the teaching
+        editor's rewrite, the one call that gets the higher effort. A later
+        repair of the same section still carries the editor's instruction,
+        but at the ordinary effort: on 2026-09-29 a word-count repair of one
+        section waited 44 minutes on three higher-effort attempts, one of
+        which ran out its whole limit."""
         assert self.outline is not None
         s = self.outline.sections[i - 1]
         previous = self.parts[i - 1] if i - 1 < len(self.parts) else ""
@@ -1873,11 +1882,13 @@ class Writer:
         budget = self.budgets.get(i, 0)
         standing = self.teaching_notes.get(i, "")
         best: tuple[str, list[str]] | None = None
-        for _ in range(SECTION_RETRIES + 1):
+        for attempt in range(SECTION_RETRIES + 1):
             asked = found + ([standing] if standing and standing not in found else [])
             prompt = _section_prompt(self.m, self.outline, i, s, previous, asked, budget)
-            raw = await self._rewrite_or_draft(prompt) if standing else await _section_step(
-                self.spec.model, prompt)
+            # Only the editor's first attempt: a retry repairs what the checks
+            # found, and three higher-effort attempts could wait 45 minutes.
+            raw = await self._rewrite_or_draft(prompt) if standing and teach and attempt == 0 \
+                else await _section_step(self.spec.model, prompt)
             html = _h2(i, s) + "\n" + clean_section(raw)
             found = self._section_findings(i, html, earlier, total, budget)
             if mechanical(found):
@@ -2102,7 +2113,7 @@ class Writer:
         after five hours of writing. A rewrite never makes a page wrong."""
         before = self.parts[i]
         before_hard = self._hard_now(i)
-        await self.write_section(i, notes)
+        await self.write_section(i, notes, teach=stage == "editor")
         brought = self._hard_now(i) - before_hard
         if brought:
             self.parts[i] = before
