@@ -151,28 +151,15 @@ One shared summation looks correct on both providers and is wrong by the size of
 
 Read extract_usage in cost_meter.py and say which provider each branch is for.
 
-Your meter can now read the bill correctly on both providers. What it still cannot explain is the second half of your invoice puzzle: the timestamp line from Phase 0 moved the bill without changing any token count. The next section asks why a line at the top of your prompt costs the whole discount.
+Your meter can now read the bill correctly on both providers. What it still cannot explain is the second half of your invoice puzzle: the timestamp line from Phase 0 moved the bill without changing any token count. The next section asks what, besides a timestamp, breaks a cache hit.
 
-## Why does a line at the top of your prompt cost the whole discount?
+## What else breaks a cache hit besides a timestamp?
 
-The meter now reads the bill, but only the prompt's layout explains why it changed.
+Phase 2A gave you the layout rule; this section adds the parts of a request you do not think of as text.
 
-The pricing module from this phase can now price every token class correctly, with one adapter per provider. It still cannot explain the second half of your invoice puzzle, where moving one timestamp line moved the bill and no token count moved with it. In Phase 0's Story 1, a team added that line to the top of its system prompt to stop the model guessing the date, and its next invoice went from about $40 to over $200 on the same traffic. This section is the mechanism that lets one short line do that.
+Phase 2A measured the rule this section builds on. The cache matches the prefix, the start of your prompt from token 0 forward, and the match stops at the first byte that differs. So a timestamp at the top of the prompt gave a 0.0% hit rate in its simulator, and the stable-first layout gave 92.0%. Phase 0's Story 1 showed the same line moving an invoice from about $40 to over $200 on the same traffic.
 
-Here is the picture. The server stores the work it did on the start of earlier prompts, and when your request arrives it compares your rendered bytes against what it stored. The prefix, the start of your prompt from token 0 forward, is the only part that can ever match, and the match stops at the first byte that differs. Everything before that byte is billed as cached input at the read price, about a tenth of input. Everything from that byte onward is full price on this request.
-
-So your prompt layout, the order of the blocks in your prompt and which content sits in each, decides how much of every request is cheap. The cache does not know your tool definitions from your timestamp. It knows byte order. Move the changing block and the matched region grows, without editing a single word of content.
-
-  Timestamp line at the top
-  Timestamp line in a tail block
-
-        Byte 0 changes every second, so nothing below it can match
-
-        The same bytes in a different order, and 12,000 tokens match
-
-matched, billed at the read priceafter the first changed byte, full pricethe volatile linemessages
-
-Block widths use the cache_demo replay's sizes, about 12,400 input tokens in all. Illustration, not a measured run.
+Production numbers agree. ProjectDiscovery sends a system prompt of over 20,000 tokens on every step of an agent task, and it kept working memory near the top. Its cache hit rate, the share of input tokens billed at the cached read price, was 7.6%. Moving that memory into a tail message raised it to 73.7% in one deploy. Two of its tasks with nearly equal volume ran at 91.8% and 3.2%, and the second cost about 60 times more. What 2A did not show is that the bytes include more than your text.
 
 Predict: two back-to-back requests differ only in the order the tool definitions appear. Same model, same system prompt. Does the second request hit the cache?
 No. Tool definitions are rendered into the request before the system and message text, so a different order means the bytes differ from the first tool onward. The match from token 0 stops at that byte, and the identical policy text below is billed at full price. The belief that this should hit is reasonable, because to you the two requests carry identical meaning. The cache never compares meaning, only the byte sequence.
@@ -183,47 +170,38 @@ Anthropic publishes the same rule as an order of invalidation, tools, then syste
 
 The sharpest form of this bug lives in your own Go services. Go deliberately shuffles map iteration order, so any serializer that emits JSON keys by ranging over a map writes different bytes on different processes. Anthropic's docs warn about exactly this for tool_use blocks in history, and name Go and Swift. The symptom is a hit rate that changes from pod to pod with zero code changes, and the fix is to make the code that serializes your tool schemas emit a fixed key order through structs or explicit sorting.
 
-The remedy is a layout rule with three parts. Put stable content first, tool definitions and then the policy text that changes rarely. Move volatile content, timestamps and session ids and per-request working memory, into a tail block after everything stable, so the first changed byte sits as late as possible. Update the stable part append-only, adding new text below and never editing in place, and on Anthropic's explicit markers put the breakpoint on the last block that stays identical across requests.
+```go
+// Go shuffles map order: each pod writes the keys differently
+for name, prop := range schema.Properties {
+    fmt.Fprintf(&buf, "%q:%s,", name, prop)
+}
+```
 
-Now count what the single red sliver in the first view costs. Story 1's line is about 25 characters, inside a prefix of about 12,000 tokens. With the line at the top, the difference sits at nearly byte 0, so all 12,000 tokens are processed and billed at full input price on every request. The token totals on every dashboard stay identical before and after, and only the cached count in the usage object flips from the full prefix to zero. That is the complete mechanism of a 4x bill from 25 characters, with no error raised anywhere.
+Two pods send the same tool schema as different bytes, so the cache misses on one of them.
 
-Evidence
-The settings list is from the OpenAI prompt caching guide, opened 2026-09-29. The tools, system, messages invalidation order and the serializer warning are from the Anthropic prompt caching docs, opened 2026-09-29, which say verbatim: "Verify that the keys in your tool_use content blocks have stable ordering as some languages (for example, Swift, Go) randomize key order during JSON conversion, breaking caches." The 25-character figure is the phase lab's own count for Story 1's line.
+```go
+// sort the keys: every pod writes the same bytes
+for _, name := range slices.Sorted(maps.Keys(schema.Properties)) {
+    fmt.Fprintf(&buf, "%q:%s,", name, schema.Properties[name])
+}
+```
 
-Use it. The lab's E5 runs exactly this experiment against the live API. It sends a cachable base prompt, then the same prompt with the timestamp at position 0, then with the timestamp at the end. Your job is to watch one field: the cached count in the usage object. Expect zero with the line at the top, then nearly the whole prefix with the line at the end, with token totals that never move. The question E5 answers: which single field told you the layout was wrong?
+Go's encoding/json already sorts map keys. The bug lives in hand-written loops like the first one.
 
-The cache matches bytes from token 0, so your layout decides how much of it matches.
-
-Caching looks automatic, but one changing line at the top silently zeroes the hit rate.
-
-Find the earliest changing block in your prompt and move it below the stable ones.
-
-These rules are easy to state, so the honest question is whether applying them pays in a real system. The next section answers it with one team's measurements: what did ProjectDiscovery change to move its cache hit rate from 7.6% to 73.7% in a single deploy?
-
-## What did one team change to move its hit rate from 7.6% to 73.7%?
-
-The three layout rules are easy to state. Their real test is a production system that ignored them and measured the result.
-
-ProjectDiscovery runs a security-testing platform where an agent completes one task in 20 to 40 steps, and each step sends the same system prompt of over 20,000 tokens. That prompt held volatile content near the top, in the form of working memory and runtime context, so it changed on most steps, the same way your timestamp line changes yours. The team measured its cache hit rate, the share of input tokens billed at the cached read price instead of the full input price, and found it at 7.6%. Remember that a cache match is checked on the prefix, the start of the prompt from token 0 forward, so that changing content broke the match on most requests.
-
-The fix was the layout rules applied once. The team moved the working memory and runtime context out of the system prompt. It moved them into a tail message at the end of the request. The prefixes across the steps of a task now matched. The hit rate rose from 7.6% to 73.7% in one deploy, and later to about 85%. No code in the agent's logic changed. No token counts changed in any meaningful way. The reported LLM cost saving went from 59% to about 70%.
-
-Weekly cache hit rate from ProjectDiscovery's published table. Reported figures, conditions below.
-
-The section's number is the comparison of two of their tasks with nearly equal token volume. One task ran at a 91.8% cache rate, a 1,225-step task with 67.5 million input tokens. The other ran at 3.2%, because its prompt layout kept volatile content in the prefix. The second task cost about 60 times more, with the same models, the same provider and the same code path. Only the prompt layout differed, and layout alone moved the cost 60x.
+So the layout rule from Phase 2A grows by two parts. Update the stable part append-only, adding new text below and never editing in place. And on Anthropic's explicit markers, put the breakpoint on the last block that stays identical across requests.
 
 Evidence
-ProjectDiscovery, "How We Cut LLM Costs by 59% With Prompt Caching". Production write-up with stated conditions: the Neo platform, 20 to 40 steps per task, system prompts over 20,000 tokens. It gives weekly cache hit rate and per-task cache rates in their own tables. The hit-rate and two-task numbers above are taken from that write-up, read 2026-09-29.
+The settings list is from the OpenAI prompt caching guide, opened 2026-09-29. The tools, system, messages invalidation order and the serializer warning are from the Anthropic prompt caching docs, opened 2026-09-29, which say verbatim: "Verify that the keys in your tool_use content blocks have stable ordering as some languages (for example, Swift, Go) randomize key order during JSON conversion, breaking caches." The hit rates and the two tasks are from ProjectDiscovery, "How We Cut LLM Costs by 59% With Prompt Caching" (the Neo platform, 20 to 40 steps per task, system prompts over 20,000 tokens), read 2026-09-29. The 0.0% and 92.0% are Phase 2A's simulator results.
 
-Map the case back to your running agent. If your prompt starts with a timestamp, your setup is the 3.2% task at a smaller scale. The same move is available to you. It is the one from the section above: one deploy that moves one line, with no other change.
+Use it. The lab's E5 runs the timestamp experiment against the live API: the same prompt with the timestamp at position 0, then at the end. Watch one field, the cached count in the usage object. Then try the new part yourself: swap the order of two tool definitions between two calls and watch the same field.
 
-One deploy that moved volatile content out of the prefix raised a hit rate from 7.6% to 73.7%.
+Tool order, output format, reasoning settings and JSON key order are part of the bytes that must match.
 
-"Hit rate is the provider's problem" is what a 3.2% layout looks like from inside the team that owns it.
+A Go serializer that ranges over a map changes the bytes on every process, so the hit rate differs from pod to pod.
 
-Read ProjectDiscovery's weekly table and find which block they moved, then look for its twin in your prompt.
+Diff the rendered request of two calls, not your prompt text, and find the first byte that differs.
 
-Every number in this section rested on someone reading the cached-token count per request. That raises a question the layout rules cannot answer. What evidence does a hit leave behind, and what does a broken cache look like on the wire? The next section answers that: why a 200 OK proves nothing about caching.
+Every number here rested on someone reading the cached-token count per request. That raises a question the layout rules cannot answer. What evidence does a hit leave behind, and what does a broken cache look like on the wire? The next section answers that: why a 200 OK proves nothing about caching.
 
 ## Why does success never prove caching?
 
@@ -399,7 +377,7 @@ That closes the teaching part of the phase. You can now read any usage object in
 
 ## What you can do now, and what comes next
 
-You started this phase with a meter that matched no invoice. Eight sections later you can explain both directions of the error. Read the four claims again; they should now read as things you would say yourself.
+You started this phase with a meter that matched no invoice. Seven sections later you can explain both directions of the error. Read the four claims again; they should now read as things you would say yourself.
 
 One field name, two meanings
 
@@ -417,7 +395,7 @@ Caching is a purchase
 
 A write costs 1.25x or 2x the input price and a read costs 0.1x. An entry pays for itself after (write − input) ÷ (input − read) reads. An entry becomes usable only after the first response begins. So ten parallel same-prefix calls write ten entries and read zero, and cost more than no cache at all.
 
-Each claim has a home in the phase. The first belongs to the sections that opened the usage object on both providers. The second belongs to the two sections on prompt layout and the ProjectDiscovery case. The third belongs to the section on silent failure. The fourth belongs to the two sections on break-even arithmetic and the cold-start fan-out.
+Each claim has a home in the phase. The first belongs to the sections that opened the usage object on both providers. The second belongs to the section on what breaks a cache hit, with the ProjectDiscovery numbers. The third belongs to the section on silent failure. The fourth belongs to the two sections on break-even arithmetic and the cold-start fan-out.
 
 What you can do now is concrete. You can read any usage object into a correct cost. You can lay out a prompt so the cache hits. You can prove both from numbers in your own account, and the lab walks you through exactly that.
 
