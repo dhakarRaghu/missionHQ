@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-09-30T03:27:56.090486+05:30",
+  "built_at": "2026-10-01T04:15:19.912474+05:30",
   "courses": [
     {
       "slug": "inference-internals",
@@ -47,8 +47,17 @@
           "one_liner": "Read a real invoice from the usage object on both providers, lay out a prompt so the cache hits, prove the hit with one number, and decide from break-even arithmetic whether explicit caching pays.",
           "minutes": 110,
           "date": "2026-09-29",
-          "read": false,
+          "read": true,
           "file": "2026-09-29-inference-internals-phase-03a-caching.html"
+        },
+        {
+          "slug": "inference-internals-phase-03b-routing-alerting",
+          "title": "Inference Internals \u2014 Phase 3B: Routing, Batch and the Cost Alarm",
+          "one_liner": "He can price a cascade against a router, prove an escalation signal with a random control, detect a billing-class regression within ten requests, and bound an agent loop's spend before it happens.",
+          "minutes": 110,
+          "date": "2026-10-01",
+          "read": false,
+          "file": "2026-10-01-inference-internals-phase-03b-routing-alerting.html"
         }
       ]
     },
@@ -93,7 +102,7 @@
       "topic": "inference-internals",
       "kind": "spine_incident",
       "date": "2026-09-29",
-      "read": false,
+      "read": true,
       "file": "2026-09-29-the-cache-hit-that-served-the-wrong-model.html"
     },
     {

@@ -389,3 +389,67 @@ def test_a_term_the_orientation_explains_again_may_be_assumed_below_it() -> None
     # A term only the lab names is not explained for a teaching section.
     plan.sections[2].assumes = ["not a term"]
     assert len(lw.ledger_problems(plan)) == 1
+
+
+# --- a later phase never re-teaches what an earlier one taught ---------------------------
+
+OLD_PAGE = ('<main><p>We open on the support agent.</p>'
+            '<h2>2.3 Prefix caching inside the server</h2>'
+            '<p class="remember">The cache matches whole blocks from token 0 forward.</p>'
+            '<h3>Measure the layout cost</h3><p>text</p>'
+            '<h2>Lab: try it</h2><h3>Exercise one</h3>'
+            '<h2>What comes next</h2><p>Phase 3A prices the cache.</p></main>')
+
+
+def test_the_memory_of_an_earlier_phase_holds_what_it_taught() -> None:
+    m = lw.phase_memory(OLD_PAGE, slug="p2a", title="Phase 2A")
+    assert m.taught == [("2.3 Prefix caching inside the server: The cache matches whole blocks"
+                         " from token 0 forward."), "Measure the layout cost"]
+    block = lw.memory_block([m])
+    assert "What it taught:" in block and "Never teach again what one of them taught" in block
+    assert lw.taught_before([m])[0].startswith("Phase 2A: 2.3 Prefix caching")
+
+
+def test_a_newer_page_gives_its_concept_list_first() -> None:
+    page = ('<main><ol class="concepts"><li id="c1"><b>Hit rate is a property of layout.</b>'
+            ' <span>x</span></li></ol><h2>Why?</h2><p>t</p></main>')
+    assert lw.phase_memory(page).taught[0] == "Hit rate is a property of layout."
+
+
+def test_a_planned_concept_that_repeats_an_earlier_phase_is_sent_back(monkeypatch) -> None:
+    calls: list[list[str]] = []
+    plan = _plan([{"heading": "S1", "concept": "c1", "covers": "c"},
+                  {"heading": "Check", "kind": "checkpoint", "covers": "c"},
+                  {"heading": "Sheet", "kind": "cheatsheet", "covers": "c"},
+                  {"heading": "Sources", "kind": "sources", "covers": "c"}]).model_dump()
+    plan["concepts"] = [dict(plan["concepts"][0], id=f"c{i}", evidence_quote="the note says this")
+                        for i in (1, 2, 3)]
+    plan["sections"][:1] = [dict(plan["sections"][0], heading=f"S{i}", concept=f"c{i}")
+                            for i in (1, 2, 3)]
+    for s in plan["sections"][1:3]:
+        s["bridge"] = "what the one above left open"
+
+    async def outline_step(model, article, material, problems, page="", previous=None):
+        calls.append(list(problems))
+        return plan
+
+    async def repeat_step(claims, taught):
+        assert taught == ["Phase 2A: stable prefix first"]
+        return {"repeats": [{"id": "c2", "earlier": "Phase 2A: stable prefix first",
+                             "new_part": "tool order is part of the bytes"}]}
+
+    async def release_step(claims):
+        return {"fails": [], "reasons": []}
+
+    monkeypatch.setattr(lw, "_outline_step", outline_step)
+    monkeypatch.setattr(lw, "_repeat_step", repeat_step)
+    monkeypatch.setattr(lw, "_release_step", release_step)
+    material = lw.Material(article=False, slug="p", note="the note says this", prompt="m",
+                           taught_before=["Phase 2A: stable prefix first"])
+    spec = type("Spec", (), {"model": "teacher", "name": "tutor"})()
+    w = lw.Writer(spec, HQDeps(agent="tutor", task_id=None, run_id=None), material)  # type: ignore[arg-type]
+    assert asyncio.run(w.plan()) is not None             # kept on the last try, flagged
+    assert len(calls) == lw.PLAN_ATTEMPTS
+    assert "c2 teaches again what an earlier phase taught" in calls[1][0]
+    assert "Keep it only for what is new here: tool order is part of the bytes" in calls[1][0]
+    assert any("repeat check, kept with doubts" in r for r in w.report) and w.release_flags
