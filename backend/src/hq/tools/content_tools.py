@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import re
+from datetime import date, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -49,7 +50,7 @@ def with_batch(existing: str | None, batch: str, day: str, title: str) -> str:
     lines = batch.strip().splitlines()
     if lines and lines[0].startswith("## "):
         lines = lines[1:]
-    title = re.sub(r"^\d{4}-\d{2}-\d{2}\s*[—–-]?\s*", "", title.strip())  # the date is added here
+    title = re.sub(r"^\d{4}-\d{2}-\d{2}\s*[—–:-]?\s*", "", title.strip())  # the date is added here
     heading = f"## {day}" + (f" — {title}" if title else "")
     section = heading + "\n\n" + "\n".join(lines).strip() + "\n"
     if not existing:
@@ -63,11 +64,30 @@ def with_batch(existing: str | None, batch: str, day: str, title: str) -> str:
     return head + top + section + ("\n" + rest + "\n" if rest else "")
 
 
-POSTS_MIN, POSTS_MAX = 3, 5              # how many code keeps and files
+# X ranks a post by the reactions it predicts, and the ones that cost most
+# are "not interested" (-47.5) and mute (-58.8) (xai-org/x-algorithm,
+# home-mixer/params/param.rs, read 2026-10-02). An original post from an
+# account his size can take a test slot in its first two hours
+# (scorers/author_cold_start.rs), so a weak post is not free: it is shown,
+# skipped and muted. One or two of the best of
+# eight, not three to five.
+POSTS_MIN, POSTS_MAX = 1, 2              # how many code keeps and files
 CANDIDATES_MIN, CANDIDATES_MAX = 6, 8    # how many sage writes for the judge
 KEEP_MEAN = 3.5                          # a kept post's mean rubric score, at least
-LESSON_POSTS_MAX = 2                     # kept posts that rest on his own lessons
-FLOOR = 3                                # and at least this on `teaches`, `accurate`, `clear`
+LESSON_POSTS_MAX = 1                     # kept posts that rest on his own lessons
+FLOOR = 3                                # and at least this on `teaches`, `clear`, `share`
+# A 3 on `accurate` is a claim that lost the condition that makes it true.
+# On 2026-10-02 the judge gave a post that called vLLM's 16-token blocks how
+# "prompt caches" work an accurate 3 and a mean of 3.5, and it would have
+# been filed: his readers call hosted APIs and would pad prompts for nothing.
+ACCURATE_FLOOR = 4
+# A post he filed in the last month is not filed again with new words. The
+# judge sees them and names a repeat; code also refuses a near copy without
+# asking it. On his file (27 entries from 15 days, read 2026-10-02) no two
+# from different days share more than 0.33 of their content words, and the
+# highest pairs are old evening notes written to one template.
+REPEAT_DAYS = 30
+REPEAT_OVERLAP = 0.6
 JUDGE_ROLE = "teacher"
 JUDGE_PATH = ("sage", "skills", "daily-posts", "judge.md")
 # The judge checks every number and name against its source, so it reads the
@@ -116,6 +136,21 @@ _INTERNALS_RE = re.compile(
     r"|time to first token|ttft|tpot|p99|throughput-bound|memory[\s-]bound|arithmetic intensity)\b",
     re.IGNORECASE)
 INTERNALS_MAX = 1
+# Asking for the reaction instead of earning it, anywhere in the post. X's
+# own guidance names "like if you agree", "comment yes" and "tag 3 friends",
+# and readers answer bait with "not interested" and mute, the two largest
+# penalties after a report. voice.yaml refuses an engagement ask as a
+# closer; on X it is refused wherever it sits.
+_BAIT_RE = re.compile(
+    r"\b(?:like|repost|retweet|rt|bookmark)\s+(?:this\s+)?if\b"
+    r"|\bcomment\s+(?:yes|[\"'\u201c\u2018]\w+[\"'\u201d\u2019])"
+    r"|\breply\s+(?:yes|[\"'\u201c\u2018]\w+[\"'\u201d\u2019])"
+    r"|\btag\s+(?:someone|(?:a|your|\d+|two|three|five)\s+(?:\w+\s+)?"
+    r"(?:friends?|colleagues?|teammates?|people))\b"
+    r"|\bbookmark\s+this\b|\bsave\s+this\s+(?:post|tweet|thread|for\s+later)\b"
+    r"|\bfollow\s+(?:me\s+)?for\s+more\b"
+    r"|\bdrop\s+an?\s+(?:comment|emoji|reply|like)\b|\bdrop\s+an?\s+[^\w\s]",
+    re.IGNORECASE)
 SOURCES_PATH = "projects/content/post-sources.md"
 _POST_SPLIT = re.compile(r"^\s*-{3,}\s*$", re.MULTILINE)
 _PATHISH = re.compile(r"\b[\w./-]+\.md\b|\bquarantine/|\bwhy:|\bsources?:", re.IGNORECASE)
@@ -159,7 +194,73 @@ def post_problems(post: str) -> list[str]:
     if claimed:
         probs.append(f"\u201c{claimed.group(0)}\u201d claims work an agent did as his own;"
                      " say only what he did himself, or drop the line")
+    bait = _BAIT_RE.search(post)
+    if bait:
+        probs.append(f"\u201c{bait.group(0)}\u201d asks for a reaction; earn it with the post,"
+                     " never ask for it")
     return probs
+
+
+_STOP = frozenset({  # words of three letters or more that carry no subject
+    "the", "and", "but", "for", "its", "it's", "that", "this", "with", "are", "was", "you",
+    "your", "they", "not", "from", "have", "has", "than", "then", "when", "what", "how", "why",
+    "does", "don't", "can"})
+
+
+def _content_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9']+", text.lower()) if len(w) > 2 and w not in _STOP}
+
+
+def overlap(a: str, b: str) -> float:
+    """The share of content words two posts have in common, 0 to 1."""
+    wa, wb = _content_words(a), _content_words(b)
+    return len(wa & wb) / len(wa | wb) if wa | wb else 0.0
+
+
+_DAY_HEAD_RE = re.compile(r"^## (\d{4}-\d{2}-\d{2})\b.*$", re.MULTILINE)
+
+
+def recent_posts(existing: str | None, today: date, days: int = REPEAT_DAYS) -> list[dict[str, str]]:
+    """The posts filed in the `days` before `today`, newest first, each as
+    ``{"id": "E1", "day": ..., "text": ...}``. A batch with no `---` is one post."""
+    if not existing:
+        return []
+    parts = _DAY_HEAD_RE.split(existing)
+    out: list[dict[str, str]] = []
+    for i in range(1, len(parts) - 1, 2):
+        try:
+            day = date.fromisoformat(parts[i])
+        except ValueError:
+            continue
+        if not timedelta(0) < today - day <= timedelta(days=days):
+            continue
+        body = parts[i + 1].split("\n## ", 1)[0]
+        posts = split_posts(body)
+        if len(posts) == 1 and not _is_one_post(posts[0]):
+            continue                    # an older batch of ideas, not a post
+        for text in posts:
+            out.append({"id": f"E{len(out) + 1}", "day": parts[i], "text": text})
+    return out
+
+
+_LIST_LINE_RE = re.compile(r"^\s*(?:[-*]|\d+\.)\s+\S", re.MULTILINE)
+
+
+def _is_one_post(text: str) -> bool:
+    """A batch body with no `---` is one post when it has no list line and
+    no more words than a post (as the Ideas page reads it)."""
+    return not _LIST_LINE_RE.search(text) and len(text.split()) <= POST_WORDS[1]
+
+
+def repeat_problem(post: str, earlier: list[dict[str, str]]) -> str:
+    """Why this post is a near copy of one filed in the last month, or ""."""
+    for e in earlier:
+        share = overlap(post, e["text"])
+        if share >= REPEAT_OVERLAP:
+            return (f"it shares {share:.0%} of its words with the post of {e['day']}"
+                    f" ({_quote(e['text'])}); say something new, or the same subject from a"
+                    " new angle")
+    return ""
 
 
 # A bare domain is a link too: X turns "example.com/x" into one. With a
@@ -207,9 +308,15 @@ def count_problem(posts: list[str], sources: list[str]) -> str | None:
     return None
 
 
-def gate(posts: list[str]) -> dict[int, list[str]]:
-    """The measured checks, per candidate number (from 1): [] when it passed."""
-    return {i: post_problems(post) for i, post in enumerate(posts, 1)}
+def gate(posts: list[str], earlier: list[dict[str, str]] | None = None) -> dict[int, list[str]]:
+    """The measured checks, per candidate number (from 1): [] when it passed.
+    `earlier` is what he filed in the last month (`recent_posts`)."""
+    out: dict[int, list[str]] = {}
+    for i, post in enumerate(posts, 1):
+        found = post_problems(post)
+        again = repeat_problem(post, earlier or [])
+        out[i] = found + ([again] if again else [])
+    return out
 
 
 def _quote(post: str) -> str:
@@ -235,29 +342,44 @@ class PostScore(BaseModel):
     insight: int = Field(ge=1, le=5)
     clear: int = Field(ge=1, le=5, description="a developer who uses AI tools but never"
                        " studied how models are served follows every sentence")
+    # What X weighs most among the reactions it predicts (param.rs, read
+    # 2026-10-02): a copied link 20, a reply 5 (20 between people who follow
+    # each other), a DM share 5, a follow 4; a like is 0.5.
+    share: int = Field(ge=1, le=5, description="a developer would send it to a colleague,"
+                       " or follow him to see the next one")
+    reply: int = Field(ge=1, le=5, description="a reader has something real to answer:"
+                       " a view to agree or disagree with, a question he means, a claim to"
+                       " add a data point to")
+    repeats: str = Field(default="", description="the id (E1, E2, ...) of an earlier post"
+                         " that makes the same point from the same angle, or empty")
     why: str = Field(description="one line: what holds the post up or lets it down")
 
     def mean(self) -> float:
         return (self.source + self.teaches + self.accurate + self.voice + self.insight
-                + self.clear) / 6
+                + self.clear + self.share + self.reply) / 8
 
     def floor_problem(self) -> str:
         """Why a post with a good mean is still not kept, or "". A post that
         teaches nothing, or states what its source does not, is not his to
         share whatever else it does well."""
-        if self.accurate < FLOOR:
-            return f"accurate {self.accurate}: a claim or number is not in its source"
+        if self.accurate < ACCURATE_FLOOR:
+            return (f"accurate {self.accurate}: a claim, number or condition is not as its"
+                    " source states it")
         if self.teaches < FLOOR:
             return f"teaches {self.teaches}: the reader learns nothing concrete"
         if self.clear < FLOOR:
             return (f"clear {self.clear}: a developer outside model serving would not"
                     " follow it")
+        if self.share < FLOOR:
+            return f"share {self.share}: nobody would send it to a colleague"
+        if self.repeats.strip():
+            return f"repeats {self.repeats.strip()}: the same point he filed before"
         return ""
 
     def line(self) -> str:
         return (f"source {self.source}, teaches {self.teaches}, accurate {self.accurate},"
-                f" voice {self.voice}, insight {self.insight}, clear {self.clear};"
-                f" mean {self.mean():.1f}")
+                f" voice {self.voice}, insight {self.insight}, clear {self.clear},"
+                f" share {self.share}, reply {self.reply}; mean {self.mean():.1f}")
 
 
 class PostVerdict(BaseModel):
@@ -276,7 +398,8 @@ _STEP: dict[str, Any] = {"retries_allowed": True, "max_attempts": 2, "interval_s
 
 
 @DBOS.step(name="posts.judge", **_STEP)
-async def _post_judge_step(candidates: list[dict[str, Any]], material: str) -> dict[str, Any]:
+async def _post_judge_step(candidates: list[dict[str, Any]], material: str,
+                           earlier: list[dict[str, str]]) -> dict[str, Any]:
     """Score each candidate on the rubric. The scores come back as JSON in
     the reply's text, which the gateway streams; a tool-call answer it would
     not, and a silent answer is cut at the idle limit."""
@@ -285,37 +408,47 @@ async def _post_judge_step(candidates: list[dict[str, Any]], material: str) -> d
                   instructions=judge_instructions(),
                   model_settings=reg.model_settings_for(JUDGE_ROLE))
     prompt = (f"<material>\n{material}\n</material>\n\n"
+              f"<earlier>\n{json.dumps(earlier, ensure_ascii=False, indent=1)}\n</earlier>\n\n"
               f"<candidates>\n{json.dumps(candidates, ensure_ascii=False, indent=1)}\n"
               "</candidates>")
     result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=4))
     return result.output.model_dump()
 
 
-def choose(verdict: PostVerdict, judged: list[int]) -> tuple[list[PostScore], list[str]]:
+def choose(verdict: PostVerdict, judged: list[int], sources: list[str] | None = None,
+           posts: list[str] | None = None) -> tuple[list[PostScore], list[str]]:
     """``(kept, weak)``: the judged candidates whose mean is at least
-    KEEP_MEAN, best first (a tie keeps his order), at most POSTS_MAX; and one
-    line for every judged candidate left out, with the judge's reason. A
-    candidate the judge returned no score for is left out and named."""
+    KEEP_MEAN and that clear every floor, best first (a tie keeps his order),
+    at most LESSON_POSTS_MAX of them from his lessons, at most POSTS_MAX in
+    all; and one line for every judged candidate left out, with the reason.
+    The lesson limit applies before the cut, so a good post from his reading
+    is filed in place of a second one from his course. A candidate the judge
+    returned no score for is left out and named."""
     by_post = {s.post: s for s in verdict.scores if s.post in judged}
     passing = sorted((s for s in by_post.values()
                       if s.mean() >= KEEP_MEAN and not s.floor_problem()),
                      key=lambda s: (-s.mean(), s.post))
+    capped: list[str] = []
+    if sources is not None and posts is not None:
+        passing, capped = cap_lessons(passing, sources, posts)
     kept = passing[:POSTS_MAX]
     kept_ids = {s.post for s in kept}
+    cut_ids = {s.post for s in passing} - kept_ids         # passed, but others scored higher
     weak: list[str] = []
     for n in judged:
         score = by_post.get(n)
         if score is None:
             weak.append(f"candidate {n}: the judge returned no score")
-        elif n not in kept_ids:
-            if score.mean() < KEEP_MEAN:
-                reason = score.why
-            elif score.floor_problem():
-                reason = f"{score.floor_problem()}. {score.why}"
-            else:
-                reason = f"{score.why} (it passed, but {POSTS_MAX} scored higher)"
-            weak.append(f"candidate {n} ({score.line()}): {reason}")
-    return kept, weak
+        elif n in kept_ids:
+            continue
+        elif score.mean() < KEEP_MEAN:
+            weak.append(f"candidate {n} ({score.line()}): {score.why}")
+        elif score.floor_problem():
+            weak.append(f"candidate {n} ({score.line()}): {score.floor_problem()}. {score.why}")
+        elif n in cut_ids:
+            weak.append(f"candidate {n} ({score.line()}): {score.why}"
+                        f" (it passed, but {POSTS_MAX} scored higher)")
+    return kept, weak + capped
 
 
 _SOURCE_PATH_RE = re.compile(r"[\w./-]+\.md\b")
@@ -409,9 +542,10 @@ async def file_posts(ctx: RunContext[HQDeps], sources: list[str], title: str = "
     he would paste it on X, separated by a line holding only `---`. Then, in
     that same reply, call this with `sources`: for each candidate in order,
     the lesson, article or project it rests on. Code checks every candidate
-    against his voice, a judge scores the ones that pass, and code files the
-    best 3 to 5 at the top of projects/content/ideas.md. When too few are
-    good, the weak ones are named with the judge's reason: rewrite them.
+    against his voice and against what he filed in the last month, a judge
+    scores the ones that pass, and code files the best 1 or 2 at the top of
+    projects/content/ideas.md. When none is good enough, the weak ones are
+    named with the judge's reason: rewrite them.
     """
     if not memory.in_scope(IDEAS_PATH, ctx.deps.vault_write_scopes):
         raise ModelRetry(f"refused: agent {ctx.deps.agent} may not write {IDEAS_PATH}")
@@ -421,7 +555,12 @@ async def file_posts(ctx: RunContext[HQDeps], sources: list[str], title: str = "
     wrong_size = count_problem(posts, sources)
     if wrong_size:
         raise ModelRetry(wrong_size + "." + again)
-    checked = gate(posts)
+    day = f"{_today():%Y-%m-%d}"
+    existing = await asyncio.to_thread(_read, IDEAS_PATH)
+    if existing and re.search(rf"^## {day}\b", existing, re.MULTILINE):
+        raise ModelRetry(f"today's posts ({day}) are already filed; say so and stop")
+    earlier = recent_posts(existing, _today().date())
+    checked = gate(posts, earlier)
     failed = [f"candidate {n} ({_quote(posts[n - 1])}): " + "; ".join(found)
               for n, found in checked.items() if found]
     if failed and ctx.retry == 0:
@@ -436,28 +575,18 @@ async def file_posts(ctx: RunContext[HQDeps], sources: list[str], title: str = "
     judged = [n for n, found in checked.items() if not found]
     if len(judged) < POSTS_MIN:
         raise ModelRetry(
-            f"only {len(judged)} of {len(posts)} candidates pass the checks and {POSTS_MIN}"
-            " must. " + "; ".join(failed) + ". Rewrite what is named." + again)
-    day = f"{_today():%Y-%m-%d}"
-    existing = await asyncio.to_thread(_read, IDEAS_PATH)
-    if existing and re.search(rf"^## {day}\b", existing, re.MULTILINE):
-        raise ModelRetry(f"today's posts ({day}) are already filed; say so and stop")
+            f"{len(judged)} of {len(posts)} candidates pass the checks, and at least"
+            f" {POSTS_MIN} must. " + "; ".join(failed) + ". Rewrite what is named." + again)
 
     candidates = [{"post": n, "source": sources[n - 1], "text": posts[n - 1]} for n in judged]
     verdict = PostVerdict.model_validate(
-        await _post_judge_step(candidates, await judge_material(sources)))
-    kept, weak = choose(verdict, judged)
-    kept, capped = cap_lessons(kept, sources, posts)
-    weak += capped
-    if len(kept) < POSTS_MIN and capped:
-        raise ModelRetry(
-            f"only {len(kept)} kept after the limit of {LESSON_POSTS_MAX} posts from his"
-            " lessons: " + "; ".join(capped) + ". Replace those with posts from his field"
-            " reading (list_readings), his projects or his view on building with AI." + again)
+        await _post_judge_step(candidates, await judge_material(sources), earlier))
+    kept, weak = choose(verdict, judged, sources, posts)
     if len(kept) < POSTS_MIN:
         raise ModelRetry(
-            f"only {len(kept)} of {len(posts)} candidates scored a mean of {KEEP_MEAN:g} or more"
-            f" on the post rubric and {POSTS_MIN} must. Weak: " + "; ".join(weak)
+            f"{len(kept)} of {len(posts)} candidates scored a mean of {KEEP_MEAN:g} or more"
+            f" on the post rubric and cleared its floors, and at least {POSTS_MIN} must."
+            " Weak: " + "; ".join(weak)
             + (". Failed the checks: " + "; ".join(failed) if failed else "")
             + ". Rewrite the weak ones so each teaches one concrete thing its source states,"
             " or replace them." + again)

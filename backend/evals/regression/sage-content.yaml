@@ -58,7 +58,7 @@
   source: >-
     Posts that passed every voice check still read like any engineer's feed.
     Sage now writes six to eight candidates, one source each; a judge scores
-    them and code files the best three to five, dropping the generic ones.
+    them and code files the best one or two, dropping the generic ones.
     The run must hand file_posts the whole candidate batch with one source
     per candidate, each on its own real trigger from the material.
   prompt: "Write today's posts."
@@ -75,7 +75,7 @@
     vault_read: ""
     vault_write: {ok: true}
     file_posts: >-
-      filed 3 of 6 candidates (best first: 2, 1, 4) under ## today at the top of
+      filed 2 of 6 candidates (best first: 2, 1) under ## today at the top of
       projects/content/ideas.md; left out: candidate 5 (trigger 1, detail 1, voice 3,
       insight 2, not generic 1; mean 1.6): no trigger in the material; any engineer
       could post this
