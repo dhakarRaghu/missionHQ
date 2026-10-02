@@ -15,7 +15,7 @@ this section connects to the rest.
    starts from the result above it: what is now known, and what is still
    unexplained. Use the plan's `bridge`. The first section opens from the
    running case.
-2. The situation: two or three sentences that return to the running case
+2. The situation: one or two sentences that return to the running case
    and put him where not knowing this costs something.
 3. The picture first. Three or four sentences and one drawn figure: what
    the thing is, what it does, why it exists. No number, no config key, no
@@ -29,10 +29,10 @@ this section connects to the rest.
    wrong for a good reason. Use the question the plan gives, or a sharper
    one. Only in the first section of a concept.
 5. The mechanism, step by step: why it is true, one level below where a
-   tutorial stops. One step per paragraph, each joined to the step before
-   it. This is where the details from his phase go: the config keys with
-   their defaults and versions, the sizes, the code. Draw it with the kit
-   piece that fits.
+   tutorial stops. Steps that happen in order are a numbered list, one or
+   two sentences a step, each with its reason. This is where the details
+   from his phase go: the config keys with their defaults and versions, the
+   sizes, the code. Draw it with the kit piece that fits.
 6. The one number or the one failure, with its conditions. Say what breaks,
    what he would see in the logs or the metrics, and why. The receipt (who
    measured it, where) goes in `<details class="evidence">` under it.
@@ -45,12 +45,38 @@ this section connects to the rest.
    claim, as he would say it to a colleague), `<p class="trap">` (the wrong
    belief and what it costs) and `<p class="try">` (one thing under five
    minutes, and what to look for).
-9. The hand-over. After the key points, one or two plain sentences: what
-   this section did not explain, and that the next section answers it.
+9. The hand-over. After the key points, one plain sentence: what this
+   section did not explain, and that the next section answers it.
    Name the next section by its question. The last teaching section hands
    over to the recall section.
 
 A later section of the same concept keeps steps 1, 5, 6, 8 and 9.
+
+## Concise, without loss
+
+Say everything the section needs, in fewer words. What goes is the words
+around the content, never the content.
+
+- Use a list where the content is a list, and a paragraph everywhere else:
+  - steps that happen in order: a numbered list (`<ol>`), one or two
+    sentences a step;
+  - three or more parallel things (causes, conditions, what breaks a hit):
+    a bullet list (`<ul>`), one sentence each;
+  - a calculation: one line per operation with its result, in
+    `<pre><code>` or a small table, never inside a sentence;
+  - the fix, when it is a sequence: a numbered list.
+  A reason, a trade-off or a chain of because stays a paragraph: a list
+  would cut the links between its sentences.
+- Every point is a full sentence and keeps its reason: "All ten calls find
+  an empty cache, because none has started a response yet."
+- Bold (`<b>`) at most one key phrase in a point, when it helps him scan.
+- A paragraph holds at most four sentences.
+- Cut the fluff: a sentence that repeats the one before it, a sentence that
+  restates the heading, "this section explains", a running case told again
+  in full, a bridge or hand-over longer than one sentence, a closing line
+  that repeats the key points.
+- Never cut a number, a unit, a condition, a defined term, a reason, a
+  named case, a command, a prediction question or the evidence.
 
 ## Terms
 
