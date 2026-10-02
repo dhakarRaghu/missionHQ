@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inference Internals — Phase 3B: Routing, Batch and the Cost Alarm</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">INFERENCE INTERNALS · PHASE 3B</div><h1>Inference Internals — Phase 3B: Routing, Batch and the Cost Alarm</h1><p class="subtitle">When does a cascade actually save money, how do you prove its signal is real, and what catches the regression that leaves every token dashboard flat?</p></header>
+<p>Phase 3A made your meter agree with the invoice: one usage adapter per provider, and every token priced by its class. The number is now correct. It is also too high. Your team has the same problem the Phase 0 teams had: you send every query to the strong model, because routing easy ones to a cheap model sounds like it returns wrong answers. The alternative your team sketches is a <span>cascade</span>: try the cheap model first, and when its answer looks unsure, ask the strong model instead. The first test shows 88% accuracy at 55% of the cost of the strong model alone, and the room wants to ship it.</p>
+
+<p>Meanwhile the Phase 0 break you could not explain is still invisible to your setup. A timestamp added to the top of your 18,000-token system prompt changes no token count, returns no error and moves no chart you have. Phase 3A showed the response still returns 200 with the same token count, so four months of paying full price for a cached prefix would pass every dashboard you own. This phase connects the two stories. Sending easy queries to a cheap model pays the cheap model even when it loses, so there is an escalation rate where the cascade costs more than the model it avoids. And a break that changes no token count can be caught only by a number that is not a token count. First, the promised saving: at what escalation rate does the cascade stop saving money at all?</p>
+<p>This lesson teaches five ideas. They are listed here so you can see where the lesson is going. They will read more clearly once each has been explained below, so come back to this list at the end.</p>
+<ol class="concepts"><li id="c1"><b>A cascade pays the cheap model for every query including escalated ones, so it beats deep-only only while the escalation rate stays below 1 minus the price ratio.</b> <span>Predict the escalation rate at which a cascade stops saving, before building anything.</span></li><li id="c2"><b>A cascade with a coin-flip signal still shows good accuracy and low cost, so only a random control that escalates the same count proves the signal carries information.</b> <span>Design the experiment that separates a real signal from an expensive coin flip.</span></li><li id="c3"><b>On strong models, agreement among samples of one model repeats that model&#x27;s own mistakes, so spend extra confidence calls on different models, not on more samples of one.</b> <span>Choose an escalation signal and reject self-consistency and raw self-reported confidence at a frontier tier.</span></li><li id="c4"><b>A billing-class regression is detected by per-request cost plus per-request cache hit rate, with the floor set just below the measured normal, because the token count never moves.</b> <span>Build the three-rule cost guard that turns a four-month incident into a ten-request incident, and tune its thresholds from the measured normal.</span></li><li id="c5"><b>Every post-hoc cost control enforces against stale spend, so only a pre-call worst-case reservation priced from max_tokens, held at the agent-loop level, can stop spend before it happens.</b> <span>Decide where enforcement must live and bound a retry loop&#x27;s worst case in currency.</span></li></ol>
+<h2 data-kind="orientation">Where the bill stands after Phase 3A</h2>
+<div class="cards" data-cols="2">
+  <div class="card">
+    <h4>Five token classes on the bill</h4>
+    <p>Phase 3A showed a bill is not input plus output. It has five classes: plain input, cached input, cache write, output and reasoning output, each with its own multiplier.</p>
+    <p>Your meter now prices all five, and the invoice finally matches.</p>
+  </div>
+  <div class="card">
+    <h4>One usage adapter per provider</h4>
+    <p>OpenAI counts cached tokens inside <code>input_tokens</code> and Anthropic counts them outside it.</p>
+    <p>Phase 3A's fix was one adapter per provider that normalises the usage object before your meter sums it.</p>
+  </div>
+  <div class="card">
+    <h4>The fallback rule in pricing.py</h4>
+    <p>When the price sheet has no cached price for a model, the code falls back to full price.</p>
+    <p>That rule hides a billing class, and this phase shows it can hide a whole incident.</p>
+  </div>
+  <div class="card">
+    <h4>Cache entries have a break-even</h4>
+    <p>A cache write is a surcharge, so an entry pays for itself only after enough reads. It needs (write − 1) / (1 − read) reads.</p>
+    <p>Phase 3A also showed a broken cache returns 200 OK with the same token count. Only the cached-token count proves it stopped.</p>
+  </div>
+</div>
+
+<p>Those four ideas make the meter correct. They do not say whether the money is spent well, or whether anyone notices when it stops being spent well. Two stories from Phase 0 are still open.</p>
+
+<p><b>Story 3</b> is the team stuck between two bad choices: send every query to the expensive model and overpay on easy ones, or send every query to the cheap model and fail the hard ones. The first half of this phase prices the middle options and shows which choice of signal is worth anything.</p>
+
+<p><b>Story 1</b> is the team whose 18,000-token prompt lost its cache for four months while every dashboard stayed green. Phase 3A explained the mechanism, but never built the detector. The second half of this phase builds it. Then it asks what could have stopped the spend instead of only reporting it.</p>
+<h2 data-concept="c1">Why does a cascade pay for some queries twice?</h2>
+<p class="why">A cascade pays the cheap model for every query, so escalated queries cost more than deep-only ever did.</p>
+
+<p>Story 3's team sits between two bad choices, expensive-everywhere and cheap-everywhere. Both middle options promise the same thing, easy queries on the cheap model and hard ones on the deep model. The two options price that promise differently. So the team can now ask which split of traffic costs less per good answer.</p>
+
+<p>The first option generates before it decides. A <dfn>cascade</dfn> sends every query to the cheap model and looks at the answer. Then it sends the hard ones on to the deep model for a second answer. The second option decides before it generates. A <dfn>router</dfn> reads the query first and sends it to one model. That model is the only one that runs. In both, the share of queries that land on the deep model is the <dfn>escalation rate</dfn>.</p>
+
+<div class="compare">
+  <div class="wrong">
+    <h4>Cascade: decide after generating</h4>
+    <ol class="flow" data-dir="down">
+      <li><b>cheap model answers</b><span>every query pays Cc</span></li>
+      <li><b>signal reads the answer</b><span>free: the answer already exists</span></li>
+      <li class="hot"><b>deep model re-answers</b><span>escalated fraction e pays Cd again</span></li>
+    </ol>
+    <p>Cost per query: Cc + e·Cd</p>
+  </div>
+  <div class="right">
+    <h4>Router: decide before generating</h4>
+    <ol class="flow" data-dir="down">
+      <li><b>classifier reads the query</b><span>a small fixed cost</span></li>
+      <li class="ok"><b>one model answers</b><span>cheap for 1 − e, deep for e</span></li>
+    </ol>
+    <p>Cost per query: (1 − e)·Cc + e·Cd</p>
+  </div>
+</div>
+
+<details class="predict">
+  <summary>Predict: your cheap model costs $1 per million input tokens and your deep model $5. At what escalation rate does the cascade stop saving, and what does the router cost at 35% escalation?</summary>
+  <p>The cascade breaks even at an 80% escalation rate. At 35% escalation it costs 55% of deep-only, while the router costs 48%. Work it in units of the cheap price Cc = 1 and deep price Cd = 5. The cascade costs 1 + 0.35 × 5 = 2.75 against deep-only's 5. The router costs 0.65 × 1 + 0.35 × 5 = 2.4 against the same 5. The break-even comes from setting 1 + 5e = 5, which gives e = 0.8.</p>
+</details>
+
+<p>The arithmetic has one step, and it is where the two shapes part. Every query enters the cascade through the cheap model. So Cc appears in its cost with no e in front of it. Escalation then adds a second generation on top of the first instead of replacing it. So an escalated query pays Cc + Cd. That is more than it would have paid going straight to the deep model.</p>
+
+<p>The break-even follows directly. The cascade loses to deep-only when Cc + e·Cd exceeds Cd, which rearranges to one condition:</p>
+
+<pre><code>cascade saves money only while  e &lt; 1 − Cc/Cd
+5x price ratio:                 e &lt; 1 − 1/5 = 0.80
+at e = 0.35:  cascade  1 + 0.35·5 = 2.75   → 55% of deep-only
+              router   0.65 + 0.35·5 = 2.40 → 48% of deep-only</code></pre>
+
+<p>Two things are worth noticing here. The boundary depends only on the price ratio. So a team with an 80% hit rate on the cheap model is sitting exactly at the point. That is where the cascade stops saving. The gap between 55% and 48% is also not about accuracy. It exists even when both signals pick the same queries.</p>
+
+<div class="calc" id="s2-cascade">
+  <h4>Cascade and router cost, as a share of deep-only</h4>
+  <label>Price ratio Cd / Cc <input type="range" name="ratio" min="2" max="20" step="1" value="5">
+    <span class="val" data-val="ratio"></span></label>
+  <label>Escalation rate (%) <input type="range" name="esc" min="0" max="100" step="5" value="35">
+    <span class="val" data-val="esc"></span></label>
+  <div class="result">Cascade <b data-out="cascade"></b></div>
+  <div class="result">Router <b data-out="router"></b></div>
+  <div class="result">Cascade breaks even above <b data-out="breakeven"></b></div>
+  <script>
+  kit.calc('#s2-cascade', function(v){
+    var e = v.esc / 100, r = v.ratio;
+    var cascade = 1 + e * r;
+    var router = (1 - e) + e * r;
+    var be = 1 - 1 / r;
+    return {
+      cascade: Math.round(100 * cascade / r) + '% of deep-only' + (cascade > r ? ' — losing money' : ''),
+      router: Math.round(100 * router / r) + '% of deep-only',
+      breakeven: Math.round(100 * be) + '% escalation'
+    };
+  });
+  </script>
+</div>
+
+<p>The cascade is not strictly worse, because it buys one thing the router cannot. Its escalation signal reads the cheap model's finished answer. So it can notice a wrong-looking or low-confidence response. A classifier reading only the prompt would miss that. The router decides blind, but the cascade decides informed. The informed decision is what the extra Cc on every query pays for.</p>
+
+<p>Measured across five benchmarks and eight models, the structural cost usually wins over the better signal. A lightweight pre-generation router beat the best cascade on four of five datasets. The paper names the double payment, not signal quality, as the cause.</p>
+
+<details class="evidence">
+  <summary>Evidence</summary>
+  <p>Bouchard, "Is Escalation Worth It? A Decision-Theoretic Characterization of LLM Cascades" (arXiv:2605.06350, preprint v1, May 2026): five benchmarks across eight models from five providers. Quote: "a lightweight pre-generation router exceeds the best cascade policy on four of five datasets, mainly because it avoids the cheap model's generation cost on queries sent directly to a larger model rather than because of a stronger routing signal." The break-even numbers in this section follow from the algebra alone, so they hold at whatever prices your own invoice shows.</p>
+</details>
+
+<p>You can run this yourself in this phase's lab: exercise E12 builds the cascade and the random control on the same traffic, and its cascade cost comes close to what the formula predicts: $0.00892 measured against $0.00864.</p>
+
+<div class="keypoints">
+  <p class="remember">A cascade costs Cc + e·Cd per query, so it beats deep-only only while the escalation rate stays under 1 − Cc/Cd.</p>
+  <p class="trap">"The cheap model handles 80% of queries, so the cascade must be cheaper" is exactly the boundary where it stops saving.</p>
+  <p class="try">Take your two models' prices from the sheet and compute 1 − Cc/Cd, then check your measured escalation rate against it.</p>
+</div>
+
+<p>This section priced the two shapes, but a price says nothing about whether the cascade's signal knows anything. The next section asks which experiment proves the signal works. A broken one can show the same accuracy and cost as a good one.</p>
+<h2 data-concept="c2">The dashboard says the cascade works. Which experiment proves it?</h2>
+<p class="why">The cascade's dashboard can look perfect while its signal knows nothing, so you need an experiment that convicts it.</p>
+
+<p>You priced Story 3's cascade in the last section, and at 35% escalation it costs 55% of deep-only. That figure is arithmetic, so it comes out the same even when the escalation signal is a coin flip. This section asks what the signal is worth.</p>
+
+<h3>The run that should not look this good</h3>
+
+<p>Picture two teams, each with a cascade on the same traffic. In team A the escalation signal is a jitter detector a colleague tuned for a week. In team B it is a random number, and each query escalates with probability 0.35. Now compute what team B's dashboard shows, before looking at team A's.</p>
+
+<details class="predict"><summary>Predict: both dashboards show 85% accuracy at 69% of deep-only cost. In one, the signal is a coin flip. Which experiment tells them apart, and how is it configured?</summary>
+<p>The experiment is a <b>random control</b>: same queries, same escalation count, but the escalated queries are picked at random. The real signal beats the random control by less than twice the standard error of the difference. So the dashboard was showing you chance, not information. Configure it by running both on the same traffic and ranking them on dollars per correct answer, explained below.</p>
+<p>Why this surprises: you expect a random signal to show a worse accuracy. But swapping the deep model in for 35% of queries at random buys accuracy by luck. It does so at the same cost. The two numbers on the dashboard cannot see the difference.</p>
+</details>
+
+<p>In the course simulation the coin-flip run prints 85% accuracy at 69.3% of deep-only cost. Those are exactly the lines a team would paste into a review to say "it works". Replacing some cheap answers with deep answers at random buys some accuracy by chance, at the same cost. So a real cascade and a coin-flip cascade look identical on an accuracy and cost dashboard.</p>
+
+<h3>The control that convicts the coin flip</h3>
+
+<p>The fix is one more row in the results table. A <dfn>random control</dfn> is a cascade that escalates the same number of queries as yours. Those queries are chosen at random, on the same traffic. Your signal earns its cost only when it picks a better 35% of queries than chance picks.</p>
+
+<ol>
+<li>Run your real cascade and record accuracy and cost per query.</li>
+<li>Run the control with the same escalation rate and random selection, because cost must match for the comparison to mean anything.</li>
+<li>Rank both on <dfn>dollars per correct answer</dfn>, the total spend divided by the count of correct answers. Accuracy hides cheap-only's waste and cost hides deep-only's, and this one number punishes both.</li>
+<li>Subtract the control from the real signal, and keep the standard error of that difference, because a gap smaller than about two standard errors can appear by chance alone.</li>
+</ol>
+
+<table>
+<tr><th>arm</th><th>signal</th><th>accuracy</th><th>cost vs deep-only</th></tr>
+<tr><td>cascade</td><td>real</td><td>85%</td><td>69.3%</td></tr>
+<tr><td>cascade</td><td class="bad">coin flip</td><td>85%</td><td>69.3%</td></tr>
+</table>
+
+<p>The last two rows are identical on the dashboard. So the comparison has to be the bottom row against the one above it. (The phase's coin-flip run, at signal quality 0.5, still showed 85% accuracy at 69.3% of deep-only cost.)</p>
+
+<h3>Why one trial is not enough</h3>
+
+<p>Even with the control row in place, one small trial can lie in either direction. With about 20 items per arm, a single accuracy number swings by roughly 7 points between runs. So the gap between signal and control swings by more. Exercise E14 runs the same zero-information signal over three seeds and prints the gap as +10.0, +0.0, and −5.0 points. Seed one would ship the coin flip, and seed three would reject a good signal. The reported number for any cascade experiment is therefore a difference with its interval. It is computed over enough items that twice the standard error fits inside the effect you care about.</p>
+
+<p>This is not a classroom artifact. LLMRouterBench re-ran 10 routing baselines over 400K+ instances. It found that several recent approaches, including commercial routers, fail to reliably outperform a simple baseline. The production version of your coin flip is already sold as a product.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The 85%-at-69.3% coin-flip run and the +10.0 / +0.0 / −5.0 seed spread are the course author's simulation runs from 2026-09-17 (E13 and E14), not re-run independently. LLMRouterBench (arXiv:2601.07206, abstract, read 2026-09-30): 10 routing baselines, 400K+ instances from 21 datasets and 33 models. Quote: "several recent approaches, including commercial routers, fail to reliably outperform a simple baseline." The ~7-point swing for a 20-item arm follows from binomial arithmetic.</p>
+</details>
+
+<p>Exercise E12 builds this experiment end to end. E13 runs it with the coin-flip signal, so you can watch the control row convict it yourself. Reading the E13 output answers one question worth asking first: which of the four rows changed when the signal changed?</p>
+
+<div class="keypoints">
+<p class="remember">A real signal must beat a random control that escalates the same count, ranked on dollars per correct answer.</p>
+<p class="trap">"88% accuracy at 55% of deep-only cost, so it works" can describe a coin-flip cascade just as well. You then ship noise at deep-model prices.</p>
+<p class="try">Open E14, run its three seeds, and check how far one 20-item trial's gap moves between seeds.</p>
+</div>
+
+<p>This section proved your signal carries information, but it assumed you already chose a signal worth testing. The next section asks which one deserves your extra calls. The most popular choices are the ones this control convicts.</p>
+<h2 data-concept="c3">Which escalation signal deserves your extra calls?</h2>
+<p class="why">The signal you trust most is the one strong models break worst.</p>
+
+<p>The random control from the last section assumes you have a signal worth shipping. The signals most teams pick first are the ones that control would convict, and the measurements below show why.</p>
+
+<p>A cascade escalates a query when its signal says the cheap model's answer is doubtful. The cheapest signal to build is to ask the same model more than once and check whether the answers agree. If five independent samples all say "Paris", the answer feels safe, so you accept it and skip the deep model. This section shows when that feeling is wrong, and where to spend those extra calls instead.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 640 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two panels: 50 samples from one model cluster around one wrong answer, while three different models scatter their errors and agree on the right answer">
+  <text x="10" y="20" fill="currentColor" font-size="13" font-weight="bold">One model, 50 samples</text>
+  <circle cx="120" cy="120" r="14" fill="none" stroke="var(--ok)" stroke-width="2"/>
+  <text x="120" y="155" fill="currentColor" font-size="11" text-anchor="middle">correct answer</text>
+  <circle cx="120" cy="120" r="2.5" fill="var(--ok)"/>
+  <circle cx="260" cy="90" r="2.5" fill="var(--bad)"/><circle cx="268" cy="98" r="2.5" fill="var(--bad)"/><circle cx="252" cy="82" r="2.5" fill="var(--bad)"/><circle cx="262" cy="76" r="2.5" fill="var(--bad)"/><circle cx="274" cy="86" r="2.5" fill="var(--bad)"/><circle cx="256" cy="100" r="2.5" fill="var(--bad)"/><circle cx="270" cy="70" r="2.5" fill="var(--bad)"/><circle cx="248" cy="92" r="2.5" fill="var(--bad)"/><circle cx="264" cy="104" r="2.5" fill="var(--bad)"/><circle cx="258" cy="88" r="2.5" fill="var(--bad)"/>
+  <ellipse cx="260" cy="88" rx="34" ry="28" fill="none" stroke="var(--bad)" stroke-dasharray="4 3"/>
+  <text x="260" y="140" fill="currentColor" font-size="11" text-anchor="middle">40 of 50 samples agree here, and are wrong</text>
+  <line x1="330" y1="10" x2="330" y2="210" stroke="var(--muted)" stroke-width="1"/>
+  <text x="350" y="20" fill="currentColor" font-size="13" font-weight="bold">Three models, several samples each</text>
+  <circle cx="480" cy="120" r="14" fill="none" stroke="var(--ok)" stroke-width="2"/>
+  <text x="480" y="155" fill="currentColor" font-size="11" text-anchor="middle">correct answer</text>
+  <circle cx="476" cy="118" r="2.5" fill="var(--ok)"/><circle cx="484" cy="122" r="2.5" fill="var(--ok)"/><circle cx="480" cy="114" r="2.5" fill="var(--ok)"/>
+  <circle cx="400" cy="60" r="2.5" fill="var(--bad)"/><circle cx="560" cy="70" r="2.5" fill="var(--bad)"/><circle cx="390" cy="180" r="2.5" fill="var(--bad)"/><circle cx="575" cy="170" r="2.5" fill="var(--bad)"/>
+  <text x="480" y="200" fill="currentColor" font-size="11" text-anchor="middle">each model's errors land in a different place</text>
+</svg>
+<figcaption>Illustration of the mechanism, not measured data. One model repeats its own mistake, so samples cluster on it. Different models make different mistakes, so only the correct answer collects agreement.</figcaption>
+</figure>
+
+<details class="predict"><summary>Predict: your audit samples one frontier model 50 times per question, and on 77% of questions the samples strongly agree. What fraction of those agreeing answers do you expect to be wrong?</summary>
+<p>The measured answer is <b>48%</b>. Ding drew 265,000 samples across GPQA Diamond and AIME. For the most consistent frontier model, agreement of 0.8 or higher covered 77% of entries, of which 48% were wrong. The stronger the model, the more consistent it is. So the agreeing-and-wrong bucket is a property of the best models, not the weak ones. Agreement was "over-confident yet no more accurate" exactly where the consistency was highest.</p>
+</details>
+
+<p><dfn>Self-consistency</dfn> is the signal of sampling one model several times and accepting the answer most samples agree on. It fails for a structural reason: the samples are not independent measurements, because they all come from the same weights. A model that has memorised a wrong heuristic produces that wrong answer on every sample. One that favours an answer because of its position in the options produces that wrong answer too. You are not measuring the answer's truth. You are measuring the model's bias, 50 times.</p>
+
+<p>The fix follows from the same cause. <dfn>Cross-model jury</dfn> is the signal of sending the same query to two or three different models. It checks agreement across them. Different models are trained differently, so their systematic errors are different. Their wrong answers scatter while the correct answer collects agreement. That is the left panel against the right panel. The same number of calls buys no information from one model and real information from several.</p>
+
+<p>The second popular signal is to ask the model how confident it is, in words or as a percentage. ConfidenceBench scored 15 frontier models on 200 questions using the <dfn>Brier score</dfn>. This is the mean squared gap between the stated confidence and whether the answer was right. Lower is better and 0 is perfect:</p>
+
+<ul>
+  <li>The best model scored 0.103, against 0.1875 for a calibrated random guesser, so the best self-reported confidence beats chance but by a modest margin.</li>
+  <li>One shipped model scored 0.367, about twice as bad as guessing, so its stated confidence actively misleads.</li>
+  <li>The most accurate model was not the best-calibrated one, so you cannot infer a model's signal quality from its answer quality.</li>
+</ul>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Ding, "When LLMs Agree, Are They Right?" (arXiv:2607.08065 v2, abstract read 2026-09-30): 53 runners, K=50 samples each. It used 265,000 samples on GPQA Diamond and AIME; agreement-to-correctness correlation 0.20 to 0.59. ConfidenceBench (arXiv:2607.20526, abstract read 2026-09-30): 15 frontier models, 200 private multiple-choice questions; its authors note the 200-question sample is small.</p>
+</details>
+
+<p>So the rule for choosing where your cascade's extra calls go has three parts:</p>
+
+<ol>
+  <li>Spend extra confidence calls on different models, because their errors are independent and one model's errors are not.</li>
+  <li>Reject self-consistency at a frontier tier, because its failure rate on agreeing answers is measured at 48%, not a few percent.</li>
+  <li>Calibrate your own model's self-reported confidence on your own queries before trusting it, because published Brier scores show the spread between models is larger than the margin over guessing.</li>
+</ol>
+
+<p>There is no lab exercise for this section, but the arithmetic is worth doing once by hand. Take the Ding numbers above. Assume your cascade accepts every high-agreement answer, and compute the expected error rate among accepted answers. Then compare it with the error rate your eval sample would need. Check whether your random control could even measure a gap.</p>
+
+<div class="keypoints">
+  <p class="remember">Agreement among samples of one model measures that model's bias, so spend confidence calls on different models.</p>
+  <p class="trap">"Five samples agree, so accept it" accepts 48% wrong answers on the most consistent frontier models, silently.</p>
+  <p class="try">Ask your frontier model its confidence on ten questions you know the answers to; compare stated confidence against actual correctness.</p>
+</div>
+
+<p>With the signal chosen, the cascade and the router have covered traffic where a user is waiting. The next section asks when half price is worth a day of waiting.</p>
+<h2 data-concept="c1">When is half price worth a day of waiting?</h2>
+<p class="why">Half price for the same tokens, if the answer can wait until tomorrow.</p>
+
+<p>The cascade and the router from the last sections decide while someone is waiting for the answer. Not all of your traffic has anyone waiting. Your nightly eval sweep is in this class. So are the labeling run for a control experiment and the summary job for tomorrow's report. For this traffic both providers sell a third option. A <dfn>batch API</dfn> takes a file of requests as one job. Every token in the file is billed at half the usual class price. In return you give up the deadline. The answer arrives within a window of up to 24 hours instead of within seconds.</p>
+
+<p>One job moves through four steps.</p>
+
+<ol class="flow">
+  <li><b>build</b><span>one file that holds every request in the job</span></li>
+  <li class="hot"><b>submit</b><span>the job request points at that file; its body holds no prompt</span></li>
+  <li><b>wait</b><span>the provider completes the job within a window of up to 24 hours</span></li>
+  <li class="ok"><b>collect</b><span>you download a results file with an answer for each request</span></li>
+</ol>
+
+<p>The submit step is marked because its request body holds no prompt. That property drives the second half of this phase. First the parameters, which have the same shape on both providers.</p>
+
+<table>
+  <thead><tr><th></th><th>OpenAI</th><th>Anthropic</th></tr></thead>
+  <tbody>
+    <tr><td>Discount on every token class</td><td class="ok">50%</td><td class="ok">50%</td></tr>
+    <tr><td>Completion window</td><td>up to 24 hours</td><td>up to 24 hours</td></tr>
+    <tr><td>File limit</td><td>50,000 requests or 200 MB</td><td>100,000 requests or 256 MB</td></tr>
+    <tr><td>If the window expires</td><td>completed requests are billed, the rest are not</td><td>expired requests are not billed</td></tr>
+    <tr><td>Results kept</td><td>output file deleted 30 days after completion</td><td>29 days</td></tr>
+    <tr><td>Prompt-caching discount</td><td>not stated on the page read</td><td class="ok">stacks on top of the batch price</td></tr>
+  </tbody>
+</table>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>OpenAI Batch guide, read 2026-09-30: half price, a 24-hour window, 50,000 requests or 200 MB per file. Expired batches bill only completed requests, and output files are deleted 30 days after completion. The Anthropic column is the phase's read of 2026-09-25: 100,000 requests or 256 MB per file. Expired requests are not billed. The caching discount applies on top of the batch price. That column was not re-read since.</p>
+</details>
+
+<p>The decision rule is one question.</p>
+
+<ul class="tree">
+  <li><b>Is a user waiting for this call?</b>
+    <ul>
+      <li class="bad"><em>yes</em><span>keep it live, at full price, routed by the cascade or the router</span></li>
+      <li class="ok"><em>no</em><span>send it to batch, at half price, answered by morning</span></li>
+    </ul></li>
+</ul>
+
+<p>Notice what the discount does not change. It halves the cheap model and the deep model by the same factor, so the price ratio is untouched. The cascade's break-even escalation rate still sits at one minus the price ratio. Batch is a choice about time, not about which model answers. The split a team could make runs by workload. User queries stay live on the cascade. Work where no user is waiting, such as an evaluation run, moves to batch. Both halves of the bill drop.</p>
+
+<details class="predict"><summary>Predict: you submit a 50,000-request batch, and your reservation code must approve the spend before the submit. Which number does it read?</summary>
+<p>None. The reservation code is the pre-approval check the enforcement sections build later. At the submit call it has nothing to read, because the body carries an endpoint and a reference to the file. The prompts sit inside the file it points at. Your own code could still count the file before submitting, because it just built it. Anything downstream of the submit call sees only the file reference. The first priced rows for the job appear when the results come back, which is after the tokens were spent.</p>
+</details>
+
+<p>That blind spot is the structural point. A live call carries its prompt and its output cap in the request body. The cap is max_tokens, the field that bounds how many tokens the reply may contain. Your cost code can read both before money moves. A batch submit carries a file reference.</p>
+
+<table>
+  <thead><tr><th>What your cost code can read before the call</th><th>live request</th><th>batch submit</th></tr></thead>
+  <tbody>
+    <tr><td>input tokens</td><td class="ok">count the messages in the body</td><td class="bad">inside the file, unseen</td></tr>
+    <tr><td>max_tokens, the output cap</td><td class="ok">a field in the body</td><td class="bad">inside the file, unseen</td></tr>
+    <tr><td>model and endpoint</td><td class="ok">in the body</td><td class="ok">in the body</td></tr>
+  </tbody>
+</table>
+
+<ul>
+  <li>At submit time nothing can price the job, because neither a token count nor an output cap is in the request.</li>
+  <li>The provider meters the job while it runs, so the first priced rows exist after the spending started, not before.</li>
+  <li>You can still bound it yourself, because you built the file, so count its prompts before the submit and write the total down.</li>
+</ul>
+
+<p>One bookkeeping detail belongs with this. Phase 3A's fallback rule charges any class missing from the price sheet at full price. Batch tokens are their own class. A sheet without batch entries makes every batch job look twice as expensive as it was. The saving you chose batch for would never appear in your ledger.</p>
+
+<p>E12 in the lab, the cascade-versus-control sweep, is exactly this kind of work, because nobody waits on it. On a real provider that sweep is a batch job: same tokens, half price, results in the morning. Before you submit one, check that your price sheet carries the batch entries. Then count the tokens in the file you built, because that count is the only estimate that exists before the submit.</p>
+
+<div class="keypoints">
+  <p class="remember">Batch bills the same tokens at half price whenever the answer can wait until tomorrow.</p>
+  <p class="trap">The submit call carries only a file reference, so nothing prices the job before spending starts.</p>
+  <p class="try">Count the callers of your last eval run who would notice results arriving tomorrow morning.</p>
+</div>
+
+<p>The next section starts the other half of this phase. It keeps the savings by asking which three rules catch what the token chart cannot.</p>
+<h2 data-concept="c4">Which three rules catch what the token chart cannot?</h2>
+<p>The routing sections showed how to spend less on each query. This section and the next two keep those savings. They begin with the detector for the failure Phase 3A explained but never caught.</p>
+
+<p>Phase 3A answered why Story 1's dashboards stayed green. A broken cache returns 200 OK with the same token count, because only the billing class changes. What it never covered is the detection setup. This section builds it, as three rules over a per-request ledger.</p>
+
+<details class="predict"><summary>Predict: tonight a timestamp is added to the top of your 18,000-token system prompt. The response still returns 200 with the same token count. Which of your current dashboards moves, and within how many requests?</summary>
+<p>None of the token dashboards moves, because the same bytes cross the wire either way. The cache hit rate is the share of input tokens billed at the cached read price. It drops from its normal near 98% to 0% on the first request after the change. The cost per request steps up 5.4x at the same moment. If you record neither per request, the incident is invisible on every chart you have.</p>
+</details>
+
+<h3>The shape of the failure</h3>
+
+<p>In the replay of Story 1, 200 agent steps run and a timestamp enters the system prompt at request 50. Two per-request series tell the whole story.</p>
+
+<div class="bars" id="s6-break">
+  <div class="bar" style="--v:4" data-label="tokens/req, 1–49" data-value="18,400"></div>
+  <div class="bar" style="--v:4" data-label="tokens/req, 50–100" data-value="18,400"></div>
+  <div class="bar" style="--v:19" data-label="$/req, 1–49" data-value="$0.0074"></div>
+  <div class="bar" style="--v:100" data-label="$/req, 50–100" data-value="$0.0398"></div>
+</div>
+<p class="legend"><span><i style="background:var(--accent)"></i>tokens stay flat through the break</span> <span><i style="background:var(--bad)"></i>cost steps up 5.4x at request 50</span></p>
+
+<p>The token count is identical on both sides of the break, because the prefix traverses the API either way. The cost jumps from $0.0074 to $0.0398 per request. That is because 18,000 cached tokens at the read price become 18,000 fresh tokens at the full price. Every request after the break costs 5.4 times more, and each one stays far below any extreme value.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Author's replay runs of the Story 1 scenario, 2026-09-17, kept in the course material. Cost per request $0.007400 before request 50, $0.039800 after. Firing points: rolling cost at request 52, cache rule at 59 with the default 50% floor. It fires at 51 with a 90% floor, and at 50 with a 5-request window.</p>
+</details>
+
+<h3>The three rules</h3>
+
+<p>One rule is not enough, because cost rising and cache breaking are two facts and you want both. The guard runs three checks on every recorded request.</p>
+
+<table>
+  <tr><th>Rule</th><th>What it checks</th><th>What it tells you</th></tr>
+  <tr><td>Per-request budget</td><td>one request's cost against an absolute ceiling</td><td>a single extreme call, such as an unbounded input</td></tr>
+  <tr class="pick"><td><dfn>Rolling cost rule</dfn></td><td>the mean cost of the last N requests against a baseline multiple</td><td>that cost rose, but not why</td></tr>
+  <tr class="pick"><td><dfn>Cache hit floor</dfn></td><td>the windowed cache hit rate against a floor</td><td>why it rose, when the cause is the cache</td></tr>
+</table>
+
+<p>The rolling cost rule compares the average cost of a recent window against a baseline. It fires at request 52 in the replay, two requests after the break. The cache hit floor compares the windowed hit rate against a threshold, and it fires at request 59. The split matters in an incident at 3am. The first rule says spend moved. The second says the cache is the place to look.</p>
+
+<p>The per-request budget is the rule most teams already have, and it is the one this failure defeats. A regression that raises every request uniformly by 5.4x produces no outlier. Each request is ordinary on its own. A ceiling set high enough to avoid false alarms on long inputs sits above every single one of them. Detection of uniform damage needs an average over recent requests, not a per-request extreme.</p>
+
+<h3>Why the pricing sheet decides whether any of this works</h3>
+
+<p>The replay runs twice, once per role, and the difference is Phase 3A's fallback rule. The <code>pricing.py</code> rule from that phase says an unknown price falls back to full price. That is the safe direction for an invoice estimate, and the wrong direction for this detector.</p>
+
+<ul>
+  <li><b>With a cached price in the sheet</b>, the meter prices cached reads at the discount, so cost per request is low while the cache works and steps up when it breaks.</li>
+  <li><b>Without a cached price in the sheet</b>, the meter prices cached tokens at full price, so the cost line is flat before and after the break, and no cost rule fires on the whole incident.</li>
+</ul>
+
+<p>The cache rule still fires in the second run. It reads the hit rate recorded through the <code>usage adapter</code>. The adapter is the per-provider function that maps each usage object onto the five token classes. The cost rules stay silent. A missing row in a pricing sheet hides a billing-class regression from the cost side completely. So the price sheet is part of the detector and not a reporting detail.</p>
+
+<h3>Two design decisions in the guard worth copying</h3>
+
+<p>The guard keeps two small disciplines that make its alerts trustworthy.</p>
+
+<ol>
+  <li><b>Record one ledger row per request.</b> The row carries the five token classes from the usage adapter, the priced cost per class, the total, and the computed hit rate. Every rule reads this row, so the alert and the invoice always agree about what one request cost.</li>
+  <li><b>Fire once per run per rule.</b> After a rule fires it stays quiet for the rest of the run. A rolling rule over a broken cache would otherwise alert on nearly every request, and the fifty-first identical alert carries no information the first one did not.</li>
+</ol>
+
+<div class="keypoints">
+  <p class="remember">A broken cache moves only the billing class, so detect it with per-request cost and hit rate, not tokens.</p>
+  <p class="trap">A per-request outlier cap catches nothing here: every request rose 5.4x and each one stayed ordinary.</p>
+  <p class="try">Add cost and cache hit rate to one request log line; check that both survive one normal call.</p>
+</div>
+
+<p>Both rules fired within ten requests of the break. But the cache rule fired second, at request 59, seven after the cost rule. That gap is a tuning mistake with arithmetic behind it. The next section asks why a tidy 50% floor detects nothing.</p>
+<h2 data-concept="c4">Why does a tidy 50% floor detect nothing?</h2>
+<p>Both rules fired within ten requests. But they fired in the wrong order: the rolling cost rule at request 52, the cache hit floor at 59. That gap is not bad luck, and it is not noise, because the same run produces it every time.</p>
+
+<p>The situation is Story 1. Someone added a timestamp to the top of your 18,000-token system prompt, so every cache read now misses. The cost rule fired fast because the price jumped 5.4x at request 50. The cache hit floor watched the same break and stayed quiet for nine requests.</p>
+
+<p>The reason is one line of arithmetic. The floor counts the distance from your normal hit rate to the threshold, in units of windowed-average travel. Before the break your rolling average sits at 98%. After the break every request reports a hit rate of zero. So the rolling average walks down from 0.98 toward zero, one zero-hit request per step.</p>
+
+<pre><code data-lang="text">gap to cross          = normal − floor = 0.98 − 0.50 = 0.48
+travel per bad request ≈ normal / window
+requests to fire      ≈ window × (normal − floor) / normal
+                      = 20 × 0.48 / 0.98 ≈ 10  (fires at request 59, measured)</code></pre>
+
+<p>A floor of 50% is 48 points below the 98% normal. The walk takes about ten zero-hit requests, so the rule fires at request 59. Seven requests after the cost rule, from the detector built specifically for this failure.</p>
+
+<div class="calc" id="s7-floor">
+  <h4>Requests before the cache rule fires</h4>
+  <label>Measured normal hit rate <input type="range" name="normal" min="0.60" max="1.00" step="0.01" value="0.98">
+    <span class="val" data-val="normal"></span></label>
+  <label>Floor <input type="range" name="floor" min="0.10" max="0.95" step="0.05" value="0.50">
+    <span class="val" data-val="floor"></span></label>
+  <label>Window (requests) <input type="range" name="window" min="3" max="30" value="20">
+    <span class="val" data-val="window"></span></label>
+  <div class="result">Zero-hit requests to fire <b data-out="lag"></b></div>
+  <script>kit.calc('#s7-floor', function(v){
+    if (v.floor >= v.normal) return {lag: 'floor above normal, alerts on healthy traffic'};
+    return {lag: Math.max(1, Math.ceil(v.window * (v.normal - v.floor) / v.normal)) + ' requests'};
+  });</script>
+</div>
+
+<p class="legend"><span>Illustration of the mechanism, not measured. The replay's measured firing points are 59 (floor 0.50), 51 (floor 0.90) and 50 (window of 5).</span></p>
+
+<p>Two knobs close the gap, and both follow from the same formula:</p>
+
+<ul>
+  <li><b>Raise the floor to just below the measured normal.</b> A floor of 0.90 cuts the gap from 48 points to 8, so the walk is shorter and the rule fires at request 51 in the replay.</li>
+  <li><b>Shrink the window.</b> A 5-request window makes each zero-hit request move the average more, and in the replay both rules then fire at request 50, the first broken one.</li>
+</ul>
+
+<p>The side-effect is also arithmetic. A small window on noisy normal traffic produces false alarms. Two unlucky misses in five requests can dip a 0.98 average below 0.90. A large window absorbs noise but pays for it in detection lag. You are trading false alarms against lag, and the formula above prices the trade.</p>
+
+<p>One more decision matters as much as the numbers. The floor must come from a baseline stored outside the process. It must not be a constant in the code that ships the prompt. The Story 1 failure was a prompt change. So anything measured at startup measures the already-broken system and calls it normal.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Firing points are the author's replay of Story 1 (runs of 2026-09-17). The rolling cost rule fired at request 52. The cache rule fired at 59 with the default 0.50 floor. It fired at 51 with a 0.90 floor, and at 50 with a 5-request window. The travel formula is the arithmetic of a rolling average over a window, so it is derived, not measured.</p>
+</details>
+
+<div class="keypoints">
+  <p class="remember">Set the floor just below the measured normal, because a round number pays the gap in detection lag.</p>
+  <p class="trap">A tidy 50% floor on a 98% workload fires nine requests late, after the cost rule it was meant to beat.</p>
+  <p class="try">Measure your cache hit rate for a week, then compute the lag for floors 0.50 and 0.90 at your window.</p>
+</div>
+
+<p>Both rules now fire fast and tell a human that cost moved, but nothing so far stops a request. The next section asks what can actually stop spend. The answer depends on when each system learns what you spent.</p>
+<h2 data-concept="c5">Alerting is not enforcing. What can actually stop spend?</h2>
+<p>Both alert rules from the section above tell a human that cost moved, but nothing so far stops a request from going out.</p>
+
+<p class="why">Stopping spend depends on when each system learns what you spent.</p>
+
+<p>Think about one request, and about every control you could put around it. Your rolling cost rule reads spend after the response lands. Your provider's cap reads spend after the provider records it. The invoice shows spend weeks later. Each of these is a good meter and a bad brake, because by the time any of them reacts, the tokens are already billed.</p>
+
+<p>The picture is a timeline of one request. Every control that reads the bill sits after the call. The only point that can stop the call sits before it.</p>
+
+<figure class="diagram" id="s8-controls">
+<svg viewBox="0 0 720 190" role="img" aria-label="Timeline of one request with four controls placed on it">
+  <line x1="40" y1="95" x2="680" y2="95" stroke="currentColor" stroke-width="1.5"/>
+  <circle cx="90" cy="95" r="7" fill="var(--ok)"/>
+  <text x="90" y="70" text-anchor="middle" fill="currentColor" font-size="12">pre-call</text>
+  <text x="90" y="120" text-anchor="middle" fill="currentColor" font-size="11">reservation</text>
+  <text x="90" y="136" text-anchor="middle" fill="currentColor" font-size="11">can reject</text>
+  <circle cx="300" cy="95" r="7" fill="currentColor"/>
+  <text x="300" y="70" text-anchor="middle" fill="currentColor" font-size="12">provider call</text>
+  <text x="300" y="120" text-anchor="middle" fill="currentColor" font-size="11">tokens generated</text>
+  <circle cx="470" cy="95" r="7" fill="var(--warn)"/>
+  <text x="470" y="70" text-anchor="middle" fill="currentColor" font-size="12">post-call</text>
+  <text x="470" y="120" text-anchor="middle" fill="currentColor" font-size="11">rolling rule, ledger</text>
+  <circle cx="580" cy="95" r="7" fill="var(--warn)"/>
+  <text x="580" y="70" text-anchor="middle" fill="currentColor" font-size="12">provider cap</text>
+  <text x="580" y="120" text-anchor="middle" fill="currentColor" font-size="11">reads recorded spend</text>
+  <circle cx="665" cy="95" r="7" fill="var(--bad)"/>
+  <text x="665" y="70" text-anchor="middle" fill="currentColor" font-size="12">invoice</text>
+  <text x="665" y="120" text-anchor="middle" fill="currentColor" font-size="11">weeks later</text>
+</svg>
+<figcaption>Three of the four controls react after the tokens exist. Only the pre-call point can refuse.</figcaption>
+</figure>
+
+<details class="predict"><summary>Predict: you set a hard spend limit with your provider. Does it stop a runaway retry loop?</summary>
+<p>No, for three separate reasons. The limit runs on a monthly interval, so a loop can spend a large share of the month in an hour before the counter updates. It applies at org or project scope, so it cannot single out one broken job. And OpenAI's own documentation says enforcement is not instantaneous, so recorded spend can exceed the configured amount while the limit state propagates. A provider cap guards the account's month. It does not guard your loop's next call.</p>
+</details>
+
+<p>The fix has one idea. Charge the call against a budget <b>before</b> you send it. A <dfn>pre-call reservation</dfn> prices the call's worst case, holds that amount against the budget, and releases the difference after the response. If the reservation does not fit the budget, the call is rejected and the provider is never contacted.</p>
+
+<ol class="steps" id="s8-reserve">
+<li><b>Read <code>max_tokens</code> from the request.</b> The output size is the only unknown, so the worst case replaces it with its bound: every input token plus <code>max_tokens</code> output tokens at full price. This is why <code>max_tokens</code> becomes a required field in a cost-controlled system.</li>
+<li><b>Price the worst case.</b> Multiply by the price sheet your usage adapter from Phase 3A already keeps, one entry per provider and cache class.</li>
+<li><b>Reserve.</b> Hold that amount against the budget. If it does not fit, reject the call now.</li>
+<li><b>Call the provider.</b> The call goes out only inside its reservation.</li>
+<li><b>Settle.</b> The response returns actual usage, so release the reservation and charge the real cost, which is lower in almost every case.</li>
+</ol>
+
+<p>The reservation is a documented pattern, not a proposal. LiteLLM's proxy has budget reservation on by default, and it pre-authorizes the estimated maximum cost before sending the request. Its fail-closed mode revalidates against the database on every request and rejects with a 503 when spend cannot be verified. Proxy deployments without a database fail the other way, with budgets skipped entirely. Decide which way your guard fails: closed, like LiteLLM's 503, or open, where enforcement is gone and no error says so.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>OpenAI spend-limits doc, read 2026-09-30: hard limits are monthly-interval, org or project scope, and the page states "Enforcement is not instantaneous, so recorded spend can slightly exceed the configured amount while the limit state propagates." LiteLLM budget docs, read 2026-09-30: reservation enabled by default, fail-closed mode rejects with 503, DB-less deployments fail open.</p>
+</details>
+
+<p>Spending the reservation at worst case feels wasteful, so you might ask whether predicted output length can shrink it. It cannot carry that duty. Output-length predictors report a mean absolute error of roughly 93 to 103 tokens. On a 200-token answer, that average error amounts to about a 50 percent cost error. A predictor is fine for scheduling. The billing bound must be a number you can trust to be high enough, and <code>max_tokens</code> is the only such number in the request.</p>
+
+<div class="callout warn">
+<p>A batch submission cannot be reserved at all. The batch API from earlier in this phase takes a file reference, and the file can hold thousands of prompts, so nothing can price the submission when you send it. Batch needs a different control, and estimating the file's token count before submitting is the available one.</p>
+</div>
+
+<p>When a reservation does not fit, you have three responses, not two. You can alert and let the call through, which informs but does not spend. You can hard-stop with an error. Or you can choose a <dfn>degrade response</dfn>: route the rejected call to a cheaper model so the work completes at the price your budget allows. LiteLLM's docs note that a zero-cost fallback model bypasses budget checks, which makes this third path possible but also easy to misconfigure.</p>
+
+<p>One gap stays open. A stream that crosses the budget mid-response is a case almost no system documents, so whether the stream is cut, finished or billed is a behaviour you test before you promise it.</p>
+
+<div class="keypoints">
+<p class="remember">Only a pre-call reservation priced at the max_tokens worst case stops spend before it happens.</p>
+<p class="trap">A provider hard cap feels like a guard, but its monthly clock and propagation lag let a loop overspend inside the limit.</p>
+<p class="try">Take one of your calls, price input plus max_tokens output at full price, and compare with its last actual bill.</p>
+</div>
+
+<p>The reservation bounds one call, but your worst risk is a loop of calls, and a per-request bound multiplied by an unbounded loop bounds nothing. The next section asks: what bounds a loop, not a request?</p>
+<h2 data-concept="c5">What bounds a loop, not a request?</h2>
+<p>The reservation from the last section bounds one call. But the failure this phase warns about most is a loop of calls. A per-request bound multiplied by an unbounded loop is no bound at all.</p>
+
+<p>Your evening project is a multi-agent system with retry loops. One of those loops calls a model up to 50 times in a session. You have priced the worst case of each call. You have not yet asked what the loop, taken as a whole, can spend.</p>
+
+<p>The picture is a small one. A reservation is a ticket the loop buys before each call. It is priced at the worst case: the full input plus <code>max_tokens</code> of output. A loop of N calls buys up to N tickets. So the worst case of the loop is N times the worst case of one call. That product is the only thing that can stop the loop before it starts spending. The fix is a <dfn>session budget</dfn>, a reservation held at the level of the whole loop. At loop start you reserve N times the per-call worst case, and each iteration settles its actual cost against it. The code that enforces the session budget is the iteration cap, and now the cap is arithmetic instead of advice.</p>
+
+<ol>
+  <li><b>Price one call at worst case</b>: full input tokens plus <code>max_tokens</code> of output, at the price sheet rates. This is the pre-call reservation, a worst-case estimate you hold in the budget before the provider sees the request.</li>
+  <li><b>Multiply by the iteration cap</b>: worst case per call times N is the session's worst case, in dollars, before any call runs.</li>
+  <li><b>Reserve the session, not the request</b>: at loop start, hold that product against the session budget. If it exceeds the budget, stop before the first call.</li>
+  <li><b>Settle each iteration</b>: after each response, replace that call's reservation with its actual cost. The remaining headroom tells you how many iterations are still affordable.</li>
+  <li><b>Stop at the cap, not at the provider</b>: the loop's own code refuses iteration N+1 when the budget is exhausted, because no vendor control fires that early.</li>
+</ol>
+
+<p>Why per-request reservations cannot do this: each new call is priced and approved on its own. It has no memory of the 49 calls before it. The session budget adds exactly that memory: one running total the loop owns, checked before each iteration.</p>
+
+<div class="calc" id="s9-loop">
+  <h4>Worst case of a retry loop</h4>
+  <label>Iterations <input type="range" name="iters" min="10" max="200" value="50">
+    <span class="val" data-val="iters"></span></label>
+  <label>Input tokens per call <input type="range" name="input" min="1000" max="40000" step="1000" value="18000">
+    <span class="val" data-val="input"></span></label>
+  <label>max_tokens <input type="range" name="maxtokens" min="200" max="4000" step="100" value="2000">
+    <span class="val" data-val="maxtokens"></span></label>
+  <div class="result">
+    Per-call worst case <b data-out="percall"></b><br>
+    Session worst case <b data-out="session"></b>
+  </div>
+  <script>kit.calc('#s9-loop', function(v){
+    var in_price = 3.0/1e6, out_price = 15.0/1e6; // illustration, not measured
+    var percall = v.input*in_price + v.maxtokens*out_price;
+    return {percall: '$'+percall.toFixed(3), session: '$'+(percall*v.iters).toFixed(2)};
+  });</script>
+</div>
+
+<p>With the defaults (18,000 input tokens, 2,000 <code>max_tokens</code>, a $3/Mtok input and $15/Mtok output model, prices chosen to show the shape rather than read from your sheet), one call reserves 18,000 × $3/Mtok + 2,000 × $15/Mtok = $0.084, and 50 iterations reserve $4.20. The two sliders that matter are not the prompt but N and <code>max_tokens</code>: they are the two numbers your code already controls, and the session budget turns both into a hard dollar figure before the first request leaves.</p>
+
+<p>The incident that shows the endpoint of having no such ceiling is METR's. A stolen API key on a fail-open internal app spent about $600,000 of API credits over about three weeks, and the post-mortem names three detection failures: the volume looked normal to a team acclimated to high usage, the dashboard never recorded the rate-limited calls that would have shown the pattern, and "because we were not paying for these tokens, there was no natural token spend ceiling". All three are the same gap at different distances: no per-request baseline, no recorded signal, and no loop-level bound. The session budget is the third one, and unlike the first two it works even when the other two fail, because it does not depend on anyone noticing anything.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+  <p>METR, "Update on Security at METR", metr.org, 31 August 2026, read 2026-09-30. The dollar figure, the three-week window and the three quoted failures come from the incident post itself. The calculation defaults (18,000 input tokens, $3/Mtok, $15/Mtok) are an illustration chosen to show the shape, not measured values.</p>
+</details>
+
+<p>Use it on your own code: pick the most expensive loop in your agent project, set its iteration count, its prompt size and its <code>max_tokens</code> in the calc box, and write the session worst case in a comment next to the loop. If the number surprises you, that is the reservation doing its first job: making the worst case visible before it happens.</p>
+
+<div class="keypoints">
+  <p class="remember">The unit of cost control for an agent is the session: iterations times worst-case per call, reserved before the loop starts.</p>
+  <p class="trap">A per-request reservation on each call of a loop bounds no loop. METR ran three weeks and $600k with no ceiling at all.</p>
+  <p class="try">Compute N × (input + max_tokens × rate) for your longest loop and put that number in its source file.</p>
+</div>
+
+<p>The phase is now complete in what it set out to teach. The recall section collects the five claims, and the next phase, Renting a GPU and Serving a Model, asks what changes when the per-token bill becomes a GPU-hour bill and your metering must live in front of a server you run yourself.</p>
+<h2 data-kind="recall">What you can do now, and what comes next</h2>
+<p>You started this phase with the invoice reconciled and two stories still open. One was the team locked between expensive-everywhere and cheap-everywhere. The other was the team whose cache broke for four months behind green dashboards. Read the five claims again. They should now read like things you would say to a colleague.</p>
+
+<ol>
+  <li><b>A cascade pays the cheap model for every query, so it beats deep-only only while the escalation rate stays below 1 minus the price ratio.</b> At a 5x price ratio the cascade stops saving above 80% escalation. The section "Why does a cascade pay for some queries twice?" derived this from one cost line, and the batch section added the third option when no user is waiting.</li>
+  <li><b>A cascade with a coin-flip signal still dashboards well, so only an equal-count random control proves the signal carries information.</b> The broken-signal run showed 85% accuracy at 69.3% of deep-only cost with zero information. The section "The dashboard says the cascade works. Which experiment proves it?" built the control and the standard-error rule.</li>
+  <li><b>On strong models, self-agreement repeats the model's own mistakes, so spend extra confidence calls on different models, not on more samples of one.</b> 48% of a frontier model's high-agreement answers were wrong. The section "Which escalation signal deserves your extra calls?" ranked the signals.</li>
+  <li><b>A billing-class regression leaves the token chart flat, so detection needs per-request cost plus a cache hit floor set just below the measured normal.</b> The two alert sections turned Story 1's four months into ten requests, and showed why a round 50% floor on a 98% system detects late.</li>
+  <li><b>Every post-hoc control enforces against stale spend, so only a pre-call reservation priced from max_tokens, held at the loop level, stops spend before it happens.</b> Provider caps fail three ways, and the session budget is iterations times the worst case per call. The last two sections built both.</li>
+</ol>
+
+<p>After the lab you can ship a routing change behind a control group and gate it. You can also build a cost guard that stops spend before it happens, loops included. Both close the running stories. Story 3 gets a router with an experiment attached, and Story 1 gets the three rules that would have caught it.</p>
+
+<p>One assumption runs under everything this phase taught: the bill arrives per token from someone else's server. The next phase is Renting a GPU and Serving a Model. It asks what changes when the bill becomes a GPU-hour on a server you run. Your metering must sit in front of it. The per-request ledger, the control-group discipline and the reservation all carry over. The pricing inputs do not.</p>
+<h2 data-kind="lab">Lab: replay the incident and break the signal</h2>
+<p>Each exercise below re-runs one claim from this phase. Run them in order: the first three replay Story 1, the last three replay the cascade experiment. All expected values are the lesson author's run of 2026-09-17. Small differences in your run are fine, but the shape is not.</p>
+
+<ul class="exercises">
+
+<li>
+<label><input type="checkbox"> <b>E9</b> <span class="tag">offline</span></label>
+<b>Replays concept: a billing-class regression leaves the token chart flat, so per-request cost and the cache hit floor are the detectors.</b>
+<p>Run the Story 1 replay. A timestamp is inserted at the top of the 18,000-token prompt at request 50, and both alert rules are active.</p>
+<p><code>Run:</code> the incident replay, rules on</p>
+<p>Watch two things. The token-per-request line stays flat through the break. The cost per request steps from <b>$0.007400 to $0.039800</b> at request 50, a 5.4x rise. The same bytes now bill as full-price input instead of cached read. The rolling cost rule fires at request <b>52</b>, the cache hit rule at <b>59</b> with the default 50% floor.</p>
+<p>Then run it with a price sheet that has no cached-price row: <code>--role cache_demo</code> removed. So Phase 3A's fallback rule prices every token at full input price both before and after the break. The cost line is flat and <b>no cost rule fires</b>. The incident becomes invisible, because the meter was never told what a cached read costs. This is why the price sheet is part of the detector, not just the invoice.</p>
+</li>
+
+<li>
+<label><input type="checkbox"> <b>E10</b> <span class="tag">offline</span></label>
+<b>Replays concept: a round-number floor sits far below the measured normal, so the windowed average must travel the gap before it crosses.</b>
+<p>Repeat E9 twice, changing one knob each time. The system's normal hit rate is 98%.</p>
+<p><code>Run:</code> the replay with the cache floor at <code>0.90</code>, then again with a 5-request window.</p>
+<p>With the floor at 0.90 the cache rule fires at request <b>51</b>, one request before the cost rule, which fires at 52. With a 5-request window both rules fire at request <b>50</b>, the first broken request. Compare with E9's defaults: floor 0.50 fired at 59. The distance from 98% normal to a 50% floor is 48 points of average to travel. That travel time is the four-month delay in miniature. A smaller window detects sooner but noisier, which is the trade to tune on your own traffic.</p>
+</li>
+
+<li>
+<label><input type="checkbox"> <b>E11</b> <span class="tag">offline</span></label>
+<b>Replays concept: the rolling cost rule tells you that cost moved; the cache rule tells you why, and each covers a failure the other misses.</b>
+<p><code>Run:</code> the replay with <code>--no-cache-rule</code>.</p>
+<p>Only the rolling cost rule fires, at request 52, and the alert says "cost went up" with no cause. Now picture the opposite run: the price sheet raises the full-input price overnight with the cache healthy. The cost rule fires, the cache rule stays quiet, and the cause is pricing, not caching. One rule is the symptom detector, and one is the cause detector. Removing either leaves a class of incident with no explanation attached.</p>
+</li>
+
+<li>
+<label><input type="checkbox"> <b>E12</b> <span class="tag">offline</span></label>
+<b>Replays concept: a cascade beats deep-only only below the break-even escalation rate, and only the random control proves the signal earns it.</b>
+<p>Build the cascade from the section on double payment, and run it on the simulated traffic. Then run the equal-count random control: the same number of escalations, chosen at random. Rank both by dollars per correct answer, not by accuracy alone.</p>
+<p>Expected shape: accuracy sits between cheap-only and deep-only, and cost sits below deep-only. The cascade row clearly beats the random-control row on dollars per correct answer. If it does not, your signal is buying accuracy by chance, and the next exercise shows what that looks like.</p>
+</li>
+
+<li>
+<label><input type="checkbox"> <b>E13</b> <span class="tag">offline</span></label>
+<b>Replays concept: a coin-flip signal still produces a good-looking accuracy-and-cost dashboard.</b>
+<p><code>Run:</code> the cascade with <code>--signal-quality 0.5</code>, a signal no better than a coin flip.</p>
+<p>The bare dashboard still reads <b>85% accuracy at 69.3% of deep-only cost</b>, the kind of line a team would ship. The gap over the random control falls to <b>+0.4 accuracy points</b>, inside two standard errors. Nothing on the accuracy or cost chart tells you the signal carried no information. Only the comparison against the equal-count control convicts it.</p>
+</li>
+
+<li>
+<label><input type="checkbox"> <b>E14</b> <span class="tag">offline</span></label>
+<b>Replays concept: small eval sets swing several points per trial, so one trial of the control experiment proves nothing.</b>
+<p><code>Run:</code> the E13 comparison three times, one seed each.</p>
+<p>The same zero-information signal prints <b>+10.0, +0.0 and −5.0</b> accuracy points against the control across the three seeds. One 20-item trial swings about 7 points. So a single run can make a coin flip look like a real signal. A real signal can look like noise. This is why the gating checklist ends with a confidence interval over several trials, not one green run.</p>
+</li>
+
+</ul>
+
+<div class="callout note">Two claims in this phase have no exercise: the bad-signal audit (compute the wrong-answer fraction of a frontier model's high-agreement answers from the numbers in the signal section) and the reservation (price one call at worst case, then multiply by the loop's iteration cap). Both are five minutes of arithmetic on numbers you already have, and the checkpoint asks both.</div>
+
+<p>The checkpoint now asks the same questions without the simulator. It asks the cascade arithmetic at 35% escalation and the control experiment's exact configuration. It asks where a reservation must live to bound a loop.</p>
+<h2 data-kind="checkpoint">Checkpoint 3B</h2>
+<p>Answer each one in your own words before you open the answer sketch. Every number you need is in the question.</p>
+
+<div class="lab" id="s12-cp">
+<ol>
+<li><b>Cascade versus router.</b> Your cheap model costs $1 per million input tokens and your deep model $5. Your measured escalation rate is 35%. What does the cascade cost as a fraction of deep-only, and what would a pre-generation router cost on the same traffic?
+<details class="answer"><summary>Answer sketch</summary>
+The cascade pays the cheap model on every query plus the deep model on the escalated fraction, so its cost per query is <code>Cc + e·Cd</code>. Dividing by deep-only: <code>Cc/Cd + e</code> = 1/5 + 0.35 = <b>0.55, or 55%</b> of deep-only. The router pays once per query: 65% of queries go cheap and 35% go deep, so <code>0.65·(1/5) + 0.35·1</code> = 0.13 + 0.35 = <b>48%</b>. The 7-point gap is the cheap generation the cascade paid for on the escalated queries, and the pre-generation router never pays it.</details></li>
+
+<li><b>The control experiment.</b> Two dashboards both show 85% accuracy at 69% of deep-only cost. In one, the escalation signal is a coin flip. Which experiment tells them apart, and exactly how is it configured?
+<details class="answer"><summary>Answer sketch</summary>
+Run a <b>random control</b>: a second cascade that escalates the same count of queries, chosen at random, on the same evaluated sample. Rank both by dollars per correct answer, not by accuracy or cost alone, because the coin-flip cascade matches the real one on both. Compare the gap against its standard error: one 20-item trial of this course's simulator swings about 7 accuracy points, so repeat over several seeds and demand a gap beyond two standard errors. The course's signal-quality-0.5 run failed exactly this test: gap of +0.4 points, inside the noise.</details></li>
+
+<li><b>The provider cap.</b> A colleague says a hard spend limit with the provider makes a runaway retry loop safe. Give three independent reasons it does not, and name the one control that bounds the loop.
+<details class="answer"><summary>Answer sketch</summary>
+The provider's hard limit fails three ways, from its own documentation: the interval is <b>monthly</b>, so the loop can spend the month's budget in an hour while staying inside the cap; the scope is <b>org or project only</b>, so there is no per-job limit and one broken job trips the cap for everyone; enforcement is <b>not instantaneous</b>, so spend overshoots while the limit state propagates. The control that bounds the loop is a <b>session budget at the agent loop</b>: a pre-call reservation priced at worst case (full input plus <code>max_tokens</code> of output) held per session, with a hard iteration cap. Both live in your own code, because the unit of control is the loop, not the request.</details></li>
+
+<li><b>The ship-it proposal.</b> A teammate proposes this escalation signal for your frontier-tier cascade: sample the model five times, and accept the answer without escalating when the samples agree or the model reports confidence above 90%. What is wrong with it?
+<details class="answer"><summary>Answer sketch</summary>
+Both halves spend extra calls on one model's agreement with itself, which repeats that model's own systematic mistakes. Ding's audit of 265,000 samples found the most consistent frontier model agreed strongly on 77% of entries and <b>48% of those were wrong</b>, so this signal accepts nearly half of the model's confidently wrong answers and escalates almost nothing. Self-reported confidence is also measured as broken: one shipped model scored a Brier of 0.367, about twice as bad as calibrated guessing at 0.1875. If extra calls buy a signal, spend them on a cross-model jury, because different models make different mistakes and their wrong answers scatter.</details></li>
+
+<li><b>The mid-stream breach.</b> Your reservation passes a request priced at worst case $0.10 against a remaining budget of $0.12. Mid-stream, the model produces a much longer thinking block and the request's true cost crosses $0.12. Is your budget guarantee intact, and what must you verify before promising it?
+<details class="answer"><summary>Answer sketch</summary>
+The reservation itself is intact, because it was priced at worst case: full input plus <code>max_tokens</code> of output, so no response can cost more than was reserved. The real question is what happens on the <b>next</b> request: settle-to-actual must run before that request's reservation is checked, or the budget reads stale. What mid-stream cancellation does when actual spend would exceed the reservation is undocumented almost everywhere, so test your gateway's behaviour before you promise a caller that a stream stops at the budget line.</details></li>
+
+<li><b>Prediction versus reservation.</b> A plan replaces worst-case reservations with an output-length predictor (error about 100 tokens) and prices each call at the predicted length, arguing this admits more requests under the same budget. Accept or reject?
+<details class="answer"><summary>Answer sketch</summary>
+Reject for enforcement, keep for scheduling. An error of about 100 tokens is a 50% cost error on a 200-token answer, and the prediction errs in both directions, so under-predictions breach the budget after the call has already started. Enforcement needs a bound, not an estimate: only the worst case from <code>max_tokens</code> guarantees the reservation covers whatever the stream returns. The predictor is still useful where a wrong estimate costs nothing, such as batching or scheduling decisions that can be revised.</details></li>
+</ol>
+</div>
+
+<div class="callout tip">A wrong answer on 3, 5 or 6 is one idea revisited: enforcement only works before the spend exists. Re-read the reservation section, then try those three again.</div>
+
+<p>Q1, Q2 and Q4 design and validate the routing change; Q3, Q5 and Q6 keep the savings. The cheatsheet that follows fits all of it on one screen.</p>
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+<pre class="cheatsheet">ROUTING
+  cascade cost = cheap x ALL + deep x escalated     (escalated queries pay twice)
+  router  cost = cheap x easy + deep x hard + classifier
+  cascade beats deep-only while   escalation rate &lt; 1 - (cheap/deep)
+  RANK BY DOLLARS PER CORRECT ANSWER, never by cost alone
+  ALWAYS run the random control: escalate the same COUNT at random
+  signal strength: cross-model jury &gt; calibrated token confidence &gt;
+                   self-reported (varies by model) &gt; self-consistency (weak)
+  CPT = the % of strong-model calls needed to hit your quality target
+
+BATCH
+  50% off on both major providers | 24h window
+  cannot be budget-reserved: the request carries a file, not the prompts
+  inside a batch use the 1-hour cache tier, not the 5-minute one
+
+COST ALERTING
+  three rules: per-request budget | rolling cost (THAT it rose)
+               cache hit floor (WHY it rose)
+  set the floor just under your MEASURED normal, not at a round number
+  fire each rule once per run; a rule that pages every request gets muted
+  record per request: route, cost, naive_cost, uncached_in, cached_in,
+                      cache_write, out, cache_hit_rate
+  a broken cache does NOT change your token count. Only the class changes.
+  no cached price in the sheet -&gt; cost looks flat -&gt; rolling rule is blind
+
+ENFORCEMENT
+  alert (traffic continues) | hard stop (429) | degrade (cheaper model, no error)
+  only a PRE-CALL RESERVATION stops spend before it happens
+    reserve worst case from max_tokens -&gt; reject -&gt; settle to actual
+  output length is NOT predictable: best-in-class MAE ~100 tokens
+  every other control is enforced against stale spend, by the vendors' own words
+  provider caps: monthly only, org or project scope, "not instantaneous"
+  mid-stream breach behaviour is undocumented almost everywhere
+
+THE COMMANDS (part B)
+  cascade_lab.py --self-test                      -&gt; the scorer, offline
+  cascade_lab.py --simulate                       -&gt; cascade vs the control
+  cascade_lab.py --simulate --signal-quality 0.5  -&gt; an expensive coin flip
+  cascade_lab.py --simulate --trials 1 --seed N   -&gt; how badly one run lies
+  budget_guard.py --self-test                     -&gt; the three rules, offline
+  budget_guard.py --simulate --role cache_demo    -&gt; Story 1: alerts at 52, 59
+  budget_guard.py --simulate --role cache_demo --cache-floor 0.90 -&gt; fires at 51
+  budget_guard.py --simulate --role cache_demo --no-cache-rule    -&gt; symptom only
+</pre>
+<h2 data-kind="post">What you could post</h2>
+<p>Two post ideas. Each is one claim plus the number that makes it yours.</p>
+
+<div class="cards" data-cols="2">
+  <div class="card" id="s14-coinflip">
+    <h4>The coin flip that dashboards well</h4>
+    <p>In a cascade lab, a coin-flip escalation signal still showed 85% accuracy at 69% of deep-only cost on the dashboard.</p>
+    <p>What makes it yours: you ran the simulation yourself, and only the equal-count random control convicted it.</p>
+  </div>
+  <div class="card" id="s14-floor">
+    <h4>The alert floor that detects nothing</h4>
+    <p>With a cache floor at 50% and a normal hit rate of 98%, the rule designed for the outage fired nine requests late.</p>
+    <p>What makes it yours: you can replay Story 1, watch the floor travel the gap. Then move it and catch request 51.</p>
+  </div>
+</div>
+<h2 data-kind="sources">Sources</h2>
+<p>Every source below was opened and checked on 2026-09-30. Each line says what this phase took from it.</p>
+
+<ul class="sources">
+  <li><a href="https://arxiv.org/abs/2305.05176">arxiv.org/abs/2305.05176</a> — FrugalGPT, the paper that defined the LLM cascade; the section "Why does a cascade pay for some queries twice?" uses its two-part definition, scorer plus threshold.</li>
+  <li><a href="https://arxiv.org/abs/2605.06350">arxiv.org/abs/2605.06350</a> — Bouchard, the pre-generation router beating the best cascade on four of five datasets, with structural cost named as the cause (verified at abstract level, preprint).</li>
+  <li><a href="https://arxiv.org/abs/2601.07206">arxiv.org/abs/2601.07206</a> — LLMRouterBench, ten routers re-run over 400,000+ instances, several failing to beat a simple baseline; the field-scale version of the coin-flip control.</li>
+  <li><a href="https://arxiv.org/abs/2607.08065">arxiv.org/abs/2607.08065</a> — Ding, "When LLMs Agree, Are They Right?", 265,000 samples; the 48%-wrong high-agreement result and the 0.20 to 0.59 correlations.</li>
+  <li><a href="https://arxiv.org/abs/2607.20526">arxiv.org/abs/2607.20526</a> — ConfidenceBench, 15 frontier models scored by Brier score; best 0.103 against calibrated-random 0.1875, one shipped model at 0.367.</li>
+  <li><a href="https://arxiv.org/html/2406.18665v4">arxiv.org/html/2406.18665v4</a> — RouteLLM, the CPT metric and the rule that every routing number names its benchmark.</li>
+  <li><a href="https://metr.org/blog/2026-08-31-security-update/">metr.org/blog/2026-08-31-security-update</a> — METR's incident post: about $600,000 over three weeks, and the three named detection failures that map onto the three alert rules.</li>
+  <li><a href="https://docs.litellm.ai/docs/proxy/users">docs.litellm.ai/docs/proxy/users</a> — LiteLLM budget docs: reservation on by default, pre-authorizing worst-case cost, and the fail-closed mode that rejects with 503.</li>
+  <li><a href="https://developers.openai.com/api/docs/guides/spend-limits">developers.openai.com/api/docs/guides/spend-limits</a> — OpenAI spend limits: monthly interval, org or project scope, and the vendor's own line that enforcement is not instantaneous.</li>
+  <li><a href="https://developers.openai.com/api/docs/guides/batch">developers.openai.com/api/docs/guides/batch</a> — OpenAI Batch guide: 50% discount, 24-hour window, 50,000 requests or 200 MB per file, and results now documented as deleted 30 days after completion.</li>
+</ul>
+
+<div class="callout note">
+  <p>Five papers the study note could not open stay unverified here: the Routing Collapse Index (arXiv:2602.03478), the jury paper (arXiv:2607.10139), UCCI (arXiv:2605.18796), AutoRelAnnotator, and RLM-Cascade. The signal-ranking claim in this phase rests on Ding and ConfidenceBench, both verified. The output-length prediction error of about 100 tokens came with no named source and was not checked.</p>
+</div>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>
