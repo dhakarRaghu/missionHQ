@@ -310,12 +310,12 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <p>In Phase 2B you saw that constrained decoding makes output legal without making it complete: the grammar stops invalid JSON, but it does not know which fields your application needs. Now look at a failure one step earlier. Your agent calls two stateful tools in order: <code>write_file</code>, then <code>compile</code>. You set <code>parallel_tool_calls=false</code> so the server cannot return both calls in one turn, because running them together corrupts the state. The request returns HTTP 200. The response is well-formed. The tool calls array holds two calls.</p>
 
 <p>The server did not reject your parameter. The output was valid JSON. Every signal you normally trust said the request worked. Yet the constraint you set was never applied at all, and nothing in the response told you. So before your agent executes any tool call, you need a way to answer one question: when a serving stack accepts a constraint parameter without an error, how do you know whether it acted on it or only read it and moved on?</p>
-<p>This lesson teaches one idea. They are listed here so you can see where it is going, and they will read more clearly once each has been explained below, so come back to this list at the end.</p>
-<ol class="concepts"><li id="c1"><b>A constraint parameter an OpenAI-compatible server accepts without error is not enforced; parse, honor and reject are three separate behaviors, and silence means the first only.</b> <span>Decide which constraints he must re-check in his own layer before executing tool calls, and which engine flags he can trust.</span></li></ol>
+<p>This lesson teaches one idea. It is stated here so you can see where the lesson is going. It will read more clearly once it has been explained below, so come back to it at the end.</p>
+<ol class="concepts"><li id="c1"><b>A constraint parameter an OpenAI-compatible server accepts without error is not enforced; parse, honor and reject are three separate behaviors, and silence means the first only.</b> <span>Decide which constraints you must re-check in your own layer before executing tool calls, and which engine flags he can trust.</span></li></ol>
 <h2 data-concept="c1">What did the caller see, and what did the engine do?</h2>
 <p class="why">A server that silently ignores your constraint returns the same 200 as one that enforces it.</p>
 
-<p>Your agent has two stateful tools: <code>write_file</code>, then <code>compile</code>. Running them in the wrong order corrupts the state, so you set <code>parallel_tool_calls=false</code>. The response arrives with HTTP 200. It has a well-formed <code>tool_calls</code> array holding two calls. This exact incident was measured. SGLang 0.5.1.post1 serving Qwen3-30B-A3B on 8x H20 returned <code>finish_reason='tool_calls'</code>. It had two calls in one turn despite the flag.</p>
+<p>Your agent has two stateful tools: <code>write_file</code>, then <code>compile</code>. Running them in the wrong order corrupts the state, so you set <code>parallel_tool_calls=false</code>. The response arrives with HTTP 200. It has a well-formed <code>tool_calls</code> array holding two calls. The same failure was measured in a public bug report. SGLang 0.5.1.post1, serving Qwen3-30B-A3B on eight H20 GPUs, returned <code>finish_reason='tool_calls'</code>. It sent two calls in one turn, to an add tool and a multiply tool, despite the flag.</p>
 
 <p>To read this failure you need three behaviors, because a constraint parameter can meet three fates. The server can <b>parse</b> it: read the field, see it is valid, move on. It can <b>honor</b> it: change what the engine produces. It can <b>reject</b> it: return a 400 saying "not supported". Your instinct says parse implies honor, so silence means safety. It does not. Silence proves parse only, and that space between accepted and acted-on is the <dfn>accepted-not-enforced gap</dfn>: the parameter crossed the API layer and never reached the engine.</p>
 
@@ -361,7 +361,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
   <li class="ok"><b>one call survives</b><span>the response can hold at most one tool call, by construction</span></li>
 </ol>
 
-<p>That strength has a price, and you have seen it before. It is the <dfn>constraint tax</dfn>, the extra latency and complexity a grammar adds to every decoded token. Because the mask is rebuilt at each step. In Phase 2B you paid it for valid JSON. For one-call-per-turn you would pay it across the whole response.</p>
+<p>That strength has a price, and you have seen it before. It is the <dfn>constraint tax</dfn>, the extra latency and complexity a grammar adds to every decoded token, because the mask is rebuilt at each step. In Phase 2B you paid it for valid JSON. For one-call-per-turn you would pay it across the whole response.</p>
 
 <p>The second place is cheaper and needs no grammar at all. It is the <dfn>post-filter backstop</dfn>: generate as usual. Then drop every tool call but the first before the response leaves the engine. A community member proposed exactly this in the issue thread, motivated by race safety for stateful tools. It costs a few lines of code and one pass over an array that is already parsed.</p>
 
@@ -380,7 +380,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <p class="try">Read your engine's tool-calling docs end to end and write down which request flags it actually wires into decoding.</p>
 </div>
 
-<p>So enforcement is possible, and your engine provides neither path. The next section asks what that changes in your own agent: where the check goes. And what to assert on instead of the status code.</p>
+<p>So enforcement is possible, and your engine provides neither path. The next section asks what that changes in your own agent: where the check goes, and what to assert on instead of the status code.</p>
 <h2 data-concept="c1">What does this change in your own agent?</h2>
 <p class="why">Enforcement will not come from your engine, so the check lives in code you own.</p>
 
@@ -401,7 +401,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 
 <p>One detail from the incident belongs in your parser too. The returned calls had <code>index=None</code>, a second spec deviation. Some client libraries mis-handle it when you push tool results back into one message. Check the field before you trust it.</p>
 
-<p>The same shift applies to your tests. A conformance test that asserts on HTTP 200 passed in the incident while the constraint was violated. Because 200 only says the response parsed. Assert on the output instead: send a prompt that invites two calls, and fail the test when two come back. Each new flag and each engine upgrade then gets its own output assertion. Then the accepted-not-enforced gap becomes a test failure instead of a race condition.</p>
+<p>The same shift applies to your tests. A conformance test that asserts on HTTP 200 passed in the incident while the constraint was violated, because 200 only says the response parsed. Assert on the output instead: send a prompt that invites two calls, and fail the test when two come back. Each new flag and each engine upgrade then gets its own output assertion. Then the accepted-not-enforced gap becomes a test failure instead of a race condition.</p>
 
 <div class="keypoints">
 <p class="remember">Treat engine constraint flags as hints; enforce the invariant in the layer that executes.</p>
@@ -490,11 +490,11 @@ assert len(calls) <= 1, (
 <div class="cards" data-cols="2">
 <div class="card">
 <h4>"I set parallel_tool_calls=false. The server sent 200 and two calls."</h4>
-<p>The claim: a constraint parameter that the server accepts is not enforced. The proof is one 30-line client that asserts on the output. What makes it yours: you ran the test against your own stack. So your post names the engine, the version and the raw response instead of quoting someone else's bug report.</p>
+<p>The claim: a constraint parameter that the server accepts is not enforced. The proof is one 30-line client that asserts on the output. Post it only after you run the lab against your own stack. Then the post names your engine, its version and the raw response you saw, instead of quoting someone else's bug report.</p>
 </div>
 <div class="card">
 <h4>"A bot closed this bug as completed. It still reproduces."</h4>
-<p>The claim: a closed issue with state reason "completed" can hide a live bug. So triage by evidence, not by state. What makes it yours: you traced the SGLang thread, the maintainer quotes, the auto-close and the three comments after. You can say what this means for anyone reading an engine's tracker.</p>
+<p>The claim: a closed issue with state reason "completed" can hide a live bug. So triage by evidence, not by state. Post it after you read the SGLang thread yourself: the maintainer quotes, the auto-close and the three comments after it. Then you can say what it means for anyone reading an engine's tracker.</p>
 </div>
 </div>
 

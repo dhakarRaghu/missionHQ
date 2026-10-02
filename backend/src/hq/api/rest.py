@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from hq import board, db, engagement, safety, value
+from hq import board, db, engagement, job_retention, safety, value
 from hq.api.deps import require_auth
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -261,16 +261,22 @@ JOB_SELECT = (
 @router.get("/jobs", operation_id="listJobs")
 async def list_jobs(status: str | None = None, limit: int = 200) -> list[dict]:
     """The job ledger. Everything hunter verified, strongest fit first."""
+    # A found or closed role first seen more than a week ago is not shown;
+    # `job_retention` moves it out of the ledger once a day. Roles he moved
+    # on (shortlisted, applied, referral and on) stay whatever their age.
+    recent = ("(status NOT IN ('seen', 'closed')"
+              f" OR first_seen > now() - make_interval(days => {job_retention.KEEP_DAYS}))")
     if status:
         if status not in JOB_STATUSES:
             raise HTTPException(400, f"status must be one of {list(JOB_STATUSES)}")
         return await db.fetch(
-            f"{JOB_SELECT} WHERE status = %s ORDER BY fit_score DESC, last_seen DESC"
-            " LIMIT %s",
+            f"{JOB_SELECT} WHERE status = %s AND {recent}"
+            " ORDER BY fit_score DESC, last_seen DESC LIMIT %s",
             (status, limit),
         )
     return await db.fetch(
-        f"{JOB_SELECT} ORDER BY fit_score DESC, last_seen DESC LIMIT %s", (limit,)
+        f"{JOB_SELECT} WHERE {recent} ORDER BY fit_score DESC, last_seen DESC LIMIT %s",
+        (limit,),
     )
 
 

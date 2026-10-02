@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic_ai import ModelRetry, RunContext
 
-from hq import db
+from hq import db, job_retention
 from hq.config import settings
 from hq.job_pipeline import exhausted_targets, sweep_brief
 from hq.obs import emit
@@ -566,6 +566,12 @@ async def record_job(
         raise ModelRetry("fit_adjust needs adjust_reason: one sentence the fields cannot show")
 
     key = _dedupe_key(company, role, location, provider, external_id)
+    gone = job_retention.removed_recently(key)
+    if gone:
+        return (f"not recorded: {company} — {role} was first found more than"
+                f" {job_retention.KEEP_DAYS} days ago and removed from the board on"
+                f" {gone['removed'][:10]}; it stays out for {job_retention.REMOVED_DAYS} days."
+                " Move on to the next role.")
     experience_band = await _strongest_band(key, experience_band)
     fit = fit_score_for(
         role, experience_band=experience_band, compensation=compensation,

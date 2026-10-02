@@ -480,3 +480,18 @@ def test_a_read_without_years_keeps_the_band_that_had_them() -> None:
     assert strongest_band("0.5-2 years", stated) == "0.5-2 years"   # new evidence wins
     assert strongest_band("not stated", "") == "not stated"
     assert strongest_band("", "3+ yrs") == "3+ yrs"
+
+
+def test_an_answer_read_by_hand_replaces_the_runtime_call() -> None:
+    """On a machine where no browser runtime runs, the pages are read in a
+    Claude session and the answer is attached to the task; the run files it
+    instead of calling the runtime."""
+    import inspect
+
+    from hq import engine
+
+    assert engine.prepared_browser_answer({"browser_answer": "  Both roles open.  "}) == "Both roles open."
+    assert engine.prepared_browser_answer({}) == "" and engine.prepared_browser_answer(None) == ""
+    src = inspect.getsource(engine.run_task)
+    assert src.index("prepared_browser_answer") < src.index("await_runtime_approval")
+    assert src.index("prepared_browser_answer") < src.index("_file_external_output")

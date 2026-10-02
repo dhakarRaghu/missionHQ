@@ -16,6 +16,7 @@ code, working steppers, tabs and calc boxes. Build the body only from these.
 <pre><code data-lang="python">          code
 <div class="compare"><div class="wrong">…</div><div class="right">…</div></div>
 <ol class="steps"><li>…                a walkthrough, shown one step at a time
+<ol><li>…  <ul><li>…                   a plain numbered or bullet list: ordered steps, or three or more parallel points
 <div class="tabs"><div data-tab="vLLM">…</div><div data-tab="SGLang">…</div></div>
 <div class="stats"><div class="stat"><b>730 ms</b><span>p99 TTFT</span></div></div>
 <div class="bars"><div class="bar" style="--v:73" data-label="p99" data-value="730 ms"></div></div>
@@ -89,6 +90,7 @@ Pick the piece that matches the idea:
 |---|---|
 | what happens in each step, and how long each step takes | `<div class="lanes" data-play>` |
 | an order of operations, a request's path | `<ol class="flow">`, or `<ol class="steps">` when each step needs a paragraph |
+| steps told in words, or three or more parallel points | a plain `<ol>` or `<ul>`, one full sentence per item |
 | one whole divided into parts (a window, a bill, a memory budget) | `<div class="stack">` |
 | a choice and where each answer leads | `<ul class="tree">` |
 | how one number drives another | `<div class="calc">` with a slider |

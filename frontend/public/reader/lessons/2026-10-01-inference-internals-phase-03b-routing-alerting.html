@@ -417,7 +417,7 @@ at e = 0.35:  cascade  1 + 0.35·5 = 2.75   → 55% of deep-only
   <p>Bouchard, "Is Escalation Worth It? A Decision-Theoretic Characterization of LLM Cascades" (arXiv:2605.06350, preprint v1, May 2026): five benchmarks across eight models from five providers. Quote: "a lightweight pre-generation router exceeds the best cascade policy on four of five datasets, mainly because it avoids the cheap model's generation cost on queries sent directly to a larger model rather than because of a stronger routing signal." The break-even numbers in this section follow from the algebra alone, so they hold at whatever prices your own invoice shows.</p>
 </details>
 
-<p>You can run this yourself in this phase's lab: exercise E12 builds the cascade and the random control on the same traffic, and the cost lines come out where the formula puts them.</p>
+<p>You can run this yourself in this phase's lab: exercise E12 builds the cascade and the random control on the same traffic, and its cascade cost comes close to what the formula predicts: $0.00892 measured against $0.00864.</p>
 
 <div class="keypoints">
   <p class="remember">A cascade costs Cc + e·Cd per query, so it beats deep-only only while the escalation rate stays under 1 − Cc/Cd.</p>
@@ -455,13 +455,11 @@ at e = 0.35:  cascade  1 + 0.35·5 = 2.75   → 55% of deep-only
 
 <table>
 <tr><th>arm</th><th>signal</th><th>accuracy</th><th>cost vs deep-only</th></tr>
-<tr><td>cheap-only</td><td>none</td><td>64%</td><td class="ok">12%</td></tr>
-<tr><td>deep-only</td><td>none</td><td class="ok">95%</td><td class="bad">100%</td></tr>
 <tr><td>cascade</td><td>real</td><td>85%</td><td>69.3%</td></tr>
 <tr><td>cascade</td><td class="bad">coin flip</td><td>85%</td><td>69.3%</td></tr>
 </table>
 
-<p>The last two rows are identical on the dashboard. So the comparison has to be the bottom row against the one above it. (Course simulation numbers, author's runs, illustrative of the pattern rather than a benchmark.)</p>
+<p>The last two rows are identical on the dashboard. So the comparison has to be the bottom row against the one above it. (The phase's coin-flip run, at signal quality 0.5, still showed 85% accuracy at 69.3% of deep-only cost.)</p>
 
 <h3>Why one trial is not enough</h3>
 
@@ -477,7 +475,7 @@ at e = 0.35:  cascade  1 + 0.35·5 = 2.75   → 55% of deep-only
 
 <div class="keypoints">
 <p class="remember">A real signal must beat a random control that escalates the same count, ranked on dollars per correct answer.</p>
-<p class="trap">"85% accuracy at 55% of cost, so it works" describes a coin-flip cascade just as well. You then ship noise at deep-model prices.</p>
+<p class="trap">"88% accuracy at 55% of deep-only cost, so it works" can describe a coin-flip cascade just as well. You then ship noise at deep-model prices.</p>
 <p class="try">Open E14, run its three seeds, and check how far one 20-item trial's gap moves between seeds.</p>
 </div>
 
@@ -551,14 +549,13 @@ at e = 0.35:  cascade  1 + 0.35·5 = 2.75   → 55% of deep-only
 
 <p>The cascade and the router from the last sections decide while someone is waiting for the answer. Not all of your traffic has anyone waiting. Your nightly eval sweep is in this class. So are the labeling run for a control experiment and the summary job for tomorrow's report. For this traffic both providers sell a third option. A <dfn>batch API</dfn> takes a file of requests as one job. Every token in the file is billed at half the usual class price. In return you give up the deadline. The answer arrives within a window of up to 24 hours instead of within seconds.</p>
 
-<p>One job moves through five steps.</p>
+<p>One job moves through four steps.</p>
 
 <ol class="flow">
-  <li><b>build</b><span>one JSON request per line, each with an id you chose</span></li>
-  <li><b>upload</b><span>the provider stores the file and returns a file id</span></li>
-  <li class="hot"><b>submit</b><span>the job call names the endpoint and the file id, nothing else</span></li>
+  <li><b>build</b><span>one file that holds every request in the job</span></li>
+  <li class="hot"><b>submit</b><span>the job request points at that file; its body holds no prompt</span></li>
   <li><b>wait</b><span>the provider completes the job within a window of up to 24 hours</span></li>
-  <li class="ok"><b>collect</b><span>you download a results file and match the answers by your ids</span></li>
+  <li class="ok"><b>collect</b><span>you download a results file with an answer for each request</span></li>
 </ol>
 
 <p>The submit step is marked because its request body holds no prompt. That property drives the second half of this phase. First the parameters, which have the same shape on both providers.</p>
@@ -570,7 +567,7 @@ at e = 0.35:  cascade  1 + 0.35·5 = 2.75   → 55% of deep-only
     <tr><td>Completion window</td><td>up to 24 hours</td><td>up to 24 hours</td></tr>
     <tr><td>File limit</td><td>50,000 requests or 200 MB</td><td>100,000 requests or 256 MB</td></tr>
     <tr><td>If the window expires</td><td>completed requests are billed, the rest are not</td><td>expired requests are not billed</td></tr>
-    <tr><td>Results kept</td><td>output file deleted 30 days after completion</td><td>not stated on the page read</td></tr>
+    <tr><td>Results kept</td><td>output file deleted 30 days after completion</td><td>29 days</td></tr>
     <tr><td>Prompt-caching discount</td><td>not stated on the page read</td><td class="ok">stacks on top of the batch price</td></tr>
   </tbody>
 </table>
@@ -591,11 +588,11 @@ at e = 0.35:  cascade  1 + 0.35·5 = 2.75   → 55% of deep-only
 
 <p>Notice what the discount does not change. It halves the cheap model and the deep model by the same factor, so the price ratio is untouched. The cascade's break-even escalation rate still sits at one minus the price ratio. Batch is a choice about time, not about which model answers. The split a team could make runs by workload. User queries stay live on the cascade. Work where no user is waiting, such as an evaluation run, moves to batch. Both halves of the bill drop.</p>
 
-<details class="predict"><summary>Predict: you submit a 50,000-request batch, and your reservation code must approve the spend before the upload. Which number does it read?</summary>
-<p>None. The reservation code is the pre-approval check the enforcement sections build later. At the submit call it has nothing to read, because the body carries an endpoint and a file id. The prompts sit inside the file behind that id. Your own uploader could still count the file, because it just built it. Anything downstream of the submit call sees only the file id. The first priced rows for the job appear when the results come back, which is after the tokens were spent.</p>
+<details class="predict"><summary>Predict: you submit a 50,000-request batch, and your reservation code must approve the spend before the submit. Which number does it read?</summary>
+<p>None. The reservation code is the pre-approval check the enforcement sections build later. At the submit call it has nothing to read, because the body carries an endpoint and a reference to the file. The prompts sit inside the file it points at. Your own code could still count the file before submitting, because it just built it. Anything downstream of the submit call sees only the file reference. The first priced rows for the job appear when the results come back, which is after the tokens were spent.</p>
 </details>
 
-<p>That blind spot is the structural point. A live call carries its prompt and its output cap in the request body. The cap is max_tokens, the field that bounds how many tokens the reply may contain. Your cost code can read both before money moves. A batch submit carries a file id.</p>
+<p>That blind spot is the structural point. A live call carries its prompt and its output cap in the request body. The cap is max_tokens, the field that bounds how many tokens the reply may contain. Your cost code can read both before money moves. A batch submit carries a file reference.</p>
 
 <table>
   <thead><tr><th>What your cost code can read before the call</th><th>live request</th><th>batch submit</th></tr></thead>
@@ -609,16 +606,16 @@ at e = 0.35:  cascade  1 + 0.35·5 = 2.75   → 55% of deep-only
 <ul>
   <li>At submit time nothing can price the job, because neither a token count nor an output cap is in the request.</li>
   <li>The provider meters the job while it runs, so the first priced rows exist after the spending started, not before.</li>
-  <li>You can still bound it yourself, because you built the file, so count its prompts before the upload and write the total down.</li>
+  <li>You can still bound it yourself, because you built the file, so count its prompts before the submit and write the total down.</li>
 </ul>
 
 <p>One bookkeeping detail belongs with this. Phase 3A's fallback rule charges any class missing from the price sheet at full price. Batch tokens are their own class. A sheet without batch entries makes every batch job look twice as expensive as it was. The saving you chose batch for would never appear in your ledger.</p>
 
-<p>E12 in the lab, the cascade-versus-control sweep, is exactly this kind of work, because nobody waits on it. On a real provider that sweep is a batch job: same tokens, half price, results in the morning. Before you submit one, check that your price sheet carries the batch entries. Then count the tokens in the file you built, because that count is the only pre-upload estimate that exists.</p>
+<p>E12 in the lab, the cascade-versus-control sweep, is exactly this kind of work, because nobody waits on it. On a real provider that sweep is a batch job: same tokens, half price, results in the morning. Before you submit one, check that your price sheet carries the batch entries. Then count the tokens in the file you built, because that count is the only estimate that exists before the submit.</p>
 
 <div class="keypoints">
   <p class="remember">Batch bills the same tokens at half price whenever the answer can wait until tomorrow.</p>
-  <p class="trap">The submit call carries a file id, so nothing prices the job before spending starts.</p>
+  <p class="trap">The submit call carries only a file reference, so nothing prices the job before spending starts.</p>
   <p class="try">Count the callers of your last eval run who would notice results arriving tomorrow morning.</p>
 </div>
 
@@ -634,7 +631,7 @@ at e = 0.35:  cascade  1 + 0.35·5 = 2.75   → 55% of deep-only
 
 <h3>The shape of the failure</h3>
 
-<p>In the replay of Story 1, a timestamp enters the system prompt at request 50 of 100. Two per-request series tell the whole story.</p>
+<p>In the replay of Story 1, 200 agent steps run and a timestamp enters the system prompt at request 50. Two per-request series tell the whole story.</p>
 
 <div class="bars" id="s6-break">
   <div class="bar" style="--v:4" data-label="tokens/req, 1–49" data-value="18,400"></div>
@@ -800,7 +797,7 @@ requests to fire      ≈ window × (normal − floor) / normal
 <p>Spending the reservation at worst case feels wasteful, so you might ask whether predicted output length can shrink it. It cannot carry that duty. Output-length predictors report a mean absolute error of roughly 93 to 103 tokens. On a 200-token answer, that average error amounts to about a 50 percent cost error. A predictor is fine for scheduling. The billing bound must be a number you can trust to be high enough, and <code>max_tokens</code> is the only such number in the request.</p>
 
 <div class="callout warn">
-<p>A batch submission cannot be reserved at all. The batch API from earlier in this phase takes a file reference, and the file can hold thousands of prompts, so nothing can price the submission when you send it. Batch needs a different control, and estimating the file's token count before uploading is the available one.</p>
+<p>A batch submission cannot be reserved at all. The batch API from earlier in this phase takes a file reference, and the file can hold thousands of prompts, so nothing can price the submission when you send it. Batch needs a different control, and estimating the file's token count before submitting is the available one.</p>
 </div>
 
 <p>When a reservation does not fit, you have three responses, not two. You can alert and let the call through, which informs but does not spend. You can hard-stop with an error. Or you can choose a <dfn>degrade response</dfn>: route the rejected call to a cheaper model so the work completes at the price your budget allows. LiteLLM's docs note that a zero-cost fallback model bypasses budget checks, which makes this third path possible but also easy to misconfigure.</p>
@@ -900,7 +897,7 @@ requests to fire      ≈ window × (normal − floor) / normal
 <b>Replays concept: a round-number floor sits far below the measured normal, so the windowed average must travel the gap before it crosses.</b>
 <p>Repeat E9 twice, changing one knob each time. The system's normal hit rate is 98%.</p>
 <p><code>Run:</code> the replay with the cache floor at <code>0.90</code>, then again with a 5-request window.</p>
-<p>With the floor at 0.90 the cache rule fires at request <b>51</b>, close behind the cost rule. With a 5-request window both rules fire at request <b>50</b>, the first broken request. Compare with E9's defaults: floor 0.50 fired at 59. The distance from 98% normal to a 50% floor is 48 points of average to travel. That travel time is the four-month delay in miniature. A smaller window detects sooner but noisier, which is the trade to tune on your own traffic.</p>
+<p>With the floor at 0.90 the cache rule fires at request <b>51</b>, one request before the cost rule, which fires at 52. With a 5-request window both rules fire at request <b>50</b>, the first broken request. Compare with E9's defaults: floor 0.50 fired at 59. The distance from 98% normal to a 50% floor is 48 points of average to travel. That travel time is the four-month delay in miniature. A smaller window detects sooner but noisier, which is the trade to tune on your own traffic.</p>
 </li>
 
 <li>
@@ -969,7 +966,7 @@ Reject for enforcement, keep for scheduling. An error of about 100 tokens is a 5
 
 <div class="callout tip">A wrong answer on 3, 5 or 6 is one idea revisited: enforcement only works before the spend exists. Re-read the reservation section, then try those three again.</div>
 
-<p>Q1 designs and validates the routing change; Q2 to Q6 keep the savings. The cheatsheet that follows fits all of it on one screen.</p>
+<p>Q1, Q2 and Q4 design and validate the routing change; Q3, Q5 and Q6 keep the savings. The cheatsheet that follows fits all of it on one screen.</p>
 <h2 data-kind="cheatsheet">Cheatsheet</h2>
 <pre class="cheatsheet">ROUTING
   cascade cost = cheap x ALL + deep x escalated     (escalated queries pay twice)
@@ -1021,12 +1018,12 @@ THE COMMANDS (part B)
 <div class="cards" data-cols="2">
   <div class="card" id="s14-coinflip">
     <h4>The coin flip that dashboards well</h4>
-    <p>My cascade's escalation signal was a coin flip, and the dashboard still showed 85% accuracy at 69% of deep-only cost.</p>
+    <p>In a cascade lab, a coin-flip escalation signal still showed 85% accuracy at 69% of deep-only cost on the dashboard.</p>
     <p>What makes it yours: you ran the simulation yourself, and only the equal-count random control convicted it.</p>
   </div>
   <div class="card" id="s14-floor">
     <h4>The alert floor that detects nothing</h4>
-    <p>My cache floor was 50% and my normal hit rate is 98%. So the rule designed for the outage fired nine requests late.</p>
+    <p>With a cache floor at 50% and a normal hit rate of 98%, the rule designed for the outage fired nine requests late.</p>
     <p>What makes it yours: you can replay Story 1, watch the floor travel the gap. Then move it and catch request 51.</p>
   </div>
 </div>

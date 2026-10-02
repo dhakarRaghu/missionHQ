@@ -35,6 +35,7 @@ from hq import (
     board,
     db,
     digest,
+    job_retention,
     lesson_writer,
     llm,
     memory,
@@ -486,6 +487,15 @@ def _partial_usage(exc: BaseException) -> tuple[int, int, float]:
     return partial.input_tokens, partial.output_tokens, partial.cost_usd
 
 
+def prepared_browser_answer(payload: dict[str, Any] | None) -> str:
+    """An answer read by hand in a signed-in browser and attached to an
+    operator task, or "". On this laptop no browser runtime can run (no
+    extension can be installed, and Codex's own browser tool fails to start),
+    so the owner has the pages read in a Claude session and the answer filed
+    through the same path a runtime's output takes."""
+    return str((payload or {}).get("browser_answer") or "").strip()
+
+
 @DBOS.workflow()
 async def run_task(task_id: str) -> str:
     task = await _load_task(task_id)
@@ -515,7 +525,16 @@ async def run_task(task_id: str) -> str:
             # This runtime drives a browser the owner is signed into, outside
             # our loop, so the whole run is approved before it starts rather
             # than one tool call at a time.
-            if not await runner.await_runtime_approval(spec, deps, task_text):
+            prepared = prepared_browser_answer(task.get("payload"))
+            if prepared:
+                # The pages were read by hand in a signed-in browser, in a
+                # session the owner started, and the answer is attached to the
+                # task (`hq.cli operator-answer`). It is filed exactly as the
+                # runtime's own output would be: the same checks, the same
+                # hand-offs to hunter.
+                outcome = runner.RunOutcome(output=prepared, outcome="done", input_tokens=0,
+                                            output_tokens=0, cost_usd=0.0)
+            elif not await runner.await_runtime_approval(spec, deps, task_text):
                 await _finish_run(run_id, "blocked", 0, 0, 0.0,
                                   error="the owner did not approve this run")
                 await runner.apply_step(task_id, "run_blocked", status="blocked",
@@ -525,7 +544,8 @@ async def run_task(task_id: str) -> str:
                     "The owner did not approve this run.",
                 )
                 return "blocked: not approved"
-            outcome = await runner.execute_external(spec, prompt=prompt, deps=deps)
+            else:
+                outcome = await runner.execute_external(spec, prompt=prompt, deps=deps)
             outcome = await _file_external_output(
                 spec, task_id, run_id, outcome, payload=task.get("payload"),
             )
@@ -988,6 +1008,15 @@ async def _archive_old_tasks() -> None:
     which the task list leaves out. Nothing is deleted: the row, its runs and
     its events all stay, and asking for status=archived still returns it.
     """
+    # Found and closed roles older than a week leave the job ledger: archived
+    # to a file and remembered so hunter does not file them again
+    # (`job_retention`). He asked for one week of roles, not a growing list.
+    try:
+        await job_retention.prune_old_jobs()
+    except REPLAY_ERRORS:
+        raise
+    except Exception:  # the roles stay until the next tick
+        log.warning("job retention failed; roles kept for now", exc_info=True)
     # A browser request nobody routed within three days is not coming: expire
     # it, so hunter's identical question tomorrow is not refused as "pending".
     await db.execute(
