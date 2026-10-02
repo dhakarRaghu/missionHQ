@@ -7,7 +7,13 @@ import hashlib
 from pydantic_ai import RunContext
 
 from hq import board, db, safety
-from hq.job_pipeline import discovery_brief, discovery_payload, families_for
+from hq.job_pipeline import (
+    DISCOVERY_STAGE,
+    WORKFLOW,
+    discovery_brief,
+    discovery_payload,
+    families_for,
+)
 from hq.obs import emit
 from hq.safety import ActionClass
 from hq.tools.registry import HQDeps, hq_tool
@@ -113,6 +119,18 @@ async def start_job_search(
     """
     from hq import engine  # late import to avoid cycles
 
+    # One discovery waits at a time. Operator's browser is read by hand in a
+    # Claude session on this laptop, so a discovery can wait days, and a new
+    # one each night piled up four blocked copies of the same search by
+    # 2026-10-01. The waiting one is answered with that day's results.
+    waiting = await db.fetchone(
+        "SELECT id::text, status, created_at::date AS since FROM hq.tasks"
+        " WHERE agent = 'operator' AND payload->>'workflow' = %s AND payload->>'stage' = %s"
+        " AND status IN ('backlog', 'running', 'blocked', 'needs_approval')"
+        " ORDER BY created_at LIMIT 1", (WORKFLOW, DISCOVERY_STAGE))
+    if waiting:
+        return (f"not started: discovery task {waiting['id']} is still {waiting['status']}"
+                f" since {waiting['since']}; it will be answered with current results")
     payload = discovery_payload(
         query=query,
         locations=locations,

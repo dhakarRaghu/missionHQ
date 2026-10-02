@@ -855,3 +855,65 @@ def test_the_codex_browser_tool_gets_the_chatgpt_token_while_models_stay_on_grid
     assert "model_provider=openai" in wrapper and "CODEX_REAL_CLI_PATH" in wrapper
     # No plugin installed: run without the fix rather than fail.
     assert codex_cli.browser_auth_override(tmp_path / "nowhere") == []
+
+
+def test_a_new_discovery_waits_while_one_is_still_waiting(monkeypatch) -> None:
+    """Four blocked copies of the same nightly search piled up by 2026-10-01;
+    while one waits, the next night starts nothing."""
+    import asyncio
+    import inspect
+    from datetime import date
+    from types import SimpleNamespace
+
+    from hq import engine
+    from hq.tools import board_tools
+
+    async def fetchone(sql, params=()):
+        return {"id": "b5a7a8cb-0000", "status": "blocked", "since": date(2026, 9, 28)}
+
+    dispatched: list[str] = []
+
+    async def dispatch(**kw):
+        dispatched.append(kw["title"])
+        return "new-task"
+
+    monkeypatch.setattr(board_tools.db, "fetchone", fetchone)
+    monkeypatch.setattr(engine, "dispatch", dispatch)
+    fn = inspect.unwrap(board_tools.start_job_search)
+    ctx = SimpleNamespace(deps=SimpleNamespace(task_id=None, run_id=None, session_id=None))
+    out = asyncio.run(fn(ctx, "software engineer"))
+    assert out.startswith("not started: discovery task b5a7a8cb-0000 is still blocked since 2026-09-28")
+    assert dispatched == []
+
+
+def test_old_roles_are_archived_remembered_and_refused(monkeypatch, tmp_path) -> None:
+    """A role first found more than a week ago leaves the ledger, but is
+    written to the archive first and refused while it is still being found."""
+    import asyncio
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    from hq import job_retention as jr
+
+    monkeypatch.setattr(jr, "_dir", lambda: tmp_path)
+    now = datetime(2026, 10, 2, tzinfo=UTC)
+    old = {"id": "j1", "dedupe_key": "fallback:netapp|software engineer|bengaluru",
+           "company": "NetApp", "role": "Software Engineer", "status": "closed",
+           "first_seen": now - timedelta(days=9)}
+    calls: list[str] = []
+
+    async def fetch(sql, params=()):
+        calls.append("fetch")
+        return [old]
+
+    async def execute(sql, params=()):
+        assert (tmp_path / "removed.json").is_file()      # archived before the delete
+        calls.append("delete")
+
+    monkeypatch.setattr(jr.db, "fetch", fetch)
+    monkeypatch.setattr(jr.db, "execute", execute)
+    assert asyncio.run(jr.prune_old_jobs(now)) == 1 and calls == ["fetch", "delete"]
+    archived = (tmp_path / "archive-2026-10.jsonl").read_text().splitlines()
+    assert json.loads(archived[0])["company"] == "NetApp"
+    assert jr.removed_recently(old["dedupe_key"], now + timedelta(days=10))
+    assert jr.removed_recently(old["dedupe_key"], now + timedelta(days=61)) is None

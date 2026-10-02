@@ -21,6 +21,7 @@
     export-reader                      write the phone reader bundle into frontend/public/reader
     publish-reader                     what the nightly does: build the bundle and commit+push it to the `reader` branch (only when it changed)
     value-week                         the weekly value report: lessons written vs read, taps, jobs moved, ideas, spend
+    operator-answer <task> <file> [via]  attach an answer read by hand in a signed-in browser to a waiting operator task and queue it
 """
 
 from __future__ import annotations
@@ -319,6 +320,46 @@ async def cmd_value_week() -> int:
         await db.close_pool()
 
 
+async def cmd_operator_answer(task_ref: str, path: str, via: str) -> int:
+    """Attach a browser answer read by hand to one waiting operator task and
+    put it back in the queue. The task's own run then files it exactly as a
+    runtime's output: the same checks, the same hand-offs to hunter."""
+    import json
+    from pathlib import Path
+
+    from hq import board, db
+
+    text = Path(path).read_text().strip()
+    if not text:
+        print("operator-answer: the answer file is empty", file=sys.stderr)
+        return 2
+    await db.open_pool()
+    try:
+        rows = await db.fetch(
+            "SELECT id::text, status, title FROM hq.tasks WHERE agent = 'operator'"
+            " AND id::text LIKE %s", (task_ref.strip() + "%",))
+        if len(rows) != 1:
+            print(f"operator-answer: {len(rows)} operator tasks match {task_ref!r}", file=sys.stderr)
+            return 2
+        task = rows[0]
+        if task["status"] not in {"blocked", "backlog"}:
+            print(f"operator-answer: the task is {task['status']}; only a blocked or queued"
+                  " task takes an answer", file=sys.stderr)
+            return 2
+        await db.execute(
+            "UPDATE hq.tasks SET payload = coalesce(payload, '{}'::jsonb) || %s::jsonb"
+            " WHERE id = %s",
+            (json.dumps({"browser_answer": text, "answered_via": via}), task["id"]))
+        if task["status"] == "blocked":
+            await board.apply(task["id"], "answered_by_hand", actor="owner", status="backlog",
+                              data={"via": via, "chars": len(text)})
+        print(f"operator-answer: {task['title'][:70]} ({task['id'][:8]}) queued with"
+              f" {len(text)} characters read via {via}")
+        return 0
+    finally:
+        await db.close_pool()
+
+
 async def cmd_board_check() -> int:
     """Event-sourcing audit: derive every task's status from hq.task_events and
     compare with the hq.tasks projection. Read-only."""
@@ -511,6 +552,9 @@ def main() -> None:
         raise SystemExit(asyncio.run(cmd_publish_reader()))
     if args[0] == "value-week":
         raise SystemExit(asyncio.run(cmd_value_week()))
+    if args[0] == "operator-answer" and len(args) in {3, 4}:
+        via = args[3] if len(args) == 4 else "a Claude session's browser"
+        raise SystemExit(asyncio.run(cmd_operator_answer(args[1], args[2], via)))
     if args[0] == "board-check":
         raise SystemExit(asyncio.run(cmd_board_check()))
     if args[0] == "prompt-check" and len(args) == 2:

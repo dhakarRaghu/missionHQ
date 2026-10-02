@@ -18,73 +18,34 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, qk } from "@/lib/api/client";
-import {
-  JOB_STATUSES,
-  REFERRAL_STATUSES,
-  type Job,
-  type JobStatus,
-  type Referral,
-  type ReferralStatus,
-} from "@/lib/api/types";
+import { JOB_STATUSES, type Job, type JobStatus } from "@/lib/api/types";
 import { timeAgo } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
-const ACTIVE_COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
-  {
-    key: "seen",
-    label: "Found",
-    hint: "Verified and scored in the last two days. Strong fits stay; the rest close themselves.",
-  },
-  { key: "shortlisted", label: "Shortlisted", hint: "Worth applying to." },
-  {
-    key: "referral",
-    label: "Referral",
-    hint: "People you can ask, read off the company's own page. Shortlist a role and operator goes looking.",
-  },
-  { key: "applied", label: "Applied", hint: "Sent. Waiting." },
-];
-
 /**
- * Interviews sit with the outcomes rather than in the active pipeline: the
- * active view keeps its four columns at a quarter width each, and a role in
- * interview is past everything an agent does for it. Every status is a choice
- * on every card, so a role can be moved to any stage from either view.
- */
-const OUTCOME_COLUMNS: { key: JobStatus; label: string; hint: string }[] = [
-  { key: "interviewing", label: "Interviewing", hint: "Roles you are interviewing for." },
-  { key: "offer", label: "Offers", hint: "Offers will appear here." },
-  { key: "rejected", label: "Rejected", hint: "Rejected roles stay searchable." },
-  { key: "closed", label: "Closed", hint: "Expired or closed roles stay in the ledger." },
-];
-
-/**
- * The job search, as one board.
+ * The job search: the roles hunter found this week, strongest first.
  *
- * Hunter writes every verified role here with a score and a reason, including
- * the weak ones, because a role written down once is never researched twice.
- * The owner moves it along; nothing else does. No agent can apply to anything.
+ * One view. The owner asked on 2026-10-02 for the Found column only, wide
+ * enough to read each role, and for nothing older than a week. Hunter scores
+ * every role; the owner applies from LinkedIn. No agent can apply to anything.
  */
 export function JobBoard() {
   const [bucket, setBucket] = useState<string>("all");
-  const [statusView, setStatusView] = useState<"active" | "outcomes">("active");
   const jobs = useQuery({ queryKey: qk.jobs(), queryFn: () => api.jobs() });
-  const columns = statusView === "active" ? ACTIVE_COLUMNS : OUTCOME_COLUMNS;
 
-  const rows = useMemo(() => {
-    const all = jobs.data ?? [];
-    return bucket === "all" ? all : all.filter((j) => j.fit_bucket === bucket);
-  }, [jobs.data, bucket]);
+  // The API returns only roles first seen in the last week (the backend
+  // moves older ones out of the ledger), so Found is the "seen" ones.
+  const found = useMemo(() => (jobs.data ?? []).filter((j) => j.status === "seen"), [jobs.data]);
+  const rows = useMemo(
+    () => (bucket === "all" ? found : found.filter((j) => j.fit_bucket === bucket)),
+    [found, bucket],
+  );
 
   if (jobs.isLoading) {
     return (
-      <div
-        className="board-columns"
-        role="status"
-        aria-busy="true"
-        aria-label="Loading roles"
-      >
-        {ACTIVE_COLUMNS.map((c) => (
-          <Skeleton key={c.key} className="h-64 w-full" />
+      <div className="job-grid" role="status" aria-busy="true" aria-label="Loading roles">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-48 w-full" />
         ))}
       </div>
     );
@@ -98,33 +59,26 @@ export function JobBoard() {
       />
     );
   }
-  if (!(jobs.data ?? []).length) {
+  if (!found.length) {
     return (
-      <EmptyState title="No roles yet">
-        Ask Sage to find roles matching your profile—no company or platform is
-        required. Operator discovers them in your signed-in browser, then
-        Hunter verifies, scores and deduplicates each original posting here.
+      <EmptyState title="No roles found this week">
+        Hunter adds the roles it verifies and scores here. Roles found more than
+        a week ago are cleared from the board.
       </EmptyState>
     );
   }
 
-  const strong = (jobs.data ?? []).filter(
-    (j) => j.fit_bucket === "strong",
-  ).length;
+  const strong = found.filter((j) => j.fit_bucket === "strong").length;
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-muted-foreground text-sm">
-          {jobs.data?.length} role{jobs.data?.length === 1 ? "" : "s"} tracked
+          {found.length} role{found.length === 1 ? "" : "s"} found this week
           {strong > 0 ? `, ${strong} a strong fit` : ""}
         </p>
         <Select value={bucket} onValueChange={setBucket}>
-          <SelectTrigger
-            size="sm"
-            className="ml-auto w-40"
-            aria-label="Filter by fit"
-          >
+          <SelectTrigger size="sm" className="ml-auto w-40" aria-label="Filter by fit">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -134,42 +88,24 @@ export function JobBoard() {
             <SelectItem value="stretch">Stretch</SelectItem>
           </SelectContent>
         </Select>
-        <Select
-          value={statusView}
-          onValueChange={(value) => setStatusView(value as "active" | "outcomes")}
-        >
-          <SelectTrigger size="sm" className="w-52" aria-label="Filter by status">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">Active pipeline</SelectItem>
-            <SelectItem value="outcomes">Interviews and outcomes</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
-      <div className="board-columns">
-        {columns.map((column) =>
-          // The referral column is the odd one out: it holds people, not
-          // roles. "Who can I ask?" is a different question from "which job is
-          // at which stage", and answering it with a job card meant the answer
-          // — a name — was a clause inside a sentence on the back of a card.
-          column.key === "referral" ? (
-            <ReferralColumn key={column.key} column={column} />
-          ) : (
-            <BoardColumn
-              key={column.key}
-              column={column}
-              items={rows.filter((j) => j.status === column.key)}
-            />
-          ),
-        )}
-      </div>
+      {rows.length === 0 ? (
+        <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-6 text-center text-xs">
+          No role this week has that fit.
+        </p>
+      ) : (
+        <ul className="job-grid">
+          {rows.map((job) => (
+            <li key={job.id}>
+              <JobCard job={job} />
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
-
-type Column = { key: JobStatus; label: string; hint: string };
 
 const FIT_PART_ORDER = ["lane", "years", "stack", "domain", "pay", "geography", "adjust"];
 
@@ -237,195 +173,6 @@ function fitReasons(job: Job): string {
   return out.join(" · ");
 }
 
-/** A column of roles. */
-function BoardColumn({ column, items }: { column: Column; items: Job[] }) {
-  return (
-    <section className="flex min-w-0 flex-col gap-2">
-      <ColumnHeader label={column.label} count={items.length} />
-      {items.length === 0 ? (
-        <ColumnEmpty>{column.hint}</ColumnEmpty>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {items.map((job) => (
-            <li key={job.id}>
-              <JobCard job={job} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function ColumnHeader({ label, count }: { label: string; count: number }) {
-  return (
-    <header className="flex items-baseline gap-2">
-      <h2 className="text-sm font-medium">{label}</h2>
-      <span className="text-muted-foreground text-xs tabular-nums">{count}</span>
-    </header>
-  );
-}
-
-function ColumnEmpty({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-6 text-center text-xs">
-      {children}
-    </p>
-  );
-}
-
-/** How usable a person is, which is the only order worth showing them in. */
-const DEGREE_LABEL: Record<Referral["degree"], string> = {
-  "1st": "1st — knows you",
-  "2nd": "2nd",
-  "3rd": "3rd",
-  none: "no connection",
-  persona: "who to look for",
-  unknown: "unverified",
-};
-
-/**
- * The people to ask, not the roles waiting on them.
- *
- * Operator reads one company's own people page and returns names; this is
- * where they land. Ordered by degree server-side, because a 1st-degree
- * connection who already knows the owner is worth every other lead put
- * together, and burying them under a newer 3rd-degree find would waste the
- * only thing that makes a referral better than a cold application.
- */
-function ReferralColumn({ column }: { column: Column }) {
-  const referrals = useQuery({
-    queryKey: qk.referrals(),
-    queryFn: () => api.referrals(),
-  });
-  const rows = (referrals.data ?? []).filter((r) => r.status !== "dismissed");
-
-  return (
-    <section className="flex min-w-0 flex-col gap-2">
-      <ColumnHeader label={column.label} count={rows.length} />
-      {referrals.isError ? (
-        <ColumnEmpty>Could not load people. Retry from the page.</ColumnEmpty>
-      ) : rows.length === 0 ? (
-        <ColumnEmpty>{column.hint}</ColumnEmpty>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {rows.map((person) => (
-            <li key={person.id}>
-              <ReferralCard person={person} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function ReferralCard({ person }: { person: Referral }) {
-  const queryClient = useQueryClient();
-  const move = useMutation({
-    mutationFn: (status: ReferralStatus) =>
-      api.updateReferral(person.id, { status }),
-    onSuccess: (_result, status) => {
-      toast(`${person.name} marked ${status}`);
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    },
-    onError: (error: Error) => toast.error(error.message),
-  });
-  const isPersona = person.degree === "persona";
-
-  return (
-    <article className="bg-card flex flex-col gap-2 rounded-lg border p-3">
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium" title={person.name}>
-            {person.name}
-          </p>
-          {person.headline ? (
-            <p
-              className="text-muted-foreground line-clamp-2 text-xs"
-              title={person.headline}
-            >
-              {person.headline}
-            </p>
-          ) : null}
-        </div>
-        <Badge
-          variant={person.degree === "1st" ? "default" : "secondary"}
-          className="max-w-28 shrink-0 truncate text-xs"
-          title={DEGREE_LABEL[person.degree]}
-        >
-          {DEGREE_LABEL[person.degree]}
-        </Badge>
-      </div>
-
-      {/* Which role this person is for. Without it a name is just a name. */}
-      <p className="text-muted-foreground truncate text-xs" title={person.job_role}>
-        for {person.job_role} @ {person.company}
-      </p>
-
-      {person.shared_ground ? (
-        <p
-          className="border-border line-clamp-3 border-l-2 pl-2 text-xs"
-          title={person.shared_ground}
-        >
-          <span className="text-muted-foreground">Open with: </span>
-          {person.shared_ground}
-        </p>
-      ) : null}
-
-      {person.why_them ? (
-        <p className="text-muted-foreground line-clamp-2 text-xs" title={person.why_them}>
-          {person.why_them}
-        </p>
-      ) : null}
-
-      {person.mutuals ? (
-        <p className="text-muted-foreground truncate text-xs" title={person.mutuals}>
-          {person.mutuals}
-        </p>
-      ) : null}
-
-      <div className="flex flex-wrap items-center gap-1.5">
-        {person.profile_url ? (
-          <Button asChild size="sm" variant="outline" className="h-7 px-2 text-xs">
-            <a href={person.profile_url} target="_blank" rel="noopener noreferrer">
-              Profile <ExternalLink aria-hidden className="size-3" />
-            </a>
-          </Button>
-        ) : null}
-        <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs">
-          <a href={person.job_url} target="_blank" rel="noopener noreferrer">
-            Role <ExternalLink aria-hidden className="size-3" />
-          </a>
-        </Button>
-        {/* A persona is not a person, so there is nobody to mark as asked. */}
-        {isPersona ? null : (
-          <Select
-            value={person.status}
-            onValueChange={(value) => move.mutate(value as ReferralStatus)}
-            disabled={move.isPending}
-          >
-            <SelectTrigger
-              size="sm"
-              className="h-7 w-auto text-xs"
-              aria-label={`Status of ${person.name}`}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {REFERRAL_STATUSES.map((status) => (
-                <SelectItem key={status} value={status}>
-                  {status}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
-    </article>
-  );
-}
-
 const BUCKET_TONE: Record<Job["fit_bucket"], string> = {
   strong: "bg-status-done/15 text-status-done",
   decent: "bg-status-running/15 text-status-running",
@@ -453,19 +200,16 @@ function JobCard({ job }: { job: Job }) {
     <article className="bg-card flex flex-col gap-2 rounded-lg border p-3">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium" title={job.role}>
+          <p className="line-clamp-2 text-sm font-medium" title={job.role}>
             {job.role}
           </p>
-          <p
-            className="text-muted-foreground truncate text-xs"
-            title={job.company}
-          >
+          <p className="text-muted-foreground text-xs" title={job.company}>
             {job.company}
             {job.location ? ` · ${job.location}` : ""}
           </p>
           {/* The score's reasons in words, so a 10 can be trusted or doubted
               at a glance; the full breakdown stays on the score's hover. */}
-          <p className="text-muted-foreground mt-0.5 truncate text-[11px]" title={fitTitle(job)}>
+          <p className="text-muted-foreground mt-0.5 line-clamp-2 text-[11px]" title={fitTitle(job)}>
             {fitReasons(job)}
           </p>
         </div>
@@ -493,7 +237,7 @@ function JobCard({ job }: { job: Job }) {
 
       {job.why_fit ? (
         <p
-          className="text-muted-foreground border-border line-clamp-2 border-l-2 pl-2 text-xs"
+          className="text-muted-foreground border-border line-clamp-3 border-l-2 pl-2 text-xs"
           title={job.why_fit}
         >
           {job.why_fit}
@@ -546,19 +290,13 @@ function JobCard({ job }: { job: Job }) {
       ) : null}
 
       <div className="flex flex-wrap items-center gap-1">
-        {/* max-w keeps a verbose band ("early career explicitly welcomed")
-            from taking a whole row to itself and pushing the rest to the next. */}
         {yearsChip(job) ? (
           <Badge variant="secondary" className="text-xs" title={job.experience_band}>
             {yearsChip(job)}
           </Badge>
         ) : null}
         {job.remote_policy ? (
-          <Badge
-            variant="secondary"
-            className="max-w-24 truncate text-xs"
-            title={job.remote_policy}
-          >
+          <Badge variant="secondary" className="text-xs" title={job.remote_policy}>
             {job.remote_policy}
           </Badge>
         ) : null}
@@ -604,8 +342,7 @@ function JobCard({ job }: { job: Job }) {
             <ExternalLink aria-hidden className="size-3" />
           </a>
         </Button>
-        {/* Moved down here off the badge row: with four columns the badges
-            wrap, and a timestamp pushed onto its own line read as a field. */}
+        {/* Off the badge row, so the time never reads as a field. */}
         <span
           className="text-muted-foreground order-last ml-auto text-xs"
           title={new Date(job.last_seen).toLocaleString()}

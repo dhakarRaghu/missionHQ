@@ -320,6 +320,15 @@
     align-items: start;
   }
 
+  /* The jobs view: one list of roles as wide cards, as many per row as fit,
+     so a role's title and chips have room to be read. */
+  .job-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+    align-items: start;
+  }
+
   @media (width >= 48rem) {
     .board-columns {
       grid-template-columns: repeat(var(--board-columns, 4), minmax(0, 1fr));
