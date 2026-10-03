@@ -152,7 +152,7 @@ def test_only_roles_someone_in_india_can_take_are_open(place: str, ok: bool) -> 
 @pytest.mark.parametrize("salary, lpa, low_high, estimated", [
     ("₹800K - ₹1.2M INR", "₹8-12 LPA (YC: ₹800K - ₹1.2M INR)", (8.0, 12.0), False),
     ("₹2M - ₹3.5M INR", "₹20-35 LPA (YC: ₹2M - ₹3.5M INR)", (20.0, 35.0), False),
-    ("₹10 - ₹15 INR", "₹10-15 LPA approx (YC: ₹10 - ₹15 INR)", (10.0, 15.0), True),
+    ("₹10 - ₹15 INR", "₹10-15 LPA (YC: ₹10 - ₹15 INR)", (10.0, 15.0), False),
     ("₹2,500,000 - ₹4,000,000", "₹25-40 LPA (YC: ₹2,500,000 - ₹4,000,000)", (25.0, 40.0), False),
 ])
 def test_rupee_salaries_reach_the_ledger_in_lakhs(salary, lpa, low_high, estimated) -> None:
@@ -169,6 +169,24 @@ def test_yc_rupee_forms_need_the_conversion() -> None:
     for raw in ("₹800K - ₹1.2M INR", "₹2M - ₹3.5M INR", "₹10 - ₹15 INR"):
         assert parse_pay(raw) is None
     assert yc.rupee_lakhs("₹25L - ₹40L") == "₹25-40 LPA (YC: ₹25L - ₹40L)"
+
+
+def test_a_stated_low_band_without_a_unit_is_penalised_as_stated() -> None:
+    """Clinikally's DevSecOps role, "₹5 - ₹6 INR", scored 7 on 2026-10-03
+    while it was marked approx."""
+    from hq.tools.job_tools import fit_score
+
+    fit = fit_score("DevSecOps Engineer", experience_band="1+ years",
+                    compensation=yc.rupee_lakhs("₹5 - ₹6 INR"), location="Gurugram, HR, IN")
+    assert fit[0] <= 4
+
+
+def test_the_us_visa_field_is_kept_only_for_us_seats() -> None:
+    us = _job(7, "Engineer", place="San Francisco, CA, US / Remote (US)")
+    india = _job(8, "Engineer", place="Gurugram, HR, IN")
+    us["visa"] = india["visa"] = "US citizen/visa only"
+    rows = yc.job_rows(_company("z", "Z", [us, india]), NOW)
+    assert [r["visa"] for r in rows] == ["US citizen/visa only", ""]
 
 
 def test_foreign_pay_is_left_alone() -> None:

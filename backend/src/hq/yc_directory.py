@@ -47,6 +47,7 @@ _SLUG_RE = re.compile(r"^[a-z0-9-]{1,100}$")
 _AGE_RE = re.compile(r"(?:less than|about|over|almost)?\s*(a|an|\d+)\s*"
                      r"(minute|hour|day|week|month|year)s?", re.IGNORECASE)
 _AGE_DAYS = {"minute": 1 / 1440, "hour": 1 / 24, "day": 1, "week": 7, "month": 30, "year": 365}
+_US_RE = re.compile(r"(?:,\s*|\()US\b|\(US\)")
 _IN_RE = re.compile(r"(?:,\s*|\()IN\b")
 _SEASON = {"W": "Winter", "S": "Summer", "F": "Fall", "X": "Spring"}
 
@@ -106,12 +107,14 @@ def rupee_lakhs(salary: str) -> str:
     """YC's rupee salary in the lakh form the ledger reads, the original kept.
 
     "₹800K - ₹1.2M INR" -> "₹8-12 LPA (YC: ₹800K - ₹1.2M INR)". A figure with
-    no K or M under 1,000 ("₹10 - ₹15 INR") can only be lakhs, but the page
-    does not say so, so it is marked approx. Not rupees: returned as it is."""
+    no unit under 1,000 ("₹5 - ₹6 INR") can only be lakhs, and it is the
+    employer's own number, so it counts as stated. On 2026-10-03 it was
+    marked approx, and a stated ₹5-6 LPA scored 7 because the ledger
+    penalises only stated pay. Not rupees: returned as it is."""
     raw = salary.strip()
     if not raw or not ("₹" in raw or "inr" in raw.casefold()) or re.search(r"[$€£]", raw):
         return raw
-    lakhs, guessed = [], False
+    lakhs = []
     for m in _PAY_NUM_RE.finditer(raw.replace(",", "")):
         v, unit = float(m.group(1)), (m.group(2) or "").upper()
         if unit == "K":
@@ -124,12 +127,11 @@ def rupee_lakhs(salary: str) -> str:
             lakhs.append(v / 100_000)
         elif v < 1000:
             lakhs.append(v)
-            guessed = True
     if not lakhs:
         return raw
     lo, hi = min(lakhs), max(lakhs)
     band = f"{lo:g}-{hi:g}" if hi > lo else f"{lo:g}"
-    return f"₹{band} LPA{' approx' if guessed else ''} (YC: {raw})"
+    return f"₹{band} LPA (YC: {raw})"
 
 
 def posted_from_age(age: str, now: datetime | None = None) -> str:
@@ -270,7 +272,9 @@ def job_rows(props: dict[str, Any], now: datetime | None = None) -> list[dict[st
             "age": str(j.get("createdAt") or ""),
             "experience": str(j.get("minExperience") or ""),
             "compensation": pay[:80],
-            "visa": str(j.get("visa") or ""),
+            # YC's visa field is about US work visas: on an India seat it
+            # read "US citizen/visa only" and looked like a bar to him.
+            "visa": str(j.get("visa") or "") if _US_RE.search(place) else "",
             "batch": str(j.get("companyBatchName") or company.get("batch") or ""),
             "team_size": company.get("team_size"),
             "description": (f"{company.get('one_liner') or ''}"
