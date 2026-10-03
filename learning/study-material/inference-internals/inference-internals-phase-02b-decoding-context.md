@@ -60,7 +60,7 @@ CHUNKED PREFILL — the same work, spread across iterations (example)
          the new request's TTFT gets a little worse, and no stream freezes
 ```
 
-The durations come from the simulator's cost model in `batching_sim.py:49`, which part A section 2.1 shows. Three decodes cost 18 + 0.12 × 3 = 18.4ms. A 24,000-token prefill costs 24,000 × 0.03 = 720ms. A 2,045-token slice plus three decodes costs 61.4 + 18.4 = 79.8ms. The prompt needs 24,000 / 2,045 = 11.7 slices, so 12 iterations.
+The durations come from the simulator's cost model in `batching_sim.py:49`, which part A section 2.1 shows. Three decodes cost 18 + 0.12 × 3 = 18.4ms. A 24,000-token prefill costs 24,000 × 0.03 = 720ms. A 2,045-token slice plus three decodes costs 61.35 + 18.36 = 79.7ms. The prompt needs 24,000 / 2,045 = 11.7 slices, so 12 iterations.
 
 The budget is shared. With `max_num_batched_tokens=2048` and 3 decoding requests, the iteration spends 3 tokens on decode. It spends up to 2,045 on prefill. The simulator reserves the decode tokens first. `batching_sim.py:122` computes `room = max(token_budget - len(decoding) - prefill_tokens, 0)`. Without chunking, `batching_sim.py:128` sets `decoding = []`, so no decode runs in that pass.
 
@@ -568,7 +568,7 @@ This course has no anchor repository. These questions use the exercise code you 
 
 1. (a) Another request's long prefill ran in one iteration without chunking. Every decoding request got no token during that pass. (b) The maximum inter-token gap per response, recorded while the stream runs. Median TTFT and total latency cannot show a freeze. (c) Shorten your own prompts, so your prefills are small. Move long-context work to a separate endpoint or a batch path. Then it does not share a batch with interactive traffic. A fallback provider for interactive traffic is a third option.
 
-2. (a) The prefill-only pass costs 24,000 × 0.03 = 720ms. The three streams get no token for that pass. With the decode passes on each side, the measured worst gap in the default run is 764ms. (b) The budget reserves 3 tokens for the decodes, so 2,048 - 3 = 2,045 prefill tokens fit per iteration. 24,000 / 2,045 = 11.7, so the prompt needs 12 iterations. (c) 2,045 × 0.03 + 18 + 0.12 × 3 = 61.4 + 18.4 = 79.8ms. The streams now pause about 80ms per token instead of 720ms once. The measured worst gap is 81ms, because the real batch holds more decodes.
+2. (a) The prefill-only pass costs 24,000 × 0.03 = 720ms. The three streams get no token for that pass. With the decode passes on each side, the measured worst gap in the default run is 764ms. (b) The budget reserves 3 tokens for the decodes, so 2,048 - 3 = 2,045 prefill tokens fit per iteration. 24,000 / 2,045 = 11.7, so the prompt needs 12 iterations. (c) 2,045 × 0.03 + 18 + 0.12 × 3 = 61.35 + 18.36 = 79.7ms. The streams now pause about 80ms per token instead of 720ms once. The measured worst gap is 81ms, because the real batch holds more decodes.
 
 3. (a) The schema forces the label early. The model chooses a label with no room to reason in text first. (b) Add a `reasoning` string field as the first property, before the constrained fields. Add it to `required`, and keep `additionalProperties: false`. A `reasoning` field placed last changes nothing, because decoding runs left to right. (c) Run the same labeled set through both schemas with `structured_lab.py`. Fix and report the parser. One run is not enough, because sampling varies between runs. A 9-point gap can appear by chance on 12 items. Use `--repeat` and compare across runs before you trust the number.
 

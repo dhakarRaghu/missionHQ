@@ -472,7 +472,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <p>The decodes reserve 3 tokens, so the pass has 2,045 left for prefill. Dividing 24,000 by 2,045 gives 11.7, so the prompt needs 12 iterations.</p>
 </details>
 
-<p>Now price one sliced iteration with the cost model from Phase 2A. A prefill token costs 0.03ms, so the 2,045-token slice costs 61.4ms. The three decodes cost 18 + 0.12 × 3 = 18.4ms on top. The whole iteration takes 61.4 + 18.4 = 79.8ms, which rounds to about 80ms. Twelve slices spread the same work across 960ms, and each stream still gets a token every 80ms.</p>
+<p>Now price one sliced iteration with the cost model from Phase 2A. A prefill token costs 0.03ms, so the 2,045-token slice costs 61.35ms. The three decodes cost 18 + 0.12 × 3 = 18.36ms on top. The whole iteration takes 61.35 + 18.36 = 79.7ms, which rounds to about 80ms. Twelve slices spread the same work across 960ms, and each stream still gets a token every 80ms.</p>
 
 <div class="calc" id="s3-slices">
   <h4>How many slices a prompt needs</h4>
@@ -560,7 +560,7 @@ Sarathi-Serve (OSDI 2024), section 5.4.1: "even with the smallest chunk size of 
 
 <div class="keypoints">
 <p class="remember">Small budgets smooth the stream but re-read the KV at every chunk boundary, so the budget has a floor.</p>
-<p class="trap">Pushing the budget toward zero looked free in the gap column and cost 25% throughput at 512.</p>
+<p class="trap">Pushing the budget toward zero looked free in the gap column, but Sarathi-Serve measured up to about 25% overhead at 512 on Yi-34B.</p>
 <p class="try">Re-run <code>batching_sim.py</code> at 512 and 8192 and check that mean TTFT and worst gap move in opposite directions.</p>
 </div>
 
@@ -744,13 +744,13 @@ metrics.record("max_inter_token_gap_ms", worst * 1000)</code></pre>
 
 <p>The paper has one pair of numbers that shows the split in your own dashboards. Constrained decoding raised format validity from 55.7% to 92.2%. Over the same change, accuracy moved from 57.3% to 55.7%. Compliance went up and reasoning went slightly down, so the two are different dials. A service can get cleaner and dumber at the same time, and a parse-failure metric measures only the first dial.</p>
 
-<p>Every tax number you read from now on must carry two names. The first name is the model. In the same paper, the older gpt-5-nano lost 8.0 points with constraints, while claude-haiku-4.5 gained 1.2. The second name is the parser used for scoring. When the authors switched MATH-500 scoring from a rule-based extractor to a model judge, the measured tax fell from 10.1 to 6.6 points. About a third of one measured tax was the scorer, not the model.</p>
+<p>Every tax number you read from now on must carry two names. The first name is the model. In the same paper, the older gpt-5-nano lost 8.0 points with constraints, while claude-haiku-4.5 is reported at +1.2 without them. The second name is the parser used for scoring. When the authors switched MATH-500 scoring from a rule-based extractor to a model judge, the measured tax fell from 10.1 to 6.6 points. About a third of one measured tax was the scorer, not the model.</p>
 
 <p>Use it in the lab. Exercise E8 runs the same 12 labelled tickets through prompt-only, json_object, and strict mode, and prints accuracy per mode. The gap between the free-form column and the prompt-only column is your prompt-side tax, and whatever remains under strict is the decoder-side share. The E8 numbers are marked unverified against a live provider, so read the shape of the comparison, not the exact values.</p>
 
 <div class="keypoints">
 <p class="remember">Most of the tax is paid at the prompt: 3.9 points there, 1.6 at the decoder.</p>
-<p class="trap">Blaming the mask and turning constraints off buys the small 1.6 back and leaves the big 3.9 in place.</p>
+<p class="trap">Blaming the mask and turning constraints off recovers only the decoder's share, 1.6 points on the paper's average, and leaves the prompt's 3.9 in place.</p>
 <p class="try">Rerun one failed ticket as free text, then with the format requested but constraints off, and compare the two scores.</p>
 </div>
 
@@ -1099,7 +1099,7 @@ python phase02_internals/batching_sim.py --token-budget 8192</code></pre>
 </details>
 
 <details class="answer"><summary><b>Q2.</b> Walk through what happens, and show the arithmetic. A server uses the cost model from <code>batching_sim.py</code>. Three requests are decoding, a 24,000-token prompt arrives, and the token budget is 2,048. (a) How long do the three streams freeze without chunking? (b) With chunking, how many prefill tokens fit in each iteration and how many iterations does the prompt need? (c) How long is each chunked iteration?</summary>
-<p>(a) The prefill-only pass costs 24,000 × 0.03 = 720ms, and the three streams get no token during that pass. With the decode passes on each side, the measured worst gap in the default run is 764ms. (b) The budget reserves 3 tokens for the decodes, so 2,048 − 3 = 2,045 prefill tokens fit per iteration, and 24,000 / 2,045 = 11.7, so the prompt needs 12 iterations. (c) Each iteration costs 2,045 × 0.03 + 18 + 0.12 × 3 = 61.4 + 18.4 = 79.8ms, so the streams now pause about 80ms per token instead of 720ms once. The measured worst gap is 81ms, because the real batch holds more decodes.</p>
+<p>(a) The prefill-only pass costs 24,000 × 0.03 = 720ms, and the three streams get no token during that pass. With the decode passes on each side, the measured worst gap in the default run is 764ms. (b) The budget reserves 3 tokens for the decodes, so 2,048 − 3 = 2,045 prefill tokens fit per iteration, and 24,000 / 2,045 = 11.7, so the prompt needs 12 iterations. (c) Each iteration costs 2,045 × 0.03 + 18 + 0.12 × 3 = 61.35 + 18.36 = 79.7ms, so the streams now pause about 80ms per token instead of 720ms once. The measured worst gap is 81ms, because the real batch holds more decodes.</p>
 </details>
 
 <details class="answer"><summary><b>Q3.</b> This is broken. Your classification service returns valid JSON that matches the schema on every call, and <code>finish_reason</code> is <code>stop</code>. Accuracy dropped 9 points after you enabled strict mode last week. (a) Give the most likely cause. (b) Describe the exact schema change you would test, including its place in the property order. (c) Name the measurement that would settle it, and say why one run is not enough.</summary>

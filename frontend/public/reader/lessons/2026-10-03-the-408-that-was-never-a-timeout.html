@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The 408 that was never a timeout</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">fails · Inference Internals Phase 3B, Routing, Batch and the Cost Alarm · the measured incident mix a production LLM fleet ran for months, and why routing away beat hotfixing</div><h1>The 408 that was never a timeout</h1><p class="subtitle">The phase builds the cost alarm and the routing experiment against simulated failures. What does a real fleet actually fail on, and what actually fixes it?</p></header>
+<p>Phase 3B left you able to ship a routing change behind a control group and to reserve spend before it happens. Both of those levers assume you can see the failure: the cascade mispredicts, the cache breaks, the cost climbs, and your dashboards tell you. This week your serving stack is live in production, and the first severity-2 incident lands in a shape none of those dashboards explains. The frontend starts timing out on long requests, and every engine metric stays green the whole time.</p>
+
+<p>The natural reading is that the engine failed those requests, so the fix should be engine-side: a bigger timeout, more capacity, a faster model. This lesson shows what a study of real production incidents found instead, and why the failure that looks like a sick engine so often lives between two healthy components, in how the connection is held while the engine works.</p>
+<p>This lesson teaches one idea. It is stated here so you can see where the lesson is going. It will read more clearly once it has been explained below, so come back to it at the end.</p>
+<ol class="concepts"><li id="c1"><b>A non-streaming long request holds one silent connection, so the shortest idle timeout in the chain kills it no matter how healthy the engine is.</b> <span>Predict which of his request paths will fail as generation time grows, and fix it with streaming or a keepalive instead of debugging the engine.</span></li></ol>
+<h2 data-concept="c1">What does a real fleet actually fail on, and does the phase&#x27;s alarm list cover it?</h2>
+<div class="why-wrap"><p class="why">Your severity-2 alarms target assumed failure classes, and a measured fleet says which classes actually fire.</p></div>
+
+<p>Suppose your team's first <dfn>severity-2 incident</dfn>, a user-visible outage that pages the on-call, is live. It shows frontend timeouts on long requests, and every engine metric green. Before you debug anything, a question decides where you look first. What does a production LLM fleet actually fail on, in measured proportions?</p>
+
+<p>Sort 156 high-severity incidents from a hyperscale serving fleet by root cause, and four classes appear. Engine failures dominate at about 60 percent. Within engine failures, timeouts cause about 40 percent and resource exhaustion about 29 percent. Infrastructure follows at about 20 percent, model configuration at about 16 percent, and operations at about 4 percent.</p>
+
+<div class="stack" id="s1-mix">
+  <h4>156 production incidents by root cause</h4>
+  <div class="whole">
+    <i style="--w:60;--c:var(--accent)" data-label="engine" data-value="~60%" data-note="of which ~40% timeouts, ~29% resource exhaustion"></i>
+    <i style="--w:20;--c:var(--violet)" data-label="infrastructure" data-value="~20%" data-note="network, storage, clusters"></i>
+    <i style="--w:16;--c:var(--warn)" data-label="configuration" data-value="~16%" data-note="81% of these are header misconfigurations"></i>
+    <i style="--w:4;--c:var(--muted)" data-label="operations" data-value="~4%" data-note="human procedure"></i>
+  </div>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Microsoft-internal study of 156 incidents (129 severity 2, 27 severity 2.5) from a hyperscale LLM inference fleet. Two raters labeled a random 31 of them, with Cohen's kappa 0.89. One company, no public dataset, so every number above carries that condition (arXiv 2511.07424).</p>
+</details>
+
+<p>Now hold this mix against your alarm. Phase 3B built a <dfn>cost guard</dfn> on per-request cost and cache-hit rate: a detector. It prices each request and fires when cost or cache-hit rate crosses a floor. That detector assumes you know what breaks. Against the measured mix, it covers part of the engine class: resource exhaustion moves cost, and some timeouts do too. It covers nothing of the configuration class, and that class holds a surprise.</p>
+
+<p>Of the configuration failures, 81 percent were <dfn>header misconfiguration</dfn>. It is a request header the serving stack rejects or mishandles, shipped with a deploy. That happens at deploy time, before any request runs. A per-request detector watches requests, so it sees this class only after users do. The fix is different in kind. Validate headers against a schema in the deploy pipeline before rollout, and the class mostly disappears.</p>
+
+<p>The wrong belief this mix corrects is that incident response is engine debugging. Three of the four classes sit outside the engine. So the first question of an outage is which class you are in, not which engine knob to turn. One more number frames the whole lesson. 48 percent of these incidents closed monitor-only or self-healing, and only 28 percent needed a hotfix. Hold that; the last section asks what it means for your incident design.</p>
+
+<details class="predict"><summary>Predict: your long non-streaming requests return HTTP 408 at the frontend, but backend logs show the same requests later returning HTTP 200 with correct outputs. Where is the failure?</summary>
+<p>Not in the engine. A 200 in the backend log means the engine finished the request correctly. So the failure sits between two healthy components. Something in the chain gave up waiting and closed the connection while the engine was still working. The next section walks exactly this incident.</p>
+</details>
+
+<p>Your incident fits this shape. The engine metrics are green because the engine is healthy. But the engine class is not the only class that produces a frontend timeout. The next section opens the incident itself: why did the frontend time out while the engine returned 200?</p>
+<h2 data-concept="c1">Why did the frontend time out while the engine returned 200?</h2>
+<p class="why">Long requests die at the shortest idle timer in the chain, however healthy the engine.</p>
+
+<p>The mix above says failures are mostly engine, but it cannot show where damage lands. Case B lands it between two healthy components. Your cascade, the cheap-first router proved against a random control, is in production now. The first severity-2 incident opens as frontend 408s on long requests while every engine metric stays green.</p>
+
+<p>A non-streaming answer sends nothing until it is complete, so one long request holds one connection open and silent. Every box on the path, client SDK, gateway, middleware, carries an <dfn>idle timeout</dfn>. That is the seconds of silence it tolerates before closing the connection. The shortest timer fires first, and the engine's correct answer then has nowhere to go.</p>
+
+<div class="lanes" id="s2-caseb" data-play>
+  <h4>One non-streaming request: 40 s of generation, a 30 s idle timeout</h4>
+  <div class="lane" data-label="frontend">
+    <i class="prefill" style="--w:10" data-t="send request"></i>
+    <i class="wait" style="--w:300" data-t="0 bytes arrived"></i>
+    <i class="frozen" style="--w:100" data-t="408 returned at t=30 s"></i>
+    <i class="idle" style="--w:10" data-t="closed"></i>
+  </div>
+  <div class="lane" data-label="middleware">
+    <i class="prefill" style="--w:10" data-t="forward request"></i>
+    <i class="idle" style="--w:300" data-t="wire silent, timer running"></i>
+    <i class="frozen" style="--w:100" data-t="idle timeout fires"></i>
+    <i class="idle" style="--w:10" data-t="closed"></i>
+  </div>
+  <div class="lane" data-label="engine">
+    <i class="prefill" style="--w:10" data-t="queued"></i>
+    <i class="decode" style="--w:300" data-t="generating"></i>
+    <i class="decode" style="--w:100" data-t="still generating"></i>
+    <i class="decode" style="--w:10" data-t="HTTP 200 into a dead connection"></i>
+  </div>
+  <p class="at" data-step="1">Step 1 (t = 0 s): one non-streaming request goes in and the engine starts generating.</p>
+  <p class="at" data-step="2">Step 2 (t = 0 to 30 s): the engine works while the connection carries no bytes.</p>
+  <p class="at" data-step="3">Step 3 (t = 30 s): the middleware's idle timeout fires, the frontend answers 408, and the engine keeps working.</p>
+  <p class="at" data-step="4">Step 4 (t = 40 s): the engine returns HTTP 200 into a connection nobody holds.</p>
+  <p class="at" data-step="all">The times are an illustration chosen to show Case B's shape, not measured values.</p>
+</div>
+
+<details class="predict"><summary>Predict: if the team adds engine capacity first, do the 408s stop?</summary>
+<p>No, because the failure never touched the engine. The backend logs showed the same requests returning HTTP 200, so more capacity would change nothing on the silent connection. That is where the 408 was born. The guess was reasonable because capacity is the lever you control. But a request that outlives the shortest idle timeout still dies.</p>
+</details>
+
+<p>The incident as the team lived it.</p>
+<ol>
+<li><b>Symptom.</b> Long requests return HTTP 408 at the frontend while short requests pass and the dashboards stay normal.</li>
+<li><b>Wrong theory.</b> The engine must be failing them, reasonable because everything measured, cost, health, token rate, watches the engine and nothing watches the connection.</li>
+<li><b>Decisive signal.</b> Backend logs show the same request ids later returning HTTP 200 with correct outputs, so the engine finished them.</li>
+<li><b>Mechanism confirmed.</b> The connection carried no bytes for the whole generation, the middleware's idle timer fired mid-generation, and the answer went nowhere.</li>
+</ol>
+
+<p>The recorded fixes attack the connection, not the engine.</p>
+<ul>
+<li><b>Streaming on long requests</b>, sending each token as generated, puts bytes on the wire, and a live wire resets every idle timer.</li>
+<li><b>Tuned batching and capped pending tokens</b> bound the queue under load, so fewer requests outlast the timer.</li>
+<li><b><dfn>Per-endpoint isolation</dfn></b> gives high-priority customers their own endpoint, so a neighbour's incident cannot become theirs.</li>
+<li><b>Hardened structured retries</b> check what failed first, because a blind retry lands on a fresh silent connection and the same timer.</li>
+</ul>
+
+<p>Isolation is justified by the fleet's shape. About 96 percent of the 156 incidents touched a single endpoint, so containment already works. Your agent loops and slow RAG calls hold this same silent connection.</p>
+
+<p>After the liveness fixes rolled out, one anonymized customer's normalized HTTP 408 rate fell. The drop was from 2.72 percent in February 2025 to 0.47 percent in March 2025. The study itself labels this directional, one customer outside the main incident window, no counterfactual. So count it as inferred, not proof.</p>
+
+<div class="bars">
+  <div class="bar" style="--v:100" data-label="Feb 2025, before liveness rollout" data-value="2.72%"></div>
+  <div class="bar" style="--v:17" data-label="Mar 2025, after rollout" data-value="0.47%"></div>
+</div>
+
+<details class="evidence"><summary>Evidence</summary><p>Case B and Figure 7 of the Microsoft-internal study of 156 severity-2 and 2.5 incidents, arXiv 2511.07424, full HTML read 2026-10-03. The 408 rates paraphrase Figure 7 for one anonymized customer, and whether connection liveness alone caused the drop could not be verified. One company's fleet, no public dataset.</p></details>
+
+<div class="keypoints">
+<p class="remember">A silent connection dies at the chain's shortest idle timeout, however healthy the engine.</p>
+<p class="trap">A 408 reads as engine failure, so the tempting first move is to scale the engine, the part that never broke.</p>
+<p class="try">Find the shortest idle timeout on your longest request path, because that is your deadline.</p>
+</div>
+
+<p>None of these fixes changed engine code. The next section asks what incident response should optimize when only 28 percent of incidents need a hotfix.</p>
+<h2 data-concept="c1">If only 28 percent need a hotfix, what should your incident response optimize?</h2>
+<p>Case B failed between two healthy components, so only routing and liveness could reach it. The fleet's closure numbers show which lever does the real work. The running incident ended the same way: traffic moved, the engines kept serving, and no code shipped.</p>
+
+<h3>Half the incidents close without a code change</h3>
+
+<p>Across the 156 incidents, 48 percent closed monitor-only or self-healing, and only 28 percent needed a hotfix.</p>
+
+<div class="bars">
+  <div class="bar" style="--v:48" data-label="monitor-only or self-healing" data-value="48%"></div>
+  <div class="bar" style="--v:28" data-label="needed a hotfix" data-value="28%"></div>
+</div>
+
+<p>The levers that restored service were rerouting traffic, restarting instances, rebalancing nodes and adding capacity. None of them touches engine code. The cost of reaching for code first shows up in the lifecycle numbers.</p>
+
+<div class="stats">
+  <div class="stat"><b>32 h</b><span>P75 time-to-mitigate, April 2025, internal view</span></div>
+  <div class="stat"><b>49 h</b><span>P75 time-to-mitigate, May 2025, hotfix-heavy period</span></div>
+  <div class="stat"><b>~1 h</b><span>median recovery, ChatGPT and Claude status pages, outside view</span></div>
+</div>
+
+<p>Chu et al. measured public LLM services from their status pages: median recovery was 1.32 hours for ChatGPT and 0.93 hours for Claude. The internal study reports a P75 time-to-mitigate of 32 to 49 hours. The two numbers are not a fair race. One is a median and the other a 75th percentile, and an internal incident includes validation and hotfix cycles that a status page never shows. They still show where the hours go: into treating traffic problems as code problems.</p>
+
+<p>Half of these incidents closed without code. The closures that worked were traffic moves, so routing away must be safe to automate. That safety depends on what the health check measures.</p>
+
+<details class="predict"><summary>Predict: your health check pings the engine process and gets a reply, but the engine returns HTTP 500 on every real request. Does the load balancer drain it?</summary>
+<p>No. A process check asks whether the process is alive, and the process is alive, so the probe passes and the pool keeps the engine. Every request routed to it still fails, because the check measured liveness and the failure is in serving.</p>
+</details>
+
+<p>Kubernetes already separates the two questions: a liveness probe restarts a dead pod, and a readiness probe decides whether a live pod gets traffic. The fix here is a <dfn>serving-ability probe</dfn>, a readiness check that exercises the serving path with one short real generation and verifies the output. Case B is why the check must touch serving, because the engine was healthy and the connection still died, so process health said nothing about service. Per-endpoint isolation then keeps a wrong drain small enough that an automatic drain can be trusted.</p>
+
+<div class="compare">
+<div class="wrong"><p><b>Process health</b></p><p>GET /healthz returns 200 while the process runs. An engine failing every request stays in the pool and keeps taking traffic.</p></div>
+<div class="right"><p><b>Serving ability</b></p><p>One short real generation through the serving path. A failure drains the endpoint within one probe interval, before users see the storm.</p></div>
+</div>
+
+<details class="evidence"><summary>Evidence</summary><p>Closure mix, fix types and P75 time-to-mitigate are from the Microsoft-internal study of 156 severity-2 and 2.5 incidents. It is arXiv 2511.07424, full HTML read 2026-10-03, one company's fleet, no public dataset. The study attributes the May rise to hotfix-heavy periods. Public recovery medians are from Chu et al., ICPE 2025, arXiv 2501.12469, status pages of 8 services, read 2026-10-03. The two measure different incident classes, so the gap is not a fair race.</p></details>
+
+<h3>Pushback is the same bound, applied to load</h3>
+
+<p>The study's second case came from the opposite direction. Bursty traffic on vision models saturated the image encoders and the model containers together, and the service answered with 429s and 5xx. The first fix was <dfn>pushback</dfn>, the load balancer slowing or refusing new work once the queue fills: caps on pending tokens, caps on pending requests, and per-client throttling on expensive sampling parameters.</p>
+
+<p>A cap bounds the queue before it grows, because without one each new request joins the queue, waits longer, times out and retries, and the retry joins the same queue. The cap turns that growth into a quick rejection at the edge, and the engine keeps serving at full rate behind it.</p>
+
+<p>This is the bounded default a cost guard applies to money, moved to load. A pre-call reservation prices a call's worst case and holds that amount before the call runs, so spend cannot outrun the budget. A pending cap holds the queue to a fixed depth before requests arrive, so load cannot outrun the engine. In both, the bound is set ahead of time and the default absorbs the burst.</p>
+
+<p>The three bounds line up one per resource:</p>
+
+<ul>
+<li>A <b>session budget</b> bounds cost, one reservation held for a whole agent loop.</li>
+<li>A <b>pending-request cap</b> bounds queue, shedding load at the edge before it pools inside.</li>
+<li>A <b>serving-ability probe</b> bounds misrouted traffic, draining a bad endpoint within one check.</li>
+</ul>
+
+<div class="keypoints">
+<p class="remember">Most incidents close on routing and monitoring, so make routing safe to automate.</p>
+<p class="trap">A live process passes a liveness probe while failing every request you send it.</p>
+<p class="try">Change one health check from a process ping to one real generation.</p>
+</div>
+
+<p>You can now treat a 500 storm as a routing and probe question before an engine question. The lab, "Try it today", finds the shortest idle timeout on your own stack.</p>
+<h2 data-kind="lab">Try it today</h2>
+<p>The shortest idle timeout in your chain decides which of your requests die silently. This lab finds it. Plan for fifteen minutes.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1</b> <span class="tag">15 min</span> <b>Map the chain.</b></label> List every hop between your client and your model call. For each one, write down its idle or read timeout and where you found it.
+<ul>
+<li><b>Client SDK:</b> the HTTP client's read timeout, often named <code>timeout</code> or <code>read_timeout</code> in its config.</li>
+<li><b>Gateway or proxy:</b> for nginx look at <code>proxy_read_timeout</code>; an API gateway document it under idle or route timeout.</li>
+<li><b>Load balancer:</b> its idle timeout for the listener behind your service.</li>
+<li><b>Your own server:</b> any read or write deadline set on the outbound call.</li>
+</ul>
+Write one line per hop: name, timeout, source. Circle the smallest number. That number, not your engine, sets the longest safe non-streaming request.</li>
+
+<li><label><input type="checkbox"> <b>E2</b> <span class="tag">5 min</span> <b>Cross the limit.</b></label> Send one long non-streaming request whose generation time exceeds the number you circled. A large <code>max_tokens</code> on a slow prompt is enough. Watch two things.
+<ol>
+<li><b>At the client:</b> note the status code and when it arrives. A 408 or a connection error arriving at the circled timeout is Case B's symptom.</li>
+<li><b>In the backend logs:</b> find the same request later. If it logged a 200 with a correct output, your engine was healthy and the connection died waiting.</li>
+</ol>
+No failure can also be the answer: your shortest timeout may be longer than your request. Raise <code>max_tokens</code> until you cross it.</li>
+
+<li><label><input type="checkbox"> <b>E3</b> <span class="tag">5 min</span> <b>Check the streaming path.</b></label> If your path already streams, the silent connection is gone at the hops that forward chunks. Check each hop for buffering instead: a proxy that collects the whole stream before forwarding gives the idle timeout a silent connection again. For nginx, <code>proxy_buffering</code> left on is the usual cause.</li>
+</ul>
+
+<div class="lab">
+<p>The output of this lab is the circled number and one decision per request path. Any path whose requests can run longer than that number needs streaming, or a heartbeat below the timeout, before the next long task ships. This is Case B played on your own stack: the fix is at the connection, not the engine.</p>
+</div>
+<h2 data-kind="checkpoint">Check yourself</h2>
+<p>Your team's p99 latency doubles and HTTP 500s climb on one endpoint right after a deploy. The token dashboard is flat, and the engine process is alive and answering health checks.</p>
+
+<p>Using the phase's model and this lesson, answer two things aloud before opening the answer.</p>
+
+<ol>
+<li>Which three checks tell you whether this is an engine failure, a probe failure, or a configuration failure?</li>
+<li>Which fix do you apply first, and why is it not a code change?</li>
+</ol>
+
+<details class="answer" id="s5-check">
+<summary>Answer sketch</summary>
+<p>The three checks, in order:</p>
+<ol>
+<li><b>Probe serving ability, not process liveness.</b> The process being alive says nothing, because 74 percent of incidents presented as 500s while engines could not serve. Send one real test request through the endpoint and see whether it completes.</li>
+<li><b>Check the deploy's headers against the previous configuration.</b> 81 percent of configuration incidents were header misconfigurations, and a deploy just landed, so compare the request headers before and after.</li>
+<li><b>Check engine-side capacity signals.</b> Only if the first two are clean: watch pending tokens, pending requests; resource exhaustion is 29 percent of engine incidents.</li>
+</ol>
+<p>The first fix is to <b>reroute traffic away</b> from the failing endpoint and confirm the 500s stop. 96 percent of incidents touched a single endpoint, so containment works, and 48 percent of incidents closed monitor-only while only 28 percent needed a hotfix. Routing away restores service now; the investigation decides later whether the cause was configuration, probe, or engine.</p>
+<p>The trap answer is restarting the engine first: it burns the mitigation window on a guess, and it cannot fix a header that the deploy broke.</p>
+</details>
+<h2 data-kind="post">What you could write</h2>
+<div class="post">
+<ul class="sources">
+<li><b>The 408 that was never a timeout.</b> The claim: a frontend 408 with a backend 200 means the connection died, not the engine, so streaming on any long request is a reliability feature, not a UX feature. What makes it his: the "Try it today" output, one timeout per hop with the smallest circled, plus the measured 2.72 to 0.47 percent rate for one customer with its no-counterfactual condition.</li>
+<li><b>Most incidents never reach the codebase.</b> The claim: 48 percent of 156 incidents closed monitor-only or self-healing and only 28 percent needed a hotfix, against the on-call assumption that an incident ends in a code change. What makes it his: the checkpoint decision he just made, rerouting before investigating, and what that mix would change about how his own on-call time is spent. The numbers are one company's internal study, so that condition travels with them.</li>
+</ul>
+</div>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+<li><b>https://arxiv.org/abs/2511.07424</b> — The Microsoft study of 156 production inference incidents. Full HTML read 2026-10-03. This gave the failure mix, Cases A and B, the fixing pattern and the time-to-mitigate numbers. Internal data from one company, no public dataset, so none of its numbers is independently checkable.</li>
+<li><b>https://arxiv.org/abs/2501.12469</b> — Chu et al., ICPE 2025. Public status pages for 8 LLM services. This gave the outside-in MTTR numbers (median 1.32 h for ChatGPT, 0.93 h for Claude) and the cross-provider isolation comparison.</li>
+<li><b>https://arxiv.org/abs/2410.21680</b> — Meta's training-cluster reliability study, 11 months and 4 million jobs. Cited only for contrast: training failures sit in a different regime, so its numbers do not transfer to serving.</li>
+<li><b>https://arxiv.org/abs/2608.13573</b> — Nixon et al., a one-year production serving trace. Abstract only at read time, so it confirmed the long-tailed workload premise and nothing more; the body is queued for a later read.</li>
+</ul>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

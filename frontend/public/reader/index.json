@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-10-03T03:13:44.191422+05:30",
+  "built_at": "2026-10-04T03:02:51.066299+05:30",
   "courses": [
     {
       "slug": "inference-internals",
@@ -56,8 +56,17 @@
           "one_liner": "He can price a cascade against a router, prove an escalation signal with a random control, detect a billing-class regression within ten requests, and bound an agent loop's spend before it happens.",
           "minutes": 110,
           "date": "2026-10-01",
-          "read": false,
+          "read": true,
           "file": "2026-10-01-inference-internals-phase-03b-routing-alerting.html"
+        },
+        {
+          "slug": "inference-internals-phase-04a-serving",
+          "title": "Serving It Yourself: The Rental Clock, the Flag Map and the Defensible Number",
+          "one_liner": "He can rent a GPU, serve a model on vLLM or SGLang with pinned flags, diagnose a startup failure before renting bigger hardware, and produce an engine comparison he could defend to a colleague.",
+          "minutes": 150,
+          "date": "2026-10-04",
+          "read": false,
+          "file": "2026-10-04-inference-internals-phase-04a-serving.html"
         }
       ]
     },
@@ -87,6 +96,24 @@
     }
   ],
   "articles": [
+    {
+      "title": "The 408 that was never a timeout",
+      "one_liner": "He can look at a 500 storm or a timeout spike in his own stack and decide whether it is an engine failure or a routing and keepalive failure, reach for the operational fix first, and add the two checks (serving-ability probes, connection liveness) before he changes any code.",
+      "topic": "inference-internals",
+      "kind": "spine_incident",
+      "date": "2026-10-03",
+      "read": false,
+      "file": "2026-10-03-the-408-that-was-never-a-timeout.html"
+    },
+    {
+      "title": "Saturday lab \u2014 routing, control groups and the cost alarm",
+      "one_liner": "Two ledger artefacts, a tuned cache-floor threshold, and written numbers for cascade cost, detection latency and single-run variance.",
+      "topic": "inference-internals",
+      "kind": "",
+      "date": "2026-10-03",
+      "read": false,
+      "file": "2026-10-03-lab-inference-internals-phase-03b-routing-alerting.html"
+    },
     {
       "title": "The server said 200. It never enforced your constraint.",
       "one_liner": "The caller set parallel_tool_calls=false, the server accepted it, the model sent two tool calls. Who kept the guarantee?",

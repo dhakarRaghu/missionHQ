@@ -2314,6 +2314,41 @@ def test_vault_writes_are_committed_once_a_day_with_their_authors(tmp_path, monk
     assert not (vault / ".git" / memory.PENDING_LEDGER).exists()
 
 
+def test_the_daily_commit_is_pushed_to_the_vaults_remote(tmp_path, monkeypatch) -> None:
+    """Since 2026-10-03 the vault is shared with his other laptop through a
+    private repo. The backend pushes after the day's commit, because a
+    launchd job may not read ~/Desktop. No remote: nothing is tried."""
+    import asyncio
+    import subprocess
+
+    from hq import memory
+
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    for cmd in (["git", "init", "-q", "-b", "main"], ["git", "config", "user.email", "t@t"],
+                ["git", "config", "user.name", "t"],
+                ["git", "commit", "-q", "--allow-empty", "-m", "root"]):
+        subprocess.run(cmd, cwd=vault, check=True)
+    monkeypatch.setattr(memory, "_vault", lambda: vault)
+    monkeypatch.setattr(memory, "write_problem", lambda *a, **k: None)
+
+    assert memory.push_sync() is None                       # no origin yet
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=vault, check=True)
+    memory.write_sync("daily/2026-10-03.md", "note", actor="sage")
+    assert asyncio.run(memory.commit_day()) == ["daily/2026-10-03.md"]
+
+    def head(repo) -> str:
+        return subprocess.run(["git", "rev-parse", "main"], cwd=repo, capture_output=True,
+                              text=True, check=True).stdout.strip()
+    assert head(remote) == head(vault)                       # the day's commit reached it
+    # A remote that refuses is logged, never raised, and the commit stays.
+    subprocess.run(["git", "remote", "set-url", "origin", str(tmp_path / "gone.git")],
+                   cwd=vault, check=True)
+    assert memory.push_sync() is False
+
+
 def test_no_model_call_in_a_live_run_is_unbounded() -> None:
     """The judges and the page reader sit outside the agent's model steps.
 

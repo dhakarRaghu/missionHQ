@@ -43,6 +43,10 @@ _BATCH_RE = re.compile(r"^##\s+(\d{4}-\d{2}-\d{2})")
 # shape) or a numbered item (older batches). Its indented `why:` and
 # `Sources:` lines, and any copy under it, are not ideas.
 _IDEA_RE = re.compile(r"^(?:-|\d+\.)\s+\S")
+# Since 2026-10-02 a daily batch can hold one post, which has no `---`. A
+# body with no separator and no list item, short enough to be a post
+# (content_tools.POST_WORDS), is one post.
+SINGLE_POST_WORDS = 160
 
 
 def _at(value: Any) -> datetime | None:
@@ -85,8 +89,12 @@ def count_ideas(markdown: str | None, since: date, until: date) -> int | None:
         separators = sum(1 for ln in lines if ln.strip() == "---")
         if separators:
             n += separators + 1
-        else:
-            n += sum(1 for ln in lines if _IDEA_RE.match(ln))
+            continue
+        ideas = sum(1 for ln in lines if _IDEA_RE.match(ln))
+        text = "\n".join(lines).strip()
+        if not ideas and text and len(text.split()) <= SINGLE_POST_WORDS:
+            ideas = 1
+        n += ideas
     return n
 
 

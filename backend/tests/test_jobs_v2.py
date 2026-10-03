@@ -240,7 +240,7 @@ def test_job_board_and_discovery_refuse_the_owners_employer(monkeypatch) -> None
     out = asyncio.run(board(_ctx(), provider="lever", company="acmecorp"))
     assert "never researched" in out["error"]
     assert "acmecorp" not in str(out).lower()
-    assert "private_employer(company[\"name\"])" in inspect.getsource(web_tools.discover_companies)
+    assert "private_employer(str(h[\"name\"]))" in inspect.getsource(web_tools.discover_companies)
 
 
 def test_the_discovery_brief_never_names_an_employer_and_code_drops_their_leads(

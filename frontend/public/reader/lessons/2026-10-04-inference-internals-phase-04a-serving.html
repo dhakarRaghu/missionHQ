@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serving It Yourself: The Rental Clock, the Flag Map and the Defensible Number</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">INFERENCE INTERNALS · PHASE 4A</div><h1>Serving It Yourself: The Rental Clock, the Flag Map and the Defensible Number</h1><p class="subtitle">What does an hour of your own GPU server really cost, and what would you measure on it that you could defend?</p></header>
+<p>Phase 3B left your hosted bill under control. Your meter matches the invoice, the cascade runs behind a random control, and a pre-call reservation stops runaway spend. Now management asks the next question: would renting a GPU and serving the model yourself cost less? You get one hour and $5 to $10 of rented GPU time to return the first honest number. You pick the cheapest H100 on the marketplace, paste the launch command, and wait. Sixty-eight minutes later the model is still downloading, the rental is over, and no server ever started. No error appears anywhere on your screen, and the failure happened in the machine listing you picked before you typed anything.</p>
+
+<p>So the question is not only what a GPU costs per hour. It is which minutes of that hour you actually get to use, why two serving engines on identical hardware behave differently, and which startup errors mean the GPU is too small versus which ones mean one setting is wrong. Answer those, and the one number you hand back at the end of the hour is one you can defend.</p>
+<p>This lesson teaches five ideas. They are listed here so you can see where the lesson is going. They will read more clearly once each has been explained below, so come back to this list at the end.</p>
+<ol class="concepts"><li id="c1"><b>A rented GPU bills from container start, so the weight download is billed at GPU rates and can cost more than the serving you came for.</b> <span>Price a session before renting, pick the machine by its measured downlink, and prepare commands offline.</span></li><li id="c2"><b>A serving default is a function evaluated at startup from GPU memory and the entry point you used, so the same hardware yields different servers depending on how you launched them.</b> <span>Explain why two honest benchmarks disagree, and pin flags before measuring anything.</span></li><li id="c3"><b>No engine is the faster engine; only one configuration is faster on one workload, so a defensible comparison is an experiment design: one client, pinned flags, a traffic-shaped trace, and a curve read by its shape.</b> <span>Design an engine comparison he could defend, and reject a bad one with specific questions.</span></li><li id="c4"><b>A startup memory failure is a budget equation, not an event: weights plus KV for your context must fit the memory fraction, and the useful error prints the value to set.</b> <span>Classify any startup failure into weights, context or fragmentation, and apply the right fix instead of renting a bigger GPU.</span></li><li id="c5"><b>Structured output is a deploy-time, engine-wide decision wearing a per-request API: the first structured request picks the grammar backend for every later request on vLLM, and SGLang&#x27;s only fallback disables the feature server-wide.</b> <span>Decide whether to pin a backend, predict what a tenant&#x27;s exotic schema does to everyone else, and read log lines as guarantees lost.</span></li></ol>
+<h2 data-kind="orientation">Where you are, and what your first rental just bought</h2>
+<p>Three phases ago you measured someone else's server. Phase 3B ended with your hosted bill under control. It was a cascade behind a random control, and a guard that reserves the worst case before each call. Now management asks a different question. Would it be cheaper to rent a GPU and serve the model yourself? You get one hour and $5 to $10 of GPU time to answer it with one number. That number is sustained output tokens per second on your traffic.</p>
+
+<p>Everything in this phase follows that one session. You rent the machine, start a server on it, and measure it. The first thing the session teaches is a surprise. Billing starts the moment the container starts, and the model still has to download. On the wrong machine, a 140 GB model takes 68 minutes to arrive. That is longer than your one-hour rental, and the whole fee went to waiting. This phase is how you make the hour pay instead.</p>
+
+<div class="cards" data-cols="2">
+<div class="card"><h4>The KV cache (Phase 2A)</h4><p>While a request runs, the GPU keeps its attention keys and values in memory. That store is the <b>KV cache</b>, and its size sets how much context your requests can afford. Self-serving means you size and budget this memory yourself, so a startup memory error becomes an equation you can solve.</p></div>
+<div class="card"><h4>Prefill and decode (Phase 2B)</h4><p>Serving one request has two phases with different costs. <b>Prefill</b> processes the whole prompt at once and gets slower as the prompt grows. <b>Decode</b> makes tokens one at a time and is memory-bound. A benchmark at one prompt length measures one point on a curve, so your trace must mix prompt sizes.</p></div>
+<div class="card"><h4>TTFT and ITL (Phases 1 and 2B)</h4><p><b>TTFT</b> is the wait for the first token, and <b>ITL</b> is the gap between later tokens. Your users feel both, so a bare throughput number is not enough. This phase reports throughput together with TTFT p99, the slowest first-token wait users see at capacity.</p></div>
+<div class="card"><h4>Success proves nothing (Phase 3A)</h4><p>A broken cache still returns 200 OK, and the usage object was the only proof. The same pattern returns three times here. Vendor defaults differ silently. A comparison looks settled and is not. A grammar backend switches with no error message. A green dashboard never proves the thing you did not check.</p></div>
+</div>
+
+<p>These four ideas meet an order of operations this time. The sequence is where the money and the mistakes go:</p>
+
+<ol class="flow" data-dir="down">
+<li><b>plan the session</b><span>write every command and check every number before the clock starts</span></li>
+<li><b>rent the machine</b><span>pick it by its measured network, not its hourly price</span></li>
+<li><b>start the server</b><span>pin the flags, and read any memory error as a budget equation</span></li>
+<li class="ok"><b>measure and compare</b><span>read the curve by its shape, not a single number</span></li>
+</ol>
+
+<p>Phase 3B taught you to distrust a bill until you could reproduce it. This phase teaches you to distrust a server the same way, including the one you started yourself.</p>
+<h2 data-concept="c1">What does an hour of GPU time actually buy?</h2>
+<p class="why">A rented GPU bills from container start, so the model download can cost more than the serving you came for.</p>
+
+<p>Management wants to know whether self-serving beats the hosted bill, so you get one hour and $5 to $10 of GPU time for the first honest number. Your budget exercise from Phase 3B taught you to price a call before making it. Renting hardware needs the same habit, because the meter here runs on time, not tokens.</p>
+
+<p>You likely believe an hour of H100 at $3.49 buys an hour of experimenting. It does not. The <dfn>rental clock</dfn>, the interval from container start to instance stop, bills every second in between. The GPU sits idle during the image pull, the weight download and the engine load, and each second bills at the GPU's hourly rate. The only part you wanted is the benchmark in the middle.</p>
+
+<figure class="diagram"><svg viewBox="0 0 720 150" xmlns="http://www.w3.org/2000/svg">
+<text x="10" y="20" fill="currentColor" font-size="12">one rental: what each span bills</text>
+<rect x="10" y="60" width="60" height="30" fill="var(--muted)" opacity="0.4"/><text x="16" y="78" fill="currentColor" font-size="11">image pull</text>
+<rect x="70" y="60" width="160" height="30" fill="var(--warn)" opacity="0.5"/><text x="80" y="78" fill="currentColor" font-size="11">download 16 GB weights</text>
+<rect x="230" y="60" width="80" height="30" fill="var(--muted)" opacity="0.4"/><text x="236" y="78" fill="currentColor" font-size="11">engine load</text>
+<rect x="310" y="60" width="360" height="30" fill="var(--accent)" opacity="0.55"/><text x="410" y="78" fill="currentColor" font-size="11">benchmark · the work you wanted</text>
+<line x1="10" y1="60" x2="10" y2="110" stroke="currentColor"/><text x="6" y="124" fill="currentColor" font-size="11">t=0:00 container starts, billing starts</text>
+<line x1="670" y1="60" x2="670" y2="110" stroke="currentColor"/><text x="620" y="124" fill="currentColor" font-size="11">t=0:25 instance stops</text>
+</svg><figcaption>Every span left of the benchmark is billed at the same hourly rate. The download span stretches or shrinks with the machine's network, and it is the one span you can predict before renting. Illustration, not measured.</figcaption></figure>
+
+<details class="predict"><summary>Predict: you rent one H100 at $3.49 per hour to benchmark a 140 GB model, and the machine's downlink is 276 Mbps (34.5 MB/s). What does the download cost, and what do you get inside a one-hour rental?</summary><p>The download takes 67.6 minutes and costs $3.93. You get nothing, because the rental ends before the download finishes. The arithmetic is 140,000 MB divided by 34.5 MB/s, which is about 4,058 seconds, and at $3.49 per hour that time costs $3.93. The same model on a 500 MB/s link takes 4.7 minutes and costs $0.27, so the two machines differ by more than a factor of ten on cost before any benchmark runs.</p></details>
+
+<p>Why does the download set the price of the session? Three steps, each billed:</p>
+
+<ol>
+<li>The container starts and billing starts with it, because rental prices instance uptime, not GPU use.</li>
+<li>The weights arrive over the machine's own network link, so your office connection is irrelevant once you rent.</li>
+<li>Marketplace machines vary by more than ten times in link speed, so two listings at the same hourly price deliver very different sessions.</li>
+</ol>
+
+<p>Step 2 has a counterweight: the listing tells you the number. A marketplace publishes the <dfn>measured downlink</dfn>, the download speed the provider recorded on that specific machine, because it varies so much. Read it before you rent, the same way you would read a server error before retrying it.</p>
+
+<div class="calc" id="s2-dl">
+<h4>Download time and its share of the rental</h4>
+<label>Model size GB <input type="range" name="gb" min="16" max="140" step="8" value="140">
+<span class="val" data-val="gb"></span></label>
+<label>Measured downlink MB/s <input type="range" name="mbps" min="34" max="500" step="10" value="500">
+<span class="val" data-val="mbps"></span></label>
+<div class="result">Download <b data-out="mins"></b>, costing <b data-out="cost"></b> at $3.49/h</div>
+<script>kit.calc('#s2-dl', function(v){
+  var mins = v.gb*1000/v.mbps/60;
+  return {mins: mins.toFixed(1)+' min', cost: '$'+(mins/60*3.49).toFixed(2)};
+});</script>
+</div>
+
+<p>Move the model-size slider to 16 and the problem mostly disappears. This is why the whole phase uses an 8B model first: 16 GB downloads in a minute or two on a fast link, and in about 8 minutes even at the listing's 34.5 MB/s. Run one larger measurement only after the small loop works.</p>
+
+<p>Three more ways to make the download cheap, each one free:</p>
+
+<ul>
+<li>Check the byte count first with <code>hf download --dry-run</code>, so a repository larger than the card promises fails for free at your desk.</li>
+<li>Use <dfn>hf_xet</dfn>, the download backend bundled with recent <code>huggingface_hub</code>, because the older <code>hf_transfer</code> package that tutorials name is deprecated.</li>
+<li>Do the cached-volume arithmetic: a network volume at $9.80 per month breaks even against 9 to 29 re-downloads, and it pins you to one datacentre.</li>
+</ul>
+
+<p>One price row for calibration: an H100 runs from about $1.87 on a marketplace to $6.88 on AWS per hour. The durable correction is the ratio, not the row. The specialist-versus-hyperscaler gap you read quoted as 10x is 3.68x at list prices, and CoreWeave, the most managed specialist in the table, sits within 12% of AWS. Re-read your provider's page on the day you rent, write the date next to your numbers, and distrust any gap larger than four.</p>
+
+<p>Two billing traps survive good download planning, and both charge while you do nothing:</p>
+
+<ul>
+<li>A provider that bills per minute and while idle charges for your lunch, so prefer per-second billing with no idle charge for a one-hour session.</li>
+<li>Stopping the instance does not stop the volume: on one marketplace the storage rate doubles on a stopped pod, and a zero balance deletes the cached model you paid to keep.</li>
+</ul>
+
+<details class="evidence"><summary>Evidence</summary><p>The 276 Mbps (34.5 MB/s) figure comes from a marketplace machine listing read 2026-09-13; the download arithmetic is recomputed from the stated link rate, so treat the times as the right order of magnitude, not measurements. Prices in this section were read 2026-09-13 and churn weekly; the 3.68x gap divides $6.88 by $1.87. hf_xet is bundled with huggingface_hub 0.32.0 and later, and the deprecation of hf_transfer is in the Hugging Face download guide, read 2026-10-04. <code>hf-mount</code> is omitted: it could not be confirmed in the guide.</p></details>
+
+<div class="keypoints">
+<p class="remember">You rent a clock, not a GPU, and the clock runs during the download.</p>
+<p class="trap">Believing the download is free costs you the whole rental if you skip the listing's measured downlink.</p>
+<p class="try">Move the calc sliders to your real model and a slow link, and watch the download pass the hour.</p>
+</div>
+
+<p>The download is the part of the clock you cannot shorten but can predict; the next section asks what you prepare before t=0:00 so the paid minutes go to serving: why is typing the launch command the last thing you do?</p>
+<h2 data-concept="c1">Why is typing the launch command the last thing you do?</h2>
+<p class="why">The download is priced by the machine, but the rest of the rental clock is priced by your preparation.</p>
+
+<p>The previous section priced the download at 67.6 billed minutes on a slow machine. That block sits on the rental clock. The rental clock is the billing timeline that starts when your container starts, whether you are ready or not. You cannot speed up the machine's measured downlink, the link rate the marketplace publishes for that specific machine. You can delete almost every other minute from the clock. Those minutes are you reading docs and typing commands while the meter runs.</p>
+
+<p>The fix is a <dfn>session plan</dfn>: one text file you write before the rental starts. It holds every command and value the session needs. Writing it costs nothing, because you write it on your laptop with the clock stopped. Copying from it during the session turns paid minutes into paste and run.</p>
+
+<p>The plan has five lines, and each line removes a specific kind of paid fumbling:</p>
+
+<ol>
+<li><b>The model id and its size in GB.</b> Write <code>Qwen/Qwen3-8B</code> and 16 GB, so the download arithmetic from the previous section uses a real number, not a guess.</li>
+<li><b>The access token, if the model is gated.</b> A gated checkpoint needs approval on its model page before any token works, and that approval is a human step you cannot do while the GPU bills you.</li>
+<li><b>Both full launch commands.</b> The vLLM command and the SGLang command, copied complete, so a $3.49-an-hour machine is not waiting while you look up a flag.</li>
+<li><b>The client command with the model id already in it.</b> A benchmark command that fails on a wrong model name spends paid minutes on a typo.</li>
+<li><b>Where the results go.</b> One open document, so the numbers you paid for land somewhere before you stop the instance.</li>
+</ol>
+
+<p>Two checks belong in the plan itself, because each can veto the machine before you pay for it.</p>
+
+<p>The first is the driver version. The default vLLM wheel needs a 575-series NVIDIA driver, and SGLang 0.5.19 needs a 580-series driver. A marketplace machine with a 570-series driver runs vLLM and does not run SGLang natively. The listing shows the driver. This is a reason to reject a machine at zero cost, before the container starts.</p>
+
+<details class="predict"><summary>Predict: the listing shows a 570-series driver. Which of the two engines can your session use?</summary>
+<p>vLLM only. Its wheel needs a 575-series driver or newer, and 570 is close but below it. SGLang 0.5.19 needs a 580-series driver, so it does not run on this machine at all. The tempting answer is "both, drivers are usually backward compatible". That belief costs you a rental: you find out after the image pull, on the clock.</p>
+</details>
+
+<p>The second check is what the download actually contains. One 8B checkpoint repository totals 32.13 GB, but only 16.06 GB of that is the safetensors files the engines read. The other half is a duplicate of the same weights in a second format.</p>
+
+<details class="predict"><summary>Predict: the repository totals 32.13 GB. How many GB must you download to serve the model?</summary>
+<p>16.06 GB. The engines read only the safetensors files. The other 16 GB is bytes you would download at GPU rates for nothing. The obvious answer is 32.13, because <code>hf download</code> takes the whole repository by default. Filtering the download to the safetensors files halves the download block on your clock. That is why the size line in the plan says 16 GB for this model and not 32.</p>
+</details>
+
+<p>This is where <code>hf download --dry-run</code> earns its place in the plan. It prints the exact byte count before anything downloads. You see the 32.13 versus 16.06 split on your laptop, with the clock stopped. hf_xet is the download backend bundled with recent <code>huggingface_hub</code>. It replaced the deprecated hf_transfer. Combined with it, the download line of the plan becomes a known number of minutes instead of a surprise.</p>
+
+<div class="keypoints">
+<p class="remember">Every command and value the session needs goes in a text file before t=0:00. Writing is free and typing is billed.</p>
+<p class="trap">The wrong belief: "I will figure out flags once the server is up". One 8B repository doubles your download to 32.13 GB. A 570-series driver rejects SGLang after you have paid for the image pull.</p>
+<p class="try">Write the five-line plan now for Qwen3-8B. It lists model id and 16 GB, token decision, both launch commands, the client command, and the results destination.</p>
+</div>
+
+<p>Your plan now ends in two launch commands. Two servers started from the same model id on the same machine are not yet the same server. The next section answers why they batch differently.</p>
+<h2 data-concept="c2">You launched two servers on one GPU. Why do they batch differently?</h2>
+<p class="why">Defaults are computed at startup from your GPU and launch method, so identical machines can run different servers.</p>
+
+<p>Your plan from the last section ends in two launch commands. But two servers started from the same model id on the same machine are not yet the same server.</p>
+
+<p>You are on the rented H100. The weights are cached and the clock is running. You start vLLM with <code>vllm serve Qwen/Qwen3-8B</code>. A colleague on an identical machine loads the same model through the Python <code>LLM</code> class in a notebook. Both succeed. Both benchmarks disagree, and neither of you set a single flag.</p>
+
+<h3>Defaults are a function, evaluated at startup</h3>
+
+<p>The word "default" suggests a fixed, vendor-tested value. In vLLM 0.29.0 a default is the output of a function, and the function runs at startup. Its inputs are the GPU's total memory and the <dfn>entry point</dfn> you used. This is the command or class that started the server. This is why the same hardware yields different servers under different launch commands.</p>
+
+<figure class="diagram">
+<ul class="tree">
+<li><b>How much total memory does the GPU report?</b>
+<ul>
+<li class="bad"><em>under 70 GiB, or any A100</em><span>server: 2,048 batched tokens, 256 concurrent sequences</span></li>
+<li class="ok"><em>70 to 160 GiB, not an A100</em><span>server: 8,192 tokens, 1,024 sequences · Python class: 16,384 tokens</span></li>
+<li class="ok"><em>160 GiB or more</em><span>both entry points: 16,384 tokens, 1,024 sequences</span></li>
+</ul></li>
+</ul>
+<figcaption>vLLM 0.29.0's defaults: memory buckets first, then the entry point. Verified against arg_utils.py at the v0.29.0 tag.</figcaption>
+</figure>
+
+<details class="predict"><summary>Predict: you run the same model through vLLM's Python LLM class and through vllm serve on the same 80 GB H100. Do they batch identically by default?</summary>
+<p>No. The 80 GB card lands in the 70 to 160 GiB bucket, and that bucket splits by entry point. The server gets 8,192 maximum batched tokens and the Python class gets 16,384. The reasoning most people give is "defaults are defaults". But here the default is a function and the entry point is one of its arguments.</p>
+</details>
+
+<p>The mechanism, from the source, in order:</p>
+
+<ol>
+<li>At startup the engine reads the GPU's total memory, a hardware measurement, not a setting.</li>
+<li>It selects a bucket. The middle bucket covers most rented cards, and it splits further by usage context.</li>
+<li>The server context gets half the batched tokens of the offline Python context in that bucket, so a notebook and an endpoint are different servers by default.</li>
+<li>The A100 exclusion is a device-name string check, added after a measured throughput regression on that card.</li>
+<li>There is a third channel: <code>--performance-mode throughput</code> doubles both values when they are unset, so one more flag silently changes the "default" server.</li>
+</ol>
+
+<p>SGLang plays the same game with less visible rules. Its <code>chunked_prefill_size</code>, <code>mem_fraction_static</code> and <code>max_running_requests</code> all default to None in 0.5.19. A startup pipeline resolves them against the measured hardware. The concrete tier numbers live in that pipeline. The study note did not read it, so treat any published SGLang default table as unverified.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The bucket code and the 8,192 versus 16,384 split are verified in vllm/engine/arg_utils.py at v0.29.0, read 2026-10-04, rank 1: "on one non-A100 80 GB GPU, the server defaults to 8,192 batched tokens and the Python class to 16,384". The throughput-mode doubling is in the same file. SGLang's None defaults are verified in server_args.py at v0.5.19; the resolved numbers were not checked.</p>
+</details>
+
+<h3>The flag map, and why 0.90 is not 0.90</h3>
+
+<p>Defaults explain why two launches on one engine differ. Comparing two engines adds a second problem, because the same idea lives under a different flag name on each side. The table that translates between them is the <dfn>flag map</dfn>. It is the thing you keep open on your first day.</p>
+
+<table>
+<tr><th>what you want</th><th>vLLM 0.29.0</th><th>SGLang 0.5.19</th></tr>
+<tr><td>maximum context</td><td><code>--max-model-len</code></td><td><code>--context-length</code></td></tr>
+<tr><td>share of GPU memory</td><td><code>--gpu-memory-utilization</code> (0.92)</td><td><code>--mem-fraction-static</code> (computed)</td></tr>
+<tr><td>concurrent sequences</td><td><code>--max-num-seqs</code></td><td><code>--max-running-requests</code></td></tr>
+<tr><td>tokens per iteration</td><td><code>--max-num-batched-tokens</code></td><td><code>--chunked-prefill-size</code></td></tr>
+</table>
+
+<p>The memory row hides the real trap. <code>--gpu-memory-utilization</code> is a fraction of the GPU's total memory. <code>--mem-fraction-static</code> counts a different whole. So 0.90 on both flags gives two different KV cache sizes. The KV cache is the memory the engines keep for each request's attention keys and values. A comparison run at "0.90 both sides" compares two servers with unequal memory budgets.</p>
+
+<p>This failure has already happened in public. A published benchmark of the two engines was retracted by its own author. He had not known that <code>--max-model-len</code> maps to <code>--context-length</code> and had used a different flag. His numbers were honest measurements of two unmatched servers. The same fate waits for any blog table that never lists flags.</p>
+
+<div class="callout warn"><p>Rule for the rest of the phase: before you measure anything, write down the context, the batched-tokens value, the concurrent-sequences value and the memory share explicitly on both engines. Unpinned, you are measuring the defaults, not the engines.</p></div>
+
+<p>Use it in E6. The lab's cross-engine exercise asks you to pin this table row by row on both engines before the first request. The result answers one question. Which flags, once pinned, move the outcome at all? A small difference after honest pinning is a valid result.</p>
+
+<div class="keypoints">
+<p class="remember">The default is a function of your GPU memory and your entry point. So unpinned flags mean you measured the defaults.</p>
+<p class="trap">The wrong belief: "0.90 on both engines is the same memory". Those flags count different wholes, so the KV caches differ and so does the comparison.</p>
+<p class="try">Write the vLLM and SGLang equivalents of one launch, pinning context, batched tokens, sequences and memory share on both.</p>
+</div>
+
+<p>Defaults explain why two launched servers differ. A launch that fails entirely has the same cause one level down. The engine reads the memory budget before it serves anything. The next section answers which of three failures yours is.</p>
+<h2 data-concept="c4">The server will not start. Which of three failures did you get?</h2>
+<p class="why">A startup memory failure is a budget equation read back to you, and the useful error prints the fix.</p>
+
+<p>vLLM's defaults are a startup function of GPU memory and entry point. A launch that fails entirely has the same cause one level down. The engine also computes its memory budget before it serves one request.</p>
+
+<h3>Your rental, five minutes in</h3>
+
+<p>Your session plan ended in one running command against Qwen3-8B. The weights download, the engine starts to load, and the process exits. The log says something about KV cache memory. No request was ever sent, so load is not the cause. Your rented GPU is still billing. That is why you want to read this error as an equation instead of reaching for a bigger machine.</p>
+
+<h3>The picture: one GPU, one budget</h3>
+
+<p>Both engines allocate memory upfront, in a fixed order. The weights load first and take what they need. The engine then measures what remains and carves out a pool for the <dfn>KV cache</dfn>. The KV cache is the attention keys and values the GPU keeps for each running sequence. Everything above that sits unused. The budget line itself is the <dfn>memory fraction</dfn>. This is the share of total GPU memory the engine is allowed to occupy. It is 0.92 by default on vLLM 0.29.0 and computed from a reserve formula on SGLang 0.5.19.</p>
+
+<div class="stack">
+<h4>One 80 GB GPU, budget at 0.92 (illustration, not measured)</h4>
+<div class="whole">
+<i style="--w:16;--c:var(--accent)" data-label="weights" data-value="16 GB" data-note="loaded first, fixed size"></i>
+<i style="--w:27;--c:var(--ok)" data-label="KV pool" data-value="27 GB" data-note="sized from what remains inside the fraction"></i>
+<i style="--w:30;--c:var(--violet)" data-label="spare in budget" data-value="30.6 GB" data-note="headroom inside 0.92"></i>
+<i style="--w:6.4;--c:var(--muted)" data-label="above the line" data-value="6.4 GB" data-note="the 8% the engine never touches"></i>
+</div>
+</div>
+
+<p>The equation is one line: weights plus the KV your context needs must fit inside the fraction. Allocation happens once, at startup. A shortage so always shows up before the first request, with exact numbers in the error.</p>
+
+<details class="predict"><summary>Predict: your server fails at startup on KV cache memory before any request arrives. Which two quantities trade against each other inside the budget, and which error message tells you the value to set?</summary>
+The trade is context length against concurrency, priced in KV bytes: a longer context needs more KV per sequence, so fewer sequences fit in the pool. The message that carries the answer is vLLM's KV-fit error, which prints the estimated maximum model length that fits in the memory you gave it. Set <code>--max-model-len</code> to that number and the budget balances.
+</details>
+
+<h3>Why the error can compute the answer</h3>
+
+<p>The error reads as magic until you see where the numbers come from. Before sizing the KV pool, the engine runs a <dfn>profiling pass</dfn>. This is one forward pass of the model with dummy inputs, run only to measure peak activation memory. The sequence is deterministic:</p>
+
+<ol>
+<li>Load the weights, because their size is fixed and known.</li>
+<li>Run the model once with dummy inputs, because activation memory peaks during a real forward pass and cannot be predicted from config files.</li>
+<li>Subtract weights and measured activations from the fraction budget, because the remainder is all the KV pool can ever be.</li>
+<li>Divide the remainder by the bytes one token of KV costs, because that converts memory into the largest context the GPU can serve.</li>
+</ol>
+
+<p>Step 4 is where the error gets its number. The <dfn>derived max model length</dfn>, the largest context that fits after the profiling pass, is printed inside the failure message. The engine does not complain about memory; it solves the equation and reports the boundary.</p>
+
+<h3>Which failure did you get?</h3>
+
+<p>Three failures cover almost every startup case, and each has a fix pointing a different way.</p>
+
+<ul>
+<li><b>Weights filled everything.</b> vLLM prints "No available memory for the cache blocks". No context length fits beside these weights, so the fixes are a smaller model, more GPUs, or a quantized checkpoint.</li>
+<li><b>The model fits, your context does not.</b> vLLM prints that serving the model's max seq len needs X GiB of KV against Y GiB available, and names the estimated maximum model length, Z. Set <code>--max-model-len</code> to Z, or raise the fraction.</li>
+<li><b>A raw allocator failure.</b> The PyTorch message mentions fragmentation and suggests <code>PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True</code>. Here the cause is usually a fraction set too high, so lower it, do not raise it.</li>
+</ul>
+
+<p>A fourth failure comes before all of these. Asking for more context than the model's trained limit, for example <code>--max-model-len 1000000</code> against Qwen3-8B's 40,960 ceiling, raises a <code>ValueError</code> from <code>model.py</code> before any memory is checked. An escape hatch exists: <code>VLLM_ALLOW_LONG_MAX_MODEL_LEN=1</code> converts the error to a warning, and the source warns that positions past the limit produce NaN or out-of-bounds behaviour. Leave it alone unless you know why the length is safe.</p>
+
+<table>
+<tr><th>engine</th><th>error you got</th><th>fix direction</th></tr>
+<tr><td>vLLM 0.29.0</td><td>context does not fit</td><td class="ok">lower <code>--max-model-len</code>, or raise <code>--gpu-memory-utilization</code></td></tr>
+<tr><td>SGLang 0.5.19</td><td>no room for KV under <code>mem_fraction_static</code></td><td class="ok">raise <code>--mem-fraction-static</code> above the suggested value</td></tr>
+<tr><td>SGLang 0.5.19</td><td>runtime OOM, general case</td><td class="bad">its own flag help says use a smaller <code>--mem-fraction-static</code></td></tr>
+</table>
+
+<p>The last two rows look like a contradiction, and they are the point. SGLang's no-KV error says raise the fraction because the weights need more of the GPU. Its flag help says lower the fraction on OOM because fragmentation needs slack. The flag name tells you nothing; the error you received tells you which way to move it.</p>
+
+<h3>The shortcut and the pin</h3>
+
+<p><code>--max-model-len auto</code> runs the search for you. It tries the model's full context, then finds the largest length that fits the measured memory. Read the number it logs, then write that number into your launch command. A pinned value makes the deployment reproducible on the next machine, where the profiling pass could pick a different one.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The <code>ValueError</code> text, the <code>VLLM_ALLOW_LONG_MAX_MODEL_LEN</code> guard with its NaN and out-of-bounds warning, and the <code>auto</code> search behaviour were verified in vLLM v0.29.0 <code>model.py</code>, read 2026-10-04. SGLang's two conflicting texts were verified in v0.5.19 <code>server_args.py</code>: the help text "Use a smaller value if you see out-of-memory errors" and the no-KV error's "raise --mem-fraction-static above &lt;suggested&gt;". vLLM's KV-fit error texts are quoted from the phase's 2026-09-17 source read, not re-read this run. E4's arithmetic: 40,960 tokens of KV for Qwen3-8B need about 6.0 GB, which does not fit beside 16 GB of weights inside a 0.25 fraction on 80 GB.</p>
+</details>
+
+<h3>Use it</h3>
+
+<p>In the lab, E4 forces this failure on purpose. The launch pins the fraction at 0.25 and the KV requirement exceeds what remains. The error then prints the estimated maximum model length. The exercise is reading the number out of the message and setting it, which is the entire fix. Under five minutes of GPU time replaces the instinct to rent a bigger card.</p>
+
+<div class="keypoints">
+<p class="remember">A startup memory failure is a budget equation, and vLLM's KV-fit error prints the answer.</p>
+<p class="trap">"OOM at startup means the GPU is too small" costs a bigger rental. The fix was one context value or one flag, moved in the direction the error names.</p>
+<p class="try">Read E4's error in the lab and confirm the printed Z matches the arithmetic. That is 6.0 GB of KV beside 16 GB of weights inside 20 GB.</p>
+</div>
+
+<p>You can now start a server, pin its flags, and recover from the launch that fails. What you still cannot do is say what the running server is worth. That is the next section's question: why does capacity live where the curve flattens?</p>
+<h2 data-concept="c3">Why does capacity live where the curve flattens?</h2>
+<p class="why">A sweep has a shape, and the shape tells you where capacity is.</p>
+
+<p>You can now start a server with pinned flags and fix the launches that fail. So the rented hour finally has a running server in it. What is left unexplained is what to measure on it. Filling GPU utilisation at 100% is not the same thing as knowing what the server is worth.</p>
+
+<p>Your management asked for one number, the sustained output tokens per second on your traffic. You have about twenty billed minutes left to produce it. The easy thing is to run the client at concurrency 64 and report the total. That single number cannot tell you whether concurrency 64 was two times the server's capacity or half of it.</p>
+
+<p>Two curves describe any serving benchmark. The first plots output tokens per second against concurrency, and it rises and then flattens, because past some load the GPU has no idle cycles left to give. The second plots <dfn>TTFT</dfn> p99, the 99th percentile of the time from sending a request to its first token, against the same concurrency, and it keeps rising the whole way. The <dfn>operating point</dfn> is the pair of numbers read where the first curve flattens: the peak output tokens per second, and the TTFT p99 at that concurrency.</p>
+
+<figure class="diagram"><svg viewBox="0 0 640 260" width="640" height="260">
+<text x="150" y="20" text-anchor="middle" fill="currentColor">output tok/s vs concurrency</text>
+<line x1="40" y1="200" x2="280" y2="200" stroke="currentColor" stroke-width="1"/>
+<line x1="40" y1="200" x2="40" y2="40" stroke="currentColor" stroke-width="1"/>
+<path d="M 40 195 C 110 140, 160 90, 200 72 C 230 62, 255 60, 280 60" fill="none" stroke="var(--accent)" stroke-width="2.5"/>
+<line x1="200" y1="200" x2="200" y2="72" stroke="var(--bad)" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="200" y="216" text-anchor="middle" fill="currentColor">plateau</text>
+<text x="200" y="35" text-anchor="middle" fill="currentColor">capacity</text>
+<text x="260" y="235" text-anchor="end" fill="currentColor">concurrency</text>
+<text x="470" y="20" text-anchor="middle" fill="currentColor">TTFT p99 vs concurrency</text>
+<line x1="360" y1="200" x2="600" y2="200" stroke="currentColor" stroke-width="1"/>
+<line x1="360" y1="200" x2="360" y2="40" stroke="currentColor" stroke-width="1"/>
+<path d="M 360 195 C 430 185, 470 170, 500 130 C 530 92, 560 55, 600 40" fill="none" stroke="var(--warn)" stroke-width="2.5"/>
+<line x1="520" y1="200" x2="520" y2="96" stroke="var(--bad)" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="520" y="216" text-anchor="middle" fill="currentColor">same point</text>
+<text x="520" y="90" text-anchor="middle" fill="var(--bad)">user experience at capacity</text>
+<text x="580" y="235" text-anchor="end" fill="currentColor">concurrency</text>
+</svg>
+<figcaption>Throughput flattens at the plateau; TTFT p99 keeps rising past it. Illustration of the shape, not measured.</figcaption>
+</figure>
+
+<details class="predict"><summary>Predict: your sweep shows output tok/s still rising 5% from concurrency 64 to 128, and TTFT p99 has doubled. Do you have capacity left, and what do you report?</summary>
+<p>Add another level, because you have not found the plateau yet. A 5% rise means the GPU still had room at 64. The peak you report must come from a concurrency where the curve flattens. The TTFT p99 you report must be read at that same concurrency. Reporting only the tok/s at 128 hides that each user's first token now waits twice as long.</p>
+</details>
+
+<h3>Why each curve has its shape</h3>
+
+<ol>
+<li><b>Throughput rises while the GPU has idle room.</b> Each added concurrent sequence fills cycles that were unused, so total output tokens per second climb almost linearly at low load.</li>
+<li><b>Throughput flattens when compute or memory bandwidth saturates.</b> Decode, the step that emits one token per sequence per pass, is memory-bound, so once every pass is busy, more concurrency adds queueing and not output.</li>
+<li><b>TTFT p99 rises without a plateau.</b> Prefill, the one pass that processes the whole prompt before the first token, competes with decode for the same GPU, so each added sequence pushes every new prompt further back in the queue.</li>
+<li><b>Errors start long after the plateau.</b> The server queues almost indefinitely before it drops requests, so "no errors" is not evidence of spare capacity.</li>
+</ol>
+
+<p>One more column belongs in the result table, and most published benchmark tables leave it out. It is ITL p99, the 99th percentile of the gap between two tokens in one stream. Phase 2B showed that a high ITL is the mid-stream freeze a user actually sees. So a plateau measurement without it is missing the number your users feel.</p>
+
+<h3>Why one prompt length is one point on an un-drawn curve</h3>
+
+<p>Prefill cost grows with prompt size while decode cost does not. So a sweep run only on 200-token prompts measures a regime your 4,000-token prompts will never visit. A support workload with short questions and long retrieved-context queries lives at several points at once. The course trace mixes three prompt-size groups for exactly this reason. So the measured plateau is the plateau of traffic that resembles yours and not of one synthetic length.</p>
+
+<h3>The two numbers you carry away</h3>
+
+<p>From the whole session you keep the operating point. It is peak output tok/s, and TTFT p99 at the concurrency that produced it. The first is the number Phase 4B's economics consume, through one conversion:</p>
+
+<pre><code data-lang="bash">python phase04_serving/gpu_economics.py --gpu-hourly 3.49 --tps &lt;your measured peak&gt;</code></pre>
+
+<p>The output is cost per million tokens, which is the figure that compares against the hosted bill. A throughput number with no cost attached cannot decide anything. A cost built on a non-plateau throughput is wrong in the direction that flatters self-hosting.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The curve shapes and the plateau rule come from his phase section 4.3, which presents them as the typical shape of a concurrency sweep. The bench_client.py table columns (TTFT p50, TTFT p99, ITL p50, ITL p99, out tok/s, err), the gpu_economics.py command, and the three-group trace are quoted from the same section. The specific numbers in his figures come from his own lab runs, so nothing here is asserted as measured throughput.</p>
+</details>
+
+<h3>Use it</h3>
+
+<p>In the lab, E5 runs this sweep against one engine. E1 is its offline half. Open the trace and check the spread of prompt lengths yourself. Then when the plateau number comes out you can say which traffic shape it belongs to. The question is whether the tok/s you hand to Phase 4B came from the flat part of the curve. Or whether they came from somewhere on the slope. Reading the sweep answers this.</p>
+
+<div class="keypoints">
+<p class="remember">Capacity is where throughput flattens; the operating point is that peak plus the TTFT p99 at the same concurrency.</p>
+<p class="trap">"No errors and rising throughput" at one concurrency is the slope talking. Reporting it as capacity overstates the server and every cost figure built on it.</p>
+<p class="try">Run bench_client.py --dry-run on the trace and confirm it reports 20 prompts across three size groups. Do this before any GPU minute is spent.</p>
+</div>
+
+<p>You can now read one server's measurement honestly. But a colleague will arrive with a blog post claiming the other engine is 2x faster. The next section gives you the questions to ask of that claim.</p>
+<h2 data-concept="c3">A blog says engine B is 2x faster. What do you ask?</h2>
+<p class="why">Believing a 2x claim from one row buys the wrong engine for a year.</p>
+
+<p>The section above showed how to read one server honestly, with capacity at the plateau and the operating point as peak output tok/s plus the TTFT p99 at that concurrency. The next event in your rental story is a colleague forwarding a benchmark that says the other engine is 2x faster. Management asks whether you are testing the wrong one. A comparison of two servers adds three new ways to fool yourself, and each one pairs with a fix you already own.</p>
+
+<p>The claim names the wrong unit. Section 4 showed that a server computes its defaults at startup. The defaults come from the GPU's memory and the entry point you used. So two runs of the same engine can already be two different servers. What a measurement compares is one configuration against another on one workload, never one engine against another. Drawn as a shape, the fair comparison looks like this.</p>
+
+<figure class="diagram" id="s7-fair">
+<svg viewBox="0 0 680 300" role="img" aria-label="The fair shape: one client and one trace drive two engines with pinned flags, producing two comparable result files">
+<rect x="170" y="10" width="340" height="62" rx="10" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+<text x="340" y="34" text-anchor="middle" font-size="13.5" font-weight="600" fill="currentColor">one client (bench_client.py)</text>
+<text x="340" y="54" text-anchor="middle" font-size="12" fill="currentColor" fill-opacity=".65">one trace file · one pinned flag set</text>
+<path d="M340 72 V 94" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3" fill="none"/>
+<path d="M170 94 H 510" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3" fill="none"/>
+<path d="M170 94 V 116" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3" fill="none"/>
+<polygon points="164,110 176,110 170,120" fill="currentColor" fill-opacity=".6"/>
+<path d="M510 94 V 116" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3" fill="none"/>
+<polygon points="504,110 516,110 510,120" fill="currentColor" fill-opacity=".6"/>
+<rect x="60" y="120" width="220" height="66" rx="10" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.4"/>
+<text x="170" y="144" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">vLLM · port 8000</text>
+<text x="170" y="164" text-anchor="middle" font-size="12" fill="currentColor" fill-opacity=".65">flags pinned</text>
+<rect x="400" y="120" width="220" height="66" rx="10" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.4"/>
+<text x="510" y="144" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">SGLang · port 30000</text>
+<text x="510" y="164" text-anchor="middle" font-size="12" fill="currentColor" fill-opacity=".65">flags pinned</text>
+<path d="M170 186 V 208" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3" fill="none"/>
+<path d="M510 186 V 208" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3" fill="none"/>
+<path d="M170 208 H 510" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3" fill="none"/>
+<path d="M340 208 V 230" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3" fill="none"/>
+<polygon points="334,224 346,224 340,234" fill="currentColor" fill-opacity=".6"/>
+<rect x="225" y="234" width="230" height="62" rx="10" fill="none" stroke="var(--ok)" stroke-width="1.6"/>
+<text x="340" y="258" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">two result files</text>
+<text x="340" y="278" text-anchor="middle" font-size="12" fill="currentColor" fill-opacity=".65">safe to put side by side</text>
+</svg>
+<figcaption>The fair shape. One client drives both engines with one trace and one pinned flag set, so the only difference left between the two runs is the engine.</figcaption>
+</figure>
+
+<p>The shape that manufactures wrong answers runs each engine's own benchmark tool against that engine on its own defaults. That changes the engine, the client, the flag set and the traffic mix all at once. So the gap it reports has four candidate causes and no way to choose among them.</p>
+
+<details class="predict"><summary>Predict: you run one engine's own benchmark tool at concurrency 64 and record 2,900 output tok/s. Your colleague runs the other engine's own tool the same way and records 1,400. Management asks which engine to buy for a year. What does each number fail to tell you, and what do you change about both runs?</summary>
+<p>Each number hides three things.</p>
+<ul>
+<li>Each engine ran on its own computed-at-startup defaults from section 4, so the pair of runs may compare two different servers rather than two different engines.</li>
+<li>Each harness issues and times requests in its own way, so part of the 2,900-against-1,400 gap may live in the client rather than the server.</li>
+<li>Concurrency 64 is one point on a curve nobody drew, and the same load can be routine for one server and heavy for the other.</li>
+</ul>
+<p>With few requests the gap can also be manufactured, as in the published result that fell from about 2x at 50 requests to 8.6% at 2,000. So the change to both runs is the same: one client, one trace shaped like your traffic, equivalent flags pinned from the flag map, and a full sweep read by its shape. The three checks below are those fixes, one by one.</p>
+</details>
+
+<h3>Check one: whose client produced the number?</h3>
+
+<p>Both engines ship a benchmark harness, and each harness can drive the other engine. vLLM's has an OpenAI-compatible path that works against SGLang on port 30000, and SGLang's includes vLLM backends directly. So two numbers from two harnesses mix the client's timing and request pattern into the server's score. Nothing forces that, because either harness could have driven both. The fix is one client and one trace, run against both servers, changing only the base URL.</p>
+
+<h3>Check two: do the flags describe the same server?</h3>
+
+<p>Section 4 showed that both engines compute their batching and memory defaults from the GPU they find. Their memory flags also count memory differently, so the same 0.90 on both sides is not the same KV cache. A comparison run "on defaults" therefore measures whatever two startup functions happened to pick, plus the engines.</p>
+
+<p>One published comparison was retracted by its own author for exactly this reason. His vLLM flag <code>--max-model-len</code> did not map to the SGLang flag he had used. Once he corrected the mapping, the memory difference he had reported came out "basically the same". The fix is to pin equivalent flags on both sides, using the flag map, before you measure anything.</p>
+
+<h3>Check three: how many requests, and whose traffic?</h3>
+
+<p>Short runs manufacture gaps. One published comparison showed about 2x at 50 requests, and a rerun with 2,000 requests shrank it to 8.6%. A run at one prompt length has the same weakness turned sideways. Prefill cost grows with prompt size, so it measures one point on a curve nobody drew. The fix is a trace shaped like your own traffic, with enough requests to fill the shape. Then read the sweep like section 6 read it. Use the plateau and the TTFT p99 at it, instead of one number at one concurrency.</p>
+
+<div class="callout note">If you later need to replay production traffic with its real arrival times, both harnesses can do it: vLLM with <code>--dataset-name timed_trace</code> and SGLang with <code>--dataset-name mooncake --use-trace-timestamps</code>, both reading JSONL with a timestamp per request. Whether one trace file works unchanged in both harnesses was not confirmed, so test that before the paid hour.</div>
+
+<h3>What the only audited comparison found</h3>
+
+<p>An <dfn>audited comparison</dfn> is a benchmark submitted to an outside body that checks the submitter followed the rules. For these two engines exactly one exists, a Krai submission to MLPerf Inference v5.1. The conditions were one machine with eight H200 GPUs, one CUDA version, one driver and Llama-3.1-70B in FP8. The run used 24,576 samples under latency limits of 2,000 ms TTFT and 200 ms per output token. The submitter tuned each engine. No other public comparison fixes the hardware, the model and the latency limits this completely. So its rows are worth reading.</p>
+
+<table>
+<thead><tr><th>quantization path</th><th>scenario</th><th>SGLang</th><th>vLLM</th></tr></thead>
+<tbody>
+<tr><td>pre-quantized FP8</td><td>offline tok/s</td><td class="ok">31,383</td><td>26,319</td></tr>
+<tr><td>pre-quantized FP8</td><td>server tok/s</td><td class="ok">30,304</td><td>25,628</td></tr>
+<tr><td>dynamic FP8</td><td>offline tok/s</td><td>27,697</td><td class="ok">30,893</td></tr>
+<tr><td>dynamic FP8</td><td>server tok/s</td><td>26,435</td><td class="ok">26,903</td></tr>
+</tbody>
+</table>
+
+<p>The winner flips with the quantization path. Pre-quantized means the checkpoint already ships FP8 weights, and dynamic means the engine applies the quantization itself. SGLang leads by 18 to 19% on the pre-quantized checkpoint. vLLM leads by 2 to 12% on the dynamic path, same machine, same model, same accuracy. Anyone quoting a single winner from this submission picked a row and ignored the rest.</p>
+
+<p>The table has limits too. Those engine versions are from mid-2025, roughly twenty releases behind the vLLM you would rent today. No audited comparison of the current versions exists. So the table's real lesson is not which engine won. It is how far the answer moved when only the quantization path changed.</p>
+
+<div class="callout warn"><b>A number you will be quoted and should not use.</b> A July 2024 blog post by one of the two engine teams reported its own engine as 3.1x faster. It tested a 2024 version of the other engine with that engine's prefix caching disabled, and prefix caching, the reuse of stored attention keys and values for a repeated prompt prefix, is on in any real deployment. The figure describes neither engine today. Both projects have since stopped publishing head-to-head numbers, vLLM removed its cross-engine benchmark path for lack of a maintainer, and one independent benchmarking project assigns one engine per model to avoid restarting the argument.</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The Krai submission's existence and conditions were checked against the public MLPerf Inference v5.1 results tree on 2026-10-04. The four row values come from the phase and were not re-read this run. The 2x to 8.6% rerun and the retracted comparison are reported in the phase. The retraction is public but was not re-read. The July 2024 figure and the retreat from head-to-head numbers are also phase-reported. On 2026-10-04 the current releases were vLLM v0.30.0 and SGLang 0.5.20. So the Krai rows describe engines roughly twenty releases old. A purchase decision needs a fresh run on current versions.</p>
+</details>
+
+<h3>Use it</h3>
+
+<p>The lab's E6 applies the whole design end to end. You launch SGLang with the flags that match your vLLM server from the earlier exercises. Then run the course client against both. bench_client.py is the neutral client. It speaks the OpenAI streaming API, so the same timing logic drives both servers. Only the base URL and the output file change:</p>
+
+<pre><code data-lang="bash">python phase04_serving/bench_client.py --base-url http://localhost:8000/v1 \
+    --model Qwen/Qwen3-8B --concurrency 1,4,16,64 \
+    --trace phase04_serving/traces/support.jsonl --out vllm.json
+
+python phase04_serving/bench_client.py --base-url http://localhost:30000/v1 \
+    --model Qwen/Qwen3-8B --concurrency 1,4,16,64 \
+    --trace phase04_serving/traces/support.jsonl --out sglang.json</code></pre>
+
+<p>Put the two files side by side and compare the operating points, not a single row. Do not treat two close operating points as a wasted hour. A small, stable difference means the engine choice costs little on your traffic, so you can pick on operability instead. The question E6 answers is not which engine is fastest. It is which configuration is fastest on your trace and by how much.</p>
+
+<div class="keypoints">
+<p class="remember">The unit of any benchmark claim is one configuration on one workload, never the engine.</p>
+<p class="trap">Two harnesses, two default flag sets and one number each compare four things at once.</p>
+<p class="try">Check any engine benchmark for three names: the client, the flags and the request count.</p>
+</div>
+
+<p>A throughput table never shows which grammar backend served your answers. The next section explains why one tenant's schema can set it for the whole server.</p>
+<h2 data-concept="c5">One tenant&#x27;s schema changes the whole server. Why?</h2>
+<p class="why">One tenant's schema can silently change what the whole server guarantees to every other tenant.</p>
+
+<p>The comparison is now defensible, but one configuration choice stays invisible inside any benchmark, because it reaches every tenant and nothing reports it. In Phase 2B you saw constrained decoding, the engine blocking tokens that would break a schema at each generation step, and the phase said this topic would return when you serve the model yourself. This is the return. Your running case is now a self-hosted server at the plateau you measured, and five tenants send JSON-schema requests to it. The question is what one strange schema does to the other four.</p>
+
+<h3>The picture</h3>
+
+<p>Constrained decoding needs a library that can read your schema and produce, at each step, the set of tokens that stay legal. That library is the <dfn>grammar backend</dfn>, and three of them exist in this course's versions, named xgrammar, outlines and guidance. Phase 2B already fixed what a schema controls: at each step, the engine blocks tokens that would break the schema. What is new here is who picks the library. With the default setting on vLLM, the server picks it for you, once, and the choice binds for every request that follows.</p>
+
+<p>The default setting is <dfn>auto backend resolution</dfn>, which means the engine reads the first structured request's schema, classifies it, and picks a backend it keeps for its whole lifetime. The vLLM v0.29.0 source says so directly, in a comment naming the reason: only a single backend is supported, and different backends per request are not.</p>
+
+<details class="predict"><summary>Predict: you serve JSON-schema responses to five tenants on vLLM with the default auto backend, and a sixth tenant's schema uses multipleOf. No error appears in any dashboard. What changed, and for whom?</summary>
+<p>The whole server's grammar backend moved. If the sixth tenant's request was the first structured one after startup, the engine classified multipleOf as something xgrammar does not support, chose a fallback backend, and stored that choice. Every later structured request from the other five tenants now runs through that fallback. No request failed, so no alert fired. The schema is still enforced on all of them, what changed is which library enforces it, and the study note could not re-read the latency difference this run, so the honest version is this: the discovery path in production is a log line, not an error.</p>
+</details>
+
+<h3>The mechanism on vLLM</h3>
+
+<ol>
+<li>At startup the engine has no backend yet, so no cost has been paid and no choice has been made.</li>
+<li>The first structured request arrives, and the engine reads its schema and checks whether xgrammar supports it.</li>
+<li>If xgrammar supports it, the engine pins xgrammar. If not, the engine pins one of the fallback backends, which one depends on which feature the schema uses.</li>
+<li>Every later structured request reuses the pinned backend, because the engine stores the choice once and the source comment says one backend is supported per engine.</li>
+</ol>
+
+<p>The features the source lists as pushing a schema off xgrammar are specific, so you can scan a tenant's schema for them before it arrives:</p>
+
+<ul>
+<li><b>multipleOf</b> on numbers.</li>
+<li><b>uniqueItems, contains, minContains or maxContains</b> on arrays.</li>
+<li>A <b>format</b> outside xgrammar's supported list.</li>
+<li>A string combining <b>pattern or format</b> with <b>minLength or maxLength</b>.</li>
+<li><b>patternProperties or propertyNames</b> on objects.</li>
+</ul>
+
+<p>Timing matters here, and so does request order. Plain chat requests arrive all evening and change nothing, because only a structured request triggers the classification. Among structured requests, whichever one arrives first decides for all the rest, so the tenant whose schema reaches your server first after each restart sets the backend for everyone.</p>
+
+<figure class="diagram"><svg viewBox="0 0 720 240">
+<text x="20" y="24" fill="currentColor" font-size="13" font-weight="bold">default auto backend</text>
+<rect x="20" y="36" width="40" height="110" fill="var(--muted)" opacity="0.5"/>
+<text x="64" y="50" fill="currentColor" font-size="11">plain chat requests, no effect</text>
+<rect x="20" y="60" width="180" height="26" rx="4" fill="var(--warn)" opacity="0.35"/>
+<text x="28" y="77" fill="currentColor" font-size="11">first structured: multipleOf schema</text>
+<polygon points="306,34 366,73 306,112 246,73" fill="none" stroke="currentColor"/>
+<text x="306" y="70" text-anchor="middle" fill="currentColor" font-size="10">xgrammar</text>
+<text x="306" y="84" text-anchor="middle" fill="currentColor" font-size="10">supports?</text>
+<line x1="200" y1="73" x2="246" y2="73" stroke="currentColor"/>
+<line x1="306" y1="112" x2="306" y2="150" stroke="currentColor"/>
+<text x="316" y="136" fill="currentColor" font-size="11">no → fallback, pinned for life</text>
+<rect x="20" y="156" width="660" height="26" rx="4" fill="var(--violet)" opacity="0.3"/>
+<text x="28" y="173" fill="currentColor" font-size="11">all later structured requests run through the fallback</text>
+<text x="20" y="216" fill="currentColor" font-size="13" font-weight="bold">backend pinned at launch (xgrammar)</text>
+<rect x="350" y="60" width="40" height="26" rx="6" fill="var(--bad)" opacity="0.7"/>
+<text x="436" y="76" fill="currentColor" font-size="11">HTTP 400 on the unsupported schema</text>
+<text x="20" y="234" fill="currentColor" font-size="11">the server stays on xgrammar for everyone</text>
+</svg><figcaption>One server under both settings. With auto, the first structured schema picks the backend for the engine's lifetime. Pinned at launch, the same schema returns 400 and everyone else stays on xgrammar.</figcaption></figure>
+
+<p>Pinning the backend with <code>--structured-outputs-config.backend xgrammar</code> changes the failure from invisible to visible. An unsupported schema then returns HTTP 400 instead of a silent switch, and the failing request is the one the tenant can fix. For a multi-tenant server this is usually what production wants, because the repair lands on the tenant whose schema caused it.</p>
+
+<h3>SGLang takes the opposite design</h3>
+
+<p>SGLang resolves <code>--grammar-backend</code> to xgrammar and applies no per-schema fallback. When a schema fails to compile, that one request aborts with a message naming the failure, and the other tenants are untouched. That is the safer half of the story.</p>
+
+<p>The other half is its one fallback, at startup. If xgrammar cannot handle the model's tokenizer, SGLang logs a warning and sets the backend to <code>none</code>. Structured output is then off for the whole server, and requests return unconstrained text with 200 OK. This is Phase 3A's pattern again, a success code that proves nothing, so the backend name belongs in your logs and your startup checks.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The single-backend comment, the initialize-on-first-request code path and the auto docstring were read this run in vLLM v0.29.0 (<code>vill/v1/structured_output/__init__.py</code>, <code>vllm/config/structured_outputs.py</code>), verified on 2026-10-04. SGLang's grammar-backend choices including <code>none</code> were verified in v0.5.19 <code>server_args.py</code>. The tokenizer-unsupported auto-fallback to <code>none</code> is from the phase's source check on 2026-09-13 and was not re-read this run. The latency difference between backends is inferred from the mechanism and was not measured.</p>
+</details>
+
+<h3>Use it</h3>
+
+<p>In the lab, E7 sends one multipleOf schema at both engines and gets three outcomes from one request. On vLLM with auto, a silent server-wide backend switch. On vLLM with the backend pinned, HTTP 400. On SGLang, one aborted request and nothing else touched. The request-field differences, such as vLLM's <code>grammar</code> field being SGLang's <code>ebnf</code> and SGLang having no <code>choice</code>, are in the cheatsheet.</p>
+
+<div class="keypoints">
+<p class="remember">With vLLM's default auto, the first structured request picks the grammar backend for every later request.</p>
+<p class="trap">Constrained decoding feels per-request like temperature, but the backend is engine-wide, so one tenant's schema decides for all tenants.</p>
+<p class="try">Scan one tenant schema for multipleOf, then check your logs for which backend the engine resolved.</p>
+</div>
+
+<p>You can now plan a rented session so the paid minutes go to serving, start vLLM and SGLang with flags you pinned on purpose, read a startup memory error as an equation, and carry away two numbers, peak output tokens per second and TTFT p99 at that concurrency. Phase 4B asks the question those two numbers answer, whether quantization and speculative decoding change the arithmetic enough to beat your hosted bill.</p>
+<h2 data-kind="recall">What you can do now, and what comes next</h2>
+<p>You started this phase with one hour, $5 to $10, and a question from management: does self-serving beat hosted prices? The hour went to a download. The sections above turned that failure into five claims. Read them again now; they should read like things you would say yourself.</p>
+
+<ul>
+<li><b>The rental clock bills the download.</b> Billing starts at container start, so a 140 GB model on a 34.5 MB/s link costs 67.6 minutes at GPU rates, longer than the rental. <i>(Section 1 and 2.)</i></li>
+<li><b>A default is a startup function.</b> vLLM reads GPU memory and your entry point before it picks batching defaults, so the same machine yields different servers depending on how you launched them. <i>(Section 3.)</i></li>
+<li><b>A startup memory failure is a budget equation.</b> Weights plus KV for your context must fit the memory fraction, and the KV-fit error prints the value to set. <i>(Section 4.)</i></li>
+<li><b>Only a configuration is faster on one workload.</b> So a comparison is an experiment design: one client, pinned flags, a traffic-shaped trace, and a curve read by its shape. <i>(Sections 5 and 6.)</i></li>
+<li><b>Structured output is an engine-wide decision.</b> On vLLM the first structured request picks the grammar backend for every later request, while a pinned backend returns HTTP 400 instead. <i>(Section 7.)</i></li>
+</ul>
+
+<p>You can now plan a rented session so the paid minutes go to serving. You can start both engines with flags you pinned on purpose. You can read a startup memory error as an equation instead of renting a bigger GPU. And you carry away two numbers: peak output tokens per second, and TTFT p99, the time to the first token, at that concurrency.</p>
+
+<p>Phase 4B asks the question those two numbers answer. Quantization buys something there, at a cost that section makes explicit. Speculative decoding changes decode speed, so it moves your plateau. The question is whether both together change the arithmetic enough to beat the hosted bill.</p>
+<h2 data-kind="lab">Lab: plan it offline, break it on the clock, defend the number</h2>
+<ul class="exercises">
+<li>
+<label><input type="checkbox"> <b>E1</b> <span class="tag">offline</span></label>
+<b>Look at the traffic before you measure it.</b> This proves the workload half of a defensible comparison: a benchmark on one prompt length measures one point on a curve you have not drawn.
+<div class="lab">
+<pre><code data-lang="bash">python phase04_serving/bench_client.py --dry-run --trace phase04_serving/traces/support.jsonl --concurrency 1,4,16,64</code></pre>
+<p>Expected: <code>prompts: 20 prompts from phase04_serving/traces/support.jsonl</code> and <code>total : 256 requests</code>. That is 64 requests at each of 4 levels.</p>
+<p>Then open <code>phase04_serving/traces/support.jsonl</code> and measure the prompt lengths yourself. Write down the shortest and the longest.</p>
+<p>Expected: the <code>prompt</code> field is 50 characters at its shortest and 5,507 at its longest. The lengths form three groups: 50 to 93, 1,102 to 1,197, and 5,448 to 5,507.</p>
+<details class="evidence"><summary>Evidence</summary>The offline commands were run and the lengths were measured with a short Python loop over the file, last re-run 2026-09-17.</details>
+</div>
+</li>
+<li>
+<label><input type="checkbox"> <b>E2</b> <span class="tag">offline</span></label>
+<b>Write the whole session down before the clock starts.</b> This is the lever from Section 1: when the rental clock bills everything, preparation controls cost.
+<div class="lab">
+<p>Write a text file with these items:</p>
+<ul>
+<li>Your chosen model id and its size in GB.</li>
+<li>The full vLLM launch command and the full SGLang launch command.</li>
+<li>The benchmark command, with your model id already in it.</li>
+<li>Your provider's hourly rate, with today's date.</li>
+</ul>
+<p>Then check your target machine's NVIDIA driver version, because a wrong driver wastes your first fifteen paid minutes. vLLM's default build needs 575 or newer, and SGLang 0.5.19 needs 580 or newer.</p>
+</div>
+</li>
+<li>
+<label><input type="checkbox"> <b>E3</b> <span class="tag">rented GPU, about $1, UNVERIFIED</span></label>
+<b>Serve a model and let the engine choose its own context size.</b> This applies the flag map and the budget equation together: <code>auto</code> removes the most common first failure, and pinning the result keeps the deployment reproducible.
+<div class="lab">
+<pre><code data-lang="bash">vllm serve Qwen/Qwen3-8B --max-model-len auto</code></pre>
+<p>Expected: the server starts and logs the context length it chose. Write that number down, then restart with that number set explicitly.</p>
+<p>If it fails, compare the error with the cases in Section 4 before you change anything.</p>
+<details class="evidence"><summary>Evidence</summary>UNVERIFIED on a rented GPU. Commands, flag names and defaults were checked against the vLLM 0.29.0 and SGLang 0.5.19 source at their release tags.</details>
+</div>
+</li>
+<li>
+<label><input type="checkbox"> <b>E4</b> <span class="tag">break-it, rented GPU, UNVERIFIED</span></label>
+<b>Run out of KV cache memory on purpose, then let the error tell you the fix.</b> This is Section 4's budget equation read from a real error message.
+<div class="lab">
+<pre><code data-lang="bash">vllm serve Qwen/Qwen3-8B --max-model-len 40960 --gpu-memory-utilization 0.25</code></pre>
+<p>Do not use a context above the model's limit, because vLLM 0.29.0 fails an over-limit context earlier with a <code>ValueError</code>, before any memory check.</p>
+<p>Expected: the server refuses to start with one of the two KV messages from Section 4. If it prints an estimated maximum model length, copy that number. Restart with <code>--max-model-len &lt;that number&gt;</code> and the same memory flag, and confirm it starts.</p>
+<pre><code>0.25 of an 80 GB GPU        = 20 GB budget
+Qwen3-8B weights            = ~16 GB
+KV per token: 2 × 36 layers × 8 KV heads × 128 head size × 2 bytes
+                            = 147,456 bytes
+40,960 tokens of KV         = ~6.0 GB, which does not fit beside the weights</code></pre>
+<p>If the server starts anyway, lower <code>--gpu-memory-utilization</code> in steps of 0.02. If you get the first KV message instead, raise it a little.</p>
+<details class="evidence"><summary>Evidence</summary>The KV arithmetic is inferred, not run; the config values come from Qwen3-8B's config.json. UNVERIFIED on a rented GPU.</details>
+</div>
+</li>
+<li>
+<label><input type="checkbox"> <b>E5</b> <span class="tag">rented GPU, about $1, UNVERIFIED</span></label>
+<b>Produce the number Phase 4B's economics need.</b> This is the shape-reading from Section 5: capacity is where the throughput curve flattens, not where errors start.
+<div class="lab">
+<pre><code data-lang="bash">python phase04_serving/bench_client.py --base-url http://localhost:8000/v1 --model Qwen/Qwen3-8B --concurrency 1,4,16,64 --trace phase04_serving/traces/support.jsonl --out vllm.json</code></pre>
+<p>Expected: throughput rises and then flattens, while TTFT p99 rises the whole time. Record the peak output tokens per second and the concurrency where it occurred.</p>
+<details class="evidence"><summary>Evidence</summary>UNVERIFIED on a rented GPU; checked against the vLLM 0.29.0 source.</details>
+</div>
+</li>
+<li>
+<label><input type="checkbox"> <b>E6</b> <span class="tag">rented GPU, about $1, UNVERIFIED</span></label>
+<b>Compare the engines without fooling yourself.</b> This is the experiment design from Sections 3 and 6 applied end to end: one client, both servers, flags pinned.
+<div class="lab">
+<pre><code data-lang="bash">sglang serve Qwen/Qwen3-8B</code></pre>
+<p>Run the same client command as E5, changing only <code>--base-url</code> to port 30000 and <code>--out</code> to <code>sglang.json</code>. Before you compare, set the batching flags explicitly on both sides, using the mapping from Section 3, because the defaults depend on GPU size and on which entry point you used.</p>
+<p>Expected: two files you can compare honestly. The difference may be small, and a small difference is a valid result.</p>
+<details class="evidence"><summary>Evidence</summary>Three public comparisons of these engines were wrong for exactly the reasons this exercise controls. UNVERIFIED on a rented GPU.</details>
+</div>
+</li>
+<li>
+<label><input type="checkbox"> <b>E7</b> <span class="tag">break-it, rented GPU, UNVERIFIED</span></label>
+<b>Send one schema that makes the two engines behave differently.</b> This shows Section 7's claim: the same schema has three different outcomes across these engines.
+<div class="lab">
+<p>Build a JSON schema that uses <code>multipleOf</code> on a number field, or <code>patternProperties</code> on an object. Send it to each engine as a structured-output request.</p>
+<ol>
+<li>On vLLM with the default <code>auto</code> backend the request succeeds, because the engine has silently switched backends for the whole server.</li>
+<li>On SGLang the engine aborts the request with a compile failure.</li>
+<li>Pin vLLM's backend with <code>--structured-outputs-config.backend xgrammar</code> and send the schema again, and expect HTTP 400.</li>
+</ol>
+<details class="evidence"><summary>Evidence</summary>UNVERIFIED on a rented GPU; backend behaviour verified at vLLM v0.29.0 source.</details>
+</div>
+</li>
+</ul>
+
+<p>Do E1 and E2 before you rent anything, because they are the preparation that keeps the five paid exercises inside $3 to $5. Work E3 to E7 from the notes you wrote in E2, and record what you see wherever an expected value is marked unverified.</p>
+<h2 data-kind="checkpoint">Checkpoint 4A</h2>
+<p>Five scenarios, each one a situation from the phase. Write your own answer before you open the sketch.</p>
+
+<ul class="exercises">
+<li>
+<label><input type="checkbox"> <b>Q1</b> <span class="tag">rental clock</span></label>
+<b>Show the arithmetic.</b> You rent one H100 at $3.49 per hour. Your model is 140 GB. The machine's measured downlink is 276 Mbps.
+<ol>
+<li>How long does the download take?</li>
+<li>What does that download cost in GPU time?</li>
+<li>You plan eight one-hour sessions this month. Compare downloading each time against a cached volume at $9.80 per month.</li>
+<li>Name the cost of the volume that is not money.</li>
+</ol>
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) 276 Mbps is 34.5 MB/s. 140,000 MB / 34.5 = about 4,058 seconds, which is 67.6 minutes. (b) 67.6 minutes at $3.49 per hour is about $3.93, so on that machine the download alone is longer than a one-hour rental. (c) On a fast link each download costs roughly $0.34 to $1.09, so eight downloads cost $2.72 to $8.72 and the $9.80 volume is close to break-even; it becomes cheaper above about 9 to 29 downloads a month. On the slow machine above, eight downloads cost 8 × $3.93 = $31.44, so the volume is much cheaper. (d) A network volume ties your work to one datacentre, which reduces the GPUs you can get and removes failover options.</p>
+</details>
+</li>
+<li>
+<label><input type="checkbox"> <b>Q2</b> <span class="tag">defaults</span></label>
+<b>A colleague says: "I benchmarked both engines on defaults. vLLM was faster, so we should use vLLM."</b> Give three specific reasons why that result may mean nothing. One reason is about batching defaults, one is about memory flags, and one is about the client.
+<details class="answer"><summary>Answer sketch</summary>
+<p>First, each engine chooses its batching defaults at startup from GPU memory and from the entry point used, so the defaults differ before you type anything. Second, <code>--gpu-memory-utilization</code> and <code>--mem-fraction-static</code> count memory differently, so equal-looking values do not give equal KV cache. Third, each engine's own benchmark client is different, so a fair test uses one client against both servers. Two public comparisons went wrong in exactly these ways: one was retracted over a flag-mapping error, and another fell from a 2x gap to 8.6% when the request count rose from 50 to 2,000.</p>
+</details>
+</li>
+<li>
+<label><input type="checkbox"> <b>Q3</b> <span class="tag">startup failure</span></label>
+<b>Your server refuses to start with a message about KV cache memory.</b>
+<ol>
+<li>Name the two different vLLM messages this could be, and how you tell them apart.</li>
+<li>For the second one, name the number in the message that tells you what to do.</li>
+<li>State what the matching SGLang message asks you to do, and explain why the direction is the opposite of what the flag name suggests.</li>
+</ol>
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) The first message says there is no memory for cache blocks at all, because the weights consumed everything inside the budget. The second says the requested context needs more KV than the remainder allows, and it prints both sizes. (b) The second message prints the estimated maximum model length, so set <code>--max-model-len</code> to that value or use <code>--max-model-len auto</code>. (c) SGLang asks you to raise <code>--mem-fraction-static</code>, because that flag is the share of memory the engine reserves, so raising it enlarges the budget inside which the KV pool must fit. The flag names look alike, but the fixes point in opposite directions depending on which error you got.</p>
+</details>
+</li>
+<li>
+<label><input type="checkbox"> <b>Q4</b> <span class="tag">grammar backend</span></label>
+<b>Your vLLM server has served plain chat for an hour. A new client sends its first structured-output request, and its schema uses <code>multipleOf</code> on a price field.</b>
+<ol>
+<li>Trace what the engine does with that schema.</li>
+<li>State what happens to every later structured-output request, and why.</li>
+<li>Name the one-line change that would have turned this into an error, and say whether you would want that.</li>
+</ol>
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) With the default <code>auto</code> backend, vLLM checks the schema against xgrammar. xgrammar does not support <code>multipleOf</code> on numbers, so vLLM checks whether the schema uses a feature the fallback backends do not support and routes it to guidance or outlines. (b) Every later structured-output request uses that same backend, because the engine resolves the backend once on the first structured request and the source says it does not support different backends per request, so one client's schema has changed the server for every client. (c) Pin <code>--structured-outputs-config.backend xgrammar</code>, which removes the fallback and returns HTTP 400 for that schema. In production you usually want this, because a clear failure on one request is better than a silent change that affects all requests.</p>
+</details>
+</li>
+<li>
+<label><input type="checkbox"> <b>Q5</b> <span class="tag">experiment design</span></label>
+<b>You have one hour of rented GPU and want a defensible comparison of the two engines for your workload.</b> Write the plan. Cover what you prepare before the clock starts, which client you use and why, which flags you pin, what traffic you replay, and the two numbers you take away.
+<details class="answer"><summary>Answer sketch</summary>
+<p>Before the clock starts, write both launch commands and the client command with the model id already in it, note the driver check and the model size, and use a cached volume if you will repeat the session. Use one client, <code>bench_client.py</code>, against both servers, because each engine's own harness is different. Pin the context flags to the same value on both sides, and pin the batched-token and concurrent-sequence flags using the flag map, so two different sets of defaults do not sneak into the comparison. Replay the mixed-size trace instead of one prompt, because prefill cost grows with prompt length and real traffic has a spread of lengths. Take away peak output tokens per second and TTFT p99 at that concurrency, which together are the operating point, and the first feeds Phase 4B's cost arithmetic.</p>
+</details>
+</li>
+</ul>
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+<pre class="cheatsheet">RENTING
+  budget for this phase: $5-10        the clock runs during the DOWNLOAD
+  H100 $/hr on 2026-09-13: market 1.87-2.00 | RunPod 1.99-3.49 |
+    Modal 3.95 | Lambda 3.99 | CoreWeave 6.16 | AWS p5.4xlarge 6.88
+  the real specialist-vs-hyperscaler gap is 3.68x, NOT the 10x you will read
+  billing: Modal/RunPod/Vast per SECOND | Lambda per MINUTE and while IDLE
+  stopping a pod can DOUBLE the volume rate, from $0.10 to $0.20/GB/mo
+  140GB download: 4.7 min at 500 MB/s ... 67.6 min ($3.93) at 276 Mbps
+  volume pays for itself at ~9-29 re-downloads/month, and pins you to one region
+  use hf_xet, NOT hf_transfer (deprecated) | hf download --dry-run
+
+LAUNCH
+  vllm serve &lt;model&gt;                      port 8000
+  sglang serve &lt;model&gt;                    port 30000
+  deprecated: python -m vllm.entrypoints.openai.api_server
+  warns:      python -m sglang.launch_server
+
+FLAG MAP                vLLM 0.29.0                 SGLang 0.5.19
+  context               --max-model-len             --context-length
+  memory share          --gpu-memory-utilization    --mem-fraction-static
+                        (0.92)                      (computed, NOT equivalent)
+  concurrent seqs       --max-num-seqs              --max-running-requests
+  tokens per iteration  --max-num-batched-tokens    --chunked-prefill-size
+  GPUs                  --tensor-parallel-size      --tp-size
+  grammar engine        --structured-outputs-       --grammar-backend
+                        config.backend
+  THE FLAG TO USE FIRST: --max-model-len auto   (searches for what fits)
+
+DEFAULTS ARE NOT FIXED
+  vLLM batching depends on GPU memory AND serve-vs-offline:
+    &lt;70 GiB or any A100 -&gt; 2048 / 256    70-160 GiB -&gt; 8192 / 1024
+    &gt;=160 GiB -&gt; 16384 / 1024
+    --performance-mode throughput DOUBLES both
+  SGLang auto-tunes chunked prefill by GPU memory; fraction falls back to 0.88
+  PIN THEM EXPLICITLY before comparing anything
+
+WHEN IT WILL NOT START
+  "max_model_len ... is greater than the derived" -&gt; above the model's limit
+                                  (Qwen3-8B max_position_embeddings = 40960)
+  "No available memory for the cache blocks"  -&gt; weights ate everything
+  "estimated maximum model length is Z"       -&gt; use Z, or --max-model-len auto
+  PyTorch CUDA OOM + fragmentation hint       -&gt; memory fraction too high
+  SGLang says RAISE --mem-fraction-static, its help says LOWER it on OOM
+                                  -&gt; the direction depends on which error you got
+  diagnostics: vllm collect-env | python -m sglang.check_env
+  drivers: vLLM cu129 needs 575+ | SGLang 0.5.19 needs 580+
+           a 570-series box runs vLLM and NOT SGLang
+
+STRUCTURED OUTPUT WHEN YOU SERVE
+  vLLM default backend = auto, falls back xgrammar -&gt; outlines/guidance
+    pushed off xgrammar by: multipleOf, uniqueItems, contains, minContains,
+    maxContains, unsupported format, pattern+minLength, patternProperties,
+    propertyNames
+  PINNED backend = NO fallback = HTTP 400
+  vLLM resolves the backend ONCE PER ENGINE: the first structured request
+    decides it for every later one
+  SGLang default = xgrammar, NO per-schema fallback, compile failure aborts
+    its only fallback sets backend=none, disabling structured output SERVER-WIDE
+  fields: vLLM json/regex/choice/grammar/json_object/structural_tag
+          SGLang json_schema/regex/ebnf/structural_tag   (grammar == ebnf)
+
+BENCHMARKING
+  ONE client against BOTH servers. Both harnesses can drive the other engine.
+  pin the flags, replay a trace, never compare defaults
+  read the SHAPE: throughput flattens, TTFT p99 never stops rising
+  capacity = where throughput flattens; the TTFT there is what users get
+  ITL p99 is the stream-freeze number most benchmarks omit
+  trace replay: vLLM --dataset-name timed_trace | SGLang mooncake
+                + --use-trace-timestamps
+  the only audited comparison (Krai, MLPerf v5.1, 8xH200, Llama-3.1-70B):
+    SGLang +18-19% on pre-quantized FP8 | vLLM +2-12% on dynamic FP8
+    -&gt; the winner FLIPS with the quantization path
+
+THE COMMANDS
+  bench_client.py --dry-run --trace ...            plan it, offline
+  bench_client.py --base-url ... --model ...       measure it
+  vllm bench serve / python -m sglang.benchmark.serving   the engines' own
+  vllm collect-env / python -m sglang.check_env    before filing a bug
+
+VERSION DRIFT
+  flags pinned to vLLM 0.29.0 and SGLang 0.5.19
+  current as of 2026-10-04: vLLM 0.30.0, SGLang 0.5.20
+  re-check every flag against current source before the paid session</pre>
+<h2 data-kind="post">What you could post</h2>
+<ul>
+<li>The download bar chart: same 140 GB model, same $3.49 GPU, one machine at 276 Mbps bills $3.93 for 67.6 minutes of download, and another at 500 MB/s bills $0.27 for 4.7 minutes. It is his because he re-derived both numbers himself from the listing's measured downlink, not from a vendor page.</li>
+<li>The one question for any engine benchmark: which flags, which client, how many requests. In the audited Krai table the winner flips with the quantization path, and a 2x gap in one benchmark became 8.6% with 2,000 requests instead of 50.</li>
+</ul>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+<li>https://raghu-monitoring.vercel.app/study/inference-internals-phase-04a-serving — his phase; pinned to vLLM 0.29.0 and SGLang 0.5.19, prices and listings read 2026-09-13.</li>
+<li>https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/engine/arg_utils.py — the batching-defaults buckets by GPU memory and entry point, the A100 name check, and <code>--performance-mode throughput</code> doubling both; read 2026-10-04.</li>
+<li>https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/config/structured_outputs.py — the <code>auto</code> grammar backend docstring: opinionated per request contents, subject to change per release; read 2026-10-04.</li>
+<li>https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/v1/structured_output/__init__.py — the single engine-wide backend, initialized from the first structured request; read 2026-10-04.</li>
+<li>https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/config/model.py — the <code>--max-model-len auto</code> docstring, the over-context ValueError, and <code>VLLM_ALLOW_LONG_MAX_MODEL_LEN</code>; read 2026-10-04.</li>
+<li>https://raw.githubusercontent.com/sgl-project/sglang/v0.5.19/python/sglang/srt/server_args.py — None-defaults resolved against the hardware, the <code>mem_fraction_static</code> help text, and the grammar backend choices; read 2026-10-04.</li>
+<li>https://github.com/vllm-project/vllm/releases — v0.30.0 is current; read 2026-10-04.</li>
+<li>https://github.com/sgl-project/sglang/releases — 0.5.20 is current, with a changed mem-fraction fallback and chunked-prefill floor; read 2026-10-04.</li>
+<li>https://huggingface.co/docs/huggingface_hub/en/guides/download — <code>hf_transfer</code> deprecated, <code>hf_xet</code> the replacement, <code>hf download --dry-run</code> prints the byte count; read 2026-10-04.</li>
+<li>https://github.com/mlcommons/inference_results_v5.1/tree/main/open/Krai — the one audited head-to-head on identical hardware; conditions verified, row values from the phase; read 2026-10-04.</li>
+</ul>
+
+<div class="callout warn" id="s14-drift">
+Every flag claim in this phase is pinned to vLLM 0.29.0 and SGLang 0.5.19. As of 2026-10-04, vLLM v0.30.0 and SGLang 0.5.20 are current, and 0.5.20 already changed the mem-fraction fallback from 0.88 to 0.95. Re-check every flag against the source tag you install before the paid session, and write the date next to each number you re-read.
+</div>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

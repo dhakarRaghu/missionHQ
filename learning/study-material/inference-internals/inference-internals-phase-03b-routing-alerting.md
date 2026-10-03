@@ -340,7 +340,7 @@ python phase03_economics/budget_guard.py --simulate --role cache_demo --cache-fl
 #   cache_floor    request   50  spend at detection $0.4024
 ```
 
-With a 90% floor, the cache rule now fires first. With a 5-request window, both rules fire on request 50, the first request after the break.
+With a 90% floor, the cache rule now fires first. With the 90% floor and a 5-request window together, both rules fire on request 50, the first request after the break. A 5-request window alone fires the cost rule at 50 and the cache rule at 52 (re-run 2026-10-03).
 
 **The rule: set the floor just below your measured normal.** Do not pick a round number. A threshold picked because it looks tidy detects nothing. Measure your hit rate for a week. Then set the floor a few points below it.
 
@@ -435,7 +435,7 @@ LiteLLM, an open-source gateway, documents this mechanism. It is worth copying, 
 
 - The first well-known work reports a mean error of 63 words.
 - Only 56% of its predictions land within 50 words. So 44% of requests land more than 50 words away.
-- Recent work reports a mean absolute error of about 93 to 103 tokens. On a 200-token answer, that is a 50% cost error.
+- A prediction errs in both directions, so an under-prediction starts a call the budget cannot cover. (A figure of about 93 to 103 tokens of mean absolute error came with no named source; it is not verified and must not be taught as a number.)
 
 Prediction is good enough for scheduling. It is not good enough for billing.
 
@@ -620,7 +620,7 @@ Every exercise here runs offline. You need no API key, and nothing costs money. 
    (c) A silent downgrade to a cheaper model is better mid-conversation. The user did not cause the breach, and an error mid-sentence is worse than a slightly weaker answer.
    (d) Log the downgrade loudly, even though the caller never sees it. Include the tenant, the original model, the fallback model, and the budget that triggered it.
 
-6. (a) Predicting the cost means predicting the output length. Recent work reports a mean absolute error near 100 tokens. That is a 50% cost error on a 200-token answer.
+6. (a) Predicting the cost means predicting the output length. Any prediction errs in both directions, so an under-prediction breaches the budget after the call has started.
    (b) Read `max_tokens` from the request. Price the worst case: full input plus that many output tokens. Reserve it against the budget, and reject before the call if it would go over. After the response, replace the reservation with the actual cost.
    (c) It depends on `max_tokens`. If a caller leaves it out, the mechanism uses the model's configured maximum. The reservation then becomes so large that valid requests get rejected.
    (d) A batch submission. The request carries a file reference, not the prompts, so nothing downstream can price the workload at submission time.
@@ -723,7 +723,7 @@ ENFORCEMENT
   alert (traffic continues) | hard stop (429) | degrade (cheaper model, no error)
   only a PRE-CALL RESERVATION stops spend before it happens
     reserve worst case from max_tokens → reject → settle to actual
-  output length is NOT predictable: best-in-class MAE ~100 tokens
+  output length is an estimate, not a bound: enforce from max_tokens
   every other control is enforced against stale spend, by the vendors' own words
   provider caps: monthly only, org or project scope, "not instantaneous"
   mid-stream breach behaviour is undocumented almost everywhere

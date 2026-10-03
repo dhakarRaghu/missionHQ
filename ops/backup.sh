@@ -15,7 +15,10 @@
 #                                `missionhq_drill`, count rows in hq.tasks, drop the
 #                                scratch database. Proves the dump is usable.
 #
-# Nightly: ops/backup-schedule.sh install (launchd, 03:30, see com.missionhq.backup.plist).
+# Nightly: the backend makes the dump (hq/backups.py) and pushes the vault
+# (hq/memory.py) after the 03:00 reindex. A launchd job running this script
+# may not read ~/Desktop (macOS: "Operation not permitted"), so
+# ops/backup-schedule.sh install only works with the repo outside ~/Desktop.
 #
 # Database: DATABASE_URL from backend/.env, or the environment, or the default
 # postgresql://localhost:5432/missionhq. pg_dump and psql must be on PATH

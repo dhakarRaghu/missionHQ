@@ -161,13 +161,29 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-/** Posts in a batch: the text between lines holding only `---`. */
+/** At most this many words in one post (backend `POST_WORDS`). */
+const POST_MAX_WORDS = 160;
+const LIST_LINE_RE = /^\s*(?:[-*]|\d+\.)\s+\S/m;
+
+/**
+ * Posts in a batch: the text between lines holding only `---`. Since
+ * 2026-10-02 a batch can hold a single post, with no separator; a body with
+ * no list line and no more words than a post is that one post. An older
+ * batch of ideas is a list, and is not a post.
+ */
 export function splitPosts(body: string): string[] {
   const posts = body
     .split(/^\s*-{3,}\s*$/m)
     .map((p) => p.trim())
     .filter(Boolean);
-  return posts.length > 1 ? posts : [];
+  if (posts.length > 1) return posts;
+  const only = posts[0] ?? "";
+  const single =
+    only !== "" &&
+    !LIST_LINE_RE.test(only) &&
+    !only.startsWith("#") &&
+    only.split(/\s+/).length <= POST_MAX_WORDS;
+  return single ? [only] : [];
 }
 
 /**
@@ -203,12 +219,15 @@ function BatchSection({
   label,
   itemNoun,
   emptyHint,
+  hint,
   defaultOpen,
 }: {
   path: string;
   label: string;
   itemNoun: string;
   emptyHint: string;
+  /** One line under the header: how to use what is listed. */
+  hint?: string;
   /** How many of the newest batches start expanded. */
   defaultOpen: number;
 }) {
@@ -293,6 +312,7 @@ function BatchSection({
           <a href={`/vault?path=${encodeURIComponent(path)}`}>Open in Memory</a>
         </Button>
       </header>
+      {hint ? <p className="text-muted-foreground text-xs">{hint}</p> : null}
 
       {note.isLoading ? (
         <Skeleton className="h-40 w-full" aria-busy="true" />
@@ -428,7 +448,12 @@ export function IdeasView() {
         label="Posts to publish"
         itemNoun="post"
         defaultOpen={1}
-        emptyHint="Sage writes three to five paste-ready posts in your voice every evening at 22:40. Nothing yet."
+        emptyHint="Sage writes one or two paste-ready posts in your voice every evening at 22:40. Nothing yet."
+        // X tests a new post from an account under 50,000 followers for its
+        // first two hours and under 200 views (xai-org/x-algorithm,
+        // home-mixer/scorers/author_cold_start.rs, read 2026-10-02). Replies
+        // in that window are the reactions it weighs most.
+        hint="Post one a day, at a time you can stay two hours to answer replies. X tests a new post in its first two hours. Keep the second post for another day."
       />
     </div>
   );

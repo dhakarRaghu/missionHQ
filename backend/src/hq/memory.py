@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import subprocess
 from datetime import date, datetime
@@ -426,20 +427,49 @@ def commit_day_sync(day: date | None = None) -> list[str]:
     return paths
 
 
+def push_sync() -> bool | None:
+    """Blocking. Push the vault to its `origin` remote. None when it has no
+    remote, else whether the push worked.
+
+    Since 2026-10-03 the vault is shared with his other laptop through a
+    private GitHub repo. The push runs here, in the backend, because a
+    launchd job running /bin/bash may not read ~/Desktop (macOS answered
+    "Operation not permitted"), and because here it follows the commit it
+    pushes. It runs every night, so a push that failed is retried with the
+    next one."""
+    remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=_vault(),
+                            capture_output=True, text=True, check=False)
+    if remote.returncode != 0:
+        return None
+    pushed = subprocess.run(
+        ["git", "push", "--quiet", "origin", "HEAD"], cwd=_vault(), capture_output=True,
+        text=True, timeout=PUSH_TIMEOUT_S, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, check=False)
+    if pushed.returncode != 0:
+        log.warning("memory: could not push the vault: %s", pushed.stderr.strip()[:300])
+    return pushed.returncode == 0
+
+
+PUSH_TIMEOUT_S = 60
 _write_lock = asyncio.Lock()
 
 
 async def commit_day() -> list[str]:
-    """The day's one vault commit, serialized with writes. Best-effort: a git
-    failure is logged and yields ``[]``; it never stops the nightly run."""
+    """The day's one vault commit, serialized with writes, then the push.
+    Best-effort: a git failure is logged and yields ``[]``; it never stops
+    the nightly run."""
     async with _write_lock:
         try:
             paths = await asyncio.to_thread(commit_day_sync)
         except (subprocess.CalledProcessError, OSError) as exc:
             log.warning("memory: could not make the daily vault commit: %s", exc)
-            return []
+            paths = []
     if paths:
         log.info("memory: committed %d vault notes for the day", len(paths))
+    try:
+        if await asyncio.to_thread(push_sync):
+            log.info("memory: pushed the vault")
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        log.warning("memory: could not push the vault: %s", exc)
     return paths
 
 

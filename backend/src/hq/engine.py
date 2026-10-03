@@ -96,7 +96,7 @@ CHAT_TIMEOUT_S = 45 * 60
 #   18:30 course study (system) -> 21:00 hunter sweep
 #   -> 21:15 job discovery (system) -> 22:00 learning run (system)
 #   -> 22:30 sage note -> 22:50 digest with the note -> 23:30 consolidation
-#   -> 03:00 reindex
+#   -> 03:00 reindex (vault commit and push, reader, database dump)
 # Change an agent's cron in its job.md and these two may need to move with it.
 DIGEST_HOUR, DIGEST_MINUTE = 22, 50
 REINDEX_HOUR = 3
@@ -2416,6 +2416,22 @@ async def _nightly_reindex(via: str) -> None:
     n = await memory.reindex_all()   # makes the vault's one commit of the day first
     await runner.emit_step("vault.reindexed", payload={"chunks": n, "via": via})
     await _publish_reader()
+    dumped = await _db_dump_step()
+    await runner.emit_step("db.dumped", payload=dumped)
+
+
+@DBOS.step(name="backups.db_dump")
+async def _db_dump_step() -> dict[str, Any]:
+    """The nightly database dump (hq.backups). A step, so a recovered workflow
+    does not dump twice. It cannot fail the tick: an error is returned and
+    logged, and tomorrow's run tries again."""
+    from hq import backups
+
+    try:
+        return await asyncio.to_thread(backups.dump_sync)
+    except (OSError, RuntimeError) as exc:
+        log.warning("nightly database dump failed: %s", exc)
+        return {"error": str(exc)[:300]}
 
 
 async def _reindex_vault_tick(scheduled: datetime, context: Any) -> None:
