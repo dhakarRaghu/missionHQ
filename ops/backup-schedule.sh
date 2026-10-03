@@ -1,5 +1,7 @@
 #!/bin/bash
 # Mission HQ nightly backup schedule on macOS (launchd LaunchAgent, 03:30).
+# Not used while the repo is under ~/Desktop: launchd's /bin/bash may not read
+# it there. The backend makes the nightly dump instead (hq/backups.py).
 #
 #   ops/backup-schedule.sh install    copy the plist into ~/Library/LaunchAgents and load it
 #   ops/backup-schedule.sh uninstall  unload it and remove the plist
