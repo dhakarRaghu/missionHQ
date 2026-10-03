@@ -35,11 +35,22 @@ share with him.
 
 ## Sources that work
 
-Roles: `job_feed` with `hn_hiring` (this month's Hacker News "Who is
-hiring?" thread) and the remote boards `himalayas`, `remotive` and
-`remoteok`, newest first. A feed row is a lead: verify it on the company's
-own board before `record_job`. Pass `since_days` to `job_board` to see only
-new roles.
+Roles: `job_feed` with `yc` first. It reads the postings of Y Combinator
+companies that are hiring in India or remote, from each company's YC page:
+the experience floor, the salary (most state one), the age, and `people`,
+the founders with LinkedIn and X. A yc row is the company's own posting:
+record it from the row, with its url, `source` "yc" and its `external_id`.
+Pass its experience as `experience_band` and its salary as `compensation`.
+Put one founder in `referral`, with the shared ground if you find any.
+
+Then `hn_hiring` (this month's Hacker News "Who is hiring?" thread) and the
+remote boards `himalayas`, `remotive` and `remoteok`, newest first. Their
+rows are leads: verify each on the company's own board before
+`record_job`. Pass `since_days` to `job_board` to see only new roles.
+
+Companies: `discover_companies` lists hiring YC companies, newest first,
+25 at a time; pass `page` for the next 25 instead of reading the same ones
+again.
 
 Research: company careers pages and their boards, engineering blogs, founder
 posts, funding announcements, Glassdoor-style salary pages for a pay signal

@@ -466,18 +466,19 @@ def _sweep_text(today: date, industry: str, known: str, skip: str, max_roles: in
         " software or backend, applied AI, forward deployed or solutions engineering."
         " 25 LPA or better is the reason to move.\n\n"
         f"Directory: discover_companies(region=\"{SWEEP_REGION}\","
-        f" industry=\"{industry}\"). Read the boards it returns with job_board, passing"
+        f" industry=\"{industry}\"). Read its boards with job_board, passing"
         " query, location and exclude. Open a posting only when the board cannot"
         " answer.\n\n"
-        "Then job_feed hn_hiring and himalayas; verify each lead on its board.\n\n"
+        "Then job_feed hn_hiring, himalayas and yc; verify each lead on its board,"
+        " except yc rows: they are postings.\n\n"
         f"Already in the ledger, skip: {known}.\n"
         f"Skip this week, three empty runs in a row: {skip}.\n\n"
         "Record every verified role with record_job, weak fits too. It scores the"
         " role and files senior, level-two, intern and 3+ year roles closed itself."
         " At 6 or better it needs compensation or pay_signal, and experience_band."
         f" Stop at max_roles {max_roles}.\n\n"
-        "End by writing the quarantine summary: roles recorded, how many strong,"
-        " the one to act on first."
+        "End with the quarantine summary: roles recorded, how many strong,"
+        " which first."
     )
 
 

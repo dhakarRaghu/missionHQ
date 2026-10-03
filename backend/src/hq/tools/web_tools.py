@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 
 from hq import llm
+from hq import yc_directory as yc
 from hq.obs import emit
 from hq.privacy import private_employer
 from hq.safety import ActionClass, Trust
@@ -784,7 +785,6 @@ async def job_board(
 
 # --- company discovery -------------------------------------------------------
 
-YC_API = "https://api.ycombinator.com/v0.1/companies"
 HN_API = "https://hn.algolia.com/api/v1/search"
 MAX_COMPANIES = 25
 
@@ -825,51 +825,50 @@ async def discover_companies(
     industry: str = "",
     batch: str = "",
     resolve_boards: bool = True,
+    hiring_only: bool = True,
+    page: int = 0,
 ) -> dict:
-    """Find companies worth looking at, from Y Combinator's public directory.
+    """Find companies worth looking at, from Y Combinator's directory.
 
-    Free, no key, and current: this is the live directory rather than a list
-    someone wrote down once. `region` is a place like "India"; `industry` is
-    a YC industry like "Fintech" or "B2B"; `batch` narrows to one YC batch
-    such as "W25" for the newest companies.
+    Free, no key, and current: the same search the ycombinator.com/companies
+    page runs. `region` is "India", "Remote" or another YC region;
+    `industry` is a YC industry like "Fintech" or "B2B"; `batch` narrows to
+    one YC batch such as "W25" or "Summer 2026". By default only companies
+    marked as hiring are returned, newest launch first, MAX_COMPANIES at a
+    time: pass `page` 1, 2, ... for the next ones.
 
     With `resolve_boards` on, each company is also checked against the
     applicant tracking boards, so you get the provider and slug to pass to
     `job_board` rather than guessing one. A company with no board found is
-    still returned, with no board field: it may hire through its own site.
+    still returned, with no board field: its roles may be on its YC page,
+    which `job_feed` with source "yc" reads.
 
     Use this before a sweep to decide WHERE to look. Everything it returns is
     public directory data, not a recommendation.
     """
-    params: dict[str, str] = {}
-    if region.strip():
-        params["regions"] = region.strip()
-    if industry.strip():
-        params["industry"] = industry.strip()
-    if batch.strip():
-        params["batch"] = batch.strip()
-
+    regions = [r.strip() for r in region.split("|") if r.strip()] or ["India"]
     try:
         async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
-            resp = await client.get(YC_API, params=params, headers={"User-Agent": _BOARD_UA})
-            if resp.status_code >= 400:
-                return {"provenance": "web",
-                        "error": f"the YC directory answered HTTP {resp.status_code}"}
-            rows = (resp.json() or {}).get("companies") or []
+            hits = await yc.hiring_companies(client, regions, hiring=hiring_only,
+                                             industry=industry, batch=batch)
+            hits = [h for h in hits if h.get("name") and not private_employer(str(h["name"]))]
+            total = len(hits)
+            start = max(0, int(page)) * MAX_COMPANIES
             out: list[dict] = []
-            for row in rows[:MAX_COMPANIES]:
-                company = {
-                    "name": str(row.get("name", ""))[:80],
-                    "what": str(row.get("oneLiner") or "")[:160],
-                    "location": ", ".join(row.get("locations") or [])[:80],
-                    "team_size": row.get("teamSize"),
-                    "industries": (row.get("industries") or [])[:4],
-                    "batch": row.get("batch", ""),
-                }
+            for row in hits[start:start + MAX_COMPANIES]:
                 # The owner's own employers are skipped silently: never listed,
                 # never resolved, never a lead.
-                if company["name"] and not private_employer(company["name"]):
-                    out.append(company)
+                out.append({
+                    "name": str(row.get("name", ""))[:80],
+                    "slug": str(row.get("slug") or ""),
+                    "what": str(row.get("one_liner") or "")[:160],
+                    "location": str(row.get("all_locations") or "")[:80],
+                    "team_size": row.get("team_size"),
+                    "industries": (row.get("industries") or [])[:4],
+                    "batch": row.get("batch", ""),
+                    "hiring": bool(row.get("isHiring")),
+                    "website": str(row.get("website") or ""),
+                })
             if resolve_boards and out:
                 found = await asyncio.gather(
                     *[_resolve_board(client, c["name"]) for c in out]
@@ -877,18 +876,22 @@ async def discover_companies(
                 for company, board in zip(out, found, strict=True):
                     if board:
                         company["board"] = board
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, ValueError, yc.DirectoryError) as exc:
         return {"provenance": "web",
-                "error": f"could not reach the YC directory ({type(exc).__name__})"}
+                "error": f"could not read the YC directory ({type(exc).__name__}: {exc})"[:200]}
 
     await emit("discover_companies", run_id=ctx.deps.run_id, task_id=ctx.deps.task_id,
                agent=ctx.deps.agent,
-               payload={"region": region, "industry": industry, "found": len(out)})
+               payload={"region": region, "industry": industry, "found": len(out),
+                        "total": total, "page": page})
     if not out:
-        return {"provenance": "web", "error": "no companies matched; try a wider region"}
+        return {"provenance": "web",
+                "error": ("no companies matched; try a wider region" if not total
+                          else f"page {page} is past the {total} companies that matched")}
     with_board = sum(1 for c in out if c.get("board"))
     return {"provenance": "web", "region": region, "industry": industry,
-            "found": len(out), "with_board": with_board, "companies": out}
+            "total": total, "page": page, "found": len(out), "with_board": with_board,
+            "more": start + len(out) < total, "companies": out}
 
 
 # --- job feeds ---------------------------------------------------------------
@@ -902,7 +905,8 @@ HN_ITEM_API = "https://hn.algolia.com/api/v1/items/{id}"
 HN_HIRING_API = (
     "https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=6"
 )
-JOB_FEEDS = ("hn_hiring", "himalayas", "remotive", "remoteok")
+JOB_FEEDS = ("yc", "hn_hiring", "himalayas", "remotive", "remoteok")
+YC_FEED_COMPANIES = 90   # company pages read per yc call: India first, then remote
 MAX_FEED_RESULTS = 40
 _HN_LINK_RE = re.compile(r"^(?:https?://|www\.)\S+$|^[\w-]+(?:\.[\w-]+)+/?$", re.IGNORECASE)
 
@@ -991,6 +995,24 @@ def _feed_row(source: str, row: dict) -> dict:
     }
 
 
+async def _yc_jobs(client: httpx.AsyncClient, location: str) -> tuple[list[dict], int]:
+    """Postings of the newest hiring YC companies in the places `location`
+    names, and how many company pages were read."""
+    slugs: list[str] = []
+    for region in yc.regions_for(location):   # India first: all of it, then the newest remote
+        for h in await yc.hiring_companies(client, [region]):
+            slug = str(h.get("slug") or "")
+            if slug and slug not in slugs and not private_employer(str(h.get("name") or "")):
+                slugs.append(slug)
+    slugs = slugs[:YC_FEED_COMPANIES]
+    pages = await yc.company_pages(client, slugs)
+    # Only roles someone in India can take: a remote role limited to the US
+    # or the EU is not one, though its company sits in YC's "Remote" region.
+    rows = [row for _, props in pages if props for row in yc.job_rows(props)
+            if row["open_to_india"]]
+    return rows, len(slugs)
+
+
 def _recent(jobs: list[dict], since_days: int) -> list[dict]:
     """Newest first, and only those posted in the last `since_days` days.
 
@@ -1028,6 +1050,13 @@ async def job_feed(
     """Open roles from a public job feed, newest first. Free, no key.
 
     `source` is one of:
+    - `yc`: job postings of Y Combinator companies that are hiring, read from
+      each company's YC page: experience floor, salary (most state one),
+      location, age, and `people` (the founders, with LinkedIn and X) for
+      the referral step. India and remote companies by default; `location`
+      narrows it. A yc row is the company's own posting: record it with its
+      url, source "yc" and its external_id, without another board.
+      With no `query`, only engineering roles are returned.
     - `hn_hiring`: this month's Hacker News "Who is hiring?" thread. Founders
       and engineers post there themselves, from companies no directory lists.
     - `himalayas`, `remotive`, `remoteok`: remote-jobs boards. Most rows are
@@ -1051,7 +1080,12 @@ async def job_feed(
         async with httpx.AsyncClient(
             timeout=30, follow_redirects=True, headers={"User-Agent": _BOARD_UA}
         ) as client:
-            if source == "hn_hiring":
+            if source == "yc":
+                jobs, read = await _yc_jobs(client, location)
+                thread = f"{read} hiring YC companies read"
+                if not query.strip():
+                    jobs = [j for j in jobs if j["role_family"] in ("eng", "")]
+            elif source == "hn_hiring":
                 thread, jobs = await _hn_hiring(client)
             else:
                 first = query.split("|")[0].strip()
@@ -1069,7 +1103,7 @@ async def job_feed(
                 # RemoteOK's first row is a legal notice, not a job.
                 jobs = [_feed_row(source, r) for r in rows
                         if isinstance(r, dict) and (r.get("title") or r.get("position"))]
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError, yc.DirectoryError) as exc:
         return {"source": source, "provenance": "web",
                 "error": f"could not read the {source} feed ({type(exc).__name__})"}
 
