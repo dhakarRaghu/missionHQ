@@ -145,7 +145,7 @@ room = max(token_budget - len(decoding) - prefill_tokens, 0)  # batching_sim.py:
 Compute it yourself: three streams decode under a 2,048-token budget when a 24,000-token prompt arrives. How many prefill tokens fit in one iteration, and how many iterations does the prompt need?
 The decodes reserve 3 tokens, so the pass has 2,045 left for prefill. Dividing 24,000 by 2,045 gives 11.7, so the prompt needs 12 iterations.
 
-Now price one sliced iteration with the cost model from Phase 2A. A prefill token costs 0.03ms, so the 2,045-token slice costs 61.4ms. The three decodes cost 18 + 0.12 × 3 = 18.4ms on top. The whole iteration takes 61.4 + 18.4 = 79.8ms, which rounds to about 80ms. Twelve slices spread the same work across 960ms, and each stream still gets a token every 80ms.
+Now price one sliced iteration with the cost model from Phase 2A. A prefill token costs 0.03ms, so the 2,045-token slice costs 61.35ms. The three decodes cost 18 + 0.12 × 3 = 18.36ms on top. The whole iteration takes 61.35 + 18.36 = 79.7ms, which rounds to about 80ms. Twelve slices spread the same work across 960ms, and each stream still gets a token every 80ms.
 
   How many slices a prompt needs
 
@@ -217,7 +217,7 @@ Carry one fact into Phase 4, when the GPU is yours. In vLLM 0.29.0 there is no s
 
 Small budgets smooth the stream but re-read the KV at every chunk boundary, so the budget has a floor.
 
-Pushing the budget toward zero looked free in the gap column and cost 25% throughput at 512.
+Pushing the budget toward zero looked free in the gap column, but Sarathi-Serve measured up to about 25% overhead at 512 on Yi-34B.
 
 Re-run batching_sim.py at 512 and 8192 and check that mean TTFT and worst gap move in opposite directions.
 
@@ -403,13 +403,13 @@ This explains why your classifier dropped despite a correct mask. The mask can o
 
 The paper has one pair of numbers that shows the split in your own dashboards. Constrained decoding raised format validity from 55.7% to 92.2%. Over the same change, accuracy moved from 57.3% to 55.7%. Compliance went up and reasoning went slightly down, so the two are different dials. A service can get cleaner and dumber at the same time, and a parse-failure metric measures only the first dial.
 
-Every tax number you read from now on must carry two names. The first name is the model. In the same paper, the older gpt-5-nano lost 8.0 points with constraints, while claude-haiku-4.5 gained 1.2. The second name is the parser used for scoring. When the authors switched MATH-500 scoring from a rule-based extractor to a model judge, the measured tax fell from 10.1 to 6.6 points. About a third of one measured tax was the scorer, not the model.
+Every tax number you read from now on must carry two names. The first name is the model. In the same paper, the older gpt-5-nano lost 8.0 points with constraints, while claude-haiku-4.5 is reported at +1.2 without them. The second name is the parser used for scoring. When the authors switched MATH-500 scoring from a rule-based extractor to a model judge, the measured tax fell from 10.1 to 6.6 points. About a third of one measured tax was the scorer, not the model.
 
 Use it in the lab. Exercise E8 runs the same 12 labelled tickets through prompt-only, json_object, and strict mode, and prints accuracy per mode. The gap between the free-form column and the prompt-only column is your prompt-side tax, and whatever remains under strict is the decoder-side share. The E8 numbers are marked unverified against a live provider, so read the shape of the comparison, not the exact values.
 
 Most of the tax is paid at the prompt: 3.9 points there, 1.6 at the decoder.
 
-Blaming the mask and turning constraints off buys the small 1.6 back and leaves the big 3.9 in place.
+Blaming the mask and turning constraints off recovers only the decoder's share, 1.6 points on the paper's average, and leaves the prompt's 3.9 in place.
 
 Rerun one failed ticket as free text, then with the format requested but constraints off, and compare the two scores.
 
@@ -760,7 +760,7 @@ Q1. This is broken. Your streaming support answers look fine on the dashboard. M
 (a) Another request's long prefill ran in one iteration without chunking, the pass the scheduler section described as one forward pass doing prefill work, and every decoding request got no token during that pass. (b) The maximum inter-token gap per response, recorded while the stream runs, because median TTFT and total latency are averages and cannot show a freeze. (c) Shorten your own prompts so your prefills are small, and move long-context work to a separate endpoint or a batch path so it does not share a batch with interactive traffic. A fallback provider for interactive traffic is a third option.
 
 Q2. Walk through what happens, and show the arithmetic. A server uses the cost model from batching_sim.py. Three requests are decoding, a 24,000-token prompt arrives, and the token budget is 2,048. (a) How long do the three streams freeze without chunking? (b) With chunking, how many prefill tokens fit in each iteration and how many iterations does the prompt need? (c) How long is each chunked iteration?
-(a) The prefill-only pass costs 24,000 × 0.03 = 720ms, and the three streams get no token during that pass. With the decode passes on each side, the measured worst gap in the default run is 764ms. (b) The budget reserves 3 tokens for the decodes, so 2,048 − 3 = 2,045 prefill tokens fit per iteration, and 24,000 / 2,045 = 11.7, so the prompt needs 12 iterations. (c) Each iteration costs 2,045 × 0.03 + 18 + 0.12 × 3 = 61.4 + 18.4 = 79.8ms, so the streams now pause about 80ms per token instead of 720ms once. The measured worst gap is 81ms, because the real batch holds more decodes.
+(a) The prefill-only pass costs 24,000 × 0.03 = 720ms, and the three streams get no token during that pass. With the decode passes on each side, the measured worst gap in the default run is 764ms. (b) The budget reserves 3 tokens for the decodes, so 2,048 − 3 = 2,045 prefill tokens fit per iteration, and 24,000 / 2,045 = 11.7, so the prompt needs 12 iterations. (c) Each iteration costs 2,045 × 0.03 + 18 + 0.12 × 3 = 61.35 + 18.36 = 79.7ms, so the streams now pause about 80ms per token instead of 720ms once. The measured worst gap is 81ms, because the real batch holds more decodes.
 
 Q3. This is broken. Your classification service returns valid JSON that matches the schema on every call, and finish_reason is stop. Accuracy dropped 9 points after you enabled strict mode last week. (a) Give the most likely cause. (b) Describe the exact schema change you would test, including its place in the property order. (c) Name the measurement that would settle it, and say why one run is not enough.
 (a) The schema forces the label early, so the model commits to a label with no room to reason in text first. This is the prompt-side format tax, the larger half of the drop. (b) Add a reasoning string as the first property, before the constrained fields, add it to required, and keep additionalProperties: false. A reasoning field placed last changes nothing, because decoding runs left to right. (c) Run the same labelled set through both schemas with structured_lab.py, and fix your parser first, because part of a measured drop can come from the scorer. One run is not enough because sampling varies: a 9-point gap can appear by chance on 12 items, so use --repeat and compare across runs.

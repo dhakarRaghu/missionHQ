@@ -80,7 +80,7 @@ cascade saves money only while  e < 1 − Cc/Cd
 at e = 0.35:  cascade  1 + 0.35·5 = 2.75   → 55% of deep-only
               router   0.65 + 0.35·5 = 2.40 → 48% of deep-only
 
-Two things are worth noticing here. The boundary depends only on the price ratio. So a team with an 80% hit rate on the cheap model is sitting exactly at the point. That is where the cascade stops saving. The gap between 55% and 48% is also not about accuracy. It exists even when both signals pick the same queries.
+Two things are worth noticing here. The boundary depends only on the price ratio. So a team whose cascade escalates 80% of its queries is sitting exactly at the point where the cascade stops saving. A cheap model that answers 80% of queries on its own is far from that point: 20% escalation costs 1 + 0.2 × 5 = 2, which is 40% of deep-only. The gap between 55% and 48% is also not about accuracy. It exists even when both signals pick the same queries.
 
   Cascade and router cost, as a share of deep-only
 
@@ -105,7 +105,7 @@ You can run this yourself in this phase's lab: exercise E12 builds the cascade a
 
   A cascade costs Cc + e·Cd per query, so it beats deep-only only while the escalation rate stays under 1 − Cc/Cd.
 
-  "The cheap model handles 80% of queries, so the cascade must be cheaper" is exactly the boundary where it stops saving.
+  "An escalated query costs only the deep price" forgets the cheap answer it already paid for, so a cascade that escalates more than 80% costs more than no cascade.
 
   Take your two models' prices from the sheet and compute 1 − Cc/Cd, then check your measured escalation rate against it.
 
@@ -119,18 +119,18 @@ You priced Story 3's cascade in the last section, and at 35% escalation it costs
 
 ### The run that should not look this good
 
-Picture two teams, each with a cascade on the same traffic. In team A the escalation signal is a jitter detector a colleague tuned for a week. In team B it is a random number, and each query escalates with probability 0.35. Now compute what team B's dashboard shows, before looking at team A's.
+Picture two teams, each with a cascade on the same traffic. In team A the escalation signal is a jitter detector a colleague tuned for a week. In team B it is a random number, and each query escalates with probability 0.5, the share team A's signal escalates in the course simulation. Now compute what team B's dashboard shows, before looking at team A's.
 
 Predict: both dashboards show 85% accuracy at 69% of deep-only cost. In one, the signal is a coin flip. Which experiment tells them apart, and how is it configured?
 The experiment is a random control: same queries, same escalation count, but the escalated queries are picked at random. The real signal beats the random control by less than twice the standard error of the difference. So the dashboard was showing you chance, not information. Configure it by running both on the same traffic and ranking them on dollars per correct answer, explained below.
 
-Why this surprises: you expect a random signal to show a worse accuracy. But swapping the deep model in for 35% of queries at random buys accuracy by luck. It does so at the same cost. The two numbers on the dashboard cannot see the difference.
+Why this surprises: you expect a random signal to show a worse accuracy. But swapping the deep model in for half of the queries at random buys accuracy by luck. It does so at the same cost. The two numbers on the dashboard cannot see the difference.
 
 In the course simulation the coin-flip run prints 85% accuracy at 69.3% of deep-only cost. Those are exactly the lines a team would paste into a review to say "it works". Replacing some cheap answers with deep answers at random buys some accuracy by chance, at the same cost. So a real cascade and a coin-flip cascade look identical on an accuracy and cost dashboard.
 
 ### The control that convicts the coin flip
 
-The fix is one more row in the results table. A random control is a cascade that escalates the same number of queries as yours. Those queries are chosen at random, on the same traffic. Your signal earns its cost only when it picks a better 35% of queries than chance picks.
+The fix is one more row in the results table. A random control is a cascade that escalates the same number of queries as yours. Those queries are chosen at random, on the same traffic. Your signal earns its cost only when it picks a better half of the queries than chance picks.
 
 - Run your real cascade and record accuracy and cost per query.
 
@@ -150,7 +150,7 @@ The last two rows are identical on the dashboard. So the comparison has to be th
 
 ### Why one trial is not enough
 
-Even with the control row in place, one small trial can lie in either direction. With about 20 items per arm, a single accuracy number swings by roughly 7 points between runs. So the gap between signal and control swings by more. Exercise E14 runs the same zero-information signal over three seeds and prints the gap as +10.0, +0.0, and −5.0 points. Seed one would ship the coin flip, and seed three would reject a good signal. The reported number for any cascade experiment is therefore a difference with its interval. It is computed over enough items that twice the standard error fits inside the effect you care about.
+Even with the control row in place, one small trial can lie in either direction. With about 20 items per arm, a single accuracy number swings by roughly 7 points between runs. So the gap between signal and control swings by more. Exercise E14 runs the same zero-information signal over three seeds and prints the gap as +10.0, +0.0, and −5.0 points. Seed one would ship the coin flip, and a gap like seed three's −5, seen on a real signal, would reject a good one. The reported number for any cascade experiment is therefore a difference with its interval. It is computed over enough items that twice the standard error fits inside the effect you care about.
 
 This is not a classroom artifact. LLMRouterBench re-ran 10 routing baselines over 400K+ instances. It found that several recent approaches, including commercial routers, fail to reliably outperform a simple baseline. The production version of your coin flip is already sold as a product.
 
@@ -317,7 +317,7 @@ tokens stay flat through the break cost steps up 5.4x at request 50
 The token count is identical on both sides of the break, because the prefix traverses the API either way. The cost jumps from $0.0074 to $0.0398 per request. That is because 18,000 cached tokens at the read price become 18,000 fresh tokens at the full price. Every request after the break costs 5.4 times more, and each one stays far below any extreme value.
 
 Evidence
-Author's replay runs of the Story 1 scenario, 2026-09-17, kept in the course material. Cost per request $0.007400 before request 50, $0.039800 after. Firing points: rolling cost at request 52, cache rule at 59 with the default 50% floor. It fires at 51 with a 90% floor, and at 50 with a 5-request window.
+Author's replay runs of the Story 1 scenario, 2026-09-17, kept in the course material. Cost per request $0.007400 before request 50, $0.039800 after. Firing points: rolling cost at request 52, cache rule at 59 with the default 50% floor. It fires at 51 with a 90% floor. With a 5-request window the cost rule fires at 50 and the cache rule at 52; with a 5-request window and the 90% floor, both fire at 50.
 
 ### The three rules
 
@@ -392,14 +392,14 @@ Two knobs close the gap, and both follow from the same formula:
 
 - Raise the floor to just below the measured normal. A floor of 0.90 cuts the gap from 48 points to 8, so the walk is shorter and the rule fires at request 51 in the replay.
 
-- Shrink the window. A 5-request window makes each zero-hit request move the average more, and in the replay both rules then fire at request 50, the first broken one.
+- Shrink the window. A 5-request window makes each zero-hit request move the average more. In the replay the cost rule then fires at request 50, the first broken one, and the cache rule at 52. With the 0.90 floor as well, both fire at 50.
 
 The side-effect is also arithmetic. A small window on noisy normal traffic produces false alarms. Two unlucky misses in five requests can dip a 0.98 average below 0.90. A large window absorbs noise but pays for it in detection lag. You are trading false alarms against lag, and the formula above prices the trade.
 
 One more decision matters as much as the numbers. The floor must come from a baseline stored outside the process. It must not be a constant in the code that ships the prompt. The Story 1 failure was a prompt change. So anything measured at startup measures the already-broken system and calls it normal.
 
 Evidence
-Firing points are the author's replay of Story 1 (runs of 2026-09-17). The rolling cost rule fired at request 52. The cache rule fired at 59 with the default 0.50 floor. It fired at 51 with a 0.90 floor, and at 50 with a 5-request window. The travel formula is the arithmetic of a rolling average over a window, so it is derived, not measured.
+Firing points are the author's replay of Story 1 (runs of 2026-09-17). The rolling cost rule fired at request 52. The cache rule fired at 59 with the default 0.50 floor. It fired at 51 with a 0.90 floor. With a 5-request window the cost rule fired at 50 and the cache rule at 52; with a 5-request window and the 0.90 floor, both fired at 50 (replay re-run 2026-10-03). The travel formula is the arithmetic of a rolling average over a window, so it is derived, not measured.
 
   Set the floor just below the measured normal, because a round number pays the gap in detection lag.
 
@@ -459,7 +459,7 @@ The reservation is a documented pattern, not a proposal. LiteLLM's proxy has bud
 Evidence
 OpenAI spend-limits doc, read 2026-09-30: hard limits are monthly-interval, org or project scope, and the page states "Enforcement is not instantaneous, so recorded spend can slightly exceed the configured amount while the limit state propagates." LiteLLM budget docs, read 2026-09-30: reservation enabled by default, fail-closed mode rejects with 503, DB-less deployments fail open.
 
-Spending the reservation at worst case feels wasteful, so you might ask whether predicted output length can shrink it. It cannot carry that duty. Output-length predictors report a mean absolute error of roughly 93 to 103 tokens. On a 200-token answer, that average error amounts to about a 50 percent cost error. A predictor is fine for scheduling. The billing bound must be a number you can trust to be high enough, and max_tokens is the only such number in the request.
+Spending the reservation at worst case feels wasteful, so you might ask whether predicted output length can shrink it. It cannot carry that duty. A predictor's error runs in both directions, so an under-prediction lets a call start that the budget cannot cover. A predictor is fine for scheduling. The billing bound must be a number you can trust to be high enough, and max_tokens is the only such number in the request.
 
 A batch submission cannot be reserved at all. The batch API from earlier in this phase takes a file reference, and the file can hold thousands of prompts, so nothing can price the submission when you send it. Batch needs a different control, and estimating the file's token count before submitting is the available one.
 
@@ -559,11 +559,11 @@ Then run it with a price sheet that has no cached-price row: --role cache_demo r
 -
  E10 offline
 Replays concept: a round-number floor sits far below the measured normal, so the windowed average must travel the gap before it crosses.
-Repeat E9 twice, changing one knob each time. The system's normal hit rate is 98%.
+Repeat E9 three times: change one knob, then the other, then both. The system's normal hit rate is 98%.
 
-Run: the replay with the cache floor at 0.90, then again with a 5-request window.
+Run: the replay with the cache floor at 0.90, then with a 5-request window, then with both.
 
-With the floor at 0.90 the cache rule fires at request 51, one request before the cost rule, which fires at 52. With a 5-request window both rules fire at request 50, the first broken request. Compare with E9's defaults: floor 0.50 fired at 59. The distance from 98% normal to a 50% floor is 48 points of average to travel. That travel time is the four-month delay in miniature. A smaller window detects sooner but noisier, which is the trade to tune on your own traffic.
+With the floor at 0.90 the cache rule fires at request 51, one request before the cost rule, which fires at 52. With a 5-request window the cost rule fires at request 50, the first broken request, and the cache rule at 52. With both knobs, window 5 and floor 0.90, both rules fire at 50. Compare with E9's defaults: floor 0.50 fired at 59. The distance from 98% normal to a 50% floor is 48 points of average to travel. That travel time is the four-month delay in miniature. A smaller window detects sooner but noisier, which is the trade to tune on your own traffic.
 
 -
  E11 offline
@@ -621,9 +621,9 @@ Both halves spend extra calls on one model's agreement with itself, which repeat
 Answer sketch
 The reservation itself is intact, because it was priced at worst case: full input plus max_tokens of output, so no response can cost more than was reserved. The real question is what happens on the next request: settle-to-actual must run before that request's reservation is checked, or the budget reads stale. What mid-stream cancellation does when actual spend would exceed the reservation is undocumented almost everywhere, so test your gateway's behaviour before you promise a caller that a stream stops at the budget line.
 
-- Prediction versus reservation. A plan replaces worst-case reservations with an output-length predictor (error about 100 tokens) and prices each call at the predicted length, arguing this admits more requests under the same budget. Accept or reject?
+- Prediction versus reservation. A plan replaces worst-case reservations with an output-length predictor and prices each call at the predicted length, arguing this admits more requests under the same budget. Accept or reject?
 Answer sketch
-Reject for enforcement, keep for scheduling. An error of about 100 tokens is a 50% cost error on a 200-token answer, and the prediction errs in both directions, so under-predictions breach the budget after the call has already started. Enforcement needs a bound, not an estimate: only the worst case from max_tokens guarantees the reservation covers whatever the stream returns. The predictor is still useful where a wrong estimate costs nothing, such as batching or scheduling decisions that can be revised.
+Reject for enforcement, keep for scheduling. Any prediction errs in both directions, so under-predictions breach the budget after the call has already started. Enforcement needs a bound, not an estimate: only the worst case from max_tokens guarantees the reservation covers whatever the stream returns. The predictor is still useful where a wrong estimate costs nothing, such as batching or scheduling decisions that can be revised.
 
 A wrong answer on 3, 5 or 6 is one idea revisited: enforcement only works before the spend exists. Re-read the reservation section, then try those three again.
 
@@ -660,7 +660,7 @@ ENFORCEMENT
   alert (traffic continues) | hard stop (429) | degrade (cheaper model, no error)
   only a PRE-CALL RESERVATION stops spend before it happens
     reserve worst case from max_tokens -> reject -> settle to actual
-  output length is NOT predictable: best-in-class MAE ~100 tokens
+  output length is an estimate, not a bound: enforce from max_tokens
   every other control is enforced against stale spend, by the vendors' own words
   provider caps: monthly only, org or project scope, "not instantaneous"
   mid-stream breach behaviour is undocumented almost everywhere
@@ -715,4 +715,4 @@ Every source below was opened and checked on 2026-09-30. Each line says what thi
 
 - developers.openai.com/api/docs/guides/batch — OpenAI Batch guide: 50% discount, 24-hour window, 50,000 requests or 200 MB per file, and results now documented as deleted 30 days after completion.
 
-  Five papers the study note could not open stay unverified here: the Routing Collapse Index (arXiv:2602.03478), the jury paper (arXiv:2607.10139), UCCI (arXiv:2605.18796), AutoRelAnnotator, and RLM-Cascade. The signal-ranking claim in this phase rests on Ding and ConfidenceBench, both verified. The output-length prediction error of about 100 tokens came with no named source and was not checked.
+  Five papers the study note could not open stay unverified here: the Routing Collapse Index (arXiv:2602.03478), the jury paper (arXiv:2607.10139), UCCI (arXiv:2605.18796), AutoRelAnnotator, and RLM-Cascade. The signal-ranking claim in this phase rests on Ding and ConfidenceBench, both verified. The output-length prediction error of about 100 tokens came with no named source and was not checked, so this lesson does not use it.

@@ -4,7 +4,7 @@ Phase 1 looked at one request on its own. You measured its TTFT, its TPOT, and i
 
 This phase opens that loop. After it, you can answer questions that Phase 1 could not:
 
-- Why did my TTFT triple at 3pm when my prompt did not change?
+- Why did my TTFT nearly double at 3pm when my prompt did not change?
 - Why does the same prompt cost 4x less on the second call? How do I make that happen every time?
 - Why did the stream freeze for 800ms in the middle of a sentence?
 - Why did my strict JSON schema make the answers worse?
@@ -173,7 +173,7 @@ THE SAME RUN AS BARS, mean TTFT in ms (from the table above)
 └────────────────────────┴──────────────────────────────────────────────┘
 ```
 
-The arrival pattern is the input you feel most. Run the same workload at 12 arrivals per second instead of 6. Continuous batching mean TTFT rises from 867ms to 1,674ms. Static rises from 5,357ms to 6,551ms. The worst gap stays at 764ms. The prompts did not change. Only the arrival rate changed. This is the answer to "why did my TTFT triple at 3pm".
+The arrival pattern is the input you feel most. Run the same workload at 12 arrivals per second instead of 6. Continuous batching mean TTFT rises from 867ms to 1,674ms. Static rises from 5,357ms to 6,551ms. The worst gap stays at 764ms. The prompts did not change. Only the arrival rate changed. This is the answer to "why did my TTFT nearly double at 3pm": 867ms to 1,674ms is 1.9x.
 
 **The sentence to remember:** one scheduler iteration gives every running request one token. Throughput comes from batch size. Latency comes from what else is in the batch.
 

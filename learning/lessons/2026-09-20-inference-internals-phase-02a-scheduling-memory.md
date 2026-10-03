@@ -8,13 +8,13 @@ Inference Internals · Phase 2A
 
 How the server shares one GPU between strangers
 
-Your TTFT tripled at 3pm and your prompt did not change. You open your own logs. Your code sent the same bytes, at the same rate, with the same key. The provider returned the same answer, three times slower. Nothing on your side explains it. The explanation is not on your side. It is inside the server. It sits in the requests that arrived at the same second as yours.
+Your TTFT nearly doubled at 3pm and your prompt did not change. You open your own logs. Your code sent the same bytes, at the same rate, with the same key. The provider returned the same answer, almost twice as slow. Nothing on your side explains it. The explanation is not on your side. It is inside the server. It sits in the requests that arrived at the same second as yours.
 
 Phase 1 looked at one request on its own. You measured its TTFT, its TPOT, and its bill. TTFT is the time to first token. TPOT is the time per output token after the first. That model is correct, but it is not complete. A real inference server never runs one request. It runs a loop over a batch. Your request shares a GPU with requests from other people.
 
 This phase opens that loop. After it, you can answer questions that Phase 1 could not:
 
-- Why did my TTFT triple at 3pm when my prompt did not change?
+- Why did my TTFT nearly double at 3pm when my prompt did not change?
 
 - Why does the same prompt cost 4x less on the second call? How do I make that happen every time?
 
@@ -189,7 +189,7 @@ You do not control the provider's scheduler. You control four inputs to it:
 │                        │ not compete for the token budget             │
 └────────────────────────┴──────────────────────────────────────────────┘
 
-The arrival pattern is the input you feel most. Run the same workload at 12 arrivals per second instead of 6. Continuous batching mean TTFT rises from 867ms to 1,674ms. Static rises from 5,357ms to 6,551ms. The worst gap stays at 764ms. The prompts did not change. Only the arrival rate changed. This is the answer to "why did my TTFT triple at 3pm".
+The arrival pattern is the input you feel most. Run the same workload at 12 arrivals per second instead of 6. Continuous batching mean TTFT rises from 867ms to 1,674ms. Static rises from 5,357ms to 6,551ms. The worst gap stays at 764ms. The prompts did not change. Only the arrival rate changed. This is the answer to "why did my TTFT nearly double at 3pm": 867ms to 1,674ms is 1.9x.
 
 What changed since this phase was written: the server can now shed load. vLLM v0.29.0, released 2026-09-09, is the current release. It added two admission flags. They are --max-num-queued-reqs and --max-num-queued-tokens (pull request #49445). When the queue limit is hit, a new request is rejected with HTTP 503. It no longer queues forever. The docstring calls this a TTFT quality-of-service valve. Set it near target TTFT times prefill throughput. This is verified from vllm/config/scheduler.py at tag v0.29.0.
 
