@@ -2,15 +2,15 @@ In Phase 2B you saw that constrained decoding makes output legal without making 
 
 The server did not reject your parameter. The output was valid JSON. Every signal you normally trust said the request worked. Yet the constraint you set was never applied at all, and nothing in the response told you. So before your agent executes any tool call, you need a way to answer one question: when a serving stack accepts a constraint parameter without an error, how do you know whether it acted on it or only read it and moved on?
 
-This lesson teaches one idea. They are listed here so you can see where it is going, and they will read more clearly once each has been explained below, so come back to this list at the end.
+This lesson teaches one idea. It is stated here so you can see where the lesson is going. It will read more clearly once it has been explained below, so come back to it at the end.
 
-- A constraint parameter an OpenAI-compatible server accepts without error is not enforced; parse, honor and reject are three separate behaviors, and silence means the first only. Decide which constraints he must re-check in his own layer before executing tool calls, and which engine flags he can trust.
+- A constraint parameter an OpenAI-compatible server accepts without error is not enforced; parse, honor and reject are three separate behaviors, and silence means the first only. Decide which constraints you must re-check in your own layer before executing tool calls, and which engine flags he can trust.
 
 ## What did the caller see, and what did the engine do?
 
 A server that silently ignores your constraint returns the same 200 as one that enforces it.
 
-Your agent has two stateful tools: write_file, then compile. Running them in the wrong order corrupts the state, so you set parallel_tool_calls=false. The response arrives with HTTP 200. It has a well-formed tool_calls array holding two calls. This exact incident was measured. SGLang 0.5.1.post1 serving Qwen3-30B-A3B on 8x H20 returned finish_reason='tool_calls'. It had two calls in one turn despite the flag.
+Your agent has two stateful tools: write_file, then compile. Running them in the wrong order corrupts the state, so you set parallel_tool_calls=false. The response arrives with HTTP 200. It has a well-formed tool_calls array holding two calls. The same failure was measured in a public bug report. SGLang 0.5.1.post1, serving Qwen3-30B-A3B on eight H20 GPUs, returned finish_reason='tool_calls'. It sent two calls in one turn, to an add tool and a multiply tool, despite the flag.
 
 To read this failure you need three behaviors, because a constraint parameter can meet three fates. The server can parse it: read the field, see it is valid, move on. It can honor it: change what the engine produces. It can reject it: return a 400 saying "not supported". Your instinct says parse implies honor, so silence means safety. It does not. Silence proves parse only, and that space between accepted and acted-on is the accepted-not-enforced gap: the parameter crossed the API layer and never reached the engine.
 
@@ -65,7 +65,7 @@ But the engine sits between the model and you, and it has two places to act. The
 
 - one call survivesthe response can hold at most one tool call, by construction
 
-That strength has a price, and you have seen it before. It is the constraint tax, the extra latency and complexity a grammar adds to every decoded token. Because the mask is rebuilt at each step. In Phase 2B you paid it for valid JSON. For one-call-per-turn you would pay it across the whole response.
+That strength has a price, and you have seen it before. It is the constraint tax, the extra latency and complexity a grammar adds to every decoded token, because the mask is rebuilt at each step. In Phase 2B you paid it for valid JSON. For one-call-per-turn you would pay it across the whole response.
 
 The second place is cheaper and needs no grammar at all. It is the post-filter backstop: generate as usual. Then drop every tool call but the first before the response leaves the engine. A community member proposed exactly this in the issue thread, motivated by race safety for stateful tools. It costs a few lines of code and one pass over an array that is already parsed.
 
@@ -83,7 +83,7 @@ Treating an unenforced flag as engine impossibility means you never build the ch
 
 Read your engine's tool-calling docs end to end and write down which request flags it actually wires into decoding.
 
-So enforcement is possible, and your engine provides neither path. The next section asks what that changes in your own agent: where the check goes. And what to assert on instead of the status code.
+So enforcement is possible, and your engine provides neither path. The next section asks what that changes in your own agent: where the check goes, and what to assert on instead of the status code.
 
 ## What does this change in your own agent?
 
@@ -106,7 +106,7 @@ This is the community member's proposal from the incident thread, written as six
 
 One detail from the incident belongs in your parser too. The returned calls had index=None, a second spec deviation. Some client libraries mis-handle it when you push tool results back into one message. Check the field before you trust it.
 
-The same shift applies to your tests. A conformance test that asserts on HTTP 200 passed in the incident while the constraint was violated. Because 200 only says the response parsed. Assert on the output instead: send a prompt that invites two calls, and fail the test when two come back. Each new flag and each engine upgrade then gets its own output assertion. Then the accepted-not-enforced gap becomes a test failure instead of a race condition.
+The same shift applies to your tests. A conformance test that asserts on HTTP 200 passed in the incident while the constraint was violated, because 200 only says the response parsed. Assert on the output instead: send a prompt that invites two calls, and fail the test when two come back. Each new flag and each engine upgrade then gets its own output assertion. Then the accepted-not-enforced gap becomes a test failure instead of a race condition.
 
 Treat engine constraint flags as hints; enforce the invariant in the layer that executes.
 
@@ -154,7 +154,11 @@ resp = requests.post(
 body = resp.json()
 calls = body["choices"][0]["message"].get("tool_calls", [])
 assert resp.status_code == 200, body
-assert len(calls) Run: python check_parallel_calls.py
+assert len(calls) <= 1, (
+    f"server ignored parallel_tool_calls=false: "
+    f"{json.dumps(body, indent=2)}")
+
+Run: python check_parallel_calls.py
 
 Expected on an enforcing engine: the script exits cleanly. One call, or zero.
 
@@ -193,11 +197,11 @@ Two posts this lesson earns, each one claim you can stand behind.
 
 "I set parallel_tool_calls=false. The server sent 200 and two calls."
 
-The claim: a constraint parameter that the server accepts is not enforced. The proof is one 30-line client that asserts on the output. What makes it yours: you ran the test against your own stack. So your post names the engine, the version and the raw response instead of quoting someone else's bug report.
+The claim: a constraint parameter that the server accepts is not enforced. The proof is one 30-line client that asserts on the output. Post it only after you run the lab against your own stack. Then the post names your engine, its version and the raw response you saw, instead of quoting someone else's bug report.
 
 "A bot closed this bug as completed. It still reproduces."
 
-The claim: a closed issue with state reason "completed" can hide a live bug. So triage by evidence, not by state. What makes it yours: you traced the SGLang thread, the maintainer quotes, the auto-close and the three comments after. You can say what this means for anyone reading an engine's tracker.
+The claim: a closed issue with state reason "completed" can hide a live bug. So triage by evidence, not by state. Post it after you read the SGLang thread yourself: the maintainer quotes, the auto-close and the three comments after it. Then you can say what it means for anyone reading an engine's tracker.
 
 Both posts carry one habit: assert on outputs, not status codes or issue states.
 
