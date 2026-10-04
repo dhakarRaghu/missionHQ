@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-10-04T03:02:51.066299+05:30",
+  "built_at": "2026-10-05T03:36:06.741301+05:30",
   "courses": [
     {
       "slug": "inference-internals",
@@ -65,8 +65,17 @@
           "one_liner": "He can rent a GPU, serve a model on vLLM or SGLang with pinned flags, diagnose a startup failure before renting bigger hardware, and produce an engine comparison he could defend to a colleague.",
           "minutes": 150,
           "date": "2026-10-04",
-          "read": false,
+          "read": true,
           "file": "2026-10-04-inference-internals-phase-04a-serving.html"
+        },
+        {
+          "slug": "inference-internals-phase-04b-optimizing",
+          "title": "Quantization, Speculation and the Self-Host Decision",
+          "one_liner": "Decide for any serving optimisation whether it needs an eval gate or a load check, pick the right quantization format for the traffic shape, size speculative decoding from the published formula, and answer the self-host question with four numbers.",
+          "minutes": 150,
+          "date": "2026-10-04",
+          "read": false,
+          "file": "2026-10-04-inference-internals-phase-04b-optimizing.html"
         }
       ]
     },
@@ -96,6 +105,15 @@
     }
   ],
   "articles": [
+    {
+      "title": "Week review: the full inference machine, from first token to self-host",
+      "one_liner": "The week's mechanics recalled against his own numbers, three older ideas tested cold, and a pointed start on the Phase 4 lab",
+      "topic": "week review",
+      "kind": "",
+      "date": "2026-10-04",
+      "read": false,
+      "file": "2026-10-04-week-review-2026-w40.html"
+    },
     {
       "title": "The 408 that was never a timeout",
       "one_liner": "He can look at a 500 storm or a timeout spike in his own stack and decide whether it is an engine failure or a routing and keepalive failure, reach for the operational fix first, and add the two checks (serving-ability probes, connection liveness) before he changes any code.",

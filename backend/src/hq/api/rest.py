@@ -11,11 +11,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from hq import board, db, engagement, job_retention, safety, value
+from hq import board, db, engagement, job_retention, outreach, safety, value
 from hq.api.deps import require_auth
 from hq.config import settings
 from hq.dbos_app import DBOS
-from hq.job_pipeline import referral_brief, referral_payload
 from hq.obs import emit
 
 log = logging.getLogger(__name__)
@@ -253,7 +252,8 @@ JOB_SELECT = (
     " experience_band, compensation, stack, fit_score, fit_bucket, status,"
     " why_fit, next_step, notes, referral, seen_count, first_seen, last_seen,"
     " company_brief, pay_signal, role_brief, researched_at, linkedin_url,"
-    " fit_parts, pay_lakh::float8 AS pay_lakh, lane"
+    " fit_parts, pay_lakh::float8 AS pay_lakh, lane,"
+    " channel, applied_at, followup_due, touches"
     " FROM hq.jobs"
 )
 
@@ -298,8 +298,11 @@ JOB_STATUSES = (
     "interviewing",
     "offer",
     "rejected",
+    "ghosted",
     "closed",
 )
+# Statuses after which nothing is waiting on him or on them.
+_CLOCK_STOPS = ("interviewing", "offer", "rejected", "ghosted", "closed")
 
 
 @router.patch("/jobs/{job_id}", operation_id="updateJob")
@@ -311,6 +314,15 @@ async def update_job(job_id: str, body: JobPatch) -> dict:
             raise HTTPException(400, f"status must be one of {list(JOB_STATUSES)}")
         sets.append("status = %s")
         params.append(body.status)
+        if body.status == "applied":
+            # The follow-up clock: one touch made,
+            # the next due a week later.
+            due = (f"followup_due = (now() AT TIME ZONE '{settings().cron_tz}')::date"
+                   f" + {outreach.FOLLOW_UP_DAYS}")
+            sets += ["applied_at = coalesce(applied_at, now())", "touches = greatest(touches, 1)",
+                     due]
+        elif body.status in _CLOCK_STOPS:
+            sets.append("followup_due = NULL")
     for field in ("next_step", "notes", "referral"):
         value = getattr(body, field)
         if value is not None:
@@ -328,55 +340,35 @@ async def update_job(job_id: str, body: JobPatch) -> dict:
         raise HTTPException(404, "no such job")
     await engagement.record_owner_action("web", "update_job")
     await emit("job.updated", payload={"job_id": job_id, "fields": sets[:-1]})
-    referral_task = None
-    # Either move says the same thing: this one is worth a real approach, so go
-    # and find the person. Shortlisting is the usual route; dragging straight
-    # to Referral is the owner skipping a step, not asking for less.
-    if body.status in {"shortlisted", "referral"}:
-        referral_task = await _hunt_referral(job_id)
-    return {"ok": True, "referral_task_id": referral_task}
+    # A status change starts no agent work. On 2026-10-04 he asked for no
+    # referral finding, dossier, message drafts or form prefill: the pipeline
+    # finds roles and tracks what he applied to; he does the rest himself.
+    return {"ok": True}
 
 
-async def _hunt_referral(job_id: str) -> str | None:
-    """Shortlisting is the owner saying this one is worth a real approach, so
-    that is the moment to go and find the person to ask.
+@router.post("/jobs/{job_id}/followed-up", operation_id="jobFollowedUp")
+async def job_followed_up(job_id: str) -> dict:
+    """He sent a follow-up on an application. After the last allowed touch the
+    due date is the day the role turns ghosted (outreach.MAX_TOUCHES), and no
+    further follow-up is recorded."""
+    rows = await db.fetch(
+        "UPDATE hq.jobs SET touches = touches + 1, updated_at = now(),"
+        f" followup_due = (now() AT TIME ZONE '{settings().cron_tz}')::date"
+        f" + {outreach.FOLLOW_UP_DAYS}"
+        " WHERE id = %s AND status = 'applied' AND touches < %s RETURNING touches",
+        (job_id, outreach.MAX_TOUCHES))
+    if not rows:
+        raise HTTPException(409, "no applied job with that id still waiting on a follow-up")
+    await emit("job.followed_up", payload={"job_id": job_id, "touches": rows[0]["touches"]})
+    return {"ok": True, "touches": rows[0]["touches"]}
 
-    Operator does it, not hunter: the people are on LinkedIn, which
-    ``browser_read`` refuses in code, and only the signed-in browser can see a
-    first-degree connection. The brief names one company and one role, which is
-    what keeps the browse guard's "bounded" test satisfiable — an open-ended
-    walk of a company's employees is exactly what it is there to refuse.
 
-    Best effort. A dispatch that fails must not fail the owner's status change,
-    which has already been committed.
-    """
-    from hq import engine
+@router.get("/pipeline/due", operation_id="pipelineDue")
+async def pipeline_due() -> dict:
+    """What is waiting on him today: follow-ups that are due."""
+    from hq import job_clock
 
-    job = await db.fetchone(
-        "SELECT company, role, url, referral FROM hq.jobs WHERE id = %s", (job_id,)
-    )
-    if job is None or "operator" not in engine.registered_agents():
-        return None
-    known = (job["referral"] or "").strip()
-    payload = referral_payload(
-        job_id=job_id, company=job["company"], role=job["role"]
-    )
-    try:
-        return await engine.dispatch(
-            agent="operator",
-            title=f"Referral path: {job['company']} — {job['role']}"[:120],
-            brief=referral_brief(payload, known),
-            source="web",
-            payload=payload,
-            # Per job, not per press: shortlisting a role twice must not queue
-            # two identical browser runs against the same company page.
-            dedup_key=f"referral:{job_id}",
-        )
-    except Exception as exc:  # noqa: BLE001 — the status change already stands
-        log.warning("could not queue referral hunt for job %s: %s", job_id, exc)
-        await emit("job.referral_hunt_failed",
-                   payload={"job_id": job_id, "error": str(exc)[:200]})
-        return None
+    return await job_clock.pipeline_due()
 
 
 @router.get("/runs", operation_id="listRuns")

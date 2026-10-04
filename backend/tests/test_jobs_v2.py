@@ -49,6 +49,8 @@ class _Recorder:
         self.events: list[tuple[str, dict]] = []
 
     async def fetch(self, sql: str, params: tuple = ()) -> list[dict]:
+        if sql.lstrip().upper().startswith("SELECT"):
+            return []  # a read, such as the earlier-row lookup: there is none
         self.sql.append((sql, params))
         return [{"id": "job-1", "seen_count": 1, "status": params[17] if len(params) > 17 else "seen"}]
 

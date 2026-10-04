@@ -10,8 +10,7 @@ region, batch and industry, 1,000 rows a page. On 2026-10-03 it held 6,269
 companies, 1,489 hiring, 54 of them hiring in India. The approach comes
 from github.com/adityajha2005/yc-outreach (MIT).
 
-Each company's own page carries a JSON blob with its founders (LinkedIn
-and X) and its job postings: title, location, salary range, equity,
+Each company's own page carries a JSON blob with its job postings: title, location, salary range, equity,
 minimum experience, skills and age. In a sample of the 20 newest companies
 hiring in India, 98 of 103 postings stated a salary. A posting there is the
 company's own listing, so it is a source, not only a lead.
@@ -227,24 +226,9 @@ async def company_pages(client: httpx.AsyncClient,
     return list(await asyncio.gather(*(one(s) for s in slugs)))
 
 
-def people(props: dict[str, Any]) -> list[dict[str, str]]:
-    """The active founders, with what a referral needs: name, title, links.
-    YC knows whether a founder has an email; it does not publish it, and
-    nothing here guesses one."""
-    out = []
-    for f in (props.get("company") or {}).get("founders") or []:
-        if not isinstance(f, dict) or f.get("is_active") is False or not f.get("full_name"):
-            continue
-        out.append({"name": str(f.get("full_name"))[:80], "title": str(f.get("title") or "")[:80],
-                    "linkedin": str(f.get("linkedin_url") or ""),
-                    "x": str(f.get("twitter_url") or "")})
-    return out[:6]
-
-
 def job_rows(props: dict[str, Any], now: datetime | None = None) -> list[dict[str, Any]]:
     """A company's YC job postings in the shape job_feed returns."""
     company = props.get("company") or {}
-    founders = people(props)
     rows = []
     for j in props.get("jobPostings") or []:
         if not isinstance(j, dict) or not j.get("title"):
@@ -279,6 +263,5 @@ def job_rows(props: dict[str, Any], now: datetime | None = None) -> list[dict[st
             "team_size": company.get("team_size"),
             "description": (f"{company.get('one_liner') or ''}"
                             + (f" Skills: {skills}." if skills else ""))[:800],
-            "people": founders,
         })
     return rows

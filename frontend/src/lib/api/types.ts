@@ -337,6 +337,7 @@ export const JOB_STATUSES = [
   "interviewing",
   "offer",
   "rejected",
+  "ghosted",
   "closed",
 ] as const;
 
@@ -390,6 +391,22 @@ export interface Job {
   seen_count: number;
   first_seen: string;
   last_seen: string;
+  /** Where hunter found it: linkedin, yc, hn, himalayas, remotive, remoteok,
+   * ats, company_site or other. */
+  channel: string;
+  /** The follow-up clock: applied plus 7 days is a follow-up; two touches,
+   * then ghosted. */
+  applied_at: string | null;
+  followup_due: string | null;
+  touches: number;
+}
+
+/** GET /pipeline/due: what waits on him today. */
+export interface PipelineDue {
+  follow_ups: {
+    id: string; company: string; role: string; url: string;
+    applied_at: string | null; followup_due: string | null; touches: number;
+  }[];
 }
 
 

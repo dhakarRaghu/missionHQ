@@ -19,6 +19,7 @@ from hq.tools import (  # noqa: F401
     radar_tools,
     request_tools,
     review_tools,
+    signal_tools,
     vault_tools,
     web_tools,
 )

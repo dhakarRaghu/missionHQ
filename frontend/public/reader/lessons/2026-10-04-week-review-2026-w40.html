@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Week review: the full inference machine, from first token to self-host</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Week review · 2026-10-04</div><h1>Week review: the full inference machine, from first token to self-host</h1><p class="subtitle">Ten minutes to make this week&#x27;s nine lessons stick, then aim at next week&#x27;s serving lab</p></header>
+<p class="why">Nine short lessons built one request's whole path, and this page checks what held and what faded.</p>
+
+<p>Over the week you followed one request from end to end: how the model produces one token at a time, how the server groups waiting requests into batches, how provider billing counts tokens in and out, what the error codes mean when a call fails, and what it would cost to run the model on your own hardware. Each lesson stood on its own, so you may not have noticed that they make one picture: every choice in that chain moves the same handful of numbers, your latency, your bill and your failure rate.</p>
+
+<p>This page lays that picture out as one machine and tests it two ways. First, you recall each week's mechanism against numbers you measured yourself. Then, three ideas from two weeks ago come back with no warning, because those are the ones most likely to have faded. By the end you will know which ideas are still yours and which ones to reread before the next phase asks you to build on them.</p>
+<div class="keypoints"><p class="remember">Every request is billed twice; every failure this week was a check missing, an adapter lying, or a floor set wrong.</p></div>
+<h2 data-kind="orientation">What you read this week</h2>
+<div class="cards" data-cols="2">
+<div class="card" id="s1-card-chunk"><h4>One long prompt freezes every stream</h4><p>Prefill and decode share one forward pass and one token budget. So a long prompt either waits or pauses every stream sharing its pass. Chunked prefill converts that pause into a small rise in time to first token. In Phase 2B you watched mean TTFT stay green while one stream paused for 720 ms.</p></div>
+<div class="card" id="s1-card-cachelie"><h4>A cache hit is two promises</h4><p>A hit proves the key matched; it says nothing about the stored state behind it. The insert path stamped a short key on a newer state. Every later hit resumed from 192 tokens in the future, and every metric read success. Only cold-warm output equality at temperature 0 proves the value is right.</p></div>
+<div class="card" id="s1-card-usage"><h4>The same field name, two meanings</h4><p>OpenAI counts cached tokens inside <code>usage.input_tokens</code> and Anthropic counts them outside it. One shared summation is wrong by the size of your cached prefix. A cache that breaks returns 200 either way. The cached-token count in the usage object is the only proof caching happened.</p></div>
+<div class="card" id="s1-card-200"><h4>A 200 never proves enforcement</h4><p>An OpenAI-compatible server can accept a constraint parameter, parse it, and never enforce it, and it answers 200 throughout. The lesson from the ignored <code>parallel_tool_calls=false</code> flag: treat engine flags as hints. Enforce the invariant in your own layer, the one that executes the tool calls.</p></div>
+<div class="card" id="s1-card-cascade"><h4>A cascade pays for some queries twice</h4><p>An escalated query costs the cheap answer and the deep answer. So a cascade saves money only while the escalation rate stays under 1 minus the price ratio. Accuracy and cost alone cannot prove the signal works. A coin-flip cascade can show the same numbers. Only a random control that escalates the same count separates signal from noise.</p></div>
+<div class="card" id="s1-card-guard"><h4>Three rules broke a four-month incident into ten requests</h4><p>A broken cache moves money between billing classes while the token count stays flat, so a token chart sees nothing. The floor is set just below the measured normal. Per-request cost plus per-request cache hit rate detects in under ten requests what a 50% floor only caught after 59. And only a pre-call reservation priced at the <code>max_tokens</code> worst case stops spend before it happens. Every post-hoc control enforces against stale spend.</p></div>
+<div class="card" id="s1-card-408"><h4>A 408 is usually not the engine</h4><p>A non-streaming long request holds one silent connection. The shortest idle timeout in the chain kills it however healthy the engine is. Scaling the engine was the tempting first move and the wrong one. The fix is streaming or a keepalive on the path that actually timed out.</p></div>
+<div class="card" id="s1-card-quant"><h4>A borrowed benchmark cannot gate your quantization</h4><p>A benchmark measures only the tasks it samples. Quantization damage lives mostly outside that sample: human raters measured 16.0% worse where the automatic suite measured 1.7%. Any gate you ship behind must be built from your own tasks, your own languages and your real context length.</p></div>
+<div class="card" id="s1-card-gpu"><h4>You rent a clock, not a GPU</h4><p>A rented GPU bills from container start. The weight download is billed at GPU rates, and one slow link can pass the whole hour. Price the session before t=0:00, and pick the machine by its measured downlink. Have every command written down before you rent anything.</p></div>
+</div>
+
+<p>This review needs all nine because they are one machine seen from nine angles. The same request can freeze a stream, lie through its cache, misreport its bill and ignore your flag. It is the request you will soon serve on your own GPU. The next section holds up the five mechanisms from this list that deserve to outlive their examples.</p>
+<h2 data-kind="recall">The five things worth keeping</h2>
+<p>Nine lessons passed this week, but only five mechanisms are worth keeping after the examples are forgotten. Each one below is a claim you can now test. It outlives the lesson that taught it because it is physics, not a bug report.</p>
+
+<div class="cards" data-cols="1">
+<div class="card" id="s2-keep-prefill"><h4>Prefill is parallel, decode is serial, and both share one token budget</h4><p>A long prompt is processed in one parallel pass, so it is cheap per token. But that pass runs inside the same batch as every decode. One big prompt then freezes every stream that shares its forward pass. This outlives the example because it is the physics of the hardware. It explains why long prompts and long answers feel different. It explains why your mean TTFT can stay green through a 720ms pause. And it explains why every server you will ever run needs a token budget that reserves decodes first. From "Why does one long prompt freeze every stream?"</p></div>
+<div class="card" id="s2-keep-strict"><h4>Strict mode guarantees legal tokens, finish_reason guarantees the end</h4><p>A grammar mask removes illegal tokens at every step. So the shape of the output is guaranteed and nothing else is. Truncation follows the schema perfectly and still cannot be parsed. That is why the finish_reason check must stay exactly when teams want to delete it. And the accuracy tax is mostly paid at the prompt, 3.9 of 5.5 points, before any mask runs. This outlives the example because any constraint system you adopt will have the same split. It is what it enforces per step, and what it never enforces about the whole. From "Strict mode says the tokens are legal. Who says the answer is complete?"</p></div>
+<div class="card" id="s2-keep-cache"><h4>A hit rate counts keys, so only output equality proves the value</h4><p>A cache hit is two promises: the key matched, and the stored state is the right state. Your dashboard checks the first promise only. So a clamped snapshot can serve a state from the future while every metric reads green. The regression check is one job. Run the same prompt cold and warm at temperature 0 and diff the token IDs. That is because a correct cache changes cost but never content. This outlives the example: every cache you will build has the same two promises and the same blind spot. Prefix cache, snapshot cache, memoised tool result are examples. From "What catches a value lie before your users do?"</p></div>
+<div class="card" id="s2-keep-guard"><h4>Detect billing regressions on per-request cost and per-request hit rate</h4><p>A broken cache moves tokens between billing classes. So the token count never moves and no token chart can see it. What moves is per-request cost and per-request cache hit rate. The floor must sit just below the measured normal. A tidy 50 percent floor on a 98 percent workload fires nine requests late. This is what turned a four-month incident into a ten-request incident. It outlives the example because "alert on the rate, not the volume" is the right shape for any shared-resource regression. From "Which three rules catch what the token chart cannot?"</p></div>
+<div class="card" id="s2-keep-clock"><h4>You rent a clock, not a GPU</h4><p>A rented GPU bills from container start. So the weight download, the image pull and your typing are all billed at GPU rates. The fix is to price the session before t=0:00. Pick the machine by its measured downlink, and write every command into a text file while it costs nothing. This outlives the example because it is the rule for any resource billed per second. Preparation happens on the free clock, execution on the expensive one. From "Why is typing the launch command the last thing you do?"</p></div>
+</div>
+
+<p>You can now look at one request and read its whole life. You can read what the prefill pass costs the batch. You can read what the constraint actually guarantees. You can read whether the cache hit is honest. You can read what the bill would say, and what the hour of serving it would cost. The next section checks whether those ideas held: three questions from material over two weeks old, answered cold, with numbers.</p>
+<h2 data-kind="checkpoint">Three questions from older material</h2>
+<p>These three questions are old material answered cold. The numbers sit inside each question. Each answer sketch shows the arithmetic, so cover the sketch and work it before you open it.</p>
+
+<h3>Question 1: the creeping TTFT (Phase 1)</h3>
+
+<p>Your support agent's TTFT crept from 400 ms to 1,200 ms over two weeks of sessions. Someone says the provider's GPU got slower. Usually the real change is your own context growing, because agent frameworks append history silently. Your prices are $2.00 per million input tokens and $12.00 per million output tokens.</p>
+
+<p>(a) Decompose TTFT into queue and prefill. (b) Decompose the cost. (c) Say why total latency is the wrong number to diagnose this with.</p>
+
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) Prefill is the parallel read of the whole prompt. So 6,000 tokens at 15,000 tokens per second is 400 ms. TTFT = queue + prefill, so the queue is 1,200 − 400 = 800 ms.</p>
+<p>(b) Input: 6,000 × $2.00 / 1e6 = $0.012. Output: 250 × $12.00 / 1e6 = $0.003. Total $0.015, and 80 percent of it is the prompt.</p>
+<p>(c) Total latency fuses the one number you control, prompt size. It fuses this with the two you do not, queue and per-token decode speed. Here the 13.7 s mixes 800 ms of queue, 400 ms of prefill and 12.5 s of decode. TTFT creeping while sessions age is usually your own context growing. The framework appends history silently, so the prompt and its prefill bill grow every turn. Read TTFT and the input-token count per call, and the cause shows.</p>
+</details>
+
+<h3>Question 2: the timestamp again, priced properly (Phase 0, with Phase 3A arithmetic)</h3>
+
+<p>Back in Phase 0 the one-second timestamp in the system prompt broke an 18,000-token cached prefix and multiplied the bill. Now you can price it exactly. Prices per million tokens: input $2.00, cached input at a 90 percent discount ($0.20), cache writes $2.50. The timestamp changes the prefix every second, so every request writes a new entry that expires unread.</p>
+
+<p>(a) Express write and read as fractions of input price. (b) Compute the break-even read count from (write − 1) / (1 − read). (c) Compute the multiplier on the 18,000-token prefix, before and after the timestamp line.</p>
+
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) Write = 2.50 / 2.00 = 1.25. Read = 0.20 / 2.00 = 0.10.</p>
+<pre><code data-lang="text">break-even reads = (1.25 − 1) / (1 − 0.10)
+                 = 0.25 / 0.90
+                 ≈ 0.28 reads</code></pre>
+<p>So one read of an entry already puts it in profit. Caching is cheap, when the prefix holds still.</p>
+<p>(c) With a stable prefix, 18,000 tokens cost 18,000 × $0.20 / 1e6 = $0.0036 per request. With the timestamp, those tokens are a fresh write at $2.50: 18,000 × $2.50 / 1e6 = $0.045. The multiplier is 0.045 / 0.0036 = <b>12.5x</b> on the cached part of every request. One line of prompt, priced exactly: the discount was 10x, and the write surcharge added 1.25 on top.</p>
+</details>
+
+<h3>Question 3: measure before you buy (the RAG recall lesson)</h3>
+
+<p>Phase 3A's rule was that a cache hit is only free when the stored value's geometry matches the key. The test that proves it is the warm-cold equality check. Run one prompt cold, then warm at temperature 0, and diff the output token IDs. Your teammate now proposes buying a second cache tier, the summary snapshots that caused the geometry bug. In the spirit of "measure recall before you buy infrastructure", there is a question. Can the equality test run <i>before</i> the second tier exists, or does it need the new hardware first?</p>
+
+<details class="answer"><summary>Answer sketch</summary>
+<p>It runs today, on the cache you already own. The test needs only a cache that can be warm. It needs any cache you own, two runs of the same prompt at temperature 0. It also needs a diff of the token IDs. The single-tier prefix cache is enough. A correct cache changes only cost, never content. So any drift between the cold and warm runs convicts the stored value on the current infrastructure. This happens before a dollar moves.</p>
+<p>This is the same shape as measuring recall against a golden set before buying a vector store. The measurement is a query and a comparison, both free. The purchase is the thing it gates. The CI version is one job. Run the shared harness prompt cold and warm, assert equality, fail the build on drift. When the second tier arrives, the same job becomes its acceptance test. The clamp bug would have failed the build on day one instead of running for months.</p>
+</details>
+
+<p>All three answers used this week's tools on older ground. The usage object priced a Phase 1 mystery, and cache misses charging full input price explain the Phase 0 bill. The value-geometry test extended the recall lesson's rule of measuring before buying. The next section checks whether the week changed the path itself.</p>
+<h2 data-kind="orientation">Does the path change?</h2>
+<div class="callout note">
+<p>The frontier shortlist, the list of subjects that keep appearing in your week and might deserve their own course, is empty. Nothing outside inference recurred this week.</p>
+</div>
+
+<p>The path stands. The inference course continues as planned, and no new course or phase is proposed this week. The week's lessons stayed inside one line: from the first token, through caching, routing and alerting, to serving and self-hosting. A review can only confirm the direction; it cannot create one. The next section says what happens on that path next week.</p>
+<h2 data-kind="orientation">Next week</h2>
+<div class="cards" data-cols="2">
+<div class="card"><h4>You rent a clock, not a GPU</h4><p>A rented GPU bills from container start, so the download runs at GPU rates. Every command you prepare before t=0:00 is free, and every one you type later is billed.</p></div>
+<div class="card"><h4>Unpinned flags measure the defaults</h4><p>A serving default is computed at startup from GPU memory and entry point. Two servers launched with defaults differ, so you pin context, batched tokens, sequences and memory share on both before comparing anything.</p></div>
+<div class="card"><h4>Capacity lives where the curve flattens</h4><p>Capacity is the concurrency where throughput stops rising, because past that point more users buy no more tokens. The operating point is that peak plus the TTFT p99 at the same concurrency.</p></div>
+<div class="card"><h4>Self-host cost divides the bill by served tokens</h4><p>Cost per token is the hourly rate over tokens actually served, so idle hours raise it. The comparison is always against one named API's price, at a stated utilisation.</p></div>
+</div>
+
+<p>The lab card is what turns the four ideas above into your own numbers. It asks for four things, in order:</p>
+
+<ol>
+<li>Rent one hour of GPU, with the five-line plan from Phase 4A already written, so no session minute is spent on typing.</li>
+<li>Run the pinned-flag comparison on both engines, because unpinned flags would measure the defaults and not the engines.</li>
+<li>Write down the capacity point you found, the flattening of your curve plus its TTFT p99.</li>
+<li>Write down the self-host number next to the one API price it replaces.</li>
+</ol>
+
+<p>One step comes before any GPU minute is spent. Run the dry-run of the bench client on the trace from Phase 4A:</p>
+
+<div class="lab">
+<pre><code data-lang="bash">python bench_client.py --dry-run --trace trace.jsonl</code></pre>
+<p>It should report <b>20 prompts across three size groups</b>. This confirms the trace is shaped before you pay to measure it. If a size group is missing, the bug is in the trace, and fixing it costs nothing while the clock is off.</p>
+</div>
+
+<p>The dry-run exists for the same reason the five-line plan does. Anything that can be checked offline is checked offline, because the session clock starts at container start. Next week this lab card gets its numbers.</p>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+</body>
+</html>
