@@ -81,9 +81,6 @@ Thin here: scalability laws. Only COST covers them.
   with models actually gets done.
 - **Lilian Weng** — lilianweng.github.io · 2026-07-04 · long surveys; agent
   harnesses, reward hacking.
-- **Anthropic engineering** — anthropic.com/engineering · 2026-05-25 · agent
-  containment, eval noise, postmortems. Borderline on the 120-day rule, kept
-  for depth.
 - **UK AISI blog** — aisi.gov.uk/blog · 2026-08-27 · eval method and real
   agent incident reports.
 - **Temporal** — temporal.io/blog · 2026-09-15 · mixed · durable execution
@@ -686,6 +683,7 @@ not technical enough, or too much overlap with Latent Space.
 
 - **Shreya Shankar** — sh-reya.com/blog · newest post 2026-05-31 (moved by the source hunt 2026-09-28)
 - **Cloudflare postmortems (tag page)** — blog.cloudflare.com/tag/post-mortem · newest post 2026-05-01 (moved by the source hunt 2026-09-28)
+- **Anthropic engineering** — anthropic.com/engineering · newest post 2026-04-23 (moved by the source hunt 2026-10-03)
 
 ## Could not verify — worth a manual look in the browser
 
@@ -819,3 +817,17 @@ one request a minute); add a row when one of them joins a course.
 - **Colfax Research** — research.colfax-intl.com · 2026-09-07 · optimization diaries with real TFLOP/s vs peak numbers, posted weekly; newest post 2026-09-07 · inference-internals and GPU performance (courses 3 and 1): Blackwell kernel internals, FlashAttention-4, GEMM (found 2026-09-28)
 - **Ashwani Jha** — ashwanijha.dev/blog · 2026-08-15 · writes TTFT-vs-TPOT and chunk-size tradeoffs from his own serving cluster; 18 inference posts and 41 paper breakdowns; newest 2026-08-15 · inference-internals: LLM serving, chunked prefill, MoE economics, paper breakdowns (found 2026-09-28)
 - **Soil & Silicon (Evan Carlson)** — soilandsilicon.dev · 2026-07-18 · implements, measures, and admits failures (Qwen3 pairing collapse, RNG noise across devices); newest read 2026-07-18 · inference-internals: from-scratch spec decoding, KV cache, local inference, with measured numbers (found 2026-09-28)
+- **Chips and Cheese (Chester Lam, George Cozma)** — chipsandcheese.com · 2026-09-29 · Own microbenchmarks and Hot Chips 2026 teardowns of the exact silicon serving lands on; newest post 2026-09-29 · inference-internals and the machine layer: microarchitecture, accelerators, memory systems (found 2026-10-02)
+- **Materialize engineering blog** — materialize.com/blog · 2026-09-29 · Engine posts like 'Replacing Swap with a Buffer Pool' carry the system's own numbers; mixed with AI-agent product posts, pick one at a time; newest 2026-09-29 · storage internals and performance: out-of-core execution, buffer pools, compression (found 2026-10-02)
+- **Artificial Analysis** — artificialanalysis.ai/articles · 2026-09-30 · The standing external reference for the per-request cost lane — 116 benchmark posts, newest 2026-09-30; an org, not an essayist, so it feeds the cost alarm rather than teaching style · inference cost and latency: independent measured benchmarks across providers (found 2026-10-02)
+- **Neal Krawetz — The Hacker Factor Blog** — hackerfactor.com/blog · 2026-09-22 · Reads like Arpit for security: plain language, own experiments, admits systems' failures (C2PA validator divergence, Google 'Won't Fix' story); newest 2026-09-22 · reliability and security in practice: signing protocols, PKI failure modes, earned-in-public exploit write-ups (found 2026-10-02)
+- **Hazy Research blog (Stanford, Chris Ré's lab)** — hazyresearch.stanford.edu/blog · 2026-08-05 · lab writing kernel internals with own measurements (ThunderKittens 2.0, megakernel Llama-1B); named authors incl. Tri Dao; newest post 2026-08-05 · @hazyresearch · inference-internals and course 1: GPU kernels, megakernels, ThunderKittens, efficient architectures (found 2026-10-03)
+- **MLC blog (mlc.ai)** — blog.mlc.ai · 2026-09-29 · XGrammar-2, TIRx compiler harness, 'Microserving LLM engines'; project team writing engine internals, newest post 2026-09-29 · @mlcaihq · inference-internals: structured generation, GPU compilation, microserving (found 2026-10-03)
+- **Thinking Machines Lab - Connectionism** — thinkingmachines.ai/blog · 2026-07-31 · named-author science (Horace He, John Schulman, Kevin Lu); 'Defeating Nondeterminism in LLM Inference' is already an archive entry and the blog keeps publishing; newest post 2026-07-31 · @thinkymachines · applied AI systems and inference: nondeterminism, on-policy distillation, LoRA (found 2026-10-03)
+- **Epoch AI** — epoch.ai/blog · 2026-10-02 · 'The plunging price of thought' puts a measured 47%/quarter fall on inference cost - direct fodder for the per-request cost alarm lane; an org not an essayist, hence lower score; newest post 2026-10-02 · @EpochAIResearch · inference cost and capacity: measured price-per-capability trends (found 2026-10-03)
+- **Tim Dettmers** — timdettmers.com · 2026-09-21 · LLM.int8() author; 'SERA' post builds a coding agent with 32 GPUs and five researchers with real numbers, but recent posts drift toward academia/AGI essays; newest post 2026-09-21 · @Tim_Dettmers · quantization, GPU hardware for deep learning, building research agents on small compute (found 2026-10-03)
+- **Chris Wellons (null program)** — nullprogram.com · 2026-09-20 · Builds the thing then explains the mechanism: concurrent atomic MSI hash tables, a custom 80286 VM to run a Win16 game, self-built code-signing infra; newest post 2026-09-20 · @skeeto · performance, concurrency and the machine; C systems craft; engineering craft with a model in the loop (found 2026-10-04)
+- **Gunnar Morling** — morling.dev/blog · 2026-08-31 · First-party deep dives on replication slots, WAL bloat, KIP-932, plus a 2026 series building a fast Parquet reader; newest post 2026-08-31 · @gunnarmorling · storage internals (Postgres, Parquet), Kafka/CDC, JVM performance (found 2026-10-04)
+- **Eli Bendersky** — eli.thegreenplace.net · 2026-09-30 · Mechanism essays on concurrent servers in Go and Rust, parse-don't-validate, plugin architecture; newest post 2026-09-30 (book notes; technical posts run Jun-Sep 2026) · @elibendersky · Go and Rust concurrency, compilers, engineering craft (found 2026-10-04)
+- **Tailscale blog** — tailscale.com/blog · 2026-09-30 · Mixed company blog: NAT-traversal lineage and Fitzpatrick's Tailcat sit next to agent-integration news; pick posts one at a time; newest post 2026-09-30 · @tailscale · networking internals and production systems; system design (found 2026-10-04)
+- **HumanLayer blog** — humanlayer.dev/blog · 2026-09-04 · Vendor but the context-engineering posts (12 Factor Agents, context forking, long-context critique) are concept-first; newest item 2026-09-04 is a resource index, not an essay · engineering craft with a model in the loop: context engineering, agent harnesses (found 2026-10-04)

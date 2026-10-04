@@ -1,0 +1,284 @@
+Phase 3B showed you that a cascade of small models can beat one large model on cost, but it left two open questions: none of your runs had a random control, so you cannot yet say the cascade's routing handles were measured, not invented, and the three-rule guard that would have caught the broken cache in ten requests was written but never run.
+
+Both scripts run offline with no API key, so this Saturday is for running them, breaking them, and writing down the numbers. One article this week adds a quieter failure to reproduce: a cache hit that served an answer from the wrong model, while the cache hit rate stayed green. By the end you will have two ledger artefacts, a tuned cache-floor threshold, and written numbers for cascade cost, detection latency and the variance of a single run.
+
+A saving you cannot measure is a saving you will lose: control groups for cascades, per-request cost for caching.
+
+## What you will have at the end?
+
+You will end Saturday with two artefacts, a tuned threshold, and every number written down.
+
+This lab runs the two scripts you wrote in Phase 3B until they break, and records what breaks. You do not read new material today. You produce evidence that your cost guard and your cascade actually work. Nothing runs against an API, so the whole lab is free and offline.
+
+You will have four things at the end:
+
+- A cascade table from cascade_lab.py, comparing your real escalation signal against a random control at several signal qualities. This is the table that proves the signal carries information, or that it does not.
+
+- A budget ledger at /tmp/budget_ledger.jsonl from budget_guard.py, where the cache break at request 50 was caught within ten requests.
+
+- A tuned cache-floor threshold, set from the measured hit rate instead of the round default.
+
+- A page of written numbers: the cascade cost, the detection latency of each rule, and how much one single run can vary.
+
+The control group
+
+A cascade with a useless signal still shows good accuracy and low cost. Only a control that escalates the same count at random shows whether the signal works. Your cascade table needs its row.
+
+The three rules
+
+The guard fires a per-request budget, a rolling-cost rule that says cost rose, and a cache-floor rule that says why. A broken cache changes no token count, so only these rules see it.
+
+The pricing fallback
+
+When a price sheet row has no cached price, part A charges full input price. The cost line then stays flat through a cache break, and the rolling rule has nothing to detect.
+
+Small samples mislead
+
+One run of a cascade can lie by many accuracy points. Averaging over many trials gives a standard error, and the standard error tells you what to believe.
+
+The lab is ordered so each artefact depends on the one before it. You first run both scripts and see the expected output. Then you break three things on purpose, so you know what each failure looks like in the numbers. Then you measure and write everything down, because a number you did not write down is a number you will argue about later.
+
+## Before you start?
+
+Each build step in this lab tells you to expect an exact output line. For that check to mean anything, your setup must already match the one those numbers were written from. This section confirms that, before you spend ten minutes on a failure that was only a missing file.
+
+Three files from part A run the whole lab, and one tool runs them:
+
+- The phase03_economics/ directory, with cascade_lab.py and budget_guard.py from part B and pricing.py from part A.
+
+- Python, on a machine where you can run scripts.
+
+- An empty /tmp/budget_ledger.jsonl, or no such file yet, so the lines you read later come only from your runs.
+
+You need no API key. Both scripts run offline against a local price sheet and a simulated workload. So every command in this lab is free, and you can repeat it as many times as you like. Re-running is the point of the break-it section, so nothing you do here is hard to undo.
+
+Prove the setup before you start. Each script has a self-test that checks its own logic offline. These are the scorer for the cascade and the three rules for the guard:
+
+python phase03_economics/cascade_lab.py --self-test
+python phase03_economics/budget_guard.py --self-test
+
+Both must pass. If a self-test fails, the problem is in your setup, not in what you observe later. So do not start the build until both pass.
+
+One warning before you run anything. The guard appends one JSON line per request to /tmp/budget_ledger.jsonl and never clears it. So the runs from the build, the breaks and the measurements all land in the same file. When you sum spend by hand in the measurement step, remember which run each block of lines came from.
+
+With both self-tests passing, the next section starts the build: four runs with the exact output lines to look for in each.
+
+## The build — what do I run, and what do I look for?
+
+Both self-tests pass, so the scripts are healthy. Now you run them for real. This section has four steps, all offline. Each step proves one idea from the phase, and each has the exact output lines to look for. When you finish them, you will have seen a cost break get caught in ten requests. You will also have seen a coin-flip cascade produce three different verdicts from three identical runs.
+
+A note on the numbers you will see. The expected values below come from the author's machine, re-run on 2026-09-17. Small details like timestamps will differ on yours. The structure of the output will not.
+
+-  E9 offline Replay Story 1 and time the detection. This is the claim that per-request metering with a cache floor turns a four-month incident into a ten-request incident. The run sends 200 agent steps with an 18,000-token stable prefix, and the cache breaks at request 50.
+python phase03_economics/budget_guard.py --simulate --role cache_demo
+
+You should see:
+request    1: cost $0.007400  hit rate 98%
+request   50: cost $0.039800  hit rate 0%
+rolling_cost   request   52  spend at detection $0.4820
+cache_floor    request   59  spend at detection $0.7606
+
+Three things to notice. First, the cost per request jumps from $0.007400 to $0.039800 at request 50, a 5.4x rise, while the token count stays the same. Only the billing class changed, from cached to uncached. Second, the rolling-cost rule fires first, at request 52. It tells you that cost rose, not why. Third, the cache rule fires at 59, seven requests later. Write that order down, because the break-it section exists to explain and fix it. Also note the spend at detection: by the time each rule fires, $0.4820 and $0.7606 are already gone.
+
+-  E9 follow-up offline Run the same replay with an incomplete price row. This proves the phase's warning that an alert is only as good as the price sheet behind it.
+python phase03_economics/budget_guard.py --simulate
+
+With no role, the default gpt-4.1-mini row has no cached price in the sheet. Part A's fallback rule charges full input price for tokens it cannot classify. So the cost line stays flat through the break: request 1 and request 50 both cost $0.007760, even though the hit rate still drops from 98% to 0%. The rolling-cost rule has nothing to see and never fires. The lesson in one sentence: fill in the cached price before you trust a cost alert, because the fallback keeps the bill estimate safe and the alert blind.
+
+-  E12 offline Build a cascade and run the control group. This is the experiment that separates a real escalation signal from an expensive coin flip. The script runs four strategies over 300 trials of 20 items, including a random control that escalates the same number of queries as the cascade, chosen at random.
+python phase03_economics/cascade_lab.py --simulate
+
+The summary lines you should get:
+signal quality 0.85: the cascade beats the random control by +7.2 accuracy
+points on average (standard error 0.41 ...).
+cascade keeps 96.4% of deep-only accuracy for 61.9% of the deep-only cost.
+
+Read the four-row table before those lines. The cascade matches deep-only accuracy at about 62% of its cost. The +7.2 point gap over the random control is 17 standard errors from zero. That is the number that proves the signal carries information, because a useless signal would beat the control by nothing on average.
+
+-  E14 offline See how much one run can mislead you. This steps on the same ground as the guard's wrong role: a result that looks solid and is not. Run one trial three times, changing only the seed. The signal quality is 0.5, a coin flip, so the true gap over the control is about zero.
+python phase03_economics/cascade_lab.py --simulate --trials 1 --signal-quality 0.5 --seed 1
+python phase03_economics/cascade_lab.py --simulate --trials 1 --signal-quality 0.5 --seed 2
+python phase03_economics/cascade_lab.py --simulate --trials 1 --signal-quality 0.5 --seed 3
+
+The three gap lines read +10.0, then +0.0, then -5.0 accuracy points. Same signal, same script, three answers that disagree. One run would have let you conclude anything. Each run also prints "Only one trial, so there is no standard error": with one trial there is no spread to measure, and the spread is the only thing that would have warned you. Keep this in mind for every small eval set you build later.
+
+Keep every run's terminal output. The measurement section asks you to write down numbers from all four steps, and re-running to recover a forgotten line is wasted time.
+
+Everything so far uses the default settings, and the defaults contain a mistake on purpose. The cache floor of 50% sits far below the normal hit rate of 98%. So the rule designed to catch this break fired second. The next section turns three knobs: the floor, the cause rule and the signal quality. It shows what each failure looks like in the output.
+
+## Break it — which knobs do I turn, and what does failure look like?
+
+The build used the defaults, and the defaults hide a tuning mistake on purpose. Now you make three breaks yourself and watch what each one looks like in the output. Then you recognise the shape when it happens for real.
+
+-  E10 offline Break 1: the round-number threshold. The default cache floor is 50%, and the system's normal hit rate is 98%. Raise the floor, then shorten the window:
+python phase03_economics/budget_guard.py --simulate --role cache_demo --cache-floor 0.90
+python phase03_economics/budget_guard.py --simulate --role cache_demo --cache-floor 0.90 --window 5
+
+The cache-floor rule fired at request 59 with the default. It fires at 51 with the 90% floor, now ahead of rolling_cost at 52, and at 50 with the 5-request window. The default was seven requests late for one reason: a window average starting at 98% must fall a long way to cross a floor of 50%, so the rule spent seven requests climbing down to its own threshold. Set the floor just below your measured normal, never at a round number.
+
+-  E11 offline Break 2: remove the rule that finds the cause.
+python phase03_economics/budget_guard.py --simulate --role cache_demo --no-cache-rule
+
+Only rolling_cost fires, at request 52, with $0.4820 spent. You now know that cost went up and nothing about why. Then run it without --role cache_demo:
+
+python phase03_economics/budget_guard.py --simulate --no-cache-rule
+
+The output ends with no alerts fired. The gpt-4.1-mini row has no cached price, so part A's fallback charges full input price on every request, the cost line is flat, and the incident is invisible twice over: no cause rule, and a cost rule with nothing to see. Keep this run's behaviour in mind for the checkpoint, which asks you to tell two unrelated rolling_cost causes apart using only the ledger fields.
+
+-  E13 offline Break 3: the coin-flip signal.
+python phase03_economics/cascade_lab.py --simulate --signal-quality 0.5
+
+The gap against the random control falls to +0.4 accuracy points, inside two standard errors of zero. The signal carries no information. But look at what did not change: the cascade still shows 90.7% of deep-only accuracy at 69.3% of the deep-only cost. A dashboard of accuracy and cost alone would call this broken cascade a success and ship it. Only the control row shows the problem, which is why every cascade table you build keeps that row.
+
+Each of these breaks is silent. No command errors, no exit code changes, and the summary numbers mostly improve. Detection came from comparing a number against the right reference: the measured normal, the second rule, the control row.
+
+You have now seen every failure shape this phase predicts. The next section is where you write the numbers down: which lines from these runs go into your notes, and what /tmp/budget_ledger.jsonl adds to them.
+
+## Measure — which numbers do I write down, and where do they come from?
+
+You have run every exercise and seen every failure shape. Those numbers scroll past in a terminal and disappear. This section lists the lines worth writing down. It also covers what each one proves when you read it back a week later.
+
+A written number has three jobs here. It proves the mechanism. It gives you a reference to compare a future run against. It survives long enough to reach the checkpoint. Write each one with its conditions: the command, the flags, and the seed.
+
+### From the E9 run: the cost of a broken cache
+
+Two numbers make the incident real: cost per request before the break, and after it.
+
+$0.007400cost per request, requests 1 to 49
+
+$0.039800cost per request, request 50 on
+
+5.4xthe jump, token count unchanged
+
+Then record the spend at detection for each rule. This tells you what a wrong threshold costs in dollars, not in request counts.
+
+rulefires at requestspend at detection
+
+rolling_cost52$0.4820
+
+cache_floor, default 50%59$0.7606
+
+All values are from the --role cache_demo replay, 200 requests with an 18,000-token prefix, the cache breaking at request 50.
+
+### From the E10 run: what tuning buys you
+
+Record the detection index at each threshold. These three numbers are your evidence that the floor must come from the measured normal.
+
+settingcache_floor fires atspend then
+
+default floor 50%59$0.7606
+
+floor 90%51$0.4422
+
+floor 90%, window 550$0.4024
+
+The tuned threshold catches the break on the very first bad request, and detecting earlier halve the wasted spend.
+
+### From the ledger: your own arithmetic
+
+Open /tmp/budget_ledger.jsonl and compute two sums yourself: the total cost before request 50, and the total after. Each line is one JSON object per request, so a short Python one-liner is enough.
+
+python -c "
+import json
+rows=[json.loads(l) for l in open('/tmp/budget_ledger.jsonl')]
+before=sum(r['cost'] for r in rows if r['i']<50)
+after=sum(r['cost'] for r in rows if r['i']>=50)
+print(f'before {before:.4f}  after {after:.4f}  ratio {after/before:.1f}x')"
+
+What to look for: the after period has three quarters of the requests. Yet it costs far more than the before period. The per-line fields route, cached_in, uncached_in and naive_cost are what let you answer E11's follow-up question later.
+
+### From the E12 run: the cascade table
+
+Record dollars per correct answer for all four strategies, because that is the ranking metric. Then record the gap against the random control in two forms: accuracy points, and standard errors.
+
+strategyaccuracy$ per correct
+
+cheap-only75.0%$0.000192
+
+deep-only90.0%$0.000800
+
+cascade90.0%$0.000495
+
+random control80.0%$0.000557
+
+Signal quality 0.85, 300 trials of 20 items. The gap is +7.2 accuracy points, 17 standard errors from zero. Also write the retained-quality line: 96.4% of deep-only accuracy for 61.9% of deep-only cost.
+
+### From the E14 run: the case for reporting the spread
+
+Three runs, the same coin-flip signal, three different answers:
+
+- --seed 1 reports a gap of +10.0 accuracy points.
+
+- --seed 2 reports +0.0.
+
+- --seed 3 reports -5.0.
+
+Keep all three together in your notes. Each also prints "Only one trial, so there is no standard error," which is the point: one run gives you no spread to judge by.
+
+Write the numbers as you go, in the order the sections above list them. The checkpoint assumes they are on the page, not in your memory.
+
+Your numbers are written down. The next section uses them to decide whether the lab is finished: five checks you answer against your own notes.
+
+## Done when — how do I know the lab is finished?
+
+The numbers are written down. This checkpoint is five questions against them, not against memory. Each asks you to read your own notes from the sections above and decide something.
+
+- The detection window. Your story-1 replay shows rolling_cost at request 52 and cache_floor at 59. The cache broke at 50. Without --role cache_demo the same break shows a flat cost line and no cost alert. Explain the flat line in one sentence.
+Answer sketch
+The default gpt-4.1-mini row has no cached price, so part A's fallback charges full input price for cached tokens too. Cost before the break then equals cost after it, and the rolling-cost rule has nothing to detect. Both rules fired within ten requests of the break on the cache_demo run, so the detection worked once the price sheet was complete.
+
+- The round-number threshold. Your --cache-floor 0.90 run fired at request 51, against 59 at the default 50% floor. Explain in one sentence why a 50% floor detects late on a system whose normal hit rate is 98%.
+Answer sketch
+The window average falls from 98% and must travel 48 points to cross a floor that sits at half of normal. Each post-break request pulls the window average down by only a fraction, so crossing takes many requests. A floor a few points below the measured normal crosses on the first broken windows.
+
+- The control row. Your cascade table has four rows, and the random control escalates the same count as the cascade. Look at your recorded gap, +7.2 accuracy points at 17 standard errors. Is the signal's gain worth the escalation cost, and what in your table would say no?
+Answer sketch
+At +7.2 points for 61.9% of deep-only cost, yes: the cascade nearly matches deep-only accuracy at a large saving. The answer flips when the gap sits inside two standard errors of zero, as in your --signal-quality 0.5 run. That run still showed 90.7% of deep-only accuracy at 69.3% of the cost, so only the control row exposes the coin flip.
+
+- Telling two causes apart. From E11: name two unrelated changes that also trigger rolling_cost. Then say how you tell them apart from a broken cache using only your ledger fields.
+Answer sketch
+Any change that raises per-request cost qualifies: a model swap to a more expensive model, a longer system prompt, or a route that starts calling a heavyweight tool every turn. Read route first to see which call type moved. Then compare cached_in against uncached_in: a broken cache moves input tokens between the two columns while the total stays flat. A longer prompt grows both and the cost. cost against naive_cost shows whether caching was ever being credited on that route at all.
+
+- Written, not remembered. Without rerunning anything, read your notes back: the two per-request costs, both spends at detection, the three detection indices from E10, the four dollars-per-correct values, and the three E14 single-trial gaps.
+Answer sketch
+You should have: $0.007400 before the break and $0.039800 after (5.4x). Spend at detection: $0.4820 for rolling_cost, $0.7606 for cache_floor. Detection at request 59 for a 50% floor, 51 for 90%, and 50 for 90% with a 5-request window. Dollars per correct: $0.000192, $0.000800, $0.000495, $0.000557 across the four strategies. Single-trial gaps: +10.0, +0.0, -5.0. If any of these is missing, run that exercise again and write it down this time. That rerun is the lesson of E14.
+
+All five answered from your notes means the lab is done. If you have time left, the next section sends you after the one failure none of these rules would catch: a cache hit that serves the wrong model.
+
+## If you have more time — the cache hit that lied?
+
+The checks you just ran detect each of this week's failures except one: a cache that reports a hit and serves the wrong state. This extension is optional, and it sends you after exactly that failure.
+
+The incident comes from this week's article, "The cache hit that served the wrong model". An SGLang user on one H200 saw repeated prompts return different greedy tokens with a warm cache than with a cold one. The cause was that the cache stored two kinds of model state, one saved at any token and one only every 64 tokens, under one shared length. A later request matched the key exactly and resumed from a state 96 tokens in the future. The hit rate stayed green the whole time, because the hit was real and the value was wrong. Your three rules from Section 3.5 watch cost and hit rate, so none of them would fire here either.
+
+The detector that caught this was not a metric. It was a comparison: warm-cache greedy tokens against cold-cache greedy tokens, on the same prompt, position by position.
+
+You will not reproduce the bug, because you do not have that serving stack. You reproduce the check.
+
+The warm/cold divergence check
+
+Pick one long prompt with a stable prefix, the same shape as your agent's system prompt. Use greedy decoding, so the only source of variation is the cache, not sampling.
+
+- Restart your server, or clear its prefix cache, so this run is guaranteed cold.
+
+- Send the prompt once and save every output token, in order. This is the cold reference.
+
+- Send the same prompt twice more without a restart, so the second and third runs hit the warm cache.
+
+- Compare the warm outputs against the cold reference token by token, and record the position of the first difference.
+
+A healthy cache gives you identical tokens at every position, because greedy decoding is deterministic for the same model state. A first divergence anywhere means the warm run resumed from a different state than the cold run. That is the signature of the article's bug, whatever the cause turns out to be.
+
+The regression check the article ends with
+
+Turn the comparison above into something that runs on every deploy, not once by hand.
+
+- Fix one prompt and store its golden greedy continuation: the token sequence a cold run produced on a known-good build.
+
+- On each deploy, run the prompt cold, then run it warm, and compare both against the golden sequence.
+
+- Fail the deploy if either run diverges. A cold divergence means the model or its config changed. A warm-only divergence means the cache is serving a state the key does not describe.
+
+The check is cheap: one prompt, three calls, no judge, no threshold to tune. It fails or it passes.
+
+Finish with one decision, and write it down with your other numbers. In your own serving setup, where does this check live: in the deploy pipeline that gates a new model build, or as a scheduled probe against the running server? A pipeline check catches the bug before users do, but only if the deploy recreates real warm-cache traffic. A scheduled probe catches a break that appears without a deploy, at the cost of running forever. Say which you pick and why, in two sentences.
