@@ -1052,8 +1052,7 @@ async def job_feed(
     `source` is one of:
     - `yc`: job postings of Y Combinator companies that are hiring, read from
       each company's YC page: experience floor, salary (most state one),
-      location, age, and `people` (the founders, with LinkedIn and X) for
-      the referral step. India and remote companies by default; `location`
+      location and age. India and remote companies by default; `location`
       narrows it. A yc row is the company's own posting: record it with its
       url, source "yc" and its external_id, without another board.
       With no `query`, only engineering roles are returned.

@@ -999,6 +999,22 @@ async def _watchdog_tick(scheduled: datetime, context: Any) -> None:
             await DBOS.send_async(wf_id, f"{row['id']}:expired", topic=runner.APPROVAL_TOPIC)
 
 
+@DBOS.step(name="jobs.daily_clock")
+async def _job_clock_step() -> dict[str, Any]:
+    """The job pipeline's daily step, at most once a calendar day."""
+    from hq import job_clock
+
+    day = job_clock.today().isoformat()
+    row = await db.fetchone("SELECT value FROM hq.control WHERE key = 'job_clock_day'")
+    if row and row["value"] == day:
+        return {"skipped": day}
+    out = await job_clock.apply_clocks()
+    await db.execute(
+        "INSERT INTO hq.control (key, value) VALUES ('job_clock_day', %s::jsonb)"
+        " ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (json.dumps(day),))
+    return {"day": day, **out}
+
+
 async def _archive_old_tasks() -> None:
     """Retire finished tasks the owner has stopped looking at.
 
@@ -1017,6 +1033,14 @@ async def _archive_old_tasks() -> None:
         raise
     except Exception:  # the roles stay until the next tick
         log.warning("job retention failed; roles kept for now", exc_info=True)
+    # Once a day: applied roles past their last touch turn ghosted
+    # (`job_clock`). What is due reaches him through the daily note.
+    try:
+        await _job_clock_step()
+    except REPLAY_ERRORS:
+        raise
+    except Exception:
+        log.warning("job clock failed; it runs again on the next tick", exc_info=True)
     # A browser request nobody routed within three days is not coming: expire
     # it, so hunter's identical question tomorrow is not refused as "pending".
     await db.execute(

@@ -76,11 +76,11 @@ SKILLS = ("daily-note", "consolidate", "job-shortlist", "daily-posts", "weekly-r
 # the shortlist gets the rows it must pick from; the posts and the review get
 # what he has done, because that is where a claim about him is possible.
 SECTIONS: dict[str, tuple[str, ...]] = {
-    "daily-note": ("lead", "needs", "decisions", "counters", "gates", "owner"),
+    "daily-note": ("lead", "needs", "decisions", "counters", "gates", "pipeline", "owner"),
     "consolidate": ("needs", "decisions", "counters", "gates"),
-    "job-shortlist": ("shortlist", "decisions", "counters"),
+    "job-shortlist": ("shortlist", "decisions", "counters", "pipeline"),
     "daily-posts": ("lead", "counters", "owner"),
-    "weekly-review": ("needs", "decisions", "counters", "gates", "owner"),
+    "weekly-review": ("needs", "decisions", "counters", "gates", "funnel", "owner"),
 }
 # The engine's own gates, as queries. The course query is start_course_study's:
 # the newest course lesson that is unread, or that he failed in review. The
@@ -492,6 +492,29 @@ def render_counters(c: Counters, gates: bool = False) -> list[str]:
     return lines + (render_gates(c.course_gate, c.topic_gate) if gates else [])
 
 
+def render_pipeline(due: dict[str, list[dict[str, Any]]] | None) -> list[str]:
+    """What waits on him today: follow-ups on applications (job_clock). He
+    sends them; nothing here does."""
+    if due is None:
+        return [f"- {NOT_READABLE}"]
+    lines = [f"- Follow up: {_cut(str(r['company']), 40)} — {_cut(str(r['role']), 50)}"
+             f" (applied {_day(r['applied_at'])}, touch {int(r['touches']) + 1} of 2)"
+             for r in due.get("follow_ups") or []]
+    return lines or ["- nothing due"]
+
+
+def render_funnel(rows: list[dict[str, Any]] | None, days: int = 7) -> list[str]:
+    """Each channel's roles over `days`, as counts: the numbers are small and
+    a rate on three roles misleads."""
+    if rows is None:
+        return [f"- {NOT_READABLE}"]
+    if not rows:
+        return [f"- no roles found in the last {days} days"]
+    return [f"- {r['channel']}: found {r['found']}, strong {r['strong']},"
+            f" applied {r['applied']}, interviewing {r['interviewing']}, offers {r['offers']}"
+            for r in rows]
+
+
 def render_decisions(decisions: list[tuple[str, int | None]]) -> list[str]:
     """Open decisions with their age; seven days or more gets the flag."""
     out: list[str] = []
@@ -549,6 +572,8 @@ def render_block(
     shortlist: list[dict[str, Any]] | None = None,
     bar: float = 25.0,
     owner: str = "",
+    due: dict[str, list[dict[str, Any]]] | None = None,
+    funnel: list[dict[str, Any]] | None = None,
     limit: int = LIMIT_CHARS,
 ) -> str:
     """The block, under ``limit`` characters. Lists are cut from the end to
@@ -580,6 +605,13 @@ def render_block(
                      "Counters and gates, computed by code (what a chain waits on is named only"
                      " from the two gate lines):")
         fixed.extend(render_counters(counters or Counters(), gates="gates" in sections))
+    if "pipeline" in sections:
+        fixed.append("Due today on the job pipeline, by the follow-up clock"
+                     " (he sends these himself; name each one he needs to act on):")
+        fixed.extend(render_pipeline(due))
+    if "funnel" in sections:
+        fixed.append("Job funnel by channel, last 7 days (counts, computed by code):")
+        fixed.extend(render_funnel(funnel))
     tail = owner.strip() if "owner" in sections and owner.strip() else ""
 
     def assemble(kept: list[list[str]]) -> str:
@@ -761,9 +793,18 @@ async def build(skill: str, now: datetime | None = None) -> str:
         counters.course_gate, counters.topic_gate = course_gate, topic_gate
     shortlist = await _shortlist_rows() if "shortlist" in sections else None
     owner = await owner_state.block() if "owner" in sections else ""
+    due = funnel = None
+    if "pipeline" in sections or "funnel" in sections:
+        from hq import job_clock
+        try:
+            due = await job_clock.pipeline_due() if "pipeline" in sections else None
+            funnel = await job_clock.funnel() if "funnel" in sections else None
+        except Exception:
+            log.warning("continuity: the job pipeline could not be read", exc_info=True)
     return render_block(
         sections=sections, lead=lead, needs=needs, decisions=aged, counters=counters,
         shortlist=shortlist, bar=settings().job_target_ctc_lakh, owner=owner,
+        due=due, funnel=funnel,
     )
 
 

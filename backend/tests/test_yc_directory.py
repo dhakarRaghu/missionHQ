@@ -195,7 +195,7 @@ def test_foreign_pay_is_left_alone() -> None:
     assert yc.rupee_lakhs("") == ""
 
 
-def test_a_posting_carries_pay_experience_india_and_the_active_founders() -> None:
+def test_a_posting_carries_pay_experience_and_india_but_no_people() -> None:
     rows = yc.job_rows(PAGES["acme-ai"], NOW) + yc.job_rows(PAGES["older-co"], NOW)
     backend = rows[0]
     assert backend["compensation"] == "₹25-40 LPA (YC: ₹25L - ₹40L) + 0.1% - 0.5% equity"
@@ -203,10 +203,9 @@ def test_a_posting_carries_pay_experience_india_and_the_active_founders() -> Non
     assert backend["url"] == "https://www.ycombinator.com/companies/x/jobs/1"
     assert backend["location"] == "Bengaluru, KA, IN (India)"
     assert rows[-1]["location"] == "Gurugram, HR, IN (India)"
-    # Only active founders, with links; YC does not publish emails and none is guessed.
-    assert backend["people"] == [{"name": "Asha Rao", "title": "CEO",
-                                  "linkedin": "https://linkedin.com/in/asha", "x": ""}]
-    assert "@" not in json.dumps(rows)
+    # Roles only: on 2026-10-04 he asked for no referral finding, so a row
+    # carries no founders and no contact.
+    assert "people" not in backend and "Asha Rao" not in json.dumps(rows)
 
 
 # --- job_feed source "yc" --------------------------------------------------------

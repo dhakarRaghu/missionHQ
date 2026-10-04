@@ -309,6 +309,8 @@ def test_record_job_closes_a_role_with_a_five_year_floor(monkeypatch) -> None:
     written: list[tuple] = []
 
     async def fetch(sql: str, params: tuple = ()) -> list[dict]:
+        if sql.lstrip().upper().startswith("SELECT"):
+            return []  # a read, such as the earlier-row lookup: there is none
         written.append(params)
         return [{"id": "job-1", "seen_count": 1, "status": params[17]}]
 

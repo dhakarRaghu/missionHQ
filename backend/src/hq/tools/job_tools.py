@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic_ai import ModelRetry, RunContext
 
-from hq import db, job_retention
+from hq import db, job_retention, outreach
 from hq.config import settings
 from hq.job_pipeline import exhausted_targets, sweep_brief
 from hq.obs import emit
@@ -452,7 +452,41 @@ def _dedupe_key(
     provider, external_id = _normal(provider), external_id.strip()
     if provider and external_id:
         return f"ats:{provider}:{external_id}"
-    return f"fallback:{_normal(company)}|{_normal(role)}|{_normal(location)}"
+    return outreach.fallback_key(company, role, location)
+
+
+def _like(prefix: str) -> str:
+    return prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def legacy_prefixes(company: str, role: str) -> list[str]:
+    """Key prefixes this role may be stored under: the company as written
+    (brackets kept, as before 2026-10-04) and as dedupe now folds it."""
+    first = company.split("(")[0]
+    return list(dict.fromkeys([f"fallback:{_normal(company)}|", f"fallback:{_normal(first)}|"]))
+
+
+async def _resolve_key(key: str, company: str, role: str, location: str = "") -> str:
+    """The key already in the ledger for this role, if any, else `key`."""
+    if not key.startswith("fallback:"):
+        return key
+    rows = await db.fetch(
+        "SELECT dedupe_key FROM hq.jobs WHERE dedupe_key = %s OR dedupe_key LIKE ANY(%s)"
+        " ORDER BY first_seen",
+        (key, [_like(p) for p in legacy_prefixes(company, role)]))
+    for row in rows:
+        found = str(row.get("dedupe_key") or "")
+        if found and (found == key or outreach.same_posting(found, company, role, location)):
+            if found.endswith("|") and location.strip() and found != key:
+                # A row stored with no location takes the first location it is
+                # seen with, so a second city is a second row, not a merge.
+                moved = await db.fetch(
+                    "UPDATE hq.jobs SET dedupe_key = %s WHERE dedupe_key = %s"
+                    " AND NOT EXISTS (SELECT 1 FROM hq.jobs WHERE dedupe_key = %s)"
+                    " RETURNING dedupe_key", (key, found, key))
+                return key if moved else found
+            return found
+    return key
 
 
 def strongest_band(new: str, prior: str) -> str:
@@ -565,8 +599,12 @@ async def record_job(
     if fit_adjust and not adjust_reason.strip():
         raise ModelRetry("fit_adjust needs adjust_reason: one sentence the fields cannot show")
 
-    key = _dedupe_key(company, role, location, provider, external_id)
-    gone = job_retention.removed_recently(key)
+    key = await _resolve_key(_dedupe_key(company, role, location, provider, external_id),
+                             company, role, location)
+    gone = job_retention.removed_recently(key) or (
+        job_retention.removed_matching(
+            lambda k: outreach.same_posting(k, company, role, location))
+        if key.startswith("fallback:") else None)
     if gone:
         return (f"not recorded: {company} — {role} was first found more than"
                 f" {job_retention.KEEP_DAYS} days ago and removed from the board on"
@@ -641,9 +679,9 @@ async def record_job(
                              compensation, stack, fit_score, fit_bucket, why_fit,
                              next_step, referral, status, notes,
                              company_brief, pay_signal, role_brief, researched_at,
-                             linkedin_url, fit_parts, pay_lakh, lane)
+                             linkedin_url, fit_parts, pay_lakh, lane, channel)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (dedupe_key) DO UPDATE SET
             -- A rediscovery refreshes facts but never overwrites a status the
             -- owner moved along.
@@ -670,7 +708,9 @@ async def record_job(
             linkedin_url = COALESCE(NULLIF(EXCLUDED.linkedin_url, ''), hq.jobs.linkedin_url),
             fit_parts = EXCLUDED.fit_parts,
             pay_lakh = COALESCE(EXCLUDED.pay_lakh, hq.jobs.pay_lakh),
-            lane = EXCLUDED.lane
+            lane = EXCLUDED.lane,
+            channel = CASE WHEN hq.jobs.channel IN ('', 'other') THEN EXCLUDED.channel
+                           ELSE hq.jobs.channel END
         RETURNING id::text, seen_count, status
         """,
         (
@@ -701,6 +741,7 @@ async def record_job(
             db.jsonb(parts),
             fit.pay_lakh,
             fit.lane,
+            outreach.channel_of(source, provider, url),
         ),
     )
     row = rows[0]

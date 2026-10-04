@@ -17,29 +17,36 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, qk } from "@/lib/api/client";
-import { JOB_STATUSES, type Job, type JobStatus } from "@/lib/api/types";
+import { JOB_STATUSES, type Job, type JobStatus, type PipelineDue } from "@/lib/api/types";
 import { timeAgo } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 /**
- * The job search: the roles hunter found this week, strongest first.
+ * The job search in three views: found, applied, closed.
  *
- * One view. The owner asked on 2026-10-02 for the Found column only, wide
- * enough to read each role, and for nothing older than a week. Hunter scores
- * every role; the owner applies from LinkedIn. No agent can apply to anything.
+ * Hunter finds and scores roles; he applies, finds the people and writes
+ * every message himself. Applied keeps the follow-up clock: 7 days with no
+ * reply is a follow-up, and after two touches the role closes as ghosted.
+ * No agent applies, drafts or sends.
  */
-export function JobBoard() {
-  const [bucket, setBucket] = useState<string>("all");
-  const jobs = useQuery({ queryKey: qk.jobs(), queryFn: () => api.jobs() });
+const VIEWS: { key: string; label: string; statuses: JobStatus[] }[] = [
+  { key: "found", label: "Found", statuses: ["seen", "shortlisted", "referral"] },
+  { key: "applied", label: "Applied", statuses: ["applied", "interviewing", "offer"] },
+  { key: "closed", label: "Closed", statuses: ["rejected", "ghosted", "closed"] },
+];
 
-  // The API returns only roles first seen in the last week (the backend
-  // moves older ones out of the ledger), so Found is the "seen" ones.
-  const found = useMemo(() => (jobs.data ?? []).filter((j) => j.status === "seen"), [jobs.data]);
-  const rows = useMemo(
-    () => (bucket === "all" ? found : found.filter((j) => j.fit_bucket === bucket)),
-    [found, bucket],
-  );
+export function JobBoard() {
+  const [view, setView] = useState("found");
+  const jobs = useQuery({ queryKey: qk.jobs(), queryFn: () => api.jobs() });
+  const due = useQuery({ queryKey: qk.pipelineDue(), queryFn: () => api.pipelineDue() });
+
+  const byView = useMemo(() => {
+    const out: Record<string, Job[]> = {};
+    for (const v of VIEWS) out[v.key] = (jobs.data ?? []).filter((j) => v.statuses.includes(j.status));
+    return out;
+  }, [jobs.data]);
 
   if (jobs.isLoading) {
     return (
@@ -59,6 +66,60 @@ export function JobBoard() {
       />
     );
   }
+
+  return (
+    <div className="flex min-h-0 flex-col gap-3">
+      <DueToday due={due.data} onOpen={setView} />
+      <Tabs value={view} onValueChange={setView}>
+        <TabsList>
+          {VIEWS.map((v) => (
+            <TabsTrigger key={v.key} value={v.key} className="text-xs">
+              {v.label}
+              <span className="text-muted-foreground ml-1 tabular-nums">
+                {byView[v.key]?.length ?? 0}
+              </span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {VIEWS.map((v) => (
+          <TabsContent key={v.key} value={v.key}>
+            {v.key === "found" ? (
+              <FoundView rows={byView.found ?? []} />
+            ) : (
+              <PipelineView rows={byView[v.key] ?? []} view={v.key} />
+            )}
+          </TabsContent>
+        ))}
+      </Tabs>
+    </div>
+  );
+}
+
+/** What waits on him today, by the follow-up clock. */
+function DueToday({
+  due,
+  onOpen,
+}: {
+  due: PipelineDue | undefined;
+  onOpen: (view: string) => void;
+}) {
+  const follow = due?.follow_ups ?? [];
+  if (!follow.length) return null;
+  return (
+    <section className="bg-card flex flex-col gap-1 rounded-lg border p-3 text-xs" aria-label="Due today">
+      <p className="text-sm font-medium">Due today</p>
+      {follow.map((f) => (
+        <button key={f.id} type="button" className="text-left hover:underline" onClick={() => onOpen("applied")}>
+          Follow up with {f.company} on {f.role} (touch {f.touches + 1} of 2)
+        </button>
+      ))}
+    </section>
+  );
+}
+
+function FoundView({ rows: found }: { rows: Job[] }) {
+  const [bucket, setBucket] = useState<string>("all");
+  const rows = bucket === "all" ? found : found.filter((j) => j.fit_bucket === bucket);
   if (!found.length) {
     return (
       <EmptyState title="No roles found this week">
@@ -67,11 +128,9 @@ export function JobBoard() {
       </EmptyState>
     );
   }
-
   const strong = found.filter((j) => j.fit_bucket === "strong").length;
-
   return (
-    <div className="flex min-h-0 flex-col gap-3">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-muted-foreground text-sm">
           {found.length} role{found.length === 1 ? "" : "s"} found this week
@@ -89,7 +148,6 @@ export function JobBoard() {
           </SelectContent>
         </Select>
       </div>
-
       {rows.length === 0 ? (
         <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-6 text-center text-xs">
           No role this week has that fit.
@@ -104,6 +162,26 @@ export function JobBoard() {
         </ul>
       )}
     </div>
+  );
+}
+
+const EMPTY_VIEW: Record<string, string> = {
+  applied: "Mark a role applied when you apply. A follow-up comes due after 7 days; after two touches with no reply, the role closes as ghosted. Interviews and offers stay here.",
+  closed: "Rejected, ghosted and closed roles land here.",
+};
+
+function PipelineView({ rows, view }: { rows: Job[]; view: string }) {
+  if (!rows.length) {
+    return <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-6 text-center text-xs">{EMPTY_VIEW[view]}</p>;
+  }
+  return (
+    <ul className="job-grid">
+      {rows.map((job) => (
+        <li key={job.id}>
+          <JobCard job={job} />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -181,20 +259,25 @@ const BUCKET_TONE: Record<Job["fit_bucket"], string> = {
 
 function JobCard({ job }: { job: Job }) {
   const queryClient = useQueryClient();
+  // qk.jobs() and qk.pipelineDue() share the "jobs" prefix.
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["jobs"] });
   const move = useMutation({
     mutationFn: (status: JobStatus) => api.updateJob(job.id, { status }),
-    onSuccess: (result, status) => {
-      toast(
-        `${job.company} moved to ${status}`,
-        result.referral_task_id
-          ? { description: "Operator is looking for a referral path in your signed-in browser." }
-          : undefined,
-      );
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    onSuccess: (_result, status) => {
+      toast(`${job.company} moved to ${status}`);
+      refresh();
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  const followed = useMutation({
+    mutationFn: () => api.jobFollowedUp(job.id),
+    onSuccess: (r) => {
+      toast(`Follow-up recorded (touch ${r.touches} of 2)`);
+      refresh();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const found = job.status === "seen" || job.status === "shortlisted" || job.status === "referral";
 
   return (
     <article className="bg-card flex flex-col gap-2 rounded-lg border p-3">
@@ -315,12 +398,32 @@ function JobCard({ job }: { job: Job }) {
             </Badge>
           );
         })()}
+        {job.channel ? (
+          <Badge variant="outline" className="text-xs" title={job.source}>
+            {job.channel}
+          </Badge>
+        ) : null}
         {job.seen_count > 1 ? (
           <span className="text-muted-foreground text-xs">
             {job.seen_count}x
           </span>
         ) : null}
       </div>
+
+      {job.applied_at ? (
+        <p className="text-xs">
+          <span className="text-muted-foreground">Applied </span>
+          <span title={new Date(job.applied_at).toLocaleString()}>{timeAgo(job.applied_at)}</span>
+          {job.status === "applied" && job.followup_due ? (
+            <span className="text-muted-foreground">
+              {" · "}
+              {job.touches >= 2
+                ? `closes as ghosted on ${job.followup_due} if no reply`
+                : `follow-up due ${job.followup_due} (touch ${job.touches + 1} of 2)`}
+            </span>
+          ) : null}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-1.5">
         <Button
@@ -342,6 +445,18 @@ function JobCard({ job }: { job: Job }) {
             <ExternalLink aria-hidden className="size-3" />
           </a>
         </Button>
+        {found ? (
+          <Button size="sm" className="h-7 px-2 text-xs"
+            disabled={move.isPending} onClick={() => move.mutate("applied")}>
+            Mark applied
+          </Button>
+        ) : null}
+        {job.status === "applied" && job.touches < 2 ? (
+          <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
+            disabled={followed.isPending} onClick={() => followed.mutate()}>
+            Followed up
+          </Button>
+        ) : null}
         {/* Off the badge row, so the time never reads as a field. */}
         <span
           className="text-muted-foreground order-last ml-auto text-xs"

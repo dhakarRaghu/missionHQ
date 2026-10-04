@@ -1,8 +1,8 @@
 # Job research
 
-What a lead is worth depends on four answers: is the role real and open, is
-it level one and paid at least 25 LPA, who could refer him, and what do they
-share with him.
+What a lead is worth depends on two answers: is the role real and open, and
+is it level one and paid at least 25 LPA. Find roles; he finds the people and
+writes to them himself, so never look for a referral or a contact.
 
 ## The order of work
 
@@ -19,11 +19,6 @@ share with him.
 4. **Dig only for a fit of 6 or more.** The company brief (what it builds,
    stage, team size), the pay signal (stated, or an estimate with its basis,
    or "no public signal"), and the role brief. Four to six calls each.
-5. **The person.** A real person on the team, found on a page you opened,
-   and the concrete ground they share with him (a school, a stack, a public
-   project, a talk or post). No shared ground is a finding: say so. A
-   role-based persona ("the backend lead for payments infra") is fine when
-   no real person is visible. Never invent a name.
 
 ## When a page will not answer
 
@@ -37,11 +32,10 @@ share with him.
 
 Roles: `job_feed` with `yc` first. It reads the postings of Y Combinator
 companies that are hiring in India or remote, from each company's YC page:
-the experience floor, the salary (most state one), the age, and `people`,
-the founders with LinkedIn and X. A yc row is the company's own posting:
-record it from the row, with its url, `source` "yc" and its `external_id`.
-Pass its experience as `experience_band` and its salary as `compensation`.
-Put one founder in `referral`, with the shared ground if you find any.
+the experience floor, the salary (most state one) and the age. A yc row is
+the company's own posting: record it from the row, with its url, `source`
+"yc" and its `external_id`. Pass its experience as `experience_band` and its
+salary as `compensation`.
 
 Then `hn_hiring` (this month's Hacker News "Who is hiring?" thread) and the
 remote boards `himalayas`, `remotive` and `remoteok`, newest first. Their
@@ -50,7 +44,10 @@ rows are leads: verify each on the company's own board before
 
 Companies: `discover_companies` lists hiring YC companies, newest first,
 25 at a time; pass `page` for the next 25 instead of reading the same ones
-again.
+again. On Mondays, `funding_news` lists Indian startups that just raised:
+open the weekly roundups, and for a startup in his lanes with a fresh seed
+or Series A, find its careers page with `detect_job_board`. They hire
+before their roles reach any board.
 
 Research: company careers pages and their boards, engineering blogs, founder
 posts, funding announcements, Glassdoor-style salary pages for a pay signal

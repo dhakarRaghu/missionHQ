@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,21 @@ def removed_recently(key: str, now: datetime | None = None) -> dict[str, str] | 
         return None
     now = now or datetime.now(UTC)
     return entry if now - removed < timedelta(days=REMOVED_DAYS) else None
+
+
+def removed_matching(match: Callable[[str], bool],
+                     now: datetime | None = None) -> dict[str, str] | None:
+    """The removal record of any removed key `match` accepts, while it still
+    holds. Keys of roles with no board id are matched by company, role and
+    location (outreach.same_posting), so a role removed under the form used
+    before 2026-10-04 stays out too."""
+    now = now or datetime.now(UTC)
+    for key in _read_removed():
+        if match(key):
+            entry = removed_recently(key, now)
+            if entry:
+                return entry
+    return None
 
 
 def _write(rows: list[dict[str, Any]], now: datetime) -> None:

@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ChatTask,
   Job,
+  PipelineDue,
   Referral,
   ChatTicket,
   ChatSession,
@@ -110,6 +111,8 @@ export const qk = {
   jobs: (status?: string) => ["jobs", status ?? "all"] as const,
   /** Prefixed by "jobs" so a jobs invalidation refreshes the people too. */
   referrals: (jobId?: string) => ["jobs", "referrals", jobId ?? "all"] as const,
+  /** Prefixed by "jobs" so a status change refreshes what is due. */
+  pipelineDue: () => ["jobs", "due"] as const,
   agents: ["agents"] as const,
   /** Prefixed by qk.agents so an agents invalidation refreshes it too. */
   agentDrafts: ["agents", "drafts"] as const,
@@ -163,7 +166,10 @@ export const api = {
   jobs: (status?: string) => request<Job[]>(`/jobs${query({ status })}`),
   referrals: (jobId?: string) =>
     request<Referral[]>(`/referrals${query({ job_id: jobId })}`),
-  updateReferral: (id: string, patch: { status?: string; shared_ground?: string }) =>
+  updateReferral: (
+    id: string,
+    patch: { status?: string; shared_ground?: string },
+  ) =>
     request<{ ok: boolean }>(`/referrals/${seg(id)}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
@@ -177,12 +183,15 @@ export const api = {
       referral?: string;
     },
   ) =>
-    // referral_task_id is set only when the patch shortlisted the role and the
-    // referral hunt was queued; null when operator is not loaded or it failed.
-    request<{ ok: boolean; referral_task_id: string | null }>(
-      `/jobs/${seg(id)}`,
-      { method: "PATCH", body: JSON.stringify(patch) },
-    ),
+    request<{ ok: boolean }>(`/jobs/${seg(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  jobFollowedUp: (id: string) =>
+    request<{ ok: boolean; touches: number }>(`/jobs/${seg(id)}/followed-up`, {
+      method: "POST",
+    }),
+  pipelineDue: () => request<PipelineDue>("/pipeline/due"),
   cancelTask: (id: string) =>
     request<{ cancelled: boolean; reason?: string }>(
       `/tasks/${seg(id)}/cancel`,

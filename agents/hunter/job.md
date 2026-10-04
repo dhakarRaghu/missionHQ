@@ -8,6 +8,7 @@ tools:
   - discover_companies
   - job_board
   - job_feed
+  - funding_news
   - detect_job_board
   - record_job
   - list_jobs
