@@ -274,7 +274,7 @@ def test_browser_discovery_hands_structured_leads_to_hunter() -> None:
 
     assert followup["stage"] == VERIFICATION_STAGE
     assert "detect_job_board" in brief
-    assert "record_job.referral" in brief
+    assert "Do not look for a referral person" in brief
     assert "Never apply" in brief
 
 
