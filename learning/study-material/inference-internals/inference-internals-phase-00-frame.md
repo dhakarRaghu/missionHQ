@@ -64,7 +64,7 @@ This difference explains output pricing. Every model in the course's `prices.yam
 
 **The trap:** you treat input and output tokens as the same kind of cost. Output tokens cost 4x more in `prices.yaml`, and each one takes a full decode step.
 
-**Verify your understanding:** do not read ahead. In an example setup, the server processes 10,000 input tokens in the time it generates about 40 output tokens. Why is that possible?
+**Verify your understanding:** do not read ahead. In an example setup, the server processes 10,000 input tokens in the time it generates about 48 output tokens. Why is that possible?
 
 ---
 
@@ -105,7 +105,7 @@ Example with numbers. A request takes 11 seconds. Case A: TTFT is 9s and decode 
 
 These are common ways application teams lose money or speed. Each story maps to a phase of this course.
 
-**Story 1: the invisible 5x bill.** A team ships an agent with an 18k-token system prompt. It holds tools, instructions, and examples. Every loop step re-sends it. The prompt has a timestamp near the top, and the timestamp changes every request. A prefix cache reuses stored work only when the prompt start matches byte for byte. So the cache never matches, and the team pays full input price on every step. With the timestamp at the end, cached steps would cost about 90% less for input. Nobody noticed for four months, because the team tracked cost per month, not per request. Phases 2 and 3 cover caching and prompt layout.
+**Story 1: the invisible 5x bill.** A team ships an agent with an 18k-token system prompt. It holds tools, instructions, and examples. Every loop step re-sends it. The prompt has a timestamp near the top, and the timestamp changes every request. A prefix cache reuses stored work only when the prompt start matches byte for byte. So the cache never matches, and the team pays full input price on every step. With the timestamp at the end, cached steps would cost about 90% less for input. Where 5x comes from: at Claude Sonnet prices ($3 input, $0.30 cached, $15 output per Mtok) and 100 input tokens per output token, a fully cached step costs 30 + 15 = 45 and a broken one costs 300 + 15 = 315, which is 7x. The bill grows exactly 5x when the cache hit 93.3% of input before it broke. Nobody noticed for four months, because the team tracked cost per month, not per request. Phases 2 and 3 cover caching and prompt layout.
 
 **Story 2: the retry that made it worse.** p99 latency spikes. p99 means the slowest 1% of requests. The team adds short timeouts and retries. But the TTFT spike came from the provider's queue under load. Every retry enters the same queue again, with a cold cache. So retries double the load and the cost, and do not help. The fix was streaming plus a TTFT-based health signal. Phase 5 covers operations.
 

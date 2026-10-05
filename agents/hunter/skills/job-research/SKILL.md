@@ -37,6 +37,16 @@ the company's own posting: record it from the row, with its url, `source`
 "yc" and its `external_id`. Pass its experience as `experience_band` and its
 salary as `compensation`.
 
+Then `cutshort`, `wellfound` and `hirist`, the Indian job sites. Their rows
+are the company's postings on that site: record them from the row with its
+url. Each row says whether the posting is still open, what the site knows
+about the company (type, size, stage, AmbitionBox rating) and any flags.
+Closed and stale postings, staffing reposts, services firms, gated roles and
+stated pay under the bar are already dropped. Skip a company kept
+confidential, or a title with no company named, unless the description names
+the employer. Before recording a lead older than two
+weeks, call `posting_status` on its url; never record a closed or stale one.
+
 Then `hn_hiring` (this month's Hacker News "Who is hiring?" thread) and the
 remote boards `himalayas`, `remotive` and `remoteok`, newest first. Their
 rows are leads: verify each on the company's own board before

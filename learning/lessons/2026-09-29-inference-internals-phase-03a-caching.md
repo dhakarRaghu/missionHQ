@@ -1,6 +1,6 @@
 Phase 2B ended with your prompt fitting its context budget and your stream no longer freezing mid-sentence. Your Phase 1 meter sums the input tokens and the output tokens of every response and prices them. The invoice that arrives this month matches that total on neither provider. On one provider the invoice is higher than your total. On the other, your total reads 76 percent above the invoice. No call ever returned an error.
 
-The second clue is the line from Phase 0's first story, the current time at the top of the system prompt. Moving that one line changes the bill by a factor of four, and every token count stays the same. Both clues have one cause. The provider charges less for text it has processed before, and each provider reports that discount in a different place. What your usage fields actually count is the first question this phase answers. Then it answers where changing text belongs in your prompt, and when that discount is worth paying for.
+The second clue is the line from Phase 0's first story, the current time at the top of the system prompt. Moving that one line changes the bill by more than a factor of five, and every token count stays the same. Both clues have one cause. The provider charges less for text it has processed before, and each provider reports that discount in a different place. What your usage fields actually count is the first question this phase answers. Then it answers where changing text belongs in your prompt, and when that discount is worth paying for.
 
 This lesson teaches four ideas. They are listed here so you can see where the lesson is going. They will read more clearly once each has been explained below, so come back to this list at the end.
 
@@ -48,7 +48,7 @@ This happens on Anthropic. There, input_tokens counts only the tokens after the 
 
 The mechanism is arithmetic. Your Phase 1 formula multiplies the full token count by the full input price. But 9,000 of those 10,000 input tokens were billed at a fraction of that price. So the formula over-reports, and it over-reports by the size of your cached prefix times the discount.
 
-The Phase 3 module pricing.py makes the gap visible on one call. It prices the token split and also computes what the old formula would have said.
+The Phase 3 module pricing.py makes the gap visible on one call. It prices the token split and also computes what the old formula would have said. The example prices input at $2.00, output at $8.00 and cached input at $0.50 per million tokens. That cached price is 0.25x input, not the 0.1x of the course price sheet, so the saving here is smaller than on a 0.1x model. At 0.1x the same call costs $0.0118.
 
 c = cost(price, Usage(uncached_in=1_000, cached_in=9_000, out=1_000))
 
@@ -159,7 +159,7 @@ Phase 2A gave you the layout rule; this section adds the parts of a request you 
 
 Phase 2A measured the rule this section builds on. The cache matches the prefix, the start of your prompt from token 0 forward, and the match stops at the first byte that differs. So a timestamp at the top of the prompt gave a 0.0% hit rate in its simulator, and the stable-first layout gave 92.0%. Phase 0's Story 1 showed the same line moving an invoice from about $40 to over $200 on the same traffic.
 
-Production numbers agree. ProjectDiscovery sends a system prompt of over 20,000 tokens on every step of an agent task, and it kept working memory near the top. Its cache hit rate, the share of input tokens billed at the cached read price, was 7.6%. Moving that memory into a tail message raised it to 73.7% in one deploy. Two of its tasks with nearly equal volume ran at 91.8% and 3.2%, and the second cost about 60 times more. What 2A did not show is that the bytes include more than your text.
+Production numbers agree. ProjectDiscovery sends a system prompt of over 20,000 tokens on every step of an agent task, and it kept working memory near the top. Its cache hit rate, the share of input tokens billed at the cached read price, was 7.6%. Moving that memory into a tail message raised it to 73.7% in one deploy. Two of its tasks with nearly equal volume ran at 91.8% and 3.2%, and the post says the second cost roughly 60 times more. Hit rate alone does not explain that. With misses at the plain input price, the average price per input token at those rates differs about 5.6 times, and caching can never make it differ more than 12.5 times, a 1.25x write against a 0.1x read. The post does not show where the rest of the gap comes from. What 2A did not show is that the bytes include more than your text.
 
 Predict: two back-to-back requests differ only in the order the tool definitions appear. Same model, same system prompt. Does the second request hit the cache?
 No. Tool definitions are rendered into the request before the system and message text, so a different order means the bytes differ from the first tool onward. The match from token 0 stops at that byte, and the identical policy text below is billed at full price. The belief that this should hit is reasonable, because to you the two requests carry identical meaning. The cache never compares meaning, only the byte sequence.
@@ -212,7 +212,7 @@ Map this back to your support agent. You moved the timestamp line out of your pr
 The picture first. A cache entry has a floor. The provider stores a prefix only if it is long enough. This floor is the minimum cacheable length, the smallest prefix the provider will store for a given model. Anthropic's minimums run from 512 tokens to 4,096 tokens depending on the model. OpenAI requires 1,024 tokens on GPT-5.6 and later. When your prefix sits below the floor, the provider processes the request at full price and returns success. When your prefix sits above the floor but does not match, the same thing happens. Both failures look identical to a hit everywhere except one field in the usage object.
 
 Predict: You marked an 800-token prefix with cache_control, the marker that asks Anthropic to store the prefix ending at that block, and got 200 OK on both calls. Were you cached? What single field proves it?
-You were not cached, and you cannot tell from the status code. Anthropic's minimums start at 512 tokens and reach 4,096 by model. So 800 tokens is below the floor on some models. The provider processed the prompt at full price and returned success with no error. The only proof one way or the other is usage.cache_read_input_tokens on the second call. A large number there proves a hit, and zero proves nothing was read. The HTTP status carries no information about caching in either direction.
+It depends on the model's floor, and you cannot tell from the status code. Anthropic's minimums start at 512 tokens on current models such as Opus 5.5 and Sonnet 5.5, and reach 4,096 on others such as Haiku 4.5. So 800 tokens is above the floor on some models and below it on others. Below the floor, the provider processed the prompt at full price and returned success with no error. The only proof one way or the other is usage.cache_read_input_tokens on the second call. A large number there proves a hit, and zero proves nothing was read. The HTTP status carries no information about caching in either direction.
 
 The mechanism has three steps, and each one explains why your error monitor is the wrong tool.
 
@@ -222,13 +222,13 @@ The mechanism has three steps, and each one explains why your error monitor is t
 
 - The cached-token count is where the truth lands. Your usage adapter, the per-provider function from the earlier section that unpacks the usage object, already reads this count to price the call. That count is the proof of a hit. A count that reads large for weeks and then reads zero, while token counts stay the same, is the failure signal. No other signal exists.
 
-The figure shows the same response twice, once after a hit and once after a silent miss. Every field matches except the last two.
+The figure shows the same response twice, once after a hit and once after a silent miss. Every field matches except the two cache counts. Both add up to the same total input: 350 + 12,400 = 12,750 tokens.
 
 {
   "status": 200,
   "usage": {
     "input_tokens": 350,
-    "cache_creation_input_tokens": 0,
+    "cache_creation_input_tokens": 12400,
     "cache_read_input_tokens": 0,
     "output_tokens": 412
   }
@@ -244,7 +244,7 @@ The figure shows the same response twice, once after a hit and once after a sile
   }
 }
 
-Both responses are success. The one on the left billed the whole 12,400-token prefix at full input price. The one on the right billed most of it at 0.1x. You can only tell them apart by reading the one field that changed.
+Both responses are success. The one on the left found no match, so it wrote the whole 12,400-token prefix again at 1.25x the input price. The one on the right read it at 0.1x. You can only tell them apart by reading the two cache fields.
 
 Evidence
 Anthropic's prompt caching documentation, read 2026-09-29: "Any requests to cache fewer than this number of tokens will be processed without caching, and no error is returned. To verify whether a prompt was cached, check the response usage fields." The same page lists the minimums, from 512 tokens on Fable 5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5 up to 4,096 tokens on Opus 4.6, Opus 4.5 and Haiku 4.5. The OpenAI prompt caching guide, read the same day, sets the minimum at 1,024 tokens on GPT-5.6 and later and notes that on earlier models it varies with tools, images, schemas, reasoning effort and verbosity.
@@ -305,7 +305,7 @@ At the 5-minute tier, 0.28 reads rounds up to one read, so the first hit already
 
 The break-even tells you which tier fits a workload by looking at read spacing. A fast tool-calling loop reads every few seconds. The 5-minute entry stays alive, and one read already paid for it. A human conversation with ten-minute pauses kills the entry between turns, so each turn pays the write again at 1.25x.
 
-That last case is a workload that reads once or not at all per write. The 1-hour tier wins there despite the higher price. Two reads inside an hour pay 2.00x plus 0.20x, which is 2.20x. Against 2.00x for two plain calls, the second read is where the 1-hour tier moves into profit.
+That last case is a workload that reads once or not at all per write. The 1-hour tier keeps the entry alive across those pauses, but one read is not enough. A write plus one read pays 2.00x plus 0.10x, which is 2.10x. Two plain calls cost 2.00x, so with one read the 1-hour tier still loses to no caching. It only beats the 5-minute tier, where both calls pay a 1.25x write, which is 2.50x. A write plus two reads pays 2.00x plus 0.20x, which is 2.20x, against 3.00x for three plain calls. The second read is where the 1-hour tier moves into profit.
 
 One detail changes the tier decision for slow responses. Anthropic measures the TTL from the start of the request, not from the end of its response. A 5-minute entry written by a request streams for 4 minutes. It has 1 minute of life left when the reply finishes. So a long streaming workload can outlive its own cache before a follow-up request arrives.
 
@@ -636,7 +636,7 @@ Every link below was opened and checked on 2026-09-29. Prices and minimums in th
 
 - Langfuse issue #13807 — gave the production proof that the field-name difference is not academic: a fully instrumented run with true cost $0.52231845 displayed as $0.237606, with usage.input: 20 on a multi-turn agent with a large system prompt, and no error anywhere.
 
-- ProjectDiscovery, "How We Cut LLM Costs by 59% With Prompt Caching" — gave the layout evidence: an autonomous security-testing platform with system prompts over 20,000 tokens moved dynamic content out of the prefix and raised its weekly hit rate from 7.6% to 73.7% in one deploy, and two equal-volume tasks at 91.8% and 3.2% hit rates differed in cost by about 60x.
+- ProjectDiscovery, "How We Cut LLM Costs by 59% With Prompt Caching" — gave the layout evidence: an autonomous security-testing platform with system prompts over 20,000 tokens moved dynamic content out of the prefix and raised its weekly hit rate from 7.6% to 73.7% in one deploy, and two equal-volume tasks at 91.8% and 3.2% hit rates differed in cost by roughly 60x by the post's own account, more than the hit rates alone can explain.
 
 - Google context caching and Google legacy caching page — gave the third provider's shape: implicit caching on by default for Gemini 2.5 and later but with no cost-saving guarantee, and explicit caching billed on cached tokens plus storage duration.
 

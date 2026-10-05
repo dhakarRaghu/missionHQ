@@ -81,7 +81,8 @@ def regions_for(location: str) -> list[str]:
 _INDIAN_CITIES = ("bengaluru", "bangalore", "gurugram", "gurgaon", "hyderabad", "mumbai",
                   "pune", "delhi", "noida", "chennai", "kolkata", "ahmedabad", "jaipur")
 _OPEN_WORDS = {"in", "india", "global", "worldwide", "anywhere", "apac", "asia"}
-_REMOTE_RE = re.compile(r"remote(?:\s*\(([^)]*)\))?", re.IGNORECASE)
+# "Remote (US)" on YC, "Remote: United States" on Wellfound.
+_REMOTE_RE = re.compile(r"remote(?:\s*\(([^)]*)\)|\s*:\s*([^,/;()]+))?", re.IGNORECASE)
 
 
 def open_to_india(place: str) -> bool:
@@ -93,7 +94,7 @@ def open_to_india(place: str) -> bool:
     if _IN_RE.search(place) or "india" in low or any(c in low for c in _INDIAN_CITIES):
         return True
     for m in _REMOTE_RE.finditer(place):
-        where = set(re.findall(r"[a-z]+", (m.group(1) or "").casefold()))
+        where = set(re.findall(r"[a-z]+", (m.group(1) or m.group(2) or "").casefold()))
         if not where or where & _OPEN_WORDS:
             return True
     return False
@@ -226,6 +227,31 @@ async def company_pages(client: httpx.AsyncClient,
     return list(await asyncio.gather(*(one(s) for s in slugs)))
 
 
+INDIA_JOBS_URL = "https://www.ycombinator.com/jobs/location/india"
+
+
+async def india_job_rows(client: httpx.AsyncClient) -> list[dict[str, Any]]:
+    """The postings on YC's own India jobs page, newest 25, as job rows.
+
+    The directory filter reads where a company is, so a US company hiring in
+    India never reaches it: on 2026-10-05 LiteLLM's "Forward Deployed
+    Engineer - India" ($50K-$90K, new grads ok) was on this page and in no
+    feed. Its location field said "Remote (US)"; YC's page is the one that
+    files it under India, so its rows are trusted as open to India."""
+    try:
+        resp = await client.get(INDIA_JOBS_URL, headers={"User-Agent": UA})
+        m = _DATA_RE.search(resp.text if resp.status_code < 400 else "")
+        props = json.loads(html.unescape(m.group(1))).get("props") or {} if m else {}
+    except (httpx.HTTPError, ValueError):
+        return []
+    rows = job_rows({"jobPostings": props.get("jobPostings") or []})
+    for row in rows:
+        if not row["open_to_india"]:
+            row["open_to_india"] = True
+            row["location"] = f"{row['location']} (India, per YC's India jobs page)"[:200]
+    return rows
+
+
 def job_rows(props: dict[str, Any], now: datetime | None = None) -> list[dict[str, Any]]:
     """A company's YC job postings in the shape job_feed returns."""
     company = props.get("company") or {}
@@ -260,6 +286,8 @@ def job_rows(props: dict[str, Any], now: datetime | None = None) -> list[dict[st
             # read "US citizen/visa only" and looked like a bar to him.
             "visa": str(j.get("visa") or "") if _US_RE.search(place) else "",
             "batch": str(j.get("companyBatchName") or company.get("batch") or ""),
+            # When the hiring manager last acted on YC: "about 1 month".
+            "hiring_manager_active": str(j.get("lastActive") or ""),
             "team_size": company.get("team_size"),
             "description": (f"{company.get('one_liner') or ''}"
                             + (f" Skills: {skills}." if skills else ""))[:800],

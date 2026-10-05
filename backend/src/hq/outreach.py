@@ -19,8 +19,8 @@ import re
 
 # --- where a role was found -----------------------------------------------------
 
-CHANNELS = ("linkedin", "yc", "hn", "himalayas", "remotive", "remoteok", "ats",
-            "company_site", "other")
+CHANNELS = ("linkedin", "yc", "hn", "himalayas", "remotive", "remoteok",
+            "cutshort", "wellfound", "hirist", "ats", "company_site", "other")
 ATS_PROVIDERS = ("greenhouse", "lever", "ashby", "workable", "recruitee",
                  "smartrecruiters", "workday", "icims", "jobvite", "bamboohr")
 _CHANNEL_RULES = (
@@ -32,6 +32,9 @@ _CHANNEL_RULES = (
     ("himalayas", re.compile(r"himalayas", re.IGNORECASE)),
     ("remotive", re.compile(r"remotive", re.IGNORECASE)),
     ("remoteok", re.compile(r"remote ?ok", re.IGNORECASE)),
+    ("cutshort", re.compile(r"cutshort", re.IGNORECASE)),
+    ("wellfound", re.compile(r"wellfound|angel\.co", re.IGNORECASE)),
+    ("hirist", re.compile(r"hirist", re.IGNORECASE)),
 )
 
 

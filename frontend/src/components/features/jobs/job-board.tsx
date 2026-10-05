@@ -37,16 +37,43 @@ const VIEWS: { key: string; label: string; statuses: JobStatus[] }[] = [
   { key: "closed", label: "Closed", statuses: ["rejected", "ghosted", "closed"] },
 ];
 
+/** Where hunter found a role (jobs.channel), as the filter names it. */
+const CHANNEL_LABEL: Record<string, string> = {
+  linkedin: "LinkedIn",
+  yc: "YC",
+  hn: "Hacker News",
+  cutshort: "Cutshort",
+  wellfound: "Wellfound",
+  hirist: "Hirist",
+  himalayas: "Himalayas",
+  remotive: "Remotive",
+  remoteok: "RemoteOK",
+  ats: "Company boards",
+  company_site: "Company site",
+  other: "Other",
+};
+
+const channelOf = (job: Job) => job.channel || "other";
+
 export function JobBoard() {
   const [view, setView] = useState("found");
+  const [channel, setChannel] = useState("all");
   const jobs = useQuery({ queryKey: qk.jobs(), queryFn: () => api.jobs() });
   const due = useQuery({ queryKey: qk.pipelineDue(), queryFn: () => api.pipelineDue() });
 
-  const byView = useMemo(() => {
-    const out: Record<string, Job[]> = {};
-    for (const v of VIEWS) out[v.key] = (jobs.data ?? []).filter((j) => v.statuses.includes(j.status));
-    return out;
+  // Only the sources that have roles, most roles first.
+  const channels = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const j of jobs.data ?? []) counts.set(channelOf(j), (counts.get(channelOf(j)) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [jobs.data]);
+
+  const byView = useMemo(() => {
+    const rows = (jobs.data ?? []).filter((j) => channel === "all" || channelOf(j) === channel);
+    const out: Record<string, Job[]> = {};
+    for (const v of VIEWS) out[v.key] = rows.filter((j) => v.statuses.includes(j.status));
+    return out;
+  }, [jobs.data, channel]);
 
   if (jobs.isLoading) {
     return (
@@ -71,16 +98,31 @@ export function JobBoard() {
     <div className="flex min-h-0 flex-col gap-3">
       <DueToday due={due.data} onOpen={setView} />
       <Tabs value={view} onValueChange={setView}>
-        <TabsList>
-          {VIEWS.map((v) => (
-            <TabsTrigger key={v.key} value={v.key} className="text-xs">
-              {v.label}
-              <span className="text-muted-foreground ml-1 tabular-nums">
-                {byView[v.key]?.length ?? 0}
-              </span>
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="flex flex-wrap items-center gap-3">
+          <TabsList>
+            {VIEWS.map((v) => (
+              <TabsTrigger key={v.key} value={v.key} className="text-xs">
+                {v.label}
+                <span className="text-muted-foreground ml-1 tabular-nums">
+                  {byView[v.key]?.length ?? 0}
+                </span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <Select value={channel} onValueChange={setChannel}>
+            <SelectTrigger size="sm" className="w-48" aria-label="Filter by where the role was found">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">From every source</SelectItem>
+              {channels.map(([key, count]) => (
+                <SelectItem key={key} value={key}>
+                  {CHANNEL_LABEL[key] ?? key} ({count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         {VIEWS.map((v) => (
           <TabsContent key={v.key} value={v.key}>
             {v.key === "found" ? (
@@ -400,7 +442,7 @@ function JobCard({ job }: { job: Job }) {
         })()}
         {job.channel ? (
           <Badge variant="outline" className="text-xs" title={job.source}>
-            {job.channel}
+            {CHANNEL_LABEL[job.channel] ?? job.channel}
           </Badge>
         ) : null}
         {job.seen_count > 1 ? (

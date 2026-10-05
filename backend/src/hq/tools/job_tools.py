@@ -127,6 +127,13 @@ FIT_ADJUST_LIMIT = 1
 # reason for the move. The -3 alone can leave a perfect-title role at 6, so a
 # stated low package also caps the score in the stretch band.
 LOW_PAY_CAP = 4
+# 9 and 10 are for a role whose own posting states a package at the bar; 8
+# for one whose estimate reaches it; 7 when no figure reaches it. On
+# 2026-10-05 five of seven LinkedIn roles scored 10 with no stated figure:
+# lane, years and domain alone add five, so the top of the board said
+# nothing about the one fact that decides a move.
+ESTIMATED_PAY_CAP = 8
+UNKNOWN_PAY_CAP = 7
 # At or above this computed score a row must carry its pay and its band.
 DIG_SCORE = 6
 
@@ -205,10 +212,24 @@ _RUPEE_MARK_RE = re.compile(r"₹|\binr\b|\brs\.?\s|\brupees?\b|\bctc\b|per annu
                             re.IGNORECASE)
 _ESTIMATE_RE = re.compile(
     r"\b(?:est|estimated?|approx|approximately|around|likely|typical|expected|band"
-    r"|going rate)\b|~|levels\.fyi|glassdoor|ambitionbox|6figr",
+    r"|going rate|plausible|uncertain|unconfirmed|guess(?:es)?|mirrors?|aggregators?)\b"
+    r"|~|levels\.fyi|glassdoor|ambitionbox|6figr"
+    # Hunter's own words for a figure that is not the posting's: "Not
+    # Adobe-stated; mirrors conflict: 18-25 LPA", "No figure stated on posting".
+    r"|\bnot\s+[\w-]*stated\b|\bno\s+figure\b",
     re.IGNORECASE,
 )
 _FOREIGN_RE = re.compile(r"\$|\busd\b|€|\beur\b|£|\bgbp\b", re.IGNORECASE)
+# The owner's own bar, quoted beside a posting's band ("15-22 LPA, below his
+# 25 LPA target"), is not part of the band.
+# "supports meeting the 25 LPA floor" and "reported below 25 LPA" (Avoca and
+# Exotel, 2026-10-05) compare a role to the bar; they are not its band.
+_BAR_AFTER_RE = re.compile(
+    r"^[^.;\n]{0,12}\b(?:target|bar|threshold|switch|ask|minimum|floor)\b", re.IGNORECASE)
+_BAR_BEFORE_RE = re.compile(
+    r"\b(?:his|owner'?s|target(?: of)?|bar(?: of)?|threshold(?: of)?|floor(?: of)?|below|under"
+    r"|above|over|than|meet(?:s|ing)?|clear(?:s|ing)?)\s*(?:the\s*)?$",
+    re.IGNORECASE)
 
 
 def parse_pay(text: str) -> tuple[float, float, bool] | None:
@@ -225,6 +246,8 @@ def parse_pay(text: str) -> tuple[float, float, bool] | None:
     flat = re.sub(r"(?<=\d),(?=\d)", "", raw)
     figures: list[float] = []
     for m in _LAKH_RE.finditer(flat):
+        if _BAR_AFTER_RE.search(flat[m.end():]) or _BAR_BEFORE_RE.search(flat[:m.start()]):
+            continue
         figures += [float(g) for g in m.groups() if g]
     for m in _CRORE_RE.finditer(flat):
         figures += [float(g) * 100 for g in m.groups() if g]
@@ -295,7 +318,9 @@ def fit_score(
     two (or an explicitly early-career posting), +1 a floor of two to three;
     +1 the stack overlaps his; +1 a customer-facing or applied-AI domain; +1
     pay at or above the bar; -3 a STATED package under it (and the score is
-    then capped at 4); -1/-2 a geography outside India. ``adjust`` moves it
+    then capped at 4); -1/-2 a geography outside India. Without a stated
+    package at the bar the score is capped: 8 when an estimate reaches the
+    bar, 7 otherwise. 9 and 10 need a stated one. ``adjust`` moves it
     by at most one, and only with a reason. Clamped to 0-10.
 
     The gates (senior, level-two, intern, years ceiling) are not here: they
@@ -341,6 +366,8 @@ def fit_score(
     pay = parse_pay(compensation) or parse_pay(pay_signal)
     pay_lakh = pay[1] if pay else None
     capped = False
+    at_bar = bool(pay and pay[1] >= bar)
+    stated_at_bar = at_bar and not pay[2]
     if pay is None:
         pay_points, pay_note = 0, "no figure"
     elif pay[1] >= bar:
@@ -366,6 +393,12 @@ def fit_score(
     if capped and score > LOW_PAY_CAP:
         parts["capped"] = f"stated pay under {bar:g} LPA caps the score at {LOW_PAY_CAP}"
         score = LOW_PAY_CAP
+    elif not stated_at_bar:
+        cap, why = ((ESTIMATED_PAY_CAP, f"an estimated, not stated, package at {bar:g} LPA")
+                    if at_bar else (UNKNOWN_PAY_CAP, f"no package figure at {bar:g} LPA"))
+        if score > cap:
+            parts["capped"] = f"{why} caps the score at {cap}"
+            score = cap
     score = max(0, min(10, score))
     parts["total"] = score
     return Fit(score, parts, lane, pay_lakh)

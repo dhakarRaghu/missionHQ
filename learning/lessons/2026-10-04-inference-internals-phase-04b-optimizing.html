@@ -335,7 +335,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 
 <p>The orientation sorted the three suggestions by what each one needs. The 4-bit checkpoint changes the model's numbers and needs an eval gate. The FP8 KV flag is a separate decision, with a break-even in context length. Speculative decoding rearranges verification and needs a load check. Before you can gate the 4-bit checkpoint, you need to know why the numbers it ships with cannot do the job.</p>
 
-<p>Your team pastes a link to the checkpoint with a small table. It says <dfn>recovery</dfn>, the quantized checkpoint's score as a percentage of the full-precision score on the same suite. The table shows 99.3 to 101.2%. Someone asks if they can ship it today.</p>
+<p>Your team pastes a link to the checkpoint with a small table. It says <dfn>recovery</dfn>, the quantized checkpoint's score as a percentage of the full-precision score on the same suite. The table shows 98.7 to 100.0% on one suite and 96.1 to 98.9% on a harder one. Someone asks if they can ship it today.</p>
 
 <figure class="diagram">
 <svg viewBox="0 0 640 230">
@@ -365,12 +365,12 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <p>Ask which tasks each one sampled. The lossless study scored recovery on standard suites, mostly English multiple choice. The second study asked human evaluators to read realistic open-ended prompts, in Japanese. Both numbers are correct for the distribution they sampled. They look in different places, and quantization damage is not spread evenly.</p>
 </details>
 
-<p>The measured pair, on the same checkpoints, is the sharpest version of this gap.</p>
+<p>The measured pair, from one study on one 4-bit checkpoint, is the sharpest version of this gap. The recovery range comes from a different study on different models.</p>
 
 <div class="stats">
 <div class="stat"><b>1.7%</b><span>average drop in Japanese, automatic tasks</span></div>
 <div class="stat"><b>16.0%</b><span>drop reported by human evaluators on realistic prompts</span></div>
-<div class="stat"><b>99.3–101.2%</b><span>FP8 recovery on the standard suites</span></div>
+<div class="stat"><b>96.1–100.0%</b><span>W4A16 recovery on the standard suites, Llama 3.1, separate study</span></div>
 </div>
 
 <p>The two rows are compatible. The mechanism has three parts, and each part explains one digit of the gap.</p>
@@ -384,7 +384,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <p>Standard suites over-weight exactly the first category. Your users generate the second and third. So a 99% recovery table tells you the checkpoint is safe where damage is smallest, and says little about where your traffic lives.</p>
 
 <details class="evidence"><summary>Evidence</summary>
-<p>Marchisio et al., arXiv 2407.03211, the only study found that ran human evaluation next to automatic metrics on the same quantized checkpoints: "a 1.7% average drop in Japanese across automatic tasks corresponds to a 16.0% drop reported by human evaluators on realistic prompts". The recovery table is from arXiv 2411.02355 ("Give Me BF16 or Give Me Death", Tables 2–3): W8A8-FP recovery of 99.3, 99.7 and 100.1% across 8B, 70B and 405B models, with a second suite reaching 101.2%. Both verified 2026-10-04. Newer numbers can replace these; the mechanism, that a suite measures only what it samples, does not change.</p>
+<p>Marchisio et al., arXiv 2407.03211, the only study found that ran human evaluation next to automatic metrics on the same quantized checkpoints. The pair is for Command R+ 103B with 4-bit weight-only quantization (W4-g), Tables 3 and 8, not an FP8 checkpoint: "a 1.7% average drop in Japanese across automatic tasks corresponds to a 16.0% drop reported by human evaluators on realistic prompts". The recovery table is from arXiv 2411.02355 ("Give Me BF16 or Give Me Death", Tables 2–3) on Llama 3.1: W4A16 recovery of 98.72, 99.53 and 99.98% across 8B, 70B and 405B on Open LLM Leaderboard V1, and 96.1, 97.4 and 98.9% on V2. The 99.3 to 101.2% range in the same tables belongs to W8A8-FP, not to the 4-bit checkpoint. Both verified 2026-10-04. Newer numbers can replace these; the mechanism, that a suite measures only what it samples, does not change.</p>
 </details>
 
 <p>One phrase in the chat suggestion names two checkpoints, and both are shorthand. <dfn>W4A16</dfn> means weights stored at 4 bits and activations kept at 16 bits. <dfn>W8A8</dfn> means weights and activations both stored at 8 bits. The format choice is the next section's topic. The gate comes before it, because gating is what decides whether any checkpoint is safe to serve.</p>
@@ -432,10 +432,10 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <figcaption>Illustration of the mechanism, not measured. Blue is the memory read, grey and orange are arithmetic. W4A16 shrinks the read; W8A8 also shrinks the math.</figcaption>
 </figure>
 
-<p><dfn>Weight-only quantization</dfn> stores the weights at 4 bits but dequantizes them to 16 bits before the matmul. The arithmetic runs exactly as before. This is the W4A16 format from the previous section: W4 means 4-bit weights, A16 means 16-bit activations. It cuts the bytes the GPU must read per token by roughly 4x, so each decode step gets faster. Prefill and large batches gain almost no speed, because their cost sits in arithmetic that W4A16 leaves at 16 bits.</p>
+<p><dfn>Weight-only quantization</dfn> stores the weights at 4 bits but dequantizes them to 16 bits before the matmul. The arithmetic runs exactly as before. This is the W4A16 format from the previous section: W4 means 4-bit weights, A16 means 16-bit activations. It cuts the bytes the GPU must read per token by roughly 4x, so each decode step gets faster. Prefill and large batches gain less, because more of their cost sits in arithmetic that W4A16 leaves at 16 bits.</p>
 
 <details class="predict"><summary>Predict: you quarter the bytes of every weight but leave activations at 16 bits. Which part of a request gets cheaper, reading the prompt or writing the answer, and at what request rate does the answer change?</summary>
-<p>Writing the answer gets cheaper, and the preference flips as the request rate rises. Decode reads every weight for each generated token, so cutting weight bytes 4x cuts a real cost there. Reading the prompt is a matmul-bound pass, and 16-bit activations keep that arithmetic at its old cost. As concurrency grows, batches grow, the server becomes compute-bound, and weight-only quantization stops helping latency while W8A8 starts paying.</p>
+<p>Writing the answer gets cheaper, and the preference flips as the request rate rises. Decode reads every weight for each generated token, so cutting weight bytes 4x cuts a real cost there. Reading the prompt is a matmul-bound pass, and 16-bit activations keep that arithmetic at its old cost. As concurrency grows, batches grow, the server becomes compute-bound, and the gain from weight-only quantization shrinks while W8A8 usually gains more.</p>
 </details>
 
 <p>W8A8 quantizes both the weights and the activations to 8 bits. So the matmuls themselves run in 8-bit integer or floating-point arithmetic. That cheapens the compute-bound work: prefill passes and the large batches of a saturated server. It shrinks weights by only 2x instead of 4x, so it helps a quiet server's decode less than W4A16 does.</p>
@@ -443,14 +443,14 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <p>The measured split matches the mechanism. Two runs from the same study, same model size:</p>
 
 <div class="stats">
-<div class="stat"><b>50.7 → 35.0 s</b><span>single-user 70B code completion, BF16 → W4A16, 2x A100</span></div>
+<div class="stat"><b>50.7 → 35.0 s</b><span>single-user 70B code completion, BF16 on 2x A100 → W4A16 on 1x A100</span></div>
 <div class="stat"><b>1.4 → 2.4 QPS</b><span>continuous batching 70B, BF16 → W8A8-INT, 4x A100</span></div>
 </div>
 
-<p>The single-user run is a decode-heavy shape at batch 1, so weight-only 4-bit cut the end-to-end time by 31%. The saturated run is compute-bound, so it took weight-plus-activation quantization to lift throughput by 71%. The same paper puts it in one sentence. Weight quantization accelerates decode by reducing memory movement, while weight-and-activation quantization improves computational efficiency in prefill. On 405B across 16 H100s, FP8 W8A8 raised document-answering throughput from 6.1 to 9.6 QPS.</p>
+<p>The single-user run is a decode-heavy shape at batch 1, so weight-only 4-bit cut the end-to-end time by 31%, on half the GPUs. W8A8-INT on one A100 took 54.3 s. The saturated run is compute-bound, and weight-plus-activation quantization lifted throughput by 71%. W4A16 on the same setup reached 2.3 QPS, so 4-bit still helped under load, a little less. The paper's average speedup for that setup is 1.87x for W8A8-INT and 1.64x for W4A16. In two other setups, 70B on 4x A6000 and 405B on 16x H100, the two formats tie. The same paper puts it in one sentence. Weight quantization accelerates decode by reducing memory movement, while weight-and-activation quantization improves computational efficiency in prefill. On 405B across 16 H100s, FP8 W8A8 raised docstring-generation throughput from 6.1 to 9.6 QPS, and W4A16 reached 11.1 QPS on the same task.</p>
 
 <details class="evidence"><summary>Evidence</summary>
-<p>arXiv 2411.02355, "Give Me BF16 or Give Me Death", measured on vLLM 0.6.4.post1 (verified 2026-10-04). Table 5: single-user 70B code completion on 2x A100, BF16 50.7 s, W4A16 35.0 s. Table 6: continuous batching 70B on 4x A100, BF16 1.4 QPS, W8A8-INT 2.4 QPS. 405B on 16x H100, FP8 6.1 to 9.6 QPS. Newer engines may shift the magnitudes; the memory-bound versus compute-bound split is the mechanism and does not expire.</p>
+<p>arXiv 2411.02355, "Give Me BF16 or Give Me Death", measured on vLLM 0.6.4.post1 (verified 2026-10-04). Table 5: single-user 70B code completion, BF16 50.7 s on 2x A100, W4A16 35.0 s on 1x A100, W8A8-INT 54.3 s on 1x A100. Table 6: continuous batching 70B code completion on 4x A100, BF16 1.4 QPS, W8A8-INT 2.4 QPS, W4A16 2.3 QPS, with average speedups of 1.87x and 1.64x. 405B on 16x H100, docstring generation, BF16 6.1, FP8 9.6 and W4A16 11.1 QPS. Newer engines may shift the magnitudes; the memory-bound versus compute-bound split is the mechanism and does not expire.</p>
 </details>
 
 <p>The practical rule follows from the two costs. If your H100 mostly serves a handful of concurrent users with long outputs, decode dominates and W4A16 buys latency. If your Phase 4A measurement showed the server saturating, W8A8 buys throughput. The third case is the quiet trap. At batch 1 with short outputs, the request is over before decode dominates. So quantization mainly saves memory. That is still a valid reason if weights and KV cache no longer fit otherwise.</p>
@@ -868,7 +868,7 @@ alpha did not move. The average over positions did.</code></pre>
 <div class="stat"><b>787 Mtok/mo</b><span>break-even volume vs the $8.00 API, engineer included</span></div>
 </div>
 
-<p>Against the cheap API the break-even volume sits above what the fleet can ever serve, so no tuning rescues that comparison. Against the $8.00 API the same hardware pays for itself at about a quarter of its capacity. The arithmetic, not efficiency, is deciding in both directions.</p>
+<p>Against the cheap API the break-even volume sits above what the fleet can serve at 1,200 tok/s, so at that throughput no utilisation rescues the comparison. Throughput can rescue it. Break-even needs about 1,498 tok/s averaged over the whole month. A 1.64x lift, about 1,968 tok/s, would break even at about 76% utilisation. Against the $8.00 API the same hardware pays for itself at about a quarter of its capacity. The arithmetic, not efficiency, is deciding in both directions.</p>
 
 <details class="evidence"><summary>Evidence</summary>
 <p>These numbers are the phase's own worked example: one H100 at $3.49/h (RunPod Secure) sustaining 1,200 output tok/s, run through gpu_economics.py with --role cheap and --role deep, outputs dated 2026-09-17. The arithmetic checks out by hand; the prices and the throughput are dated inputs that will move, while the four-input structure and the engineer line do not. Three published break-even write-ups from 2026 assume throughputs from 620 to about 8,000 tok/s on comparable hardware, a spread over 7x, and reach opposite conclusions (unconfirmed; the sources themselves were not opened). They agree on one point: the answer changes by a factor of about 100 depending only on which API you compare against.</p>
@@ -969,7 +969,7 @@ alpha did not move. The average over positions did.</code></pre>
 <li id="s12-q5">
 <p><b>The proposal on one number.</b> A colleague sends the self-host proposal: "our H100 at 1,200 tok/s gives $0.81 per million output tokens, the API charges $1.60, self-hosting wins." List what the proposal is missing before you would sign it.</p>
 <details class="answer"><summary>Answer sketch</summary>
-<p>Four things, each a number or a name. First, utilisation: $0.81 assumes 100%, and at 10% the same hardware costs $8.08 per million, so state the measured figure. Second, the named API being replaced: against a $1.60 API the break-even utilisation is 50.5%, against an $8.00 API it is 10.1%, and "the API" without a name hides which decision you are taking. Third, the people line: a quarter-engineer at $3,750 a month on a one-GPU fleet pushes the break-even volume to about 3,936 million tokens a month, above the fleet's ceiling of about 3,154, so at this scale that comparison cannot be rescued by tuning. Fourth, the throughput input: it must come from your own Phase 4A operating-point measurement, because published write-ups disagree on it by more than 7x. A proposal with all four is arithmetic; without them it is an opinion.</p>
+<p>Four things, each a number or a name. First, utilisation: $0.81 assumes 100%, and at 10% the same hardware costs $8.08 per million, so state the measured figure. Second, the named API being replaced: against a $1.60 API the break-even utilisation is 50.5%, against an $8.00 API it is 10.1%, and "the API" without a name hides which decision you are taking. Third, the people line: a quarter-engineer at $3,750 a month on a one-GPU fleet pushes the break-even volume to about 3,936 million tokens a month, above the fleet's ceiling of about 3,154 at 1,200 tok/s, so at that throughput the comparison cannot break even. Only about 1,498 tok/s or more, averaged over the month, would rescue it. Fourth, the throughput input: it must come from your own Phase 4A operating-point measurement, because published write-ups disagree on it by more than 7x. A proposal with all four is arithmetic; without them it is an opinion.</p>
 </details>
 </li>
 
@@ -993,13 +993,13 @@ alpha did not move. The average over positions did.</code></pre>
     --quantization is for ONLINE quantization only
 
   W4A16 speeds DECODE (reads fewer weight bytes)  -> low concurrency
-      70B single user, 2x A100:  50.7 s -> 35.0 s
+      70B single user: 50.7 s (BF16, 2x A100) -> 35.0 s (W4A16, 1x A100)
   W8A8 speeds decode AND prefill (matmuls too)    -> under load
-      70B batched, 4x A100:  1.4 -> 2.4 QPS
+      70B batched, 4x A100:  1.4 -> 2.4 QPS (W4A16 reached 2.3)
   batch 1 + short outputs -> quantization saves memory, not time
 
 QUALITY — a suite samples a distribution; yours is different
-  automatic metrics -1.7% | human raters -16.0% — same checkpoint
+  automatic metrics -1.7% | human raters -16.0% — same checkpoint (Command R+ 103B, W4-g)
   damage concentrates: maths/reasoning > non-Latin > long context
   reasoning model, 3-bit:  85.6% at 5,200 tok -> 47.0% at 23,400 tok
     put OUTPUT LENGTH in the gate; no standard suite reports it
@@ -1042,7 +1042,7 @@ SELF-HOST — four inputs, answer against ONE named API
   break-even 50.5% util vs $1.60 API | 10.1% vs $8.00 API
   + quarter-engineer $3,750/mo (~1.5x the hardware):
       vs cheap API the fleet's ceiling (3,154M tok/mo) sits BELOW its
-      break-even volume (3,936M) — no tuning rescues it
+      break-even volume (3,936M) at 1,200 tok/s; needs ~1,498 tok/s averaged over the month
   overrides outside the arithmetic: data control, a model nobody hosts,
     a latency floor you own, price stability
 
@@ -1082,8 +1082,8 @@ COMMANDS
 <p>Each source below says what this lesson took from it. Everything was fetched and checked on 2026-10-04, at the versions named.</p>
 
 <ul class="sources">
-<li><b>"Give Me BF16 or Give Me Death"?</b> — https://arxiv.org/abs/2411.02355 — the recovery tables that show near-lossless scores on the standard suites, plus the serving split: W4A16 at 35.0 s single-user and W8A8-INT at 2.4 QPS under continuous batching, measured on vLLM 0.6.4.post1.</li>
-<li><b>How Does Quantization Affect Multilingual LLMs?</b> — https://arxiv.org/abs/2407.03211 — the human-evaluation correction: the −1.7% automatic drop against the −16.0% human drop on the same checkpoints, in Japanese.</li>
+<li><b>"Give Me BF16 or Give Me Death"?</b> — https://arxiv.org/abs/2411.02355 — the recovery tables that show near-lossless scores on the standard suites, plus the serving split: W4A16 at 35.0 s single-user on one A100 against BF16 at 50.7 s on two, and W8A8-INT at 2.4 QPS against W4A16 at 2.3 QPS under continuous batching, measured on vLLM 0.6.4.post1.</li>
+<li><b>How Does Quantization Affect Multilingual LLMs?</b> — https://arxiv.org/abs/2407.03211 — the human-evaluation correction: the −1.7% automatic drop against the −16.0% human drop on the same 4-bit Command R+ 103B checkpoint, in Japanese.</li>
 <li><b>Fast Inference from Transformers via Speculative Decoding</b> — https://arxiv.org/abs/2211.17192 — Theorem 3.8 with the speedup formula, and Appendix A.1 proving accepted tokens come from the target's own distribution.</li>
 <li><b>EAGLE-3</b> — https://arxiv.org/abs/2503.01840 — the batch-size table where the speedup crosses below 1.00x as load rises, the pattern behind the load check.</li>
 <li><b>Quantized Reasoning Models Think They Need to Think Longer</b> — https://arxiv.org/abs/2606.00206 — the effect that connects low-bit quantization to longer, wronger reasoning. Read from the abstract; the specific table numbers were not verified this run.</li>

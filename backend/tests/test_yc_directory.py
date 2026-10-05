@@ -70,6 +70,12 @@ PAGES = {
         _job(4, "Software Engineer", place="Gurugram, HR, IN", age="about 1 month")]),
 }
 
+# YC's India jobs page: a US company's India role, filed by YC under India
+# though its location says "Remote (US)" (LiteLLM, 2026-10-05).
+INDIA_PAGE = [{**_job(9, "Forward Deployed Engineer - India", place="Remote (US)",
+                     age="about 2 months"),
+               "companyName": "LiteLLM", "companyBatchName": "W23", "lastActive": "about 1 month"}]
+
 
 class FakeYC:
     """The directory page, the search index and the company pages."""
@@ -93,6 +99,9 @@ class FakeYC:
             want = {f.split(":", 1)[1] for f in facets[0]}
             hits = [h for h in self.hits if want & set(h.get("regions") or [])]
             return httpx.Response(200, json={"hits": hits, "nbPages": 1})
+        if url == yc.INDIA_JOBS_URL:
+            blob = html.escape(json.dumps({"props": {"jobPostings": INDIA_PAGE}}), quote=True)
+            return httpx.Response(200, text=f'<div data-page="{blob}"></div>')
         slug = url.rsplit("/", 1)[-1]
         self.pages_read.append(slug)
         if slug in PAGES:
@@ -215,7 +224,8 @@ def test_the_yc_feed_returns_recent_engineering_roles_for_india(fake) -> None:
     out = asyncio.run(feed(_ctx(), source="yc", location="India|Bengaluru|Bangalore",
                            since_days=60))
     titles = [j["title"] for j in out["jobs"]]
-    assert titles == ["Backend Engineer", "Software Engineer"]   # newest first
+    # newest first; the last is a US company's role from YC's India jobs page
+    assert titles == ["Backend Engineer", "Software Engineer", "Forward Deployed Engineer - India"]
     assert "Growth Marketer" not in titles                         # no query: engineering only
     assert "AI Engineer" not in titles                             # over 2 years old
     assert out["thread"] == "2 hiring YC companies read"
@@ -271,5 +281,14 @@ def test_his_employers_are_never_listed(fake, monkeypatch) -> None:
     assert [c["name"] for c in out["companies"]] == ["Older Co"]
     feed = inspect.unwrap(web_tools.job_feed)
     jobs = asyncio.run(feed(_ctx(), source="yc", since_days=0))["jobs"]
-    assert {j["company"] for j in jobs} == {"Older Co"}
+    assert {j["company"] for j in jobs} == {"Older Co", "LiteLLM"}
     assert "acme-ai" not in fake.pages_read                         # never even opened
+
+
+def test_a_us_company_on_ycs_india_page_is_found(fake) -> None:
+    feed = inspect.unwrap(web_tools.job_feed)
+    out = asyncio.run(feed(_ctx(), source="yc", since_days=0))
+    [row] = [j for j in out["jobs"] if j["company"] == "LiteLLM"]
+    assert row["open_to_india"] and "India, per YC's India jobs page" in row["location"]
+    assert row["hiring_manager_active"] == "about 1 month"
+    assert "india" not in fake.pages_read      # not mistaken for a company page

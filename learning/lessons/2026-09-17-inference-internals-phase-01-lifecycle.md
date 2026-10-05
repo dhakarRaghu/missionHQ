@@ -47,7 +47,7 @@ Try this now: open your agent's last run log. Find the LLM call. Ask: do you kno
 
 ## 1.1 Why does the same text cost different amounts of tokens?
 
-You know what a token is. Here is the part that costs you money: the tokenizer does not price all text equally. And your agent pays the difference again on every loop step. Not knowing this is how a cost model built on English test data goes wrong by 2–4x when real Hindi traffic arrives.
+You know what a token is. Here is the part that costs you money: the tokenizer does not price all text equally. And your agent pays the difference again on every loop step. Not knowing this is how a cost model built on English test data goes wrong by 2–4.5x when real Hindi traffic arrives.
 
 ### Pass 1 — the model: a fixed vocabulary with an uneven exchange rate
 
@@ -74,7 +74,7 @@ What is true: the 4-per-token rule holds only for English prose. Code, JSON, Ind
 
 - Agent history multiplies the cost. Your agent loop re-sends the whole conversation on each step. A tool that returns pretty-printed JSON on step 1 is not billed once. It is billed again on step 2, step 3, every step after. Ten steps later one verbose tool result has been billed ten times.
 
-- Multilingual products pay a hidden multiplier. The same support ticket in Hindi can cost 2–4x the tokens of its English translation. If support traffic is half Hindi and you only measured English, your per-conversation cost model is wrong.
+- Multilingual products pay a hidden multiplier. The same support ticket in Hindi can cost 2–4.5x the tokens of its English translation. That range is the table's English 4.0–4.5 chars/token against Hindi 1.0–2.0. If support traffic is half Hindi and you only measured English, your per-conversation cost model is wrong.
 
 - Schema design is cost design. Field names in your structured outputs are tokens. "customer_sentiment_classification" costs more than "sentiment". Across millions of calls, that is a real, recurring price difference.
 

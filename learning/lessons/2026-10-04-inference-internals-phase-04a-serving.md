@@ -1,4 +1,4 @@
-Phase 3B left your hosted bill under control. Your meter matches the invoice, the cascade runs behind a random control, and a pre-call reservation stops runaway spend. Now management asks the next question: would renting a GPU and serving the model yourself cost less? You get one hour and $5 to $10 of rented GPU time to return the first honest number. You pick the cheapest H100 on the marketplace, paste the launch command, and wait. Sixty-eight minutes later the model is still downloading, the rental is over, and no server ever started. No error appears anywhere on your screen, and the failure happened in the machine listing you picked before you typed anything.
+Phase 3B left your hosted bill under control. Your meter matches the invoice, the cascade runs behind a random control, and a pre-call reservation stops runaway spend. Now management asks the next question: would renting a GPU and serving the model yourself cost less? You get one hour and $5 to $10 of rented GPU time to return the first honest number. You pick the cheapest H100 on the marketplace, paste the launch command, and wait. Sixty minutes later the rental is over, the model is still downloading, and no server ever started. No error appears anywhere on your screen, and the failure happened in the machine listing you picked before you typed anything.
 
 So the question is not only what a GPU costs per hour. It is which minutes of that hour you actually get to use, why two serving engines on identical hardware behave differently, and which startup errors mean the GPU is too small versus which ones mean one setting is wrong. Answer those, and the one number you hand back at the end of the hour is one you can defend.
 
@@ -14,7 +14,7 @@ This lesson teaches five ideas. They are listed here so you can see where the le
 
 Three phases ago you measured someone else's server. Phase 3B ended with your hosted bill under control. It was a cascade behind a random control, and a guard that reserves the worst case before each call. Now management asks a different question. Would it be cheaper to rent a GPU and serve the model yourself? You get one hour and $5 to $10 of GPU time to answer it with one number. That number is sustained output tokens per second on your traffic.
 
-Everything in this phase follows that one session. You rent the machine, start a server on it, and measure it. The first thing the session teaches is a surprise. Billing starts the moment the container starts, and the model still has to download. On the wrong machine, a 140 GB model takes 68 minutes to arrive. That is longer than your one-hour rental, and the whole fee went to waiting. This phase is how you make the hour pay instead.
+Everything in this phase follows that one session. You rent the machine, start a server on it, and measure it. The first thing the session teaches is a surprise. Billing starts the moment the container starts, and the model still has to download. On the wrong machine, a 140 GB model takes 67.6 minutes to arrive. That is longer than your one-hour rental, and the whole fee went to waiting. It would not have served even after the download, because 140 GB of weights do not fit in one H100's 80 GB of memory. A model that size needs at least two of them. This phase is how you make the hour pay instead.
 
 The KV cache (Phase 2A)
 
@@ -133,10 +133,10 @@ The plan has five lines, and each line removes a specific kind of paid fumbling:
 
 Two checks belong in the plan itself, because each can veto the machine before you pay for it.
 
-The first is the driver version. The default vLLM wheel needs a 575-series NVIDIA driver, and SGLang 0.5.19 needs a 580-series driver. A marketplace machine with a 570-series driver runs vLLM and does not run SGLang natively. The listing shows the driver. This is a reason to reject a machine at zero cost, before the container starts.
+The first is the driver version. The default vLLM wheel is built with CUDA 12.9, which ships with a 575-series NVIDIA driver. CUDA's minor-version compatibility still runs any CUDA 12 build on a driver from 525 up, so a 575-series driver is not required. SGLang 0.5.19 is built on CUDA 13, which needs a 580-series driver. A marketplace machine with a 570-series driver runs vLLM and does not run SGLang natively. The listing shows the driver. This is a reason to reject a machine at zero cost, before the container starts.
 
 Predict: the listing shows a 570-series driver. Which of the two engines can your session use?
-vLLM only. Its wheel needs a 575-series driver or newer, and 570 is close but below it. SGLang 0.5.19 needs a 580-series driver, so it does not run on this machine at all. The tempting answer is "both, drivers are usually backward compatible". That belief costs you a rental: you find out after the image pull, on the clock.
+vLLM only. Its wheel is a CUDA 12 build, and minor-version compatibility runs it on the 570 driver. SGLang 0.5.19 is a CUDA 13 build that needs a 580-series driver, so it does not run on this machine at all. The tempting answer is "both, drivers are usually backward compatible". That belief costs you a rental: you find out after the image pull, on the clock.
 
 The second check is what the download actually contains. One 8B checkpoint repository totals 32.13 GB, but only 16.06 GB of that is the safetensors files the engines read. The other half is a duplicate of the same weights in a second format.
 
@@ -335,7 +335,7 @@ concurrency
 Throughput flattens at the plateau; TTFT p99 keeps rising past it. Illustration of the shape, not measured.
 
 Predict: your sweep shows output tok/s still rising 5% from concurrency 64 to 128, and TTFT p99 has doubled. Do you have capacity left, and what do you report?
-Add another level, because you have not found the plateau yet. A 5% rise means the GPU still had room at 64. The peak you report must come from a concurrency where the curve flattens. The TTFT p99 you report must be read at that same concurrency. Reporting only the tok/s at 128 hides that each user's first token now waits twice as long.
+Almost none. Doubling concurrency bought only 5% more output, so the curve has already flattened, and the plateau starts at about 64. On the slope, a doubling buys close to double the output. Report the peak at 64 and the TTFT p99 read at that same concurrency. Reporting only the tok/s at 128 claims 5% more output and hides that each user's first token now waits twice as long.
 
 ### Why each curve has its shape
 
@@ -484,8 +484,8 @@ Constrained decoding needs a library that can read your schema and produce, at e
 
 The default setting is auto backend resolution, which means the engine reads the first structured request's schema, classifies it, and picks a backend it keeps for its whole lifetime. The vLLM v0.29.0 source says so directly, in a comment naming the reason: only a single backend is supported, and different backends per request are not.
 
-Predict: you serve JSON-schema responses to five tenants on vLLM with the default auto backend, and a sixth tenant's schema uses multipleOf. No error appears in any dashboard. What changed, and for whom?
-The whole server's grammar backend moved. If the sixth tenant's request was the first structured one after startup, the engine classified multipleOf as something xgrammar does not support, chose a fallback backend, and stored that choice. Every later structured request from the other five tenants now runs through that fallback. No request failed, so no alert fired. The schema is still enforced on all of them, what changed is which library enforces it, and the study note could not re-read the latency difference this run, so the honest version is this: the discovery path in production is a log line, not an error.
+Predict: you serve JSON-schema responses to five tenants on vLLM with the default auto backend. One tenant changes its schema to use multipleOf. After the next restart, that tenant's request is the first structured one to arrive. No error appears in any dashboard. What changed, and for whom?
+The whole server's grammar backend moved. The engine classified multipleOf as something xgrammar does not support, chose a fallback backend, and stored that choice. Every later structured request from the other four tenants now runs through that fallback. Before the restart nothing moved, because an earlier request had already pinned the backend. No request failed, so no alert fired. The schema is still enforced on all of them, what changed is which library enforces it, and the study note could not re-read the latency difference this run, so the honest version is this: the discovery path in production is a log line, not an error.
 
 ### The mechanism on vLLM
 
@@ -603,7 +603,7 @@ Write a text file with these items:
 
 - Your provider's hourly rate, with today's date.
 
-Then check your target machine's NVIDIA driver version, because a wrong driver wastes your first fifteen paid minutes. vLLM's default build needs 575 or newer, and SGLang 0.5.19 needs 580 or newer.
+Then check your target machine's NVIDIA driver version, because a wrong driver wastes your first fifteen paid minutes. vLLM's default CUDA 12.9 build runs on 525 or newer through minor-version compatibility, and SGLang 0.5.19 needs 580 or newer.
 
 -
  E3 rented GPU, about $1, UNVERIFIED
@@ -779,7 +779,7 @@ WHEN IT WILL NOT START
   SGLang says RAISE --mem-fraction-static, its help says LOWER it on OOM
                                   -> the direction depends on which error you got
   diagnostics: vllm collect-env | python -m sglang.check_env
-  drivers: vLLM cu129 needs 575+ | SGLang 0.5.19 needs 580+
+  drivers: vLLM cu129 runs on 525+ (built for 575) | SGLang 0.5.19 needs 580+
            a 570-series box runs vLLM and NOT SGLang
 
 STRUCTURED OUTPUT WHEN YOU SERVE

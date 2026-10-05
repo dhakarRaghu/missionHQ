@@ -5,6 +5,7 @@ replaced, the way the other job tests do it."""
 import asyncio
 import inspect
 import pathlib
+import re
 from datetime import date
 from types import SimpleNamespace
 
@@ -94,6 +95,38 @@ def test_pay_is_read_in_lakhs(text, low, high, estimated) -> None:
     assert parse_pay(text) == (low, high, estimated)
 
 
+def test_his_own_bar_quoted_beside_a_band_is_not_part_of_it() -> None:
+    """Zamp scored 10 on 2026-10-05: its 15-22 LPA was read as up to 25."""
+    assert parse_pay("INR 15-22 LPA stated on the posting, below his 25 LPA target.") == (
+        15, 22, False)
+    assert parse_pay("15-22 LPA; under the target of 25 LPA") == (15, 22, False)
+    assert parse_pay("25 LPA") == (25, 25, False)
+    assert parse_pay("No public number; funding supports meeting the 25 LPA floor.") is None
+    assert parse_pay("level-one packages generally reported below 25 LPA on Glassdoor") is None
+    assert parse_pay("₹20-30 LPA, above the 25 LPA bar") == (20, 30, False)
+
+
+def test_hunter_guesses_are_estimates_not_stated_pay() -> None:
+    """Potpie and Adobe scored 10 on 2026-10-05 from these sentences."""
+    assert parse_pay("No public signal; pre-seed budgets make 25 LPA uncertain.")[2]
+    assert parse_pay("Not Adobe-stated; mirrors conflict: 18-25 LPA (Jobfound)")[2]
+    assert not parse_pay("₹10-25 LPA (YC: ₹1M - ₹2.5M INR) + equity")[2]
+
+
+def test_nine_and_ten_need_a_stated_package_at_the_bar() -> None:
+    title = {"experience_band": "0-1 years", "location": "Bengaluru", "stack": "Python, LLM"}
+    unknown = fit_score("AI Engineer I", **title)
+    assert unknown.score == 7 and "caps the score at 7" in unknown.parts["capped"]
+    estimated = fit_score("AI Engineer I", compensation="est. 30-40 LPA (levels.fyi)", **title)
+    assert estimated.score == 8 and "caps the score at 8" in estimated.parts["capped"]
+    under = fit_score("AI Engineer I", compensation="est. 18-22 LPA (levels.fyi)", **title)
+    assert under.score == 7
+    stated = fit_score("AI Engineer I", compensation="30-40 LPA", **title)
+    assert stated.score == 10 and "capped" not in stated.parts
+    low = fit_score("AI Engineer I", compensation="INR 15-22 LPA, below his 25 LPA target", **title)
+    assert low.score == 4
+
+
 @pytest.mark.parametrize("text", ["", "no public signal", "$120,000 - $150,000", "competitive"])
 def test_pay_without_an_indian_figure_is_none(text) -> None:
     assert parse_pay(text) is None
@@ -162,12 +195,14 @@ def test_geography_outside_india_costs_points_and_work_mode_never_does() -> None
 
 
 def test_the_model_moves_the_score_by_one_at_most_and_only_with_a_reason() -> None:
-    base = fit_score("SDE-1", experience_band="0-2 years").score
-    assert fit_score("SDE-1", experience_band="0-2 years", adjust=1,
-                     adjust_reason="funded payments team").score == base + 1
-    assert fit_score("SDE-1", experience_band="0-2 years", adjust=5,
-                     adjust_reason="x").score == base + 1
-    assert fit_score("SDE-1", experience_band="0-2 years", adjust=1).score == base
+    # A stated package at the bar, so no pay cap is in the way.
+    band = {"experience_band": "2-4 years", "compensation": "30 LPA"}
+    base = fit_score("Data Analyst", **band).score
+    assert base == 7
+    assert fit_score("Data Analyst", adjust=1, adjust_reason="funded payments team",
+                     **band).score == base + 1
+    assert fit_score("Data Analyst", adjust=5, adjust_reason="x", **band).score == base + 1
+    assert fit_score("Data Analyst", adjust=1, **band).score == base
 
 
 # --- record_job --------------------------------------------------------------
@@ -335,11 +370,13 @@ def test_the_sweep_brief_is_a_short_contract_with_the_state_filled_in() -> None:
     brief = sweep_brief(today=date(2026, 9, 22), known_companies=known, exhausted=skips)
     assert len(brief.split()) <= 150
     assert 'industry="Developer Tools"' in brief  # Tuesday is B2B, backed off
-    assert "Company0" in brief and "and 9 more" in brief
+    assert "Company0" in brief and "Company13" not in brief
+    assert re.search(r"and \d+ more", brief)
     assert "lever board quiet" in brief and "Skip this week" in brief
     assert "max_roles 8" in brief
     assert "record_job" in brief and "job_board" in brief and "discover_companies" in brief
-    assert "job_feed hn_hiring" in brief
+    for feed in ("cutshort", "wellfound", "hirist", "yc", "hn_hiring", "himalayas"):
+        assert feed in brief, feed
     assert "intern" in brief and "closed itself" in brief
 
 

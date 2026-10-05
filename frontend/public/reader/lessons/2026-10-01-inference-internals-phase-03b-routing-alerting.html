@@ -727,7 +727,7 @@ requests to fire      ≈ window × (normal − floor) / normal
   <li><b>Shrink the window.</b> A 5-request window makes each zero-hit request move the average more. In the replay the cost rule then fires at request 50, the first broken one, and the cache rule at 52. With the 0.90 floor as well, both fire at 50.</li>
 </ul>
 
-<p>The side-effect is also arithmetic. A small window on noisy normal traffic produces false alarms. Two unlucky misses in five requests can dip a 0.98 average below 0.90. A large window absorbs noise but pays for it in detection lag. You are trading false alarms against lag, and the formula above prices the trade.</p>
+<p>The side-effect is also arithmetic. A small window on noisy normal traffic produces false alarms. One unlucky zero-hit request in five is enough to dip a 0.98 average below 0.90, because 0.98 × 4 / 5 ≈ 0.78. A large window absorbs noise but pays for it in detection lag. You are trading false alarms against lag, and the formula above prices the trade.</p>
 
 <p>One more decision matters as much as the numbers. The floor must come from a baseline stored outside the process. It must not be a constant in the code that ships the prompt. The Story 1 failure was a prompt change. So anything measured at startup measures the already-broken system and calls it normal.</p>
 
