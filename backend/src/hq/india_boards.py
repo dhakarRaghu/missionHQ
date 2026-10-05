@@ -32,6 +32,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from hq import yc_directory as yc
+
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
       " (KHTML, like Gecko) Chrome/129.0 Safari/537.36")
 SOURCES = ("cutshort", "wellfound", "hirist")
@@ -180,14 +182,14 @@ def cutshort_rows(data: dict[str, Any], now: datetime | None = None) -> list[dic
                 str(co.get("stage") or ""), f"founded {co['founded']}" if co.get("founded") else "",
                 str((co.get("links") or {}).get("website") or "")]
         remote = str(j.get("remoteType") or "")
+        mode = {"remote_only": "remote", "remote_okay": "remote or onsite"}.get(remote, "")
         rows.append(_row(
             source="cutshort",
             external_id=str(j.get("_id") or ""),
             company=name[:80],
             title=str(j["headline"])[:200],
-            location=str(j.get("locationsText") or ", ".join(j.get("locations") or []))[:200]
-            + (" (Remote)" if remote.startswith("remote_only") else ""),
-            remote_policy="remote" if remote.startswith("remote") and "not" not in remote else "",
+            location=str(j.get("locationsText") or ", ".join(j.get("locations") or []))[:200],
+            remote_policy=mode,
             url=str(j.get("publicUrl") or ""),
             posted=_iso(facts.get("postedDate")),
             experience=f"{exp.get('min')}-{exp.get('max')} years" if exp.get("max") else "",
@@ -236,7 +238,8 @@ def wellfound_rows(data: dict[str, Any], now: datetime | None = None) -> list[di
                 title=str(j["title"])[:200],
                 location=", ".join(places + [f"Remote: {a}" for a in accepted])[:200]
                 or ("Remote" if j.get("remote") else ""),
-                remote_policy="remote" if j.get("remote") or remote == "REMOTE_ONLY" else "",
+                remote_policy=("remote" if j.get("remote") or remote == "REMOTE_ONLY"
+                           else "hybrid" if remote == "HYBRID" else ""),
                 url=f"https://wellfound.com/jobs/{j.get('id')}-{j.get('slug') or ''}",
                 posted=_iso(j.get("liveStartAt")),
                 experience=f"{low}+ years" if low is not None else "",
@@ -332,6 +335,10 @@ async def read_source(client: httpx.AsyncClient, source: str) -> tuple[list[dict
     seen: dict[str, dict[str, Any]] = {}
     for rows in results:
         for row in rows or []:
+            # Cutshort and Hirist list Indian jobs only, so a "Remote only",
+            # "Work From Home" or "Hybrid" row there is open to India too.
+            # Wellfound's remote page is worldwide: its rows are read.
+            row["open_to_india"] = source != "wellfound" or yc.open_to_india(row["location"])
             seen.setdefault(row["url"] or row["external_id"], row)
     return list(seen.values()), sum(r is not None for r in results)
 

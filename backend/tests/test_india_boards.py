@@ -158,3 +158,25 @@ def test_the_feed_drops_what_record_job_would_close_and_counts_it() -> None:
     for title in ("Golang Backend Engineer", "Junior Member of Technical Staff - AI/ML",
                   "Forward Deployed Engineer - Python", "SDE-1", "Data Scientist"):
         assert ib.tech_title(title), title
+
+
+def test_remote_hybrid_and_every_indian_city_say_india() -> None:
+    from hq.tools.web_tools import _filter_jobs, _say_india
+
+    rows = [{"title": "SDE-1", "location": loc, "remote_policy": mode, **extra}
+            for loc, mode, extra in [
+                ("Remote only", "remote", {"open_to_india": True}),      # Cutshort
+                ("Work From Home", "remote", {"open_to_india": True}),   # Hirist
+                ("Hyderabad", "", {}),
+                ("Gurgaon/Gurugram", "hybrid", {}),
+                ("Remote", "remote", {}),
+                ("", "hybrid", {}),
+                ("New York, Remote: United States", "remote", {}),
+                ("Remote (US)", "remote", {}),
+            ]]
+    for row in rows:
+        _say_india(row)
+    kept = _filter_jobs(rows, "", "India|Worldwide|Anywhere|APAC")
+    assert [r["location"] for r in kept] == [
+        "Remote only (India)", "Work From Home (India)", "Hyderabad (India)",
+        "Gurgaon/Gurugram (India)", "Remote (India)", "(India)"]

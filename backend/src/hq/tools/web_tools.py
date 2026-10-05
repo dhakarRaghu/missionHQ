@@ -741,6 +741,8 @@ async def job_board(
     )
     jobs = [_one_job(r, provider, company) for r in rows if isinstance(r, dict)]
     jobs = [j for j in jobs if j["title"]]
+    for job in jobs:
+        _say_india(job)
     jobs = _filter_jobs(jobs, query, location, exclude)
     before_dates = len(jobs)
     jobs = _recent(jobs, max(0, int(since_days)))
@@ -1010,6 +1012,8 @@ async def _yc_jobs(client: httpx.AsyncClient, location: str) -> tuple[list[dict]
     # or the EU is not one, though its company sits in YC's "Remote" region.
     rows = [row for _, props in pages if props for row in yc.job_rows(props)
             if row["open_to_india"]]
+    seen = {row["external_id"] for row in rows}
+    rows += [row for row in await yc.india_job_rows(client) if row["external_id"] not in seen]
     return rows, len(slugs)
 
 
@@ -1035,6 +1039,23 @@ def _recent(jobs: list[dict], since_days: int) -> list[dict]:
                  if w is None or (now - w).days <= since_days]
     dated.sort(key=lambda pair: pair[0] or datetime.min.replace(tzinfo=UTC), reverse=True)
     return [j for _, j in dated]
+
+
+def _say_india(job: dict) -> None:
+    """Put "India" in the location of a role someone in India can take.
+
+    Remote, hybrid and work-from-home roles count, and so does every Indian
+    city. The location filter hunter passes ("India|...|Worldwide") used to
+    name Bengaluru only: on 2026-10-05 it dropped 74 of 82 remote Cutshort
+    roles ("Remote only") and Hirist roles in Gurgaon, Hyderabad and
+    "Remote". A remote role limited to another country stays as it is."""
+    place = str(job.get("location") or "")
+    india = job["open_to_india"] if "open_to_india" in job else yc.open_to_india(place)
+    if not india and not place.strip():
+        india = str(job.get("remote_policy") or "").startswith(("remote", "hybrid"))
+    job["open_to_india"] = bool(india)
+    if india and "india" not in place.casefold():
+        job["location"] = f"{place} (India)".strip()[:220]
 
 
 def _india_gates(jobs: list[dict]) -> tuple[list[dict], dict[str, int]]:
@@ -1109,8 +1130,11 @@ async def job_feed(
       record_job, and pass the facts as company_brief.
 
     `query`, `location` and `exclude` work as in job_board: pipe-separated
-    alternatives, and `exclude` matches the title only. For roles open to
-    him, pass location "India|Bengaluru|Bangalore|Worldwide|Anywhere|APAC".
+    alternatives, and `exclude` matches the title only. Every row someone in
+    India can take, whether in an Indian city, remote, hybrid or work from
+    home, has "India" in its location, so for roles open to him pass
+    location "India|Worldwide|Anywhere|APAC". Never drop a role for being
+    remote or hybrid.
     `since_days` drops older postings (0 keeps all).
 
     A feed row is a lead, not a verified role. Before record_job, find the
@@ -1158,6 +1182,8 @@ async def job_feed(
                 "error": f"could not read the {source} feed ({type(exc).__name__})"}
 
     jobs = [j for j in jobs if j["title"] and not private_employer(j["company"])]
+    for job in jobs:
+        _say_india(job)
     total = len(jobs)
     jobs = _filter_jobs(jobs, query, location, exclude)
     jobs = _recent(jobs, max(0, int(since_days)))
