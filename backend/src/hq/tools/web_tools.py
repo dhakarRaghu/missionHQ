@@ -22,7 +22,7 @@ import httpx
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 
-from hq import llm
+from hq import india_boards, llm
 from hq import yc_directory as yc
 from hq.obs import emit
 from hq.privacy import private_employer
@@ -905,7 +905,7 @@ HN_ITEM_API = "https://hn.algolia.com/api/v1/items/{id}"
 HN_HIRING_API = (
     "https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=6"
 )
-JOB_FEEDS = ("yc", "hn_hiring", "himalayas", "remotive", "remoteok")
+JOB_FEEDS = ("yc", "hn_hiring", "himalayas", "remotive", "remoteok") + india_boards.SOURCES
 YC_FEED_COMPANIES = 90   # company pages read per yc call: India first, then remote
 MAX_FEED_RESULTS = 40
 _HN_LINK_RE = re.compile(r"^(?:https?://|www\.)\S+$|^[\w-]+(?:\.[\w-]+)+/?$", re.IGNORECASE)
@@ -1037,6 +1037,45 @@ def _recent(jobs: list[dict], since_days: int) -> list[dict]:
     return [j for _, j in dated]
 
 
+def _india_gates(jobs: list[dict]) -> tuple[list[dict], dict[str, int]]:
+    """An Indian site's rows that are worth hunter's attention, and how many
+    were dropped for each reason. These sites list hundreds of rows a night,
+    and record_job would close a 3+ year, senior or intern role anyway: here
+    they are dropped before they take a place in `limit`."""
+    from hq.config import settings
+    from hq.tools.job_tools import (
+        intern_title,
+        min_years_required,
+        parse_pay,
+        senior_title,
+    )
+
+    bar = settings().job_max_min_years
+    pay_bar = settings().job_target_ctc_lakh
+    dropped = {"closed_or_stale": 0, "staffing": 0, "services_firm": 0, "not_engineering": 0,
+               "gated": 0, "stated_pay_under_bar": 0}
+    kept = []
+    for job in jobs:
+        floor = min_years_required(job.get("experience") or "")
+        pay = parse_pay(job.get("compensation") or "")
+        if job["posting"] in ("closed", "stale"):
+            dropped["closed_or_stale"] += 1
+        elif any(f.startswith("staffing") for f in job["flags"]):
+            dropped["staffing"] += 1
+        elif "services firm" in job["flags"]:
+            dropped["services_firm"] += 1
+        elif not india_boards.tech_title(job["title"]):
+            dropped["not_engineering"] += 1
+        elif (floor is not None and floor >= bar) or senior_title(job["title"]) \
+                or intern_title(job["title"]):
+            dropped["gated"] += 1
+        elif pay and not pay[2] and pay[1] < pay_bar:
+            dropped["stated_pay_under_bar"] += 1
+        else:
+            kept.append(job)
+    return kept, dropped
+
+
 @hq_tool(action=ActionClass.READ, trust=Trust.WEB, network=True)
 async def job_feed(
     ctx: RunContext[HQDeps],
@@ -1060,6 +1099,14 @@ async def job_feed(
       and engineers post there themselves, from companies no directory lists.
     - `himalayas`, `remotive`, `remoteok`: remote-jobs boards. Most rows are
       remote roles; pass `location` to keep the ones open to India.
+    - `cutshort`, `wellfound`, `hirist`: Indian job sites. Each row carries
+      `posting` (open or stale, from the site's own flag and the age),
+      `company_facts` (type, size, stage, rating) and `flags`. Closed and
+      stale postings, staffing reposts, services firms, 3+ year, senior or
+      intern roles, and
+      roles whose stated pay is under the bar are dropped before you see
+      them; `dropped` counts them. Check `flags` and `company_facts` before
+      record_job, and pass the facts as company_brief.
 
     `query`, `location` and `exclude` work as in job_board: pipe-separated
     alternatives, and `exclude` matches the title only. For roles open to
@@ -1086,6 +1133,10 @@ async def job_feed(
                     jobs = [j for j in jobs if j["role_family"] in ("eng", "")]
             elif source == "hn_hiring":
                 thread, jobs = await _hn_hiring(client)
+            elif source in india_boards.SOURCES:
+                jobs, pages = await india_boards.read_source(client, source)
+                thread = f"{pages} pages read"
+                jobs, dropped = _india_gates(jobs)
             else:
                 first = query.split("|")[0].strip()
                 url, params = {
@@ -1117,10 +1168,43 @@ async def job_feed(
                agent=ctx.deps.agent,
                payload={"source": source, "query": query[:120], "jobs": len(jobs)})
     if not jobs:
-        return {"source": source, "provenance": "web", "total": total,
+        miss = {"source": source, "provenance": "web", "total": total,
                 "error": "the feed is reachable but nothing matched; widen query or location"}
+        if source in india_boards.SOURCES:
+            miss["dropped"] = dropped
+        return miss
     out = {"source": source, "provenance": "web", "total": total,
            "matched": matched, "shown": len(jobs), "jobs": jobs}
+    if source in india_boards.SOURCES:
+        out["dropped"] = dropped
     if thread:
         out["thread"] = thread
     return out
+
+
+@hq_tool(action=ActionClass.READ, trust=Trust.WEB, network=True)
+async def posting_status(ctx: RunContext[HQDeps], url: str) -> dict:
+    """Is a Cutshort, Wellfound or Hirist posting still hiring? Reads the
+    posting itself.
+
+    `posting` is "closed" (the page is gone or the site marks it closed),
+    "stale" (older than 45 days: still listed, hiring most likely done) or
+    "open". For Hirist it also gives the number of applicants and the email
+    domain of whoever posted it: a recruiter's domain is a staffing repost.
+    Call it before record_job on a lead from these sites that is more than
+    two weeks old, and do not record a closed or stale one.
+    """
+    host = (urlparse(url).hostname or "").lower()
+    if not host.endswith(("cutshort.io", "wellfound.com", "hirist.tech")):
+        return {"url": url, "error": "posting_status reads Cutshort, Wellfound and Hirist postings only"}
+    try:
+        async with httpx.AsyncClient(
+            timeout=30, follow_redirects=True, headers={"User-Agent": india_boards.UA}
+        ) as client:
+            out = await india_boards.posting_status(client, url)
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"url": url, "provenance": "web",
+                "error": f"could not read the posting ({type(exc).__name__})"}
+    await emit("posting_status", run_id=ctx.deps.run_id, task_id=ctx.deps.task_id,
+               agent=ctx.deps.agent, payload={"url": url[:200], "posting": out.get("posting")})
+    return {"provenance": "web", **out}

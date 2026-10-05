@@ -222,10 +222,14 @@ _ESTIMATE_RE = re.compile(
 _FOREIGN_RE = re.compile(r"\$|\busd\b|€|\beur\b|£|\bgbp\b", re.IGNORECASE)
 # The owner's own bar, quoted beside a posting's band ("15-22 LPA, below his
 # 25 LPA target"), is not part of the band.
-_BAR_AFTER_RE = re.compile(r"^[^.;\n]{0,12}\b(?:target|bar|threshold|switch|ask|minimum)\b",
-                           re.IGNORECASE)
-_BAR_BEFORE_RE = re.compile(r"\b(?:his|owner'?s|target(?: of)?|bar(?: of)?|threshold(?: of)?)\s*$",
-                            re.IGNORECASE)
+# "supports meeting the 25 LPA floor" and "reported below 25 LPA" (Avoca and
+# Exotel, 2026-10-05) compare a role to the bar; they are not its band.
+_BAR_AFTER_RE = re.compile(
+    r"^[^.;\n]{0,12}\b(?:target|bar|threshold|switch|ask|minimum|floor)\b", re.IGNORECASE)
+_BAR_BEFORE_RE = re.compile(
+    r"\b(?:his|owner'?s|target(?: of)?|bar(?: of)?|threshold(?: of)?|floor(?: of)?|below|under"
+    r"|above|over|than|meet(?:s|ing)?|clear(?:s|ing)?)\s*(?:the\s*)?$",
+    re.IGNORECASE)
 
 
 def parse_pay(text: str) -> tuple[float, float, bool] | None:

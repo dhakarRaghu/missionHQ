@@ -5,6 +5,7 @@ replaced, the way the other job tests do it."""
 import asyncio
 import inspect
 import pathlib
+import re
 from datetime import date
 from types import SimpleNamespace
 
@@ -100,6 +101,9 @@ def test_his_own_bar_quoted_beside_a_band_is_not_part_of_it() -> None:
         15, 22, False)
     assert parse_pay("15-22 LPA; under the target of 25 LPA") == (15, 22, False)
     assert parse_pay("25 LPA") == (25, 25, False)
+    assert parse_pay("No public number; funding supports meeting the 25 LPA floor.") is None
+    assert parse_pay("level-one packages generally reported below 25 LPA on Glassdoor") is None
+    assert parse_pay("₹20-30 LPA, above the 25 LPA bar") == (20, 30, False)
 
 
 def test_hunter_guesses_are_estimates_not_stated_pay() -> None:
@@ -366,11 +370,13 @@ def test_the_sweep_brief_is_a_short_contract_with_the_state_filled_in() -> None:
     brief = sweep_brief(today=date(2026, 9, 22), known_companies=known, exhausted=skips)
     assert len(brief.split()) <= 150
     assert 'industry="Developer Tools"' in brief  # Tuesday is B2B, backed off
-    assert "Company0" in brief and "and 9 more" in brief
+    assert "Company0" in brief and "Company13" not in brief
+    assert re.search(r"and \d+ more", brief)
     assert "lever board quiet" in brief and "Skip this week" in brief
     assert "max_roles 8" in brief
     assert "record_job" in brief and "job_board" in brief and "discover_companies" in brief
-    assert "job_feed hn_hiring" in brief
+    for feed in ("cutshort", "wellfound", "hirist", "yc", "hn_hiring", "himalayas"):
+        assert feed in brief, feed
     assert "intern" in brief and "closed itself" in brief
 
 
