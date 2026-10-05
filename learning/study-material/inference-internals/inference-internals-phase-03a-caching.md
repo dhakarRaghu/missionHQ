@@ -337,7 +337,7 @@ ProjectDiscovery cache hit rate, from their weekly table
   later                  ██████████████████████████████████           85%
 ```
 
-Their clearest example compares two tasks with nearly the same token volume. One task ran at a 91.8% cache rate. The other ran at 3.2%. The second task cost about **60 times** more.
+Their clearest example compares two tasks with nearly the same token volume. One task ran at a 91.8% cache rate. The other ran at 3.2%. The post says the second task cost roughly **60 times** more. Hit rate alone cannot explain that. With misses at the plain input price, the average price per input token at those rates differs about 5.6x, and caching can never make it differ more than 12.5x (a 1.25x write against a 0.1x read). The post does not show where the rest comes from.
 
 **Deriv.** A production assistant team measured an **85.8% hit rate and a 77% reduction in input-token cost**. Note their own caveat. Their dollar figures are illustrative, because their volume is confidential. The percentages are measured.
 
@@ -629,7 +629,7 @@ Every URL below was fetched and checked on 2026-09-12. Some pages blocked automa
 
 - **How We Cut LLM Costs by 59% With Prompt Caching, ProjectDiscovery, 10 April 2026** — https://projectdiscovery.io/blog/how-we-cut-llm-cost-with-prompt-caching
   The best production write-up on this topic, because it states its measurement method. The team derived effective per-token rates from real spend. They compared those rates with the standard-rate cost of the same volume. Focus on the weekly hit-rate table.
-  Conditions: an autonomous security-testing platform, 20 to 40 LLM steps per task, and system prompts over 20,000 tokens per agent. Section 3.2 quotes its hit rates, its 59% to 70% savings, and its 60x two-task comparison.
+  Conditions: an autonomous security-testing platform, 20 to 40 LLM steps per task, and system prompts over 20,000 tokens per agent. Section 3.2 quotes its hit rates, its 59% to 70% savings, and its 60x two-task comparison, which is larger than hit rate alone can explain.
 
 - **How prompt caching cut our production AI agent input costs by 77%, Deriv, 23 July 2026** — https://derivai.substack.com/p/prompt-caching-production-ai-agent-costs
   A second independent production measurement. Section 3.2 quotes its 85.8% hit rate and 77% saving.

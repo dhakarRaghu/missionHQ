@@ -83,7 +83,7 @@ Take two things from this table:
 1. FP8 is close to lossless at every size.
 2. 4-bit recovery improves with model size, from 96.1% to 97.4% to 98.9%. This happens only on the harder benchmark suite, v2. On the easier suite, every cell is 98.7% or higher, and the size effect disappears.
 
-**The pessimistic result.** A study by a different group used human evaluation as well as automatic benchmarks, on the same quantized checkpoints. Its central finding, quoted:
+**The pessimistic result.** A study by a different group used human evaluation as well as automatic benchmarks, on its own quantized checkpoints. The pair below is for Command R+ 103B at 4-bit weight-only (W4-g). Its central finding, quoted:
 
 > automatic evaluations estimate performance deterioration relative to FP16 across tasks at −0.3% (French) and −1.7% (Japanese) vs −16.6% and −16.0% reported by human evaluators.
 

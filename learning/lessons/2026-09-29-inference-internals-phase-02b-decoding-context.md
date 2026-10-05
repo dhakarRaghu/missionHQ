@@ -145,7 +145,7 @@ room = max(token_budget - len(decoding) - prefill_tokens, 0)  # batching_sim.py:
 Compute it yourself: three streams decode under a 2,048-token budget when a 24,000-token prompt arrives. How many prefill tokens fit in one iteration, and how many iterations does the prompt need?
 The decodes reserve 3 tokens, so the pass has 2,045 left for prefill. Dividing 24,000 by 2,045 gives 11.7, so the prompt needs 12 iterations.
 
-Now price one sliced iteration with the cost model from Phase 2A. A prefill token costs 0.03ms, so the 2,045-token slice costs 61.35ms. The three decodes cost 18 + 0.12 × 3 = 18.36ms on top. The whole iteration takes 61.35 + 18.36 = 79.7ms, which rounds to about 80ms. Twelve slices spread the same work across 960ms, and each stream still gets a token every 80ms.
+Now price one sliced iteration with the cost model from Phase 2A. A prefill token costs 0.03ms, so the 2,045-token slice costs 61.35ms. The three decodes cost 18 + 0.12 × 3 = 18.36ms on top. The whole iteration takes 61.35 + 18.36 = 79.7ms, which rounds to about 80ms. Twelve slices spread the same work across about 940ms. That is 720ms of prefill plus 12 decode passes of 18.36ms, because the last slice holds only 1,505 tokens. Each stream still gets a token about every 80ms.
 
   How many slices a prompt needs
 
@@ -202,7 +202,7 @@ That re-read is the repeated cost. Cut the budget in half and the number of chun
 
     Chunks  · total KV tokens re-read
 
-Move the budget slider down and two numbers rise together. The chunk count rises. The total KV re-read rises with it, because each new chunk walks the same earlier KV again. At a 512-token budget the 24,000-token prompt needs 47 chunks and re-reads half a million KV tokens of its own prompt. At 2,048 it needs 12 chunks and re-reads a quarter of that. This re-read is why small budgets cost throughput.
+Move the budget slider down and two numbers rise together. The chunk count rises. The total KV re-read rises with it, because each new chunk walks the same earlier KV again. At a 512-token budget the 24,000-token prompt needs 48 chunks and re-reads half a million KV tokens of its own prompt. At 2,048 it needs 12 chunks and re-reads a quarter of that. This re-read is why small budgets cost throughput.
 
 Sarathi-Serve measured the cost on real GPUs. At a 512-token budget, chunking cost about 25% overhead on Yi-34B. At 2,048 the overhead was nearly negligible. Your simulator shows the same shape from the user side. The worst gap falls as the budget falls, and mean TTFT climbs at the same time.
 
@@ -388,7 +388,7 @@ Strict mode cut your classifier's accuracy by 9 points, and the grammar mask exp
 
 Strict mode guarantees legal tokens at every step, but your classifier's accuracy fell 9 points anyway. A filter that only removes illegal tokens should never change what the model knows. So the points were lost somewhere else, and finding where decides which fix you try on Monday.
 
-Return to the running case. Your ticket classifier used to reason freely and then you enabled strict mode with three fields: category, priority, a one-line justification. The JSON is now always valid. The answers are now more often wrong. Two colleagues argue about the cause, and each proposes a different fix.
+Return to the running case. Your ticket classifier used to reason freely and then you enabled strict mode with two fields: category and priority. The JSON is now always valid. The answers are now more often wrong. Two colleagues argue about the cause, and each proposes a different fix.
 
 The picture has two suspects. The first suspect is the prompt itself, because asking for a format changes what the model writes. The model must plan its answer to fit a shape, and that planning happens before any constraint runs. The second suspect is the decoder, where the grammar mask, the per-step filter that sets illegal tokens to negative infinity, removes choices. Researchers argued about which suspect was guilty for two years. A 2026 paper separated the two experimentally, and the measured accuracy drop from structured output is called the format tax.
 
@@ -401,7 +401,7 @@ The result puts most of the cost on the prompt. Asking for the format cost 3.9 a
 
 This explains why your classifier dropped despite a correct mask. The mask can only remove illegal tokens, but the prompt had already pushed the model into a cramped way of answering. Your schema asks for category and priority, so the model must commit to a label before it has written any reasoning in text. Committing early is the mechanism behind the prompt-side cost, and the mask only inherits it.
 
-The paper has one pair of numbers that shows the split in your own dashboards. Constrained decoding raised format validity from 55.7% to 92.2%. Over the same change, accuracy moved from 57.3% to 55.7%. Compliance went up and reasoning went slightly down, so the two are different dials. A service can get cleaner and dumber at the same time, and a parse-failure metric measures only the first dial.
+The paper has one pair of numbers that shows the split in your own dashboards. Constrained decoding raised format validity from 55.7% to 92.2%. Over the same change, accuracy moved from 57.3% to 55.7%, and the paper calls that unchanged. Both stay below the 61.5% free-form baseline. Compliance went up and reasoning did not, so the two are different dials. A service can get cleaner and dumber at the same time, and a parse-failure metric measures only the first dial.
 
 Every tax number you read from now on must carry two names. The first name is the model. In the same paper, the older gpt-5-nano lost 8.0 points with constraints, while claude-haiku-4.5 is reported at +1.2 without them. The second name is the parser used for scoring. When the authors switched MATH-500 scoring from a rule-based extractor to a model judge, the measured tax fell from 10.1 to 6.6 points. About a third of one measured tax was the scorer, not the model.
 
@@ -634,7 +634,7 @@ The core fact first. A deterministic error is a failure the provider decides fro
 The second fact. You cannot predict every input, so you add a second layer under the trigger. A backstop is the code that catches the overflow 400 after the trigger missed, changes the input and retries once. The trigger handles gradual growth. The backstop handles the single jump that no threshold caught. Each layer catches what the other one misses.
 
 Predict: a colleague ships a retry loop. On any exception it sleeps 2^n, resends and tries three times. Walk one context overflow through it. How many times does it fail, and why?
-It fails all three times. Each attempt sends the identical oversized prompt, and the provider rejects an identical input identically, at validation time. The backoff sleeps add delay without changing the input, so the loop burns three billed calls, reports three failures and the user still has no answer.
+It fails all three times. Each attempt sends the identical oversized prompt, and the provider rejects an identical input identically, at validation time. The backoff sleeps add delay without changing the input, so the loop sends three calls, reports three failures and the user still has no answer.
 
 Here are the two paths side by side.
 
@@ -665,13 +665,13 @@ The second step logs loudly. A fired backstop means the trigger let a prompt thr
 The third step compacts, which is what makes the retry meaningful. A retry is only useful if the input changed, and compaction is the change. The fourth step retries exactly once. Once is enough because the compacted prompt either fits or your compactor itself is broken, and a third attempt cannot tell you which.
 
 Evidence
-Phase 1 exercise E7 sent an oversized prompt and received a fast 400. The determinism claim rests on the mechanism, not on a benchmark: the provider checks the input against a fixed window at validation time, so the identical resend gets the identical 400. Your phase puts it this way, quoted: "the classic blind retry resends the identical oversized prompt and fails identically, so the retry is only meaningful if the input changed". The status, type and code triple is stated in the phase and was not re-verified against the provider this run. One more cost hides here: the summarising call inside compact() is a second billed call, and one report says its tokens can sit outside the top-level usage counts, also not checked this run.
+Phase 1 exercise E7 sent an oversized prompt and received a fast 400. The determinism claim rests on the mechanism, not on a benchmark: the provider checks the input against a fixed window at validation time, so the identical resend gets the identical 400. Your phase puts it this way, quoted: "the classic blind retry resends the identical oversized prompt and fails identically, so the retry is only meaningful if the input changed". The status, type and code triple is stated in the phase and was not re-verified against the provider this run. Whether the provider bills a rejected request was not checked either, so this lesson does not call the failed attempts billed. One more cost hides here: the summarising call inside compact() is a second billed call, and one report says its tokens can sit outside the top-level usage counts, also not checked this run.
 
 Use it in Mission HQ terms. Open compactor.py:660 to compactor.py:671, the shipped version of the right path. The question it answers: does cm.compact run before the retry, so the second call sends a different prompt? Then ask the harder one: when this code fires in your own agent, what log do you read the next morning, and what number in your budget table does that log make you change?
 
 An overflow 400 is deterministic, so shrink the input and retry once, never wait and resend.
 
-Backoff retries on any exception: the same oversized prompt fails identically, three billed calls deep.
+Backoff retries on any exception: the same oversized prompt fails identically, three calls deep.
 
 Run compactor.py --simulate --turns 12 --inject-overflow 5 and read the backstop lines.
 
@@ -699,7 +699,7 @@ Violation rates went from 0% with the policy visible to 38% when the summary dro
 
 An overflow 400 is deterministic, so the fix is a smaller input, never a wait
 
-The same oversized prompt returns the same 400 at the same speed every time. A blind retry loop burns three billed calls and reports three outages. Check the machine-readable error fields, compact so the retry sends a different input, retry once, and log loudly. The same lesson sizes your budget: every source gets a cap, and the trigger fires before the window fills, with headroom left for the summarising call itself. Taught in How do you keep a growing prompt inside a finite window? and The cap missed and the 400 arrived. What now?
+The same oversized prompt returns the same 400 at the same speed every time. A blind retry loop fails three times and reports three outages. Check the machine-readable error fields, compact so the retry sends a different input, retry once, and log loudly. The same lesson sizes your budget: every source gets a cap, and the trigger fires before the window fills, with headroom left for the summarising call itself. Taught in How do you keep a growing prompt inside a finite window? and The cap missed and the 400 arrived. What now?
 
 Your support agent now explains all three of its failures. The mid-sentence freeze was a scheduling choice, measured by the gap metric. The 9 lost accuracy points were paid at the prompt, fixed by field order. The 400 on the six-hour run was a cap that missed, answered by one modified retry.
 

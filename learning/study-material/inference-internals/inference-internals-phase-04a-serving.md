@@ -295,8 +295,8 @@ Both engines ship a diagnostic command. Run it before you open a bug report: `vl
 
 **The two engines need different drivers and CUDA versions.**
 
-- The default vLLM wheel is built against CUDA 12.9. It needs a 575-series NVIDIA driver or newer.
-- SGLang 0.5.19 depends on CUDA 13. It needs a 580-series driver.
+- The default vLLM wheel is built against CUDA 12.9, which ships with a 575-series NVIDIA driver. CUDA's minor-version compatibility runs any CUDA 12 build on a driver from 525 up.
+- SGLang 0.5.19 depends on CUDA 13. It needs a 580-series driver, because CUDA 13 compatibility starts at 580.
 - **A machine with a 570-series driver runs vLLM, but it does not run SGLang natively.**
 
 Check the driver before you pick the engine. This matters most on a marketplace machine.
@@ -553,7 +553,7 @@ This command leads into section 4.6. A throughput number without a cost does not
     - the full vLLM launch command and the full SGLang launch command
     - the benchmark command, with your model id already in it
     - your provider's hourly rate, with today's date
-  - Then check your target machine's NVIDIA driver version. Otherwise it can waste your first fifteen minutes. vLLM's default build needs 575 or newer. SGLang 0.5.19 needs 580 or newer.
+  - Then check your target machine's NVIDIA driver version. Otherwise it can waste your first fifteen minutes. vLLM's default CUDA 12.9 build runs on 525 or newer through minor-version compatibility. SGLang 0.5.19 needs 580 or newer.
   - Teaches: on rented hardware, preparation controls cost.
 
 - [ ] **E3 (rented GPU, about $1, UNVERIFIED).** Serve a model and let the engine choose its own context size.
@@ -772,7 +772,7 @@ WHEN IT WILL NOT START
   PyTorch CUDA OOM + fragmentation hint       -> memory fraction too high
   SGLang says RAISE --mem-fraction-static     -> opposite direction to vLLM
   diagnostics: vllm collect-env | python -m sglang.check_env
-  drivers: vLLM cu129 needs 575+ | SGLang 0.5.19 needs 580+
+  drivers: vLLM cu129 runs on 525+ (built for 575) | SGLang 0.5.19 needs 580+
            a 570-series box runs vLLM and NOT SGLang
 
 STRUCTURED OUTPUT WHEN YOU SERVE
