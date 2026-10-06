@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
  * Centre pane: every video, by course.
  *
  * Each course lists its long course videos in phase order, then its YouTube
- * playlist in episode order. Picking one plays it at the top of the pane;
+ * playlist in episode order, then the videos of its Learn articles. Picking one plays it at the top of the pane;
  * "Open the phase" goes to the lesson it was made from.
  *
  * Above the library, "Being made" lists the videos still on their way, and a
@@ -43,7 +43,7 @@ export function VideoLibrary({
   onBack: () => void;
   onOpenPhase: (course: string, slug: string) => void;
 }) {
-  const filter = { kind: "course,youtube" };
+  const filter = { kind: "course,youtube,article" };
   const videos = useQuery({
     queryKey: mediaKeys.videos(filter),
     queryFn: () => mediaApi.videos(filter),
@@ -118,6 +118,7 @@ export function VideoLibrary({
               const course = courses.find((c) => c.course === key);
               const long = group.filter((v) => v.kind === "course");
               const episodes = group.filter((v) => v.kind === "youtube");
+              const articles = group.filter((v) => v.kind === "article");
               return (
                 <section key={key} aria-label={course ? courseTitle(course) : key} className="space-y-3">
                   <h3 className="text-sm font-semibold">{course ? courseTitle(course) : key}</h3>
@@ -133,6 +134,14 @@ export function VideoLibrary({
                     <VideoList
                       title="YouTube playlist"
                       videos={episodes}
+                      playing={playing}
+                      onPlay={play}
+                    />
+                  ) : null}
+                  {articles.length ? (
+                    <VideoList
+                      title="Article videos"
+                      videos={articles}
                       playing={playing}
                       onPlay={play}
                     />

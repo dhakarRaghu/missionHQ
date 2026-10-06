@@ -6,8 +6,8 @@ import { API_BASE } from "@/lib/auth";
 // the backend serves them from its media folder. See docs/videos.md.
 
 /** "course" is the long video of one phase; "youtube" is one short episode
- * of the YouTube playlist. "article" exists in the manifest format, but the
- * console shows course videos only: Mission HQ makes videos from phases. */
+ * of the YouTube playlist; "article" is the video of one Learn article, shown
+ * above the article and in the library. */
 export type VideoKind = "course" | "youtube" | "article";
 
 export interface VideoChapter {

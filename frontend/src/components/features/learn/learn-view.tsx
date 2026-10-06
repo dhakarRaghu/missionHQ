@@ -17,6 +17,7 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { LessonPageFrame } from "@/components/features/learn/lesson-frame";
+import { LessonVideo } from "@/components/features/learn/lesson-video";
 import { Markdown } from "@/components/features/vault/markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -269,6 +270,12 @@ export function LearnView() {
           <AskBox />
         </div>
       </header>
+
+      <LessonVideo
+        key={current.id}
+        lessonMd={current.md_path}
+        canMake={current.kind === "topic"}
+      />
 
       {mode === "page" && current.html_path ? (
         <LessonPageFrame
