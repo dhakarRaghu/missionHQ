@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import hq.dbos_app  # noqa: F401 — constructs DBOS before any decorated import
-from hq import db, engine, llm, memory, obs
+from hq import db, engine, lesson_index, llm, memory, obs
 from hq.channels import telegram
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -73,6 +73,8 @@ async def lifespan(app: FastAPI):
     DBOS.launch()
     await engine.bootstrap_post_launch()  # queues + schedules need a launched executor
     await engine.reap()             # reconcile stale state from the last crash
+    await lesson_index.sync_quietly()     # lessons another laptop committed
+    await lesson_index.export_quietly()   # and this laptop's, for the next commit
     await telegram.start()
     log.info("mission hq up: agents=%s", sorted(engine.registered_agents()))
     yield

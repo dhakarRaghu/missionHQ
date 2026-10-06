@@ -210,11 +210,11 @@ def test_the_nightly_cron_calls_the_pipeline_and_nothing_else() -> None:
     assert "start_learning_run" in sage.tools  # he can still ask for one in chat
 
 
-def test_topic_learning_waits_for_read_and_for_an_active_run() -> None:
+def test_topic_learning_waits_only_for_an_active_run() -> None:
     from hq.tools import learning_tools
 
     src = inspect.getsource(learning_tools.topic_learning_blocker)
-    assert "kind = 'topic' AND read_at IS NULL" in src
+    assert "read_at IS NULL" not in src     # unread articles hold nothing since 2026-10-06
     assert "'feed_pass', 'reading_scan', 'deep_study', 'lesson_synthesis'" in src
     assert "topic_learning_blocker" in inspect.getsource(learning_tools.start_learning_run)
 

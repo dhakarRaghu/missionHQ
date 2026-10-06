@@ -19,7 +19,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from hq import db, lesson_kit, signals
+from hq import db, lesson_index, lesson_kit, signals
 from hq.api.deps import require_auth
 from hq.config import settings
 from hq.learning_pipeline import LESSON_DIR
@@ -103,6 +103,7 @@ async def list_lessons(limit: int = 30, kind: str = "") -> list[dict[str, Any]]:
     the first three; course lessons belong on the Courses page, beside the
     phase they teach.
     """
+    await lesson_index.sync_quietly()   # rows another laptop wrote (git)
     limit = max(1, min(int(limit), 120))
     kinds = [k.strip() for k in kind.split(",") if k.strip()]
     if kinds:
@@ -264,6 +265,7 @@ async def mark_read(lesson_id: str) -> dict[str, Any] | None:
             " WHERE lesson_id = %s::uuid" + (" OR slug = %s" if slug else ""),
             (lesson_id, slug) if slug else (lesson_id,),
         )
+    await lesson_index.export_quietly()
     return {"id": row["id"], "title": str(row["title"] or ""), "kind": str(row["kind"])}
 
 
@@ -317,6 +319,7 @@ async def list_courses() -> list[dict[str, Any]]:
     one by one, not all in one" — so the evening run works the active course
     and leaves the rest alone.
     """
+    await lesson_index.sync_quietly()   # rows another laptop wrote (git)
     active = await _active_course()
     rows = await db.fetch(
         "SELECT p.course, count(*) AS phases,"
@@ -376,6 +379,7 @@ async def get_course_phases(course: str) -> list[dict[str, Any]]:
     written here — deeper, corrected, with the production failure attached —
     rather than going back to the source module.
     """
+    await lesson_index.sync_quietly()   # rows another laptop wrote (git)
     return await db.fetch(
         "SELECT p.slug, p.phase_order, p.title, p.summary, p.difficulty,"
         " p.minutes, p.status, p.url, p.lesson_id::text,"
@@ -491,27 +495,24 @@ async def draft_post_from_field_note(name: str, section: str = "writing",
 async def teach_phase(course: str, slug: str, force: bool = False) -> dict:
     """Study one named phase now, instead of waiting for tonight's run.
 
-    Still gated: it will not start while a course lesson sits unread, because
-    that is the rule that stops articles piling up.
+    An unread lesson does not hold it (he dropped that rule on 2026-10-06);
+    a course lesson he failed in review does, because it needs his decision.
 
     `force=true` is the rebuild. He has the page already and wants it written
     again, usually because the kit or the standard moved under it, so neither
-    the unread gate nor "this phase is taught" applies: both of those exist to
-    stop work piling up on its own, and this is him asking.
+    the failed-review hold nor "this phase is taught" applies.
     """
     from hq import engine
     from hq.learning_pipeline import course_payload, course_study_brief
 
-    unread = None if force else await db.fetchone(
-        "SELECT title, review_status FROM hq.lessons WHERE kind = 'course'"
-        " AND (read_at IS NULL OR review_status = 'failed')"
+    failed = None if force else await db.fetchone(
+        "SELECT title FROM hq.lessons WHERE kind = 'course' AND review_status = 'failed'"
         " ORDER BY lesson_date DESC LIMIT 1",
         (),
     )
-    if unread:
-        why = {"failed": "failed review and needs a decision"}.get(
-            str(unread["review_status"]), "is still unread — mark it read first")
-        return {"started": False, "reason": f"{unread['title']} {why}"}
+    if failed:
+        return {"started": False,
+                "reason": f"{failed['title']} failed review and needs a decision"}
 
     wanted = ("pending", "taught") if force else ("pending",)
     phase = await db.fetchone(

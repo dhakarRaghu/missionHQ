@@ -83,15 +83,13 @@ SECTIONS: dict[str, tuple[str, ...]] = {
     "weekly-review": ("needs", "decisions", "counters", "gates", "funnel", "owner"),
 }
 # The engine's own gates, as queries. The course query is start_course_study's:
-# the newest course lesson that is unread, or that he failed in review. The
-# topic query is topic_learning_blocker's: the newest unread topic article.
+# the newest course lesson he failed in review. Unread lessons hold nothing
+# since 2026-10-06, when he dropped the "read it first" rule; an article
+# waits only on a run already in progress, which is not a lesson.
 COURSE_GATE_SQL = (
     "SELECT title, lesson_date, review_status, read_at IS NULL AS unread FROM hq.lessons"
-    " WHERE kind = 'course' AND (read_at IS NULL OR review_status = 'failed')"
+    " WHERE kind = 'course' AND review_status = 'failed'"
     " ORDER BY lesson_date DESC LIMIT 1")
-TOPIC_GATE_SQL = (
-    "SELECT title, lesson_date FROM hq.lessons WHERE kind = 'topic' AND read_at IS NULL"
-    " ORDER BY lesson_date DESC, created_at DESC LIMIT 1")
 
 _DAILY_NAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.md$")
 _DATE_RE = re.compile(r"(?<!\d)(20\d\d-\d\d-\d\d)(?!\d)")
@@ -456,7 +454,7 @@ def render_gates(course: Gate | None, topic: Gate | None) -> list[str]:
     if course is None:
         course_line = head + NOT_READABLE
     elif not course.title:
-        course_line = head + "nothing: the last course lesson is read"
+        course_line = head + "nothing: an unread lesson does not hold it"
     elif course.failed:
         course_line = (head + f"“{_cut(course.title, 90)}” (failed his review; his decision"
                        " on the Courses page)")
@@ -696,15 +694,14 @@ def _gate(rows: list[dict[str, Any]] | None) -> Gate | None:
     if not rows:
         return Gate()
     row = rows[0]
-    unread = _truthy(row.get("unread", True))
     return Gate(title=str(row.get("title") or "(untitled lesson)"),
                 since=_day(row.get("lesson_date")),
-                failed=not unread and str(row.get("review_status") or "") == "failed")
+                failed=str(row.get("review_status") or "") == "failed")
 
 
 async def _gates() -> tuple[Gate | None, Gate | None]:
     """``(course, topic)``: the lesson each chain waits on, None if unreadable."""
-    return _gate(await _rows(COURSE_GATE_SQL)), _gate(await _rows(TOPIC_GATE_SQL))
+    return _gate(await _rows(COURSE_GATE_SQL)), Gate()
 
 
 async def _ledger(lines: list[str], decisions: str,

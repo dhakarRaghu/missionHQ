@@ -798,7 +798,7 @@ async def _system_dispatch_step(tool: str, kwargs: dict[str, Any]) -> str:
     ctx = SimpleNamespace(deps=runner.HQDeps(agent="sage"))
     try:
         return str(await raw(ctx, **kwargs))[:500]
-    except ModelRetry as exc:  # a refusal (the last lesson is unread) is an answer
+    except ModelRetry as exc:  # a refusal (a lesson failed review) is an answer
         return f"not started: {exc}"[:500]
 
 

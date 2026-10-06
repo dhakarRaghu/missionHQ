@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from pydantic_ai import ModelRetry, RunContext
 
-from hq import board, db, lesson_kit, privacy, site_posts
+from hq import board, db, lesson_index, lesson_kit, privacy, site_posts
 from hq import courses as courses_spec
 from hq.config import settings
 from hq.learning_pipeline import (
@@ -454,6 +454,7 @@ async def set_review(lesson_id: str, status: str, notes: str = "") -> None:
     await db.execute(
         "UPDATE hq.lessons SET review_status = %s, review_notes = %s WHERE id = %s",
         (status, notes, lesson_id))
+    await lesson_index.export_quietly()
 
 
 def _conflict_for(kind: str) -> str:
@@ -565,6 +566,7 @@ async def record_lesson_row(
         )
     await emit("lesson.recorded", run_id=run_id, agent=agent,
                payload={"title": title[:120], "sources": len(urls), "score": score})
+    await lesson_index.export_quietly()
     return str(lesson_id)
 
 
@@ -2360,33 +2362,25 @@ async def list_courses(ctx: RunContext[HQDeps]) -> list[dict[str, Any]]:
 async def start_course_study(ctx: RunContext[HQDeps], course: str = "") -> str:
     """Teach the next phase of his own course material.
 
-    One phase a day, in order. It will not start a new one while the last
-    course lesson is still unread — his rule: "if I have read that last
-    article then generate the next, otherwise articles will pile up".
+    One phase a day, in order. An unread lesson does not hold the next one:
+    on 2026-10-06 he dropped his earlier "read it first" rule. Only a lesson
+    he failed in review holds the course, because it needs his decision.
 
     Leave `course` empty to continue whichever course is already in progress.
     """
     from hq import engine  # late import to avoid cycles
 
-    unread = await db.fetchone(
-        "SELECT title, to_char(lesson_date, 'YYYY-MM-DD') AS d, review_status,"
-        " read_at IS NULL AS unread FROM hq.lessons"
-        " WHERE kind = 'course' AND (read_at IS NULL OR review_status = 'failed')"
+    failed = await db.fetchone(
+        "SELECT title FROM hq.lessons WHERE kind = 'course' AND review_status = 'failed'"
         " ORDER BY lesson_date DESC LIMIT 1",
         (),
     )
-    if unread:
-        # Only his own "failed" holds a read lesson back. Sentences the
-        # citation pass could not map are listed on the lesson ("flagged"),
-        # and nothing in the system revises it later, so waiting on them
-        # stopped the course for good.
-        if unread["review_status"] == "failed":
-            return (f"not starting a new phase: {unread['title']!r} failed review;"
-                    " its findings are on the Courses page and need a decision.")
-        return (
-            f"not starting a new phase: {unread['title']!r} from {unread['d']} is"
-            " still unread. Mark it read on the Courses page and the next one runs."
-        )
+    if failed:
+        # Sentences the citation pass could not map are listed on the lesson
+        # ("flagged") and hold nothing: nothing in the system revises them
+        # later, so waiting on them stopped the course for good.
+        return (f"not starting a new phase: {failed['title']!r} failed review;"
+                " its findings are on the Courses page and need a decision.")
 
     # One course at a time. His words: "we will be learning all topic one by
     # one, not all in one." Whichever course he marked active on the Courses
@@ -2641,19 +2635,9 @@ async def active_phase() -> dict[str, Any] | None:
 async def topic_learning_blocker() -> str | None:
     """Explain why another topic article must not start yet.
 
-    Topic articles follow the same pace rule as course phases: one article is
-    waiting for the owner at a time.  The scheduled run is deliberately the
-    gate, rather than the console button, so a read late at night cannot make
-    two topic lessons land on the same calendar date.
+    Only a run already in progress holds the next article. An unread article
+    does not: on 2026-10-06 he dropped his earlier "read it first" rule.
     """
-    unread = await db.fetchone(
-        "SELECT title FROM hq.lessons WHERE kind = 'topic' AND read_at IS NULL"
-        " ORDER BY lesson_date DESC, created_at DESC LIMIT 1",
-        (),
-    )
-    if unread:
-        return f"not starting a new topic article: {unread['title']!r} is still unread"
-
     active = await db.fetchone(
         "SELECT title FROM hq.tasks"
         " WHERE status IN ('backlog', 'running', 'needs_approval')"

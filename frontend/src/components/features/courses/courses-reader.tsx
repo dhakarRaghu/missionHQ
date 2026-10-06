@@ -81,9 +81,8 @@ export function CoursesReader({
     mutationFn: (slug: string) => learningApi.teachPhase(course, slug),
     onSuccess: invalidate,
   });
-  // The gate: the evening run will not start the next phase until this one
-  // is marked read. Read is per phase now, so it works on any published
-  // phase, including one Mission HQ has not added to yet.
+  // Read is per phase, so it works on any published phase, including one
+  // Mission HQ has not added to yet. It no longer holds the next phase back.
   const markRead = useMutation({
     mutationFn: (slug: string) => learningApi.markPhaseRead(course, slug),
     onSuccess: () => {
@@ -95,9 +94,9 @@ export function CoursesReader({
   const content = useQuery({
     queryKey: learningKeys.phaseContent(course, phase?.slug ?? ""),
     queryFn: () => learningApi.phaseContent(course, phase?.slug ?? ""),
-    // Only for the outline of a phase whose enhanced page is not built yet.
-    // The original text itself is never shown here: he reads Mission HQ's
-    // version, and the original stays on the study platform.
+    // A phase whose enhanced page is not built yet shows its original text,
+    // from the repo copy: on 2026-10-06 he asked for what is already
+    // generated to be shown directly, not only its outline.
     enabled: Boolean(phase && published && !phase.lesson_html_path),
     staleTime: 5 * 60_000,
   });
@@ -295,11 +294,6 @@ export function CoursesReader({
           {phaseTitle(title)}
         </h2>
 
-        {state === "unread" ? (
-          <p className="text-xs text-muted-foreground">
-            The next phase waits until this one is marked read.
-          </p>
-        ) : null}
         {markRead.isError && markRead.variables === phase.slug ? (
           <p role="alert" className="text-xs text-destructive">
             Could not mark it read: {(markRead.error as Error).message}
@@ -352,6 +346,7 @@ export function CoursesReader({
           outline={
             content.data?.content ? splitCourse(content.data.content).sections : []
           }
+          original={content.data?.content ?? ""}
           loading={content.isPending}
           building={teaching && Boolean(teach.data?.started)}
           canBuild={state === "pending"}
@@ -377,11 +372,8 @@ export function CoursesReader({
 }
 
 /**
- * A published phase whose enhanced page does not exist yet.
- *
- * The original text is not shown: he reads Mission HQ's version, and the
- * original stays on the study platform. What the phase covers is listed, so
- * he can decide to build it now.
+ * A published phase whose enhanced page does not exist yet: its original
+ * text, in full, with the option to build the enhanced page above it.
  */
 function NotBuilt({
   phase,
@@ -392,9 +384,11 @@ function NotBuilt({
   starting,
   onBuild,
   footer,
+  original,
 }: {
   phase: CoursePhase;
   outline: { id: string; number: string; title: string }[];
+  original: string;
   loading: boolean;
   building: boolean;
   canBuild: boolean;
@@ -408,7 +402,7 @@ function NotBuilt({
         <div className="space-y-2 rounded-lg border border-dashed p-4">
           <p className="flex items-center gap-2 font-medium">
             <Sparkles aria-hidden className="size-4 text-primary" />
-            The enhanced version of this phase is not built yet
+            The enhanced version is not built yet — the original phase is below
           </p>
           <p className="text-sm text-muted-foreground">
             Mission HQ researches past the phase, then builds the page you read
@@ -430,9 +424,15 @@ function NotBuilt({
         </div>
 
         <section>
-          <h3 className="text-sm font-semibold">What this phase covers</h3>
+          <h3 className="text-sm font-semibold">
+            {original ? "The original phase" : "What this phase covers"}
+          </h3>
           {loading ? (
             <Skeleton className="mt-2 h-32 w-full" />
+          ) : original ? (
+            <div className="mt-3">
+              <Markdown content={original} />
+            </div>
           ) : outline.length ? (
             <ol className="mt-2 space-y-1.5">
               {outline.map((section) => (
