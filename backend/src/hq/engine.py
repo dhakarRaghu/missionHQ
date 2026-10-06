@@ -58,6 +58,8 @@ from hq.job_pipeline import (
     verification_payload,
 )
 from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, scan
+from hq.video import STAGES as VIDEO_STAGES
+from hq.video import pipeline as video_pipeline
 
 # Doubled 2026-09-10 alongside high reasoning effort and tripled call caps: a
 # run that thinks harder and calls more tools needs the wall clock to match, or
@@ -325,6 +327,9 @@ async def bootstrap_post_launch() -> None:
     # is a 429 that the model-step retry already waits out.
     _queues["courses"] = await DBOS.register_queue_async("courses", worker_concurrency=1)
     _queues["chat"] = await DBOS.register_queue_async("chat", worker_concurrency=1)
+    # Narrated videos: a render keeps the CPU about 97% busy (measured on the
+    # 4K episode renders), so a second one at once only halves both.
+    _queues["videos"] = await DBOS.register_queue_async("videos", worker_concurrency=1)
     await DBOS.apply_schedules_async(_schedules)
     wanted = {s["schedule_name"] for s in _schedules}
     for sched in await DBOS.list_schedules_async(schedule_name_prefix="cron_"):
@@ -379,7 +384,12 @@ def lane_for(payload: Any, agent: str = "") -> str:
     if agent and _runs_in_browser(agent):
         return "browser"
     stage = payload.get("stage") if isinstance(payload, dict) else None
+    if stage in VIDEO_STAGES:
+        # A render holds every core for an hour; one video at a time, and
+        # never in the course lane, so a video never delays a lesson.
+        return "videos"
     return "courses" if stage in _COURSE_STAGES else "tasks"
+
 
 
 def _runs_in_browser(agent: str) -> bool:
@@ -415,7 +425,7 @@ async def _enqueue(task_id: str, *, attempt: int = 0, lane: str = "tasks") -> No
         # the same outcome the step_id branch already relies on.
         return
     wf_id = f"task-{task_id}" if attempt == 0 else f"task-{task_id}-retry-{attempt}"
-    cap = COURSE_TIMEOUT_S if lane == "courses" else TASK_TIMEOUT_S
+    cap = COURSE_TIMEOUT_S if lane in ("courses", "videos") else TASK_TIMEOUT_S
     # Durable wall-clock cap enforced by DBOS, outside the agent: a stalled or
     # hung run is cancelled instead of sitting in "running" all night.
     with SetWorkflowID(wf_id), SetWorkflowTimeout(cap):
@@ -549,6 +559,10 @@ async def run_task(task_id: str) -> str:
             outcome = await _file_external_output(
                 spec, task_id, run_id, outcome, payload=task.get("payload"),
             )
+        elif video_pipeline.handles(spec, task["payload"]):
+            # A narrated video of a finished lesson: the script stage, which
+            # ends waiting for the owner, or the build stage his approval starts.
+            outcome = await video_pipeline.write(task, spec, deps)
         elif lesson_writer.handles(spec, task["payload"]):
             # A course phase or an article: outline, sections, assembly and a
             # citation pass, each a bounded call, instead of one agent loop.
@@ -746,6 +760,10 @@ SYSTEM_DISPATCHES: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
     ("job_search", "15 21 * * *", "start_job_search",
      {"query": JOB_QUERY, "locations": "India|Bengaluru|Remote", "max_roles": 20}),
     ("learning_run", "0 22 * * *", "start_learning_run", {}),
+    # Videos of lessons the learning chain did not start one for: older
+    # lessons, phases published from /study, stopped videos. One a night, at
+    # an hour when nothing else renders or writes. Code only.
+    ("video_backfill", "0 1 * * *", "start_next_video", {}),
     ("source_hunt", "0 7 * * 0", "start_source_hunt", {}),
     # The radar collects before his day starts. Code only: no model is asked.
     ("radar_collect", "30 6 * * *", "collect_radar", {}),
@@ -1904,6 +1922,50 @@ async def _course_shape_step(course: str, slug: str) -> list[dict[str, Any]]:
     return out
 
 
+_PAGE_RE = re.compile(r"Page: `(learning/lessons/[^`]+)\.html`")
+
+
+def lesson_md_from_output(output: str) -> str:
+    """The staged writer's report names the page it wrote ("Page: `....html`")."""
+    m = _PAGE_RE.search(output or "")
+    return f"{m.group(1)}.md" if m else ""
+
+
+async def _start_lesson_video(parent_task_id: str, md: str, mode: str) -> str | None:
+    """A written lesson starts its video: script, reviews, voice and render,
+    with no approval in between (hq.video). VIDEO_AUTO=0 turns it off."""
+    if not md or not video_auto():
+        return None
+    from hq.video import SCRIPT_STAGE
+    from hq.video.script import video_id_for
+
+    video_id = video_id_for(md)
+    return await dispatch(
+        agent="tutor", title=f"Video: {video_id}",
+        brief="A narrated video of a finished lesson (hq.video).", source="agent",
+        parent_task_id=parent_task_id,
+        payload={"stage": SCRIPT_STAGE, "video_id": video_id, "lesson_md": md, "mode": mode},
+        # One video per written lesson task, stable across replays.
+        dedup_key=f"video-auto:{parent_task_id}",
+    )
+
+
+def video_auto() -> bool:
+    """A finished course phase starts its video unless VIDEO_AUTO=0."""
+    import os
+
+    return os.environ.get("VIDEO_AUTO", "1").strip() not in {"0", "false", "no", ""}
+
+
+@DBOS.step()
+async def _course_lesson_md_step(phase_slug: str) -> str:
+    """The newest course lesson written for this phase."""
+    row = await db.fetchone(
+        "SELECT md_path FROM hq.lessons WHERE kind = 'course' AND phase_slug = %s"
+        " AND md_path <> '' ORDER BY lesson_date DESC LIMIT 1", (phase_slug,))
+    return str((row or {}).get("md_path") or "")
+
+
 @DBOS.step()
 async def _phase_articles_step(phase_slug: str) -> list[dict[str, Any]]:
     """Articles already written around this phase, which he may have read."""
@@ -2106,10 +2168,15 @@ async def _advance_learning(
         )
 
     if learning.is_course_written(payload):
-        # Nothing follows a written phase. The staged writer checked its plan,
-        # every part, the whole page, and every sentence against the study
-        # note before recording it; what did not map is on the lesson.
-        return None
+        # The staged writer checked its plan, every part, the whole page, and
+        # every sentence against the study note before recording it; what did
+        # not map is on the lesson. What follows a written phase is its video:
+        # the same course, taught aloud, for him to watch next to the page.
+        if result != "done":
+            return None
+        md = lesson_md_from_output(output) or await _course_lesson_md_step(
+            str(payload.get("slug") or ""))
+        return await _start_lesson_video(task_id, md, "course")
 
     if learning.is_deep_study(payload):
         urls = [str(u) for u in (payload.get("urls") or [])]
@@ -2132,6 +2199,9 @@ async def _advance_learning(
             payload={**lesson, "run_id": run_id},
             dedup_key=f"learning-lesson:{task_id}",
         )
+    if payload.get("stage") == learning.LESSON_STAGE and result == "done":
+        # Today's article is written; its video follows, like a course phase's.
+        return await _start_lesson_video(task_id, lesson_md_from_output(output), "article")
     return None
 
 

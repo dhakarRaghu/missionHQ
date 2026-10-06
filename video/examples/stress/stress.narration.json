@@ -1,0 +1,1169 @@
+{
+ "engine": "kokoro",
+ "voice": "af_heart",
+ "speed": 0.94,
+ "fadeTailS": 0.3,
+ "leadinS": 0.3,
+ "holdS": 1.8,
+ "gapS": 0.8,
+ "beats": {
+  "cold": {
+   "chapter": "WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H10",
+   "lines": [
+    {
+     "key": "co0",
+     "text": "WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hoursM"
+    },
+    {
+     "key": "co1",
+     "text": "MW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours a"
+    },
+    {
+     "key": "co2",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at"
+    },
+    {
+     "key": "co3",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours atM"
+    },
+    {
+     "key": "co4",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 1"
+    },
+    {
+     "key": "co5",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 10"
+    }
+   ]
+  },
+  "title": {
+   "lines": [
+    {
+     "key": "t0",
+     "text": "WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW M"
+    },
+    {
+     "key": "t1",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hour"
+    }
+   ]
+  },
+  "c1": {
+   "chapter": "MW Measured $8,888 GPU-hours at 100% load with W4A16 on H100",
+   "cueLeadS": 0.25,
+   "preDelayS": 0.3,
+   "lines": [
+    {
+     "key": "k0",
+     "text": "MW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    },
+    {
+     "key": "s0",
+     "text": "MW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A"
+    },
+    {
+     "key": "s1",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A1"
+    },
+    {
+     "key": "p0",
+     "text": "MW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A"
+    },
+    {
+     "key": "p1",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16"
+    },
+    {
+     "key": "q0",
+     "text": "MW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    },
+    {
+     "key": "q1",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "t1",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at"
+    },
+    {
+     "key": "t2",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours atM"
+    },
+    {
+     "key": "t3",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 1"
+    },
+    {
+     "key": "m1",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at"
+    },
+    {
+     "key": "m2",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours atM"
+    },
+    {
+     "key": "m3",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 1"
+    },
+    {
+     "key": "m4",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 10"
+    },
+    {
+     "key": "m5",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    },
+    {
+     "key": "m6",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "n0",
+     "text": "MW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A"
+    },
+    {
+     "key": "n1",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A1"
+    },
+    {
+     "key": "n2",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16"
+    },
+    {
+     "key": "r0",
+     "text": "Remember: MW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Me"
+    },
+    {
+     "key": "r1",
+     "text": "The trap: W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Mea"
+    },
+    {
+     "key": "r2",
+     "text": "Try this:  Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Meas"
+    },
+    {
+     "key": "h0",
+     "text": "MW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours a"
+    },
+    {
+     "key": "h1",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at"
+    }
+   ]
+  },
+  "c2": {
+   "chapter": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100M",
+   "cueLeadS": 0.25,
+   "preDelayS": 0.3,
+   "lines": [
+    {
+     "key": "k0",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "s0",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A1"
+    },
+    {
+     "key": "s1",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16"
+    },
+    {
+     "key": "p0",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A1"
+    },
+    {
+     "key": "p1",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16M"
+    },
+    {
+     "key": "q0",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "q1",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "t1",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours atM"
+    },
+    {
+     "key": "t2",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 1"
+    },
+    {
+     "key": "t3",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 10"
+    },
+    {
+     "key": "m1",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours atM"
+    },
+    {
+     "key": "m2",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 1"
+    },
+    {
+     "key": "m3",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 10"
+    },
+    {
+     "key": "m4",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    },
+    {
+     "key": "m5",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "m6",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "n0",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A1"
+    },
+    {
+     "key": "n1",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16"
+    },
+    {
+     "key": "n2",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16M"
+    },
+    {
+     "key": "r0",
+     "text": "Remember: W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Mea"
+    },
+    {
+     "key": "r1",
+     "text": "The trap:  Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Meas"
+    },
+    {
+     "key": "r2",
+     "text": "Try this: Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measu"
+    },
+    {
+     "key": "h0",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at"
+    },
+    {
+     "key": "h1",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours atM"
+    }
+   ]
+  },
+  "c3": {
+   "chapter": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 M",
+   "cueLeadS": 0.25,
+   "preDelayS": 0.3,
+   "lines": [
+    {
+     "key": "k0",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "s0",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16"
+    },
+    {
+     "key": "s1",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16M"
+    },
+    {
+     "key": "p0",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16"
+    },
+    {
+     "key": "p1",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 o"
+    },
+    {
+     "key": "q0",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "q1",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "t1",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 1"
+    },
+    {
+     "key": "t2",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 10"
+    },
+    {
+     "key": "t3",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    },
+    {
+     "key": "m1",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 1"
+    },
+    {
+     "key": "m2",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 10"
+    },
+    {
+     "key": "m3",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    },
+    {
+     "key": "m4",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "m5",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "m6",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "n0",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16"
+    },
+    {
+     "key": "n1",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16M"
+    },
+    {
+     "key": "n2",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 o"
+    },
+    {
+     "key": "r0",
+     "text": "Remember:  Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Meas"
+    },
+    {
+     "key": "r1",
+     "text": "The trap: Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measu"
+    },
+    {
+     "key": "r2",
+     "text": "Try this: easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measur"
+    },
+    {
+     "key": "h0",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours atM"
+    },
+    {
+     "key": "h1",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 1"
+    }
+   ]
+  },
+  "c4": {
+   "chapter": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW",
+   "cueLeadS": 0.25,
+   "preDelayS": 0.3,
+   "lines": [
+    {
+     "key": "k0",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "s0",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16M"
+    },
+    {
+     "key": "s1",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 o"
+    },
+    {
+     "key": "p0",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16M"
+    },
+    {
+     "key": "p1",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on"
+    },
+    {
+     "key": "q0",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "q1",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "t1",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 10"
+    },
+    {
+     "key": "t2",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    },
+    {
+     "key": "t3",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "m1",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 10"
+    },
+    {
+     "key": "m2",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    },
+    {
+     "key": "m3",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "m4",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "m5",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "m6",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "n0",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16M"
+    },
+    {
+     "key": "n1",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 o"
+    },
+    {
+     "key": "n2",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on"
+    },
+    {
+     "key": "r0",
+     "text": "Remember: Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measu"
+    },
+    {
+     "key": "r1",
+     "text": "The trap: easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measur"
+    },
+    {
+     "key": "r2",
+     "text": "Try this: asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measure"
+    },
+    {
+     "key": "h0",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 1"
+    },
+    {
+     "key": "h1",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 10"
+    }
+   ]
+  },
+  "c5": {
+   "chapter": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MWM",
+   "cueLeadS": 0.25,
+   "preDelayS": 0.3,
+   "lines": [
+    {
+     "key": "k0",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "s0",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 o"
+    },
+    {
+     "key": "s1",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on"
+    },
+    {
+     "key": "p0",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 o"
+    },
+    {
+     "key": "p1",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 onM"
+    },
+    {
+     "key": "q0",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "q1",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "t1",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    },
+    {
+     "key": "t2",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "t3",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "m1",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    },
+    {
+     "key": "m2",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "m3",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "m4",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "m5",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "m6",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "n0",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 o"
+    },
+    {
+     "key": "n1",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on"
+    },
+    {
+     "key": "n2",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 onM"
+    },
+    {
+     "key": "r0",
+     "text": "Remember: easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measur"
+    },
+    {
+     "key": "r1",
+     "text": "The trap: asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measure"
+    },
+    {
+     "key": "r2",
+     "text": "Try this: sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured"
+    },
+    {
+     "key": "h0",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 10"
+    },
+    {
+     "key": "h1",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    }
+   ]
+  },
+  "c6": {
+   "chapter": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW W",
+   "cueLeadS": 0.25,
+   "preDelayS": 0.3,
+   "lines": [
+    {
+     "key": "k0",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "s0",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on"
+    },
+    {
+     "key": "s1",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 onM"
+    },
+    {
+     "key": "p0",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on"
+    },
+    {
+     "key": "p1",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H"
+    },
+    {
+     "key": "q0",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "q1",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load"
+    },
+    {
+     "key": "t1",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "t2",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "t3",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "m1",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "m2",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "m3",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "m4",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "m5",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "m6",
+     "text": " $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load"
+    },
+    {
+     "key": "n0",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on"
+    },
+    {
+     "key": "n1",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 onM"
+    },
+    {
+     "key": "n2",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H"
+    },
+    {
+     "key": "r0",
+     "text": "Remember: asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measure"
+    },
+    {
+     "key": "r1",
+     "text": "The trap: sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured"
+    },
+    {
+     "key": "r2",
+     "text": "Try this: ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW MeasuredM"
+    },
+    {
+     "key": "h0",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100"
+    },
+    {
+     "key": "h1",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    }
+   ]
+  },
+  "c7": {
+   "chapter": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WM",
+   "cueLeadS": 0.25,
+   "preDelayS": 0.3,
+   "lines": [
+    {
+     "key": "k0",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load"
+    },
+    {
+     "key": "s0",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 onM"
+    },
+    {
+     "key": "s1",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H"
+    },
+    {
+     "key": "p0",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 onM"
+    },
+    {
+     "key": "p1",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H1"
+    },
+    {
+     "key": "q0",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load"
+    },
+    {
+     "key": "q1",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loadM"
+    },
+    {
+     "key": "t1",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "t2",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "t3",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "m1",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "m2",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "m3",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "m4",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "m5",
+     "text": " $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load"
+    },
+    {
+     "key": "m6",
+     "text": "$8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loadM"
+    },
+    {
+     "key": "n0",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 onM"
+    },
+    {
+     "key": "n1",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H"
+    },
+    {
+     "key": "n2",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H1"
+    },
+    {
+     "key": "r0",
+     "text": "Remember: sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured"
+    },
+    {
+     "key": "r1",
+     "text": "The trap: ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW MeasuredM"
+    },
+    {
+     "key": "r2",
+     "text": "Try this: red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $"
+    },
+    {
+     "key": "h0",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%"
+    },
+    {
+     "key": "h1",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    }
+   ]
+  },
+  "c8": {
+   "chapter": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW",
+   "cueLeadS": 0.25,
+   "preDelayS": 0.3,
+   "lines": [
+    {
+     "key": "k0",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loadM"
+    },
+    {
+     "key": "s0",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H"
+    },
+    {
+     "key": "s1",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H1"
+    },
+    {
+     "key": "p0",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H"
+    },
+    {
+     "key": "p1",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H10"
+    },
+    {
+     "key": "q0",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loadM"
+    },
+    {
+     "key": "q1",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load w"
+    },
+    {
+     "key": "t1",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "t2",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "t3",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "m1",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "m2",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "m3",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "m4",
+     "text": " $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load"
+    },
+    {
+     "key": "m5",
+     "text": "$8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loadM"
+    },
+    {
+     "key": "m6",
+     "text": "8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load w"
+    },
+    {
+     "key": "n0",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H"
+    },
+    {
+     "key": "n1",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H1"
+    },
+    {
+     "key": "n2",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H10"
+    },
+    {
+     "key": "r0",
+     "text": "Remember: ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW MeasuredM"
+    },
+    {
+     "key": "r1",
+     "text": "The trap: red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $"
+    },
+    {
+     "key": "r2",
+     "text": "Try this: ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8"
+    },
+    {
+     "key": "h0",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100%M"
+    },
+    {
+     "key": "h1",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    }
+   ]
+  },
+  "c9": {
+   "chapter": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMWM",
+   "cueLeadS": 0.25,
+   "preDelayS": 0.3,
+   "lines": [
+    {
+     "key": "k0",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load w"
+    },
+    {
+     "key": "s0",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H1"
+    },
+    {
+     "key": "s1",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H10"
+    },
+    {
+     "key": "p0",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H1"
+    },
+    {
+     "key": "p1",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100"
+    },
+    {
+     "key": "q0",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load w"
+    },
+    {
+     "key": "q1",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load wi"
+    },
+    {
+     "key": "t1",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "t2",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "t3",
+     "text": " $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load"
+    },
+    {
+     "key": "m1",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "m2",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "m3",
+     "text": " $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load"
+    },
+    {
+     "key": "m4",
+     "text": "$8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loadM"
+    },
+    {
+     "key": "m5",
+     "text": "8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load w"
+    },
+    {
+     "key": "m6",
+     "text": ",888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load wi"
+    },
+    {
+     "key": "n0",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H1"
+    },
+    {
+     "key": "n1",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H10"
+    },
+    {
+     "key": "n2",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100"
+    },
+    {
+     "key": "r0",
+     "text": "Remember: red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $"
+    },
+    {
+     "key": "r1",
+     "text": "The trap: ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8"
+    },
+    {
+     "key": "r2",
+     "text": "Try this: d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,"
+    },
+    {
+     "key": "h0",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% l"
+    },
+    {
+     "key": "h1",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    }
+   ]
+  },
+  "c10": {
+   "chapter": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW M",
+   "cueLeadS": 0.25,
+   "preDelayS": 0.3,
+   "lines": [
+    {
+     "key": "k0",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load wi"
+    },
+    {
+     "key": "s0",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H10"
+    },
+    {
+     "key": "s1",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100"
+    },
+    {
+     "key": "p0",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H10"
+    },
+    {
+     "key": "p1",
+     "text": " $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100M"
+    },
+    {
+     "key": "q0",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load wi"
+    },
+    {
+     "key": "q1",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load wit"
+    },
+    {
+     "key": "t1",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "t2",
+     "text": " $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load"
+    },
+    {
+     "key": "t3",
+     "text": "$8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loadM"
+    },
+    {
+     "key": "m1",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    },
+    {
+     "key": "m2",
+     "text": " $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load"
+    },
+    {
+     "key": "m3",
+     "text": "$8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loadM"
+    },
+    {
+     "key": "m4",
+     "text": "8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load w"
+    },
+    {
+     "key": "m5",
+     "text": ",888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load wi"
+    },
+    {
+     "key": "m6",
+     "text": "888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load wit"
+    },
+    {
+     "key": "n0",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H10"
+    },
+    {
+     "key": "n1",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100"
+    },
+    {
+     "key": "n2",
+     "text": " $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100M"
+    },
+    {
+     "key": "r0",
+     "text": "Remember: ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8"
+    },
+    {
+     "key": "r1",
+     "text": "The trap: d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,"
+    },
+    {
+     "key": "r2",
+     "text": "Try this:  $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,8"
+    },
+    {
+     "key": "h0",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% lo"
+    },
+    {
+     "key": "h1",
+     "text": "d $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% loa"
+    }
+   ]
+  },
+  "payoff": {
+   "chapter": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100M",
+   "lines": [
+    {
+     "key": "y0",
+     "text": "WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hoursM"
+    },
+    {
+     "key": "y1",
+     "text": "MW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours a"
+    },
+    {
+     "key": "y2",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at"
+    },
+    {
+     "key": "y3",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours atM"
+    },
+    {
+     "key": "y4",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 1"
+    },
+    {
+     "key": "y5",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 10"
+    }
+   ]
+  },
+  "recap": {
+   "chapter": "Recap",
+   "lines": [
+    {
+     "key": "r0",
+     "text": "WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H10"
+    },
+    {
+     "key": "r1",
+     "text": "MW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Me"
+    },
+    {
+     "key": "r2",
+     "text": "W Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Mea"
+    },
+    {
+     "key": "r3",
+     "text": " Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Meas"
+    },
+    {
+     "key": "r4",
+     "text": "Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measu"
+    },
+    {
+     "key": "r5",
+     "text": "easured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measur"
+    },
+    {
+     "key": "r6",
+     "text": "asured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measure"
+    },
+    {
+     "key": "r7",
+     "text": "sured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured"
+    },
+    {
+     "key": "r8",
+     "text": "ured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW MeasuredM"
+    },
+    {
+     "key": "r9",
+     "text": "red $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $"
+    },
+    {
+     "key": "r10",
+     "text": "ed $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8"
+    }
+   ]
+  },
+  "end": {
+   "holdS": 9,
+   "lines": [
+    {
+     "key": "x0",
+     "text": "WMW Measured $8,888 GPU-hours at 100% load with W4A16 on H100 MW WMW Measured $8,888 GPU-hours at 100% load with W4A16 o"
+    }
+   ]
+  }
+ }
+}

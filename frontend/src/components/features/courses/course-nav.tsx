@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ChevronDown, ChevronRight, Clapperboard } from "lucide-react";
 
 import {
   courseTitle,
@@ -18,6 +19,7 @@ import type {
   Curriculum,
   CurriculumModule,
 } from "@/lib/api/learning";
+import { mediaApi, mediaKeys } from "@/lib/api/media";
 import { cn } from "@/lib/utils";
 
 /**
@@ -30,7 +32,8 @@ import { cn } from "@/lib/utils";
  *
  * Three groups, in the order he uses them: the path he is working through,
  * the applied-AI curriculum behind it (mostly still a plan), and the platform
- * courses, which are reference and stay closed until he asks for them.
+ * courses, which are reference and stay closed until he asks for them. Above
+ * them, one row opens the videos made from the courses.
  */
 export function CourseNav({
   courses,
@@ -40,8 +43,10 @@ export function CourseNav({
   error,
   onRetry,
   openModule,
+  videosOpen,
   onPickCourse,
   onOpenModule,
+  onOpenVideos,
 }: {
   courses: Course[];
   current: Course;
@@ -51,12 +56,22 @@ export function CourseNav({
   onRetry: () => void;
   /** The module shown in the centre, when he opened one that has no course. */
   openModule: CurriculumModule | null;
+  /** The video library is in the centre pane. */
+  videosOpen: boolean;
   onPickCourse: (course: string) => void;
   onOpenModule: (module: CurriculumModule) => void;
+  onOpenVideos: () => void;
 }) {
   const path = courses.filter(onPath);
   const others = courses.filter((c) => !onPath(c));
   const modules = curriculum?.modules ?? [];
+  // The same key as the library's list, so opening it costs no second fetch.
+  const videos = useQuery({
+    queryKey: mediaKeys.videos({ kind: "course,youtube" }),
+    queryFn: () => mediaApi.videos({ kind: "course,youtube" }),
+    staleTime: 10 * 60_000,
+  });
+  const reading = !openModule && !videosOpen;
 
   const [open, setOpen] = useState<Record<GroupName, boolean>>({
     path: true,
@@ -69,6 +84,23 @@ export function CourseNav({
 
   return (
     <nav aria-label="Courses" className="courses-switcher -mx-1 px-1">
+      <button
+        type="button"
+        onClick={onOpenVideos}
+        aria-current={videosOpen ? "true" : undefined}
+        className={cn(
+          "mb-1 flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-semibold transition-colors",
+          videosOpen ? "bg-accent text-accent-foreground" : "hover:bg-muted",
+        )}
+      >
+        <Clapperboard aria-hidden className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">Videos</span>
+        {videos.data ? (
+          <span className="shrink-0 tabular-nums text-muted-foreground">
+            {videos.data.length}
+          </span>
+        ) : null}
+      </button>
       <Group
         name="path"
         title="Your path"
@@ -82,7 +114,7 @@ export function CourseNav({
               <CourseRow
                 course={course}
                 step={course.course_order}
-                selected={!openModule && course.course === current.course}
+                selected={reading && course.course === current.course}
                 onSelect={() => onPickCourse(course.course)}
               />
             </li>
@@ -130,7 +162,7 @@ export function CourseNav({
                         module={module}
                         selected={
                           module.number === openModule?.number ||
-                          (!openModule &&
+                          (reading &&
                             Boolean(module.topic) &&
                             module.topic === current.course)
                         }
@@ -162,7 +194,7 @@ export function CourseNav({
               <li key={course.course}>
                 <CourseRow
                   course={course}
-                  selected={!openModule && course.course === current.course}
+                  selected={reading && course.course === current.course}
                   onSelect={() => onPickCourse(course.course)}
                 />
               </li>

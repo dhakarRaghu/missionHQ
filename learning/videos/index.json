@@ -1,0 +1,748 @@
+{
+  "about": "Course videos. The MP4 and SRT files are not in git: they live in the media folder (MEDIA_DIR, default data/media), and `file` and `captions` are relative to it. Run backend/scripts/video_manifest.py to fill duration_s, chapters and title. See docs/videos.md.",
+  "videos": [
+    {
+      "id": "inference-internals-phase-01",
+      "kind": "course",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-01-lifecycle",
+      "phase_slugs": [
+        "inference-internals-phase-01-lifecycle"
+      ],
+      "number": null,
+      "title": "LLM Inference, One Request End to End: Tokens, TTFT, KV Cache, Decode",
+      "duration_s": 1232.7,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "Which number is yours?"
+        },
+        {
+          "t": 29,
+          "title": "One request, six questions"
+        },
+        {
+          "t": 63,
+          "title": "Why does the same text cost different amounts of tokens?"
+        },
+        {
+          "t": 233,
+          "title": "Where does TTFT come from?"
+        },
+        {
+          "t": 389,
+          "title": "What is the KV cache, and what does it limit?"
+        },
+        {
+          "t": 612,
+          "title": "Why do output tokens cost more and run slower?"
+        },
+        {
+          "t": 802,
+          "title": "Why does temperature 0 not reproduce?"
+        },
+        {
+          "t": 989,
+          "title": "How do you measure TTFT, TPOT and cost?"
+        },
+        {
+          "t": 1165,
+          "title": "Recap: one request, six concepts"
+        }
+      ],
+      "file": "inference-internals/course-phase-01.mp4",
+      "captions": "inference-internals/course-phase-01.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-09-17-inference-internals-phase-01-lifecycle.md"
+    },
+    {
+      "id": "inference-internals-phase-02",
+      "kind": "course",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-02a-scheduling-memory",
+      "phase_slugs": [
+        "inference-internals-phase-02a-scheduling-memory",
+        "inference-internals-phase-02b-decoding-context"
+      ],
+      "number": null,
+      "title": "Inside an LLM Inference Server: Batching, Paged KV Cache, Chunked Prefill, Strict Mode",
+      "duration_s": 1650.9,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "Who froze my stream?"
+        },
+        {
+          "t": 32,
+          "title": "Ten questions in two parts"
+        },
+        {
+          "t": 54,
+          "title": "Why does your latency depend on other requests?"
+        },
+        {
+          "t": 211,
+          "title": "Why does paging fit 18 times more requests?"
+        },
+        {
+          "t": 374,
+          "title": "What happens when the blocks run out?"
+        },
+        {
+          "t": 521,
+          "title": "Why does one changed character end the cache hit?"
+        },
+        {
+          "t": 665,
+          "title": "How many requests can one GPU hold?"
+        },
+        {
+          "t": 831,
+          "title": "Part B: decoding and context"
+        },
+        {
+          "t": 849,
+          "title": "Why does one long prompt freeze every stream?"
+        },
+        {
+          "t": 1014,
+          "title": "Who says a strict answer is complete?"
+        },
+        {
+          "t": 1155,
+          "title": "Accuracy fell 9 points. Who took them?"
+        },
+        {
+          "t": 1292,
+          "title": "What must cross a compaction word for word?"
+        },
+        {
+          "t": 1441,
+          "title": "The cap missed and the 400 arrived. What now?"
+        },
+        {
+          "t": 1588,
+          "title": "Recap: Phase 2"
+        }
+      ],
+      "file": "inference-internals/course-phase-02.mp4",
+      "captions": "inference-internals/course-phase-02.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-09-20-inference-internals-phase-02a-scheduling-memory.md"
+    },
+    {
+      "id": "inference-internals-phase-03b",
+      "kind": "course",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-03b-routing-alerting",
+      "phase_slugs": [
+        "inference-internals-phase-03b-routing-alerting"
+      ],
+      "number": null,
+      "title": "Router or Coin Flip? LLM Routing and the Cost Alarm",
+      "duration_s": 1080.5,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "Router or coin flip?"
+        },
+        {
+          "t": 34,
+          "title": "Five questions"
+        },
+        {
+          "t": 56,
+          "title": "Why does a cascade pay for some queries twice?"
+        },
+        {
+          "t": 234,
+          "title": "Which experiment proves the signal works?"
+        },
+        {
+          "t": 430,
+          "title": "Which escalation signal deserves your extra calls?"
+        },
+        {
+          "t": 620,
+          "title": "Which rules catch what the token chart cannot?"
+        },
+        {
+          "t": 831,
+          "title": "What can actually stop the spend?"
+        },
+        {
+          "t": 1032,
+          "title": "Recap: Phase 3B"
+        }
+      ],
+      "file": "inference-internals/course-phase-03b.mp4",
+      "captions": "inference-internals/course-phase-03b.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-10-01-inference-internals-phase-03b-routing-alerting.md"
+    },
+    {
+      "id": "inference-internals-phase-04a",
+      "kind": "course",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-04a-serving",
+      "phase_slugs": [
+        "inference-internals-phase-04a-serving"
+      ],
+      "number": null,
+      "title": "Paid to Download: Renting a GPU and Serving a Model",
+      "duration_s": 966.3,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "Would renting a GPU cost less?"
+        },
+        {
+          "t": 34,
+          "title": "Five questions"
+        },
+        {
+          "t": 56,
+          "title": "What does an hour of GPU time actually buy?"
+        },
+        {
+          "t": 219,
+          "title": "Why do two servers on one GPU batch differently?"
+        },
+        {
+          "t": 389,
+          "title": "Which of three startup failures did you get?"
+        },
+        {
+          "t": 569,
+          "title": "A blog says engine B is 2x faster. What do you ask?"
+        },
+        {
+          "t": 743,
+          "title": "Why does one tenant's schema change the whole server?"
+        },
+        {
+          "t": 919,
+          "title": "Recap: Phase 4A"
+        }
+      ],
+      "file": "inference-internals/course-phase-04a.mp4",
+      "captions": "inference-internals/course-phase-04a.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-10-04-inference-internals-phase-04a-serving.md"
+    },
+    {
+      "id": "inference-internals-yt-01",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-00-frame",
+      "phase_slugs": [
+        "inference-internals-phase-00-frame"
+      ],
+      "number": 1,
+      "title": "One Line in Your Prompt Can 5x Your LLM Bill",
+      "duration_s": 455.7,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "One line, five times the bill"
+        },
+        {
+          "t": 49,
+          "title": "What does the GPU remember?"
+        },
+        {
+          "t": 233,
+          "title": "What did the timestamp break?"
+        },
+        {
+          "t": 406,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-01.mp4",
+      "captions": "inference-internals/yt-01.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-09-14-inference-internals-phase-00-frame.md"
+    },
+    {
+      "id": "inference-internals-yt-02",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-01-lifecycle",
+      "phase_slugs": [
+        "inference-internals-phase-01-lifecycle"
+      ],
+      "number": 2,
+      "title": "TTFT, Tokens per Second and Cost: Your LLM Call's 3 Numbers",
+      "duration_s": 725.0,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "Your run log's three numbers"
+        },
+        {
+          "t": 38,
+          "title": "What does the $0.004 pay for?"
+        },
+        {
+          "t": 178,
+          "title": "Where do the 2.1 seconds come from?"
+        },
+        {
+          "t": 311,
+          "title": "Why only 34 tokens per second?"
+        },
+        {
+          "t": 473,
+          "title": "How do you measure all three?"
+        },
+        {
+          "t": 627,
+          "title": "Your three numbers, explained"
+        },
+        {
+          "t": 679,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-02.mp4",
+      "captions": "inference-internals/yt-02.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-09-17-inference-internals-phase-01-lifecycle.md"
+    },
+    {
+      "id": "inference-internals-yt-03",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-01-lifecycle",
+      "phase_slugs": [
+        "inference-internals-phase-01-lifecycle"
+      ],
+      "number": 3,
+      "title": "Why Temperature 0 Is Not Deterministic",
+      "duration_s": 285.4,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "The test that fails at random"
+        },
+        {
+          "t": 35,
+          "title": "Where does the randomness come from?"
+        },
+        {
+          "t": 240,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-03.mp4",
+      "captions": "inference-internals/yt-03.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-09-17-inference-internals-phase-01-lifecycle.md"
+    },
+    {
+      "id": "inference-internals-yt-04",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-02a-scheduling-memory",
+      "phase_slugs": [
+        "inference-internals-phase-02a-scheduling-memory"
+      ],
+      "number": 4,
+      "title": "Why Your LLM Gets Slower at 3pm",
+      "duration_s": 497.8,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "Same prompt, slower at 3pm"
+        },
+        {
+          "t": 32,
+          "title": "Who else is in your batch?"
+        },
+        {
+          "t": 229,
+          "title": "How many requests fit?"
+        },
+        {
+          "t": 416,
+          "title": "So what changed at 3pm?"
+        },
+        {
+          "t": 454,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-04.mp4",
+      "captions": "inference-internals/yt-04.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-09-20-inference-internals-phase-02a-scheduling-memory.md"
+    },
+    {
+      "id": "inference-internals-yt-05",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-02b-decoding-context",
+      "phase_slugs": [
+        "inference-internals-phase-02b-decoding-context"
+      ],
+      "number": 5,
+      "title": "Why AI Chat Freezes Mid-Sentence",
+      "duration_s": 608.1,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "The freeze the dashboard missed"
+        },
+        {
+          "t": 42,
+          "title": "Why does one prompt freeze every stream?"
+        },
+        {
+          "t": 204,
+          "title": "How does slicing the prompt remove the freeze?"
+        },
+        {
+          "t": 410,
+          "title": "Which number would have caught it?"
+        },
+        {
+          "t": 560,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-05.mp4",
+      "captions": "inference-internals/yt-05.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-09-29-inference-internals-phase-02b-decoding-context.md"
+    },
+    {
+      "id": "inference-internals-yt-06",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-02b-decoding-context",
+      "phase_slugs": [
+        "inference-internals-phase-02b-decoding-context"
+      ],
+      "number": 6,
+      "title": "Strict JSON Mode Cost Us 9 Accuracy Points",
+      "duration_s": 436.7,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "Strict mode on, 9 points gone"
+        },
+        {
+          "t": 38,
+          "title": "What does strict mode guarantee?"
+        },
+        {
+          "t": 181,
+          "title": "Who took the 9 points?"
+        },
+        {
+          "t": 339,
+          "title": "Where the 9 points went"
+        },
+        {
+          "t": 390,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-06.mp4",
+      "captions": "inference-internals/yt-06.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-09-29-inference-internals-phase-02b-decoding-context.md"
+    },
+    {
+      "id": "inference-internals-yt-07",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-02b-decoding-context",
+      "phase_slugs": [
+        "inference-internals-phase-02b-decoding-context"
+      ],
+      "number": 7,
+      "title": "Why Long AI Agent Runs Die with a 400",
+      "duration_s": 430.8,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "Six hours, then a 400"
+        },
+        {
+          "t": 39,
+          "title": "What must cross a compaction word for word?"
+        },
+        {
+          "t": 210,
+          "title": "The 400 arrived. What now?"
+        },
+        {
+          "t": 352,
+          "title": "How the run survives"
+        },
+        {
+          "t": 388,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-07.mp4",
+      "captions": "inference-internals/yt-07.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-09-29-inference-internals-phase-02b-decoding-context.md"
+    },
+    {
+      "id": "inference-internals-yt-08",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-03a-caching",
+      "phase_slugs": [
+        "inference-internals-phase-03a-caching"
+      ],
+      "number": 8,
+      "title": "Prompt Caching Can Cost You 25% More",
+      "duration_s": 633.7,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "The bill that went up"
+        },
+        {
+          "t": 36,
+          "title": "When does caching pay?"
+        },
+        {
+          "t": 228,
+          "title": "What breaks a cache hit?"
+        },
+        {
+          "t": 397,
+          "title": "How do you know it works?"
+        },
+        {
+          "t": 583,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-08.mp4",
+      "captions": "inference-internals/yt-08.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-09-29-inference-internals-phase-03a-caching.md"
+    },
+    {
+      "id": "inference-internals-yt-09",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-03b-routing-alerting",
+      "phase_slugs": [
+        "inference-internals-phase-03b-routing-alerting"
+      ],
+      "number": 9,
+      "title": "Is Your LLM Router a Coin Flip?",
+      "duration_s": 716.9,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "Two dashboards, one coin flip"
+        },
+        {
+          "t": 34,
+          "title": "What does a cascade cost?"
+        },
+        {
+          "t": 239,
+          "title": "Which test exposes a coin flip?"
+        },
+        {
+          "t": 454,
+          "title": "Which signal deserves your extra calls?"
+        },
+        {
+          "t": 665,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-09.mp4",
+      "captions": "inference-internals/yt-09.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-10-01-inference-internals-phase-03b-routing-alerting.md"
+    },
+    {
+      "id": "inference-internals-yt-10",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-03b-routing-alerting",
+      "phase_slugs": [
+        "inference-internals-phase-03b-routing-alerting"
+      ],
+      "number": 10,
+      "title": "The Cache Bug No Dashboard Caught for 4 Months",
+      "duration_s": 556.7,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "Four months behind green dashboards"
+        },
+        {
+          "t": 42,
+          "title": "Which rules catch a broken cache?"
+        },
+        {
+          "t": 291,
+          "title": "What can stop the spend?"
+        },
+        {
+          "t": 509,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-10.mp4",
+      "captions": "inference-internals/yt-10.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-10-01-inference-internals-phase-03b-routing-alerting.md"
+    },
+    {
+      "id": "inference-internals-yt-11",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-04a-serving",
+      "phase_slugs": [
+        "inference-internals-phase-04a-serving"
+      ],
+      "number": 11,
+      "title": "Why My First $3.49 GPU Hour Served Zero Tokens",
+      "duration_s": 681.4,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "The hour that served zero tokens"
+        },
+        {
+          "t": 35,
+          "title": "Where did the hour go?"
+        },
+        {
+          "t": 227,
+          "title": "Why did the server crash?"
+        },
+        {
+          "t": 436,
+          "title": "Which number can you trust?"
+        },
+        {
+          "t": 632,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-11.mp4",
+      "captions": "inference-internals/yt-11.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-10-04-inference-internals-phase-04a-serving.md"
+    },
+    {
+      "id": "inference-internals-yt-12",
+      "kind": "youtube",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-04b-optimizing",
+      "phase_slugs": [
+        "inference-internals-phase-04b-optimizing"
+      ],
+      "number": 12,
+      "title": "Is Self-Hosting Your LLM Cheaper Than the API?",
+      "duration_s": 781.8,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "The $0.81 in the meeting"
+        },
+        {
+          "t": 67,
+          "title": "What does a 4-bit checkpoint make faster?"
+        },
+        {
+          "t": 264,
+          "title": "Can you trust the 99% recovery score?"
+        },
+        {
+          "t": 451,
+          "title": "So is it cheaper than the API?"
+        },
+        {
+          "t": 646,
+          "title": "Back to the meeting"
+        },
+        {
+          "t": 736,
+          "title": "Recap"
+        }
+      ],
+      "file": "inference-internals/yt-12.mp4",
+      "captions": "inference-internals/yt-12.srt",
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-10-04-inference-internals-phase-04b-optimizing.md"
+    },
+    {
+      "id": "the-408-that-was-never-a-timeout",
+      "kind": "article",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-03b-routing-alerting",
+      "phase_slugs": [
+        "inference-internals-phase-03b-routing-alerting"
+      ],
+      "number": null,
+      "title": "The 408 that was never a timeout",
+      "duration_s": 1645.6,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "The 408 that was never a timeout"
+        },
+        {
+          "t": 74.967,
+          "title": "Which failure class is your incident actually in?"
+        },
+        {
+          "t": 309.867,
+          "title": "Why does a silent connection kill a healthy request?"
+        },
+        {
+          "t": 578.3,
+          "title": "Why is streaming a reliability feature, not a UX feature?"
+        },
+        {
+          "t": 784.867,
+          "title": "If most incidents need no code, what is response for?"
+        },
+        {
+          "t": 1001.667,
+          "title": "What should a health check actually check?"
+        },
+        {
+          "t": 1219.633,
+          "title": "Why is a quick rejection better than a slow queue?"
+        },
+        {
+          "t": 1468.933,
+          "title": "Why did correct answers become timeouts?"
+        },
+        {
+          "t": 1570.067,
+          "title": "The 408 your engine never saw, in six lines"
+        }
+      ],
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-10-03-the-408-that-was-never-a-timeout.md",
+      "think_questions": [
+        "Which failure class do you check first? Let's think it through.",
+        "Who reports the failure first, and what does the engine say when it does? Let's think it through.",
+        "So why would your on-call engineer care about it at 3 a.m.? Let's think it through.",
+        "What should your incident runbook spend its first hour doing? Let's think it through.",
+        "Does the load balancer drain that engine? Let's think it through.",
+        "Is it better to accept every request and let it queue, or to reject some immediately? Let's think it through."
+      ],
+      "file": "inference-internals/the-408-that-was-never-a-timeout.mp4",
+      "captions": "inference-internals/the-408-that-was-never-a-timeout.srt"
+    }
+  ]
+}

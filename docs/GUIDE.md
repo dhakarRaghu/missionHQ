@@ -339,5 +339,7 @@ for that reason.
 - [deploy.md](deploy.md) — production setup, Linux units, Tailscale, backups
 - [external-runtimes.md](external-runtimes.md) — running an agent through the
   Codex or Claude CLI so it can use the browser you are signed into
+- [videos.md](videos.md) — where course videos live (not in git), how the
+  console plays them, and how to add one
 - [adr/](adr/) — why particular decisions were made
 - `frontend/AGENTS.md` — console design rules

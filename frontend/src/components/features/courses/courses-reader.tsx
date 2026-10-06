@@ -24,6 +24,7 @@ import {
   tidy,
 } from "@/components/features/courses/course-format";
 import { splitCourse } from "@/components/features/courses/course-markdown";
+import { PhaseVideos } from "@/components/features/courses/phase-videos";
 import { LessonPageFrame } from "@/components/features/learn/lesson-frame";
 import { Markdown } from "@/components/features/vault/markdown";
 import { EmptyState } from "@/components/empty-state";
@@ -320,6 +321,18 @@ export function CoursesReader({
           </p>
         ) : null}
       </header>
+
+      {/* Above the lesson, never inside its frame: the frame's sandbox and
+          policy stay exactly as they are, and the video is served by the
+          console's own API. */}
+      {planned ? null : (
+        <PhaseVideos
+          key={phase.slug}
+          course={course}
+          phaseSlug={phase.slug}
+          lessonMd={phase.lesson_md_path}
+        />
+      )}
 
       {planned ? (
         <>
