@@ -49,13 +49,23 @@ def _plain(value: Any) -> Any:
 
 
 async def export() -> int:
-    """Write every lesson row to index.json. Sorted and stable, so git shows
-    only the rows that changed. Returns how many rows were written."""
+    """Write the lesson rows to index.json, merged with what the file already
+    holds. Sorted and stable, so git shows only the rows that changed.
+
+    Merged, not replaced: the file carries the other laptop's lessons too, and
+    a database that has not synced them yet must not drop them. On 2026-10-06
+    a test run against a stand-in database wrote one row over nineteen, that
+    file was committed, and the other laptop got one lesson. This database's
+    row wins for a lesson both have. Returns how many entries were written."""
     global _last_mtime
     rows = await db.fetch(
         f"SELECT {', '.join(FIELDS)} FROM hq.lessons WHERE md_path <> ''"
         " ORDER BY lesson_date, md_path", ())
-    entries = [{k: _plain(r.get(k)) for k in FIELDS} for r in rows]
+    merged = {str(e["md_path"]): e for e in _entries()}
+    for r in rows:
+        merged[str(r["md_path"])] = {k: _plain(r.get(k)) for k in FIELDS}
+    entries = sorted(merged.values(),
+                     key=lambda e: (str(e.get("lesson_date") or ""), str(e["md_path"])))
     path = index_path()
     text = json.dumps(entries, indent=1, ensure_ascii=False, sort_keys=True) + "\n"
     if not path.is_file() or path.read_text() != text:

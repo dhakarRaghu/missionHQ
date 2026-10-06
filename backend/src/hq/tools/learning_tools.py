@@ -35,6 +35,7 @@ from hq.learning_pipeline import (
     LESSON_DIR,
     LESSON_KINDS,
     MAX_CANDIDATES,
+    OPEN_KINDS,
     PAPER,
     POST_SECTIONS,
     RELATIONSHIPS,
@@ -2516,14 +2517,46 @@ async def _phase_row(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+async def week_phases() -> list[dict[str, Any]]:
+    """Every course phase he marked read in the last seven days, newest first."""
+    rows = await db.fetch(
+        "SELECT p.slug, p.course, p.title, p.question, p.summary, p.sections"
+        " FROM hq.course_phases p LEFT JOIN hq.lessons l ON l.id = p.lesson_id"
+        " WHERE coalesce(p.read_at, l.read_at) > now() - interval '7 days'"
+        " ORDER BY coalesce(p.read_at, l.read_at) DESC LIMIT 12",
+        (),
+    )
+    out = []
+    for r in rows:
+        sections = r.get("sections") or []
+        if isinstance(sections, str):
+            try:
+                sections = json.loads(sections)
+            except ValueError:
+                sections = []
+        out.append({"slug": str(r["slug"]), "course": str(r["course"]),
+                    "title": str(r["title"]),
+                    "question": str(r.get("question") or r.get("summary") or "")[:300],
+                    "summary": str(r.get("summary") or ""),
+                    "sections": [str(x) for x in sections]})
+    return out
+
+
 async def phase_for_day(kind: str) -> dict[str, Any] | None:
-    """The phase today's run is built around, or None on a frontier day."""
+    """The phase today's run is built around, or None on an open day.
+
+    The course day covers every phase he read that week: the newest is the
+    one it orbits, and the rest ride along as `week_phases`. A week with
+    nothing read falls back to the day kind's own pick."""
+    if kind in OPEN_KINDS:
+        return None
+    week = await week_phases()
+    if week:
+        return {**week[0], "gaps": list(RELATIONSHIPS), "week_phases": week}
     if kind == PAPER:
         return await paper_phase()
     if kind == REVISION:
         return await revision_phase() or await active_phase()
-    if kind == FRONTIER:
-        return None
     return await active_phase()
 
 

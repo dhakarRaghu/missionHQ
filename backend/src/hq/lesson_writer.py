@@ -1003,6 +1003,13 @@ async def gather(payload: dict[str, Any]) -> Material:
         if page:
             orbit = [phase_memory(page, slug=phase_slug,
                                   title=str(payload.get("phase_title") or phase_slug))]
+        week = [w for w in payload.get("week_phases") or [] if w.get("slug")]
+        if len(week) > 1:
+            # The course day covers every phase he read this week, not one.
+            phase += ("\n\n# Every phase he read this week — the article covers all of"
+                      " them, and may be long:\n" + "\n".join(
+                          f"- {w.get('title')} (`{w.get('slug')}`): {w.get('question') or ''}"
+                          for w in week))
     so_far = memory_block(orbit)
     prompt = (
         f"# Today's article\n\nKind: {kind}. Relationship to the phase: "

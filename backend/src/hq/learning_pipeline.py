@@ -218,11 +218,22 @@ FRONTIER = "frontier"
 REVISION = "revision"
 LAB_CARD = "lab_card"
 WEEK_REVIEW = "week_review"
+# The open days, decided with him on 2026-10-06: the articles tied to his
+# course read "only related to the course", and he did not find them
+# interesting or valuable. One day serves the course now; the rest read about
+# how real products are built, design decisions, and what is new in AI.
+PRODUCT_BUILD = "product_build"
+DESIGN_STORY = "design_story"
+AI_LATEST = "ai_latest"
+OPEN_KINDS = (FRONTIER, PRODUCT_BUILD, DESIGN_STORY, AI_LATEST)
 
-# Monday to Sunday. Friday alternates: new ground one week, revision the next,
-# so old material is revisited without spending a weekday every week.
-WEEK = (SPINE_INCIDENT, PAPER, SPINE_EVIDENCE, FRONTIER, "", LAB_CARD, WEEK_REVIEW)
-ARTICLE_KINDS = (SPINE_INCIDENT, SPINE_EVIDENCE, PAPER, FRONTIER, REVISION)
+# Monday to Sunday. Tuesday is the course day ("" here): one article on every
+# phase he read that week, its kind rotating by week. The lab card is no
+# longer on the week; Saturday is one more article.
+WEEK = (PRODUCT_BUILD, "", DESIGN_STORY, AI_LATEST, AI_LATEST, AI_LATEST, WEEK_REVIEW)
+COURSE_ROTATION = (SPINE_INCIDENT, SPINE_EVIDENCE, PAPER, REVISION)
+ARTICLE_KINDS = (SPINE_INCIDENT, SPINE_EVIDENCE, PAPER, FRONTIER, REVISION,
+                 PRODUCT_BUILD, DESIGN_STORY, AI_LATEST)
 # What a lesson row can be: a course phase, a weekday article, and the two
 # weekend pieces he works from rather than reads.
 LESSON_KINDS = ("topic", "course", "lab", "review")
@@ -235,8 +246,8 @@ def day_kind(day: date) -> str:
     planned = WEEK[day.weekday()]
     if planned:
         return planned
-    # Friday: even ISO weeks look forward, odd weeks look back.
-    return FRONTIER if day.isocalendar().week % 2 == 0 else REVISION
+    # The course day: incident, evidence, paper, revision, one per week.
+    return COURSE_ROTATION[day.isocalendar().week % len(COURSE_ROTATION)]
 
 
 def wants_phase(kind: str) -> bool:
@@ -255,6 +266,8 @@ def phase_fields(phase: Mapping[str, Any] | None) -> dict[str, Any]:
         "phase_question": str(phase.get("question") or phase.get("summary") or "")[:600],
         "phase_sections": [str(x) for x in (phase.get("sections") or [])][:16],
         "gaps": [str(g) for g in (phase.get("gaps") or RELATIONSHIPS)],
+        **({"week_phases": [dict(w) for w in phase["week_phases"]][:12]}
+           if phase.get("week_phases") else {}),
     }
 
 
@@ -855,6 +868,23 @@ time — that is a real answer, and better than padding it with noise.
 """
 
 
+def week_block(phase: Mapping[str, Any] | None) -> str:
+    """The course day covers every phase he read that week, not one."""
+    week = [w for w in (phase or {}).get("week_phases") or [] if w.get("slug")]
+    if len(week) < 2:
+        return ""
+    lines = "\n".join(f"- **{w.get('title')}** (`{w.get('slug')}`): {w.get('question') or ''}"
+                      for w in week)
+    return f"""
+**This week he read {len(week)} phases, and today's one article covers all of
+them.** It may be long. Look for reading that shows these mechanisms in real
+systems, ideally one that joins two or more of them, and name in `adds` which
+of the phases each lead serves:
+
+{lines}
+"""
+
+
 def phase_block(phase: Mapping[str, Any] | None) -> str:
     """The scan's aim: the course phase he is on, and what it still lacks."""
     if not phase or not phase.get("slug"):
@@ -888,6 +918,7 @@ and every lead you put forward must say how, in `relationship`:
 Spend most of the run on the first of those, and put forward at least three
 leads for it when they exist, so the article can compare them.
 
+{week_block(phase)}
 On every lead that serves this phase, set `phase_slug` to `{slug}` and `adds`
 to one line on what it gives him that the course does not. Leave `phase_slug`
 empty on anything else. Code will not pick a lead for another subject however
@@ -896,7 +927,70 @@ article of the morning.
 """
 
 
+_OPEN_RULES = """
+Do not orbit a course phase today. Leave `phase_slug` and `relationship`
+empty on every lead. It must still clear his bar: real systems, real numbers
+with their conditions, or a real decision with its reasons. Not a press
+release, a launch post without substance, or a listicle.
+
+**Every lead says what it would change for him**, in `adds`: something he
+could try, a decision he would make differently, or a default he would check.
+"Interesting" is not an answer.
+"""
+
+OPEN_AIMS = {
+    PRODUCT_BUILD: """
+
+## Today: how a company built a real product
+
+Find an engineering write-up of how a real team built, scaled or rebuilt a
+product people use: an engineering blog post, a conference talk, or a
+detailed postmortem of a migration. "How Discord stores trillions of
+messages" is the shape. The best ones show the first design, why it stopped
+working, what they changed and the numbers before and after. Prefer products
+built with or around AI, then any well-known product with a real technical
+story.
+""" + _OPEN_RULES,
+    DESIGN_STORY: """
+
+## Today: a system design story or an engineering decision
+
+Find a write-up where a team made a design decision and explains it: why
+they chose X over Y, what the trade-off cost them, and what happened after.
+Architecture decision records, "why we moved from A to B", "why we did not
+use C", design reviews made public. The value is the reasoning and the
+consequences, not the final diagram.
+""" + _OPEN_RULES,
+    AI_LATEST: """
+
+## Today: what is new in AI that a working engineer should know
+
+Find the most useful new thing from the last two weeks in AI engineering:
+- a new tool, library or model worth trying, shown by someone who used it on
+  real work, with what it does better and where it falls short;
+- a change in AI developer tools (coding agents, frameworks, APIs) and what
+  it changes in daily work;
+- an optimisation people made to an AI system: latency, cost, quality,
+  evals, with the numbers;
+- a new technique or approach, explained with a working example.
+
+Recency matters today: prefer the last two weeks, and say the date. Skip
+anything already covered in the list of recent articles below.
+""" + _OPEN_RULES,
+}
+
+
 def aim_block(kind: str, phase: Mapping[str, Any] | None) -> str:
+    """What today's scan is looking for, with the week's other phases added on
+    the course day whatever its kind (the paper and revision templates do not
+    go through phase_block)."""
+    text = _aim_block(kind, phase)
+    if kind not in OPEN_KINDS and "This week he read" not in text:
+        text += week_block(phase)
+    return text
+
+
+def _aim_block(kind: str, phase: Mapping[str, Any] | None) -> str:
     """What today's scan is looking for. One of five kinds, decided by the day.
 
     Three kinds serve the course phase he is on. Two do not: the paper day
@@ -906,6 +1000,8 @@ def aim_block(kind: str, phase: Mapping[str, Any] | None) -> str:
     direction". The frontier day keeps direction by ending with what it would
     change, not by staying inside the plan.
     """
+    if kind in OPEN_AIMS:
+        return OPEN_AIMS[kind]
     if kind == FRONTIER:
         return """
 
@@ -1078,7 +1174,7 @@ def scan_brief(
         else f"\n\n{INTERESTS_PATH} is missing, so fall back to the interests line"
         " above and say in your answer that the file was not there."
     )
-    frontier_day = str(payload.get("article_kind") or "") == FRONTIER
+    frontier_day = str(payload.get("article_kind") or "") in OPEN_KINDS
     roster = roster_for(roster, str((phase or {}).get("course") or ""),
                         include_courses=not frontier_day).strip()
     # One course's slice measured 11k characters on 2026-09-17, against a
@@ -1689,7 +1785,7 @@ RELATIONSHIP_NEEDS = {
 }
 # The phase context that travels scan -> study -> article in the payload.
 PHASE_KEYS = ("phase_slug", "phase_title", "phase_course", "phase_question",
-              "phase_sections", "gaps", "relationship", "adds")
+              "phase_sections", "gaps", "relationship", "adds", "week_phases")
 
 
 def course_payload(phase: Mapping[str, Any]) -> dict[str, Any]:
