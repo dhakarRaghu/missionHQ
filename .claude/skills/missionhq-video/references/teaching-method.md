@@ -113,5 +113,5 @@ to follow:
   learning, not for an audience.
 
 Mission HQ makes these automatically after a course phase is written:
-`docs/video-pipeline.md` in the Mission HQ repo, and `references/mission-hq.md`
-in its copy of this skill.
+`docs/video-pipeline.md` in the Mission HQ repo, and the `missionhq-video`
+skill in that repo (`.claude/skills/missionhq-video`).

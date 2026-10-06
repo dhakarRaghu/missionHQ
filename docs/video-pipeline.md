@@ -9,7 +9,8 @@ phase or an article is written, its video starts by itself and goes from
 script to render on its own.
 
 YouTube episodes are not made here. They are cut by hand in a Claude session
-with the `video-remotion` skill (`.claude/skills/video-remotion`).
+with the `video-remotion` skill from the `dhakarRaghu/claude-plugin` repo.
+The skill for this pipeline is `missionhq-video` (`.claude/skills/missionhq-video`).
 
 ## The flow
 

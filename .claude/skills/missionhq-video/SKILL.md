@@ -1,5 +1,5 @@
 ---
-name: video-remotion
+name: missionhq-video
 description: Improve, debug or test Mission HQ's narrated course and article videos — the hq.video pipeline (Kimi writes a reviewed script and a scene spec, fixed Remotion templates in video/ draw it, Kokoro voices it, code checks sync and frames). Use when asked to make a Mission HQ video look or teach better, fix a failed video job, add or change a scene template or panel kind, change the narration rules or review prompts, or run the pipeline by hand on one lesson.
 argument-hint: "<what to improve, or a lesson to run>"
 ---
