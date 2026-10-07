@@ -91,8 +91,7 @@ export function CoursesSyllabus({
 
         {course.active ? (
           <p className="rounded-md bg-muted/60 px-2 py-1.5 text-xs text-muted-foreground">
-            Active. One phase a night, in order; the next waits until the last
-            lesson is read.
+            Active. One phase a night, in order.
           </p>
         ) : (
           <Button

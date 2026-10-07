@@ -10,6 +10,7 @@ import { CourseNav } from "@/components/features/courses/course-nav";
 import { CoursesReader } from "@/components/features/courses/courses-reader";
 import { CoursesSide } from "@/components/features/courses/courses-side";
 import { CoursesSyllabus } from "@/components/features/courses/courses-syllabus";
+import { VideoLibrary } from "@/components/features/courses/video-library";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -70,6 +71,8 @@ export function CoursesView() {
   });
   // A module with no course takes the centre pane instead of the reader.
   const [openModule, setOpenModule] = useState<CurriculumModule | null>(null);
+  // So does the video library. /courses?view=videos opens it directly.
+  const [videosOpen, setVideosOpen] = useState(() => params.get("view") === "videos");
 
   const all = courses.data ?? [];
   const active = all.find((c) => c.active);
@@ -112,14 +115,24 @@ export function CoursesView() {
       }
       onRetryCurriculum={() => void curriculum.refetch()}
       openModule={openModule}
-      // Picking a course closes the module panel: he asked for a course, so
-      // the reader is what he should be looking at.
+      videosOpen={videosOpen}
+      // Picking a course closes the module panel and the videos: he asked
+      // for a course, so the reader is what he should be looking at.
       onPickCourse={(course) => {
         setSelected(course);
         setOpenModule(null);
+        setVideosOpen(false);
       }}
-      onOpenModule={setOpenModule}
+      onOpenModule={(module) => {
+        setOpenModule(module);
+        setVideosOpen(false);
+      }}
       onCloseModule={() => setOpenModule(null)}
+      onOpenVideos={() => {
+        setVideosOpen(true);
+        setOpenModule(null);
+      }}
+      onCloseVideos={() => setVideosOpen(false)}
     />
   );
 }
@@ -132,9 +145,12 @@ function CourseWorkspace({
   curriculumError,
   onRetryCurriculum,
   openModule,
+  videosOpen,
   onPickCourse,
   onOpenModule,
   onCloseModule,
+  onOpenVideos,
+  onCloseVideos,
 }: {
   courses: Course[];
   course: Course;
@@ -143,9 +159,12 @@ function CourseWorkspace({
   curriculumError: string | null;
   onRetryCurriculum: () => void;
   openModule: CurriculumModule | null;
+  videosOpen: boolean;
   onPickCourse: (course: string) => void;
   onOpenModule: (module: CurriculumModule) => void;
   onCloseModule: () => void;
+  onOpenVideos: () => void;
+  onCloseVideos: () => void;
 }) {
   const phases = useQuery({
     queryKey: learningKeys.coursePhases(course.course),
@@ -180,12 +199,21 @@ function CourseWorkspace({
   const current = list.find((p) => p.slug === picked.slug) ?? whereHeIs(list);
   // A published phase is read as its enhanced page, which carries its own
   // contents rail inside its frame, so the side panel steps aside. A module
-  // panel has no phase behind it at all, so it steps aside too.
-  const pageOnScreen = Boolean(openModule) || current?.source === "platform";
+  // panel or the video library has no phase behind it at all, so it steps
+  // aside too.
+  const pageOnScreen =
+    Boolean(openModule) || videosOpen || current?.source === "platform";
 
   const select = (slug: string) => {
     setPicked({ course: course.course, slug });
     rememberPhase(course.course, slug);
+  };
+  // From a video to the phase it was made from, in any course. Remembered
+  // first, because a switch of course reads the phase back from storage.
+  const openPhase = (target: string, slug: string) => {
+    rememberPhase(target, slug);
+    if (target === course.course) select(slug);
+    onPickCourse(target);
   };
 
   return (
@@ -210,8 +238,10 @@ function CourseWorkspace({
             error={curriculumError}
             onRetry={onRetryCurriculum}
             openModule={openModule}
+            videosOpen={videosOpen}
             onPickCourse={onPickCourse}
             onOpenModule={onOpenModule}
+            onOpenVideos={onOpenVideos}
           />
           <CoursesSyllabus
             course={course}
@@ -226,6 +256,8 @@ function CourseWorkspace({
       )}
       {openModule ? (
         <CourseModulePanel module={openModule} onBack={onCloseModule} />
+      ) : videosOpen ? (
+        <VideoLibrary courses={courses} onBack={onCloseVideos} onOpenPhase={openPhase} />
       ) : (
         <CoursesReader
           course={course.course}

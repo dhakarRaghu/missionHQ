@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import hq.dbos_app  # noqa: F401 — constructs DBOS before any decorated import
-from hq import db, engine, llm, memory, obs
+from hq import db, engine, lesson_index, llm, memory, obs
 from hq.channels import telegram
 from hq.config import settings
 from hq.dbos_app import DBOS
@@ -73,6 +73,8 @@ async def lifespan(app: FastAPI):
     DBOS.launch()
     await engine.bootstrap_post_launch()  # queues + schedules need a launched executor
     await engine.reap()             # reconcile stale state from the last crash
+    await lesson_index.sync_quietly()     # lessons another laptop committed
+    await lesson_index.export_quietly()   # and this laptop's, for the next commit
     await telegram.start()
     log.info("mission hq up: agents=%s", sorted(engine.registered_agents()))
     yield
@@ -106,17 +108,21 @@ from hq.api.agents_admin import router as agents_admin_router
 from hq.api.chat import router as chat_router
 from hq.api.events import router as events_router
 from hq.api.learning import router as learning_router
+from hq.api.media import router as media_router
 from hq.api.radar import router as radar_router
 from hq.api.reader import router as reader_router
 from hq.api.rest import router as rest_router
 from hq.api.today import router as today_router
 from hq.api.vault import router as vault_router
+from hq.api.videos import router as videos_router
 
 app.include_router(rest_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(vault_router, prefix="/api")
 app.include_router(learning_router, prefix="/api")
+app.include_router(media_router, prefix="/api")
+app.include_router(videos_router, prefix="/api")
 app.include_router(reader_router, prefix="/api")
 app.include_router(agents_admin_router, prefix="/api")
 app.include_router(today_router, prefix="/api")

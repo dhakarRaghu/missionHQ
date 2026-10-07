@@ -210,11 +210,11 @@ def test_the_nightly_cron_calls_the_pipeline_and_nothing_else() -> None:
     assert "start_learning_run" in sage.tools  # he can still ask for one in chat
 
 
-def test_topic_learning_waits_for_read_and_for_an_active_run() -> None:
+def test_topic_learning_waits_only_for_an_active_run() -> None:
     from hq.tools import learning_tools
 
     src = inspect.getsource(learning_tools.topic_learning_blocker)
-    assert "kind = 'topic' AND read_at IS NULL" in src
+    assert "read_at IS NULL" not in src     # unread articles hold nothing since 2026-10-06
     assert "'feed_pass', 'reading_scan', 'deep_study', 'lesson_synthesis'" in src
     assert "topic_learning_blocker" in inspect.getsource(learning_tools.start_learning_run)
 
@@ -987,7 +987,8 @@ def test_production_failure_outranks_everything_else() -> None:
     sources = (root / "learning" / "sources.md").read_text()
     skill = " ".join((root / "agents" / "tutor" / "writer" / "outline-article.md").read_text().split())
 
-    assert "read this above everything" in interests
+    # Since 2026-10-06 incidents come first on the course day, not every day.
+    assert "first on my course day" in interests
     assert "The best article of all** is a real incident" in path
     assert "blog.cloudflare.com/tag/outage/" in sources
     assert "danluu/post-mortems" in sources
@@ -1792,30 +1793,43 @@ def test_a_lesson_with_a_placeholder_is_sent_back() -> None:
     assert "placeholders_in(markdown)" in inspect.getsource(lt.finish_lesson)
 
 
-def test_the_week_has_two_streams_and_a_building_weekend() -> None:
-    """He asked for it: "how will I learn new things ... what about extra".
-    Three weekdays serve a phase, two look outside, the weekend builds."""
+def test_the_week_is_one_course_day_and_open_reading() -> None:
+    """2026-10-06: the course articles read "only related to the course", and
+    he did not find them valuable. One day serves the course and covers every
+    phase he read that week; the rest read how products are built, design
+    decisions and what is new in AI. Saturday is an article, not a lab."""
     from datetime import date, timedelta
 
     from hq.learning_pipeline import (
-        FRONTIER,
-        LAB_CARD,
-        PAPER,
-        REVISION,
-        SPINE_EVIDENCE,
-        SPINE_INCIDENT,
+        AI_LATEST,
+        COURSE_ROTATION,
+        DESIGN_STORY,
+        OPEN_KINDS,
+        PRODUCT_BUILD,
         WEEK_REVIEW,
+        aim_block,
         day_kind,
         wants_phase,
+        week_block,
     )
 
-    week = [day_kind(date(2026, 9, 14) + timedelta(days=i)) for i in range(7)]
-    assert week == [SPINE_INCIDENT, PAPER, SPINE_EVIDENCE, FRONTIER, FRONTIER,
-                    LAB_CARD, WEEK_REVIEW]
-    # The next Friday looks back instead of outward.
-    assert day_kind(date(2026, 9, 25)) == REVISION
-    assert not wants_phase(FRONTIER)
-    assert wants_phase(PAPER) and wants_phase(SPINE_INCIDENT)
+    monday = date(2026, 10, 5)
+    week = [day_kind(monday + timedelta(days=i)) for i in range(7)]
+    assert week[0] == PRODUCT_BUILD and week[2] == DESIGN_STORY
+    assert week[3:6] == [AI_LATEST] * 3 and week[6] == WEEK_REVIEW
+    # Tuesday rotates through the four course kinds, one per week.
+    tuesdays = {day_kind(monday + timedelta(days=1 + 7 * i)) for i in range(4)}
+    assert tuesdays == set(COURSE_ROTATION)
+    assert all(wants_phase(k) for k in COURSE_ROTATION)
+    assert not any(wants_phase(k) for k in OPEN_KINDS)
+    for kind in (PRODUCT_BUILD, DESIGN_STORY, AI_LATEST):
+        aim = aim_block(kind, None)
+        assert "Leave `phase_slug` and `relationship`" in aim and "`adds`" in aim
+    assert "last two weeks" in aim_block(AI_LATEST, None)
+    two = {"week_phases": [{"slug": "a-phase-01", "title": "A", "question": "qa"},
+                           {"slug": "a-phase-02", "title": "B", "question": "qb"}]}
+    assert "read 2 phases" in week_block(two) and "a-phase-02" in week_block(two)
+    assert week_block({"week_phases": two["week_phases"][:1]}) == ""
 
 
 def test_each_day_asks_the_scan_for_its_own_kind_of_lead() -> None:
@@ -2010,7 +2024,8 @@ def test_a_course_build_gets_the_time_it_needs_and_a_reachable_reading_limit() -
 
     assert engine.COURSE_TIMEOUT_S > engine.TASK_TIMEOUT_S
     enqueue = inspect.getsource(engine._enqueue)
-    assert 'lane == "courses"' in enqueue and "SetWorkflowTimeout(cap)" in enqueue
+    # Video builds share the long cap since commit 7ddc247.
+    assert 'lane in ("courses", "videos")' in enqueue and "SetWorkflowTimeout(cap)" in enqueue
 
     # A plain source: the page may be plain too, not plainer.
     source = ("## 1.1 — Queues\n" + " ".join(["The queue grows when work arrives faster."] * 60))

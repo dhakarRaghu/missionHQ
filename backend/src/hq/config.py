@@ -179,6 +179,11 @@ class Settings(BaseSettings):
     # In the repo, not the vault: the vault has no remote and is the agents'
     # memory layer, and these two are his to edit and worth git history.
     learning_dir: Path = REPO_DIR / "learning"
+    # Rendered course videos: MP4s of 160 MB to 1 GB each, too large for git
+    # (GitHub refuses a file over 100 MB). Only their manifest is in the repo,
+    # at learning/videos/index.json; the files live here, outside git, and
+    # /api/media serves them. See docs/videos.md.
+    media_dir: Path = REPO_DIR / "data" / "media"
     # His own study platform. The catalogue at /api/study is public; the phase
     # pages are readable by slug. Tutor works through them one phase a day.
     study_api_base: str = "https://raghu-monitoring.vercel.app"

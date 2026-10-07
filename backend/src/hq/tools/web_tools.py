@@ -1163,13 +1163,14 @@ async def job_feed(
                 jobs, dropped = _india_gates(jobs)
             else:
                 first = query.split("|")[0].strip()
-                url, params = {
+                feeds: dict[str, tuple[str, dict[str, str | int]]] = {
                     "himalayas": ("https://himalayas.app/jobs/api/search",
                                   {"q": first, "limit": 100}),
                     "remotive": ("https://remotive.com/api/remote-jobs",
                                  {"search": first, "limit": 200}),
                     "remoteok": ("https://remoteok.com/api", {}),
-                }[source]
+                }
+                url, params = feeds[source]
                 resp = await client.get(url, params={k: v for k, v in params.items() if v})
                 resp.raise_for_status()
                 body = resp.json()

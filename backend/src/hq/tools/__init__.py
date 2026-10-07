@@ -21,6 +21,7 @@ from hq.tools import (  # noqa: F401
     review_tools,
     signal_tools,
     vault_tools,
+    video_tools,
     web_tools,
 )
 from hq.tools.registry import TOOL_REGISTRY, HQDeps, hq_tool

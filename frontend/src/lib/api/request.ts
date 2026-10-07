@@ -37,9 +37,23 @@ export async function getJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** POST/PUT with an optional JSON body. Same auth and error contract as getJson. */
+/**
+ * A file the API serves behind the Authorization header, such as an image.
+ * An `<img src>` cannot send the header, so the caller shows the blob through
+ * `URL.createObjectURL` and revokes it when it unmounts.
+ */
+export async function getBlob(path: string): Promise<Blob> {
+  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() });
+  if (!res.ok) {
+    if (res.status === 401) onUnauthorized();
+    throw new ApiError(res.status, await errorMessage(res));
+  }
+  return res.blob();
+}
+
+/** POST/PUT/PATCH with an optional JSON body. Same auth and error contract as getJson. */
 export async function sendJson<T>(
-  method: "POST" | "PUT",
+  method: "POST" | "PUT" | "PATCH",
   path: string,
   body?: unknown,
 ): Promise<T> {

@@ -595,7 +595,7 @@ def test_the_gate_lines_name_the_newest_unread_lesson_or_nothing() -> None:
         f"- The next course phase waits on: “{PHASE_3A}” (unread since 2026-09-24)",
         "- The next article waits on: “Why the bill doubled” (unread since 2026-09-23)"]
     assert ct.render_gates(ct.Gate(), ct.Gate()) == [
-        "- The next course phase waits on: nothing: the last course lesson is read",
+        "- The next course phase waits on: nothing: an unread lesson does not hold it",
         "- The next article waits on: nothing"]
     assert ct.render_gates(None, None) == [
         "- The next course phase waits on: not readable",
@@ -605,16 +605,18 @@ def test_the_gate_lines_name_the_newest_unread_lesson_or_nothing() -> None:
 
 
 def test_a_gate_row_is_read_the_way_the_engine_reads_it() -> None:
-    assert ("kind = 'course' AND (read_at IS NULL OR review_status = 'failed')"
-            in ct.COURSE_GATE_SQL)
+    # Since 2026-10-06 only a failed review holds the course; unread does not.
+    assert "kind = 'course' AND review_status = 'failed'" in ct.COURSE_GATE_SQL
+    assert "read_at IS NULL OR" not in ct.COURSE_GATE_SQL
     assert "ORDER BY lesson_date DESC LIMIT 1" in ct.COURSE_GATE_SQL
-    assert "kind = 'topic' AND read_at IS NULL" in ct.TOPIC_GATE_SQL
+    assert not hasattr(ct, "TOPIC_GATE_SQL")
     assert ct._gate(None) is None and ct._gate([]) == ct.Gate()
     row = {"title": PHASE_2B, "lesson_date": date(2026, 9, 22), "review_status": "failed",
            "unread": False}
     assert ct._gate([row]) == ct.Gate(PHASE_2B, "2026-09-22", failed=True)
+    # A failed lesson he has not read yet still needs his decision.
     unread = ct._gate([dict(row, unread=True)])
-    assert unread is not None and unread.failed is False
+    assert unread is not None and unread.failed is True
 
 
 def test_an_unread_lesson_that_is_not_the_gate_is_marked_so() -> None:
@@ -650,8 +652,6 @@ def _patch_gates(monkeypatch: pytest.MonkeyPatch) -> None:
         if sql == ct.COURSE_GATE_SQL:
             return [{"title": PHASE_3A, "lesson_date": date(2026, 9, 24),
                      "review_status": "passed", "unread": True}]
-        if sql == ct.TOPIC_GATE_SQL:
-            return []
         if "SELECT title, kind, read_at FROM hq.lessons" in sql:
             return [{"title": PHASE_3A, "kind": "course", "read_at": None},
                     {"title": PHASE_2B, "kind": "course", "read_at": None}]

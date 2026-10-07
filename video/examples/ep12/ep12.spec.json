@@ -1,0 +1,287 @@
+{
+  "version": 1,
+  "id": "inference-internals-yt-12",
+  "mode": "course",
+  "series": "Inference Internals",
+  "number": 12,
+  "title": "Is Self-Hosting Your LLM Cheaper Than the API?",
+  "label": "Inference Internals #12",
+  "next": { "number": 13, "title": null },
+  "site": "raghvendra.xyz/videos",
+  "beats": [
+    {
+      "id": "cold", "kind": "cold", "heading": "The $0.81 in the meeting",
+      "steps": [
+        { "step": "panel", "panel": {
+          "kind": "flow", "caption": "A rented GPU against a hosted API",
+          "nodes": [
+            { "label": "1× H100 · $3.49/h", "sub": "1,200 output tokens/s at full load", "at": "co0" },
+            { "label": "≈ $0.81 per 1M", "sub": "$3.49 ÷ 4.32 M tokens an hour", "at": "co1" },
+            { "label": "API: $1.60 per 1M", "sub": "self-hosting looks 2x cheaper", "tone": "accent", "at": "co2" }
+          ] } },
+        { "step": "panel", "panel": {
+          "kind": "chips", "caption": "A teammate's link",
+          "items": [
+            { "text": "4-bit checkpoint: each weight in 4 bits instead of 16", "at": "co3" },
+            { "text": "Recovery ≈ 99%: benchmark score as a share of the original's", "tone": "info", "at": "co4" },
+            { "text": "Really cheaper than the API? What does 4-bit change?", "tone": "accent", "at": "co5" }
+          ] } }
+      ]
+    },
+    { "id": "title", "kind": "title", "mark": "Cheaper Than the API?" },
+    {
+      "id": "c1", "kind": "concept", "heading": "What does a 4-bit checkpoint make faster?", "count": "1 of 3",
+      "mark": "a quiet server",
+      "steps": [
+        { "step": "claim" },
+        { "step": "situation", "panel": {
+          "kind": "stats", "caption": "It lowers your cost only if the full-load tok/s rises",
+          "items": [
+            { "value": "1,200 tok/s", "label": "your server at full load → $0.81 per 1M", "at": "s0" },
+            { "value": "4-bit", "label": "the teammate's checkpoint", "tone": "info", "at": "s0" }
+          ] } },
+        { "step": "picture", "panels": [
+          { "kind": "chips", "caption": "A request has two phases",
+            "items": [
+              { "text": "Prefill: the whole prompt in one pass, mostly matrix math", "tone": "warn", "at": "p0" },
+              { "text": "Decode: one token at a time, each token reads every weight", "tone": "info", "at": "p1" }
+            ] },
+          { "kind": "bars", "caption": "Where a request's time goes",
+            "note": "Illustration of the mechanism, not measured data.",
+            "items": [
+              { "label": "1 request: read weights", "value": 87, "display": "sets the speed", "tone": "info", "at": "p2" },
+              { "label": "1 request: math", "value": 13, "display": "small", "at": "p2" },
+              { "label": "busy batch: read weights", "value": 21, "display": "shared", "at": "p3" },
+              { "label": "busy batch: math", "value": 79, "display": "sets the speed", "tone": "warn", "at": "p3" }
+            ] }
+        ] },
+        { "step": "think",
+          "first": "yes: the GPU moves a quarter of the bytes",
+          "misses": "at full load, the math sets most of the time",
+          "real": "Which part of a request's time does each format make smaller?" },
+        { "step": "mechanism",
+          "items": [
+            { "text": "W4A16: 4-bit weights.", "at": "m1" },
+            { "text": "Back to 16 bits before the math.", "at": "m2" },
+            { "text": "W8A8: 8-bit weights and activations.", "at": "m3" },
+            { "text": "8-bit math.", "at": "m4" }
+          ],
+          "side": { "kind": "equation", "lines": [
+            { "text": "weights 16 → 4 bits: decode reads ≈ ¼", "at": "m1" },
+            { "text": "math still in 16 bits: same cost", "at": "m2" },
+            { "text": "activations: numbers passed between layers", "at": "m3" },
+            { "text": "8-bit math: prefill and busy batches faster", "tone": "accent", "at": "m4" }
+          ] } },
+        { "step": "number",
+          "source": { "text": "arXiv 2411.02355, Tables 5–6, vLLM 0.6.4.post1. 8-bit here is W8A8-INT. 1.00x is BF16 itself." },
+          "panels": [
+            { "kind": "table", "caption": "Llama 3.1 70B in vLLM · one request at a time · code task",
+              "note": "BF16 is the original 16-bit format. The single-request runs used different GPU counts per format.",
+              "columns": ["format", "GPUs", "time"],
+              "rows": [
+                { "cells": ["BF16", "2× A100", "50.7 s"], "at": "n1" },
+                { "cells": ["4-bit W4A16", "1× A100", "35.0 s"], "tone": "ok", "at": "n2" },
+                { "cells": ["8-bit W8A8", "1× A100", "54.3 s"], "at": "n2" }
+              ] },
+            { "kind": "table", "caption": "Under load · 4× A100 · continuous batching · queries per second",
+              "columns": ["format", "code task", "7-task average"],
+              "rows": [
+                { "cells": ["BF16", "1.4", "1.00x"], "at": "n3" },
+                { "cells": ["8-bit W8A8", "2.4", "1.87x"], "tone": "ok", "at": "n4" },
+                { "cells": ["4-bit W4A16", "2.3", "1.64x"], "at": "n4" }
+              ] },
+            { "kind": "chips", "items": [
+              { "text": "4 bits win clearly only when the server is quiet", "tone": "ok", "at": "n5" },
+              { "text": "Under load the gain in this study stayed below 2x", "tone": "accent", "at": "n5" }
+            ] }
+          ] },
+        { "step": "keypoints" },
+        { "step": "bridge", "label": "Back to the teammate's link", "panel": {
+          "kind": "chips", "items": [
+            { "text": "Faster? Only for the traffic shape it fits", "at": "h0" },
+            { "text": "As good as the original? Worth nothing until it is", "tone": "accent", "at": "h0" },
+            { "text": "The checkpoint's page: recovery ≈ 99% on standard benchmarks", "tone": "info", "at": "h1" }
+          ] } }
+      ]
+    },
+    {
+      "id": "c2", "kind": "concept", "heading": "Can you trust the 99% recovery score?", "count": "2 of 3",
+      "mark": "only the tasks its benchmark samples",
+      "steps": [
+        { "step": "claim" },
+        { "step": "situation", "panels": [
+          { "kind": "table", "caption": "4-bit (W4A16) Llama 3.1 · one standard suite",
+            "note": "arXiv 2411.02355, Table 2 (Open LLM Leaderboard v1).",
+            "columns": ["model size", "recovery"],
+            "rows": [
+              { "cells": ["8B", "98.7%"], "at": "s0" },
+              { "cells": ["70B", "99.5%"], "at": "s0" },
+              { "cells": ["405B", "100.0%"], "at": "s0" }
+            ] },
+          { "kind": "chips", "caption": "The teammate", "items": [
+            { "text": "“99%: ship it today?”", "tone": "accent", "at": "s1" },
+            { "text": "99% sounds like no loss at all", "at": "s1" }
+          ] }
+        ] },
+        { "step": "picture", "panels": [
+          { "kind": "compare",
+            "left": { "title": "What a standard suite tests", "items": ["short English questions", "answer options to pick from", "one-step answers", "multiple choice absorbs small errors"] },
+            "right": { "title": "Where damage concentrates", "items": ["maths", "non-Latin scripts", "long reasoning", "each token's error feeds the next"] },
+            "at_left": "p0", "at_right": "p2" },
+          { "kind": "stats", "caption": "One study · a 103B model with 4-bit weights · Japanese",
+            "note": "Marchisio et al., arXiv 2407.03211: Command R+ 103B, 4-bit weight-only (W4-g, GPTQ).",
+            "items": [
+              { "value": "1.7% drop", "label": "automatic tasks", "at": "p4" },
+              { "value": "16.0% drop", "label": "human evaluators · realistic prompts", "tone": "bad", "at": "p4" }
+            ] },
+          { "kind": "chips", "items": [
+            { "text": "Quantization gate: a pass or fail test on your own items", "tone": "accent", "at": "p5" }
+          ] }
+        ] },
+        { "step": "think",
+          "first": "ship: the middle, 1.8, is under 2",
+          "misses": "the interval still allows a 3.4-point drop",
+          "real": "Which end of the interval must stay inside your limit?" },
+        { "step": "mechanism",
+          "items": [
+            { "text": "Items from your own traffic.", "at": "m1" },
+            { "text": "Your real context and output length.", "at": "m2" },
+            { "text": "Both checkpoints, same items: paired interval.", "at": "m3" },
+            { "text": "Judge the worst end.", "at": "m4" }
+          ],
+          "side": { "kind": "chips", "items": [
+            { "text": "your task · your languages", "tone": "info", "at": "m1" },
+            { "text": "errors compound along long answers", "tone": "info", "at": "m2" },
+            { "text": "resample the items many times → interval 0.2 to 3.4", "tone": "info", "at": "m3" },
+            { "text": "worst end 3.4 > your limit 2 → HOLD", "tone": "bad", "at": "m4" }
+          ] } },
+        { "step": "number", "panel": {
+          "kind": "prompt", "title": "20 items · paired interval, 95%",
+          "note": "Bootstrap intervals recomputed by simulation for this video.",
+          "lines": [
+            { "text": "each item = 5 points", "at": "n0" },
+            { "text": "1 flipped:   drop 5 points", "at": "n1" },
+            { "text": "             interval reaches −15 → HOLD", "tone": "bad", "at": "n1" },
+            { "text": "4 regressed: drop 20 points", "at": "n2" },
+            { "text": "             interval excludes 0", "tone": "ok", "at": "n2" },
+            { "text": "a 2-point drop: smaller than 1 item", "tone": "accent", "at": "n2" },
+            { "text": "→ add items until the interval sees it", "tone": "info", "at": "n3" }
+          ] } },
+        { "step": "keypoints" },
+        { "step": "bridge", "label": "Back to the meeting", "panel": {
+          "kind": "chips", "items": [
+            { "text": "Your gate: SHIP", "tone": "ok", "at": "h0" },
+            { "text": "Next full-load test: a higher rate", "at": "h0" },
+            { "text": "$0.81 = $3.49 ÷ 4.32 M tokens", "at": "h1" },
+            { "text": "One more input is hidden · not the tokens per second", "tone": "accent", "at": "h1" }
+          ] } }
+      ]
+    },
+    {
+      "id": "c3", "kind": "concept", "heading": "So is it cheaper than the API?", "count": "3 of 3",
+      "mark": "the tokens you actually serve",
+      "steps": [
+        { "step": "claim" },
+        { "step": "situation", "panels": [
+          { "kind": "equation", "lines": [
+            { "text": "1,200 tok/s × 3,600 s = 4.32 M tokens per hour", "at": "s0" },
+            { "text": "assumed: every second of every hour", "tone": "accent", "at": "s0" }
+          ] },
+          { "kind": "chips", "note": "Illustration of one day, not measured traffic.", "items": [
+            { "text": "Fewer requests at night and at weekends", "tone": "ok", "at": "s1" },
+            { "text": "The rental bills every hour anyway", "tone": "bad", "at": "s1" }
+          ] }
+        ] },
+        { "step": "picture", "panel": {
+          "kind": "equation", "caption": "Cost per million tokens has four inputs",
+          "lines": [
+            { "text": "cost per 1M tokens =", "at": "p0" },
+            { "text": "hourly rate × number of GPUs", "at": "p0" },
+            { "text": "÷ (tok/s × 3,600 × utilisation ÷ 1M)", "at": "p1" },
+            { "text": "utilisation: paid hours that serve requests", "tone": "accent", "at": "p2" }
+          ] } },
+        { "step": "think",
+          "first": "the hourly price: a cheaper rental, cheaper tokens",
+          "misses": "the price is fixed once you rent; busy hours can fall to a tenth",
+          "real": "How much of each paid hour serves real requests?" },
+        { "step": "mechanism",
+          "items": [
+            { "text": "Start from billed time.", "at": "m1" },
+            { "text": "Your own sustained rate.", "at": "m2" },
+            { "text": "Multiply by utilisation.", "at": "m3" },
+            { "text": "Divide by one named API's price.", "at": "m4" }
+          ],
+          "side": { "kind": "equation", "lines": [
+            { "text": "$3.49 per hour, busy or idle", "at": "m1" },
+            { "text": "1,200 × 3,600 = 4.32 M tokens per hour", "at": "m2" },
+            { "text": "$3.49 ÷ 4.32 ≈ $0.81 per 1M at 100%", "at": "m3" },
+            { "text": "$0.81 ÷ 0.10 ≈ $8.08 per 1M at 10%", "tone": "accent", "at": "m3" },
+            { "text": "break-even = $0.81 ÷ API price", "at": "m4" }
+          ] } },
+        { "step": "number",
+          "source": { "text": "OpenAI list prices, output tokens, read 2026-10-05. Both sides count output tokens only. H100 price dated 2026-09-17." },
+          "panels": [
+            { "kind": "chips", "caption": "The price list for this video", "items": [
+              { "text": "GPT-4.1 mini · $1.60 per 1M output tokens", "tone": "accent", "at": "n0" },
+              { "text": "GPT-4.1 · $8.00 per 1M output tokens", "tone": "info", "at": "n0" }
+            ] },
+            { "kind": "bars", "caption": "Self-hosting is cheaper only above this utilisation",
+              "note": "1× H100 at $3.49 an hour, 1,200 tok/s at full load.",
+              "items": [
+                { "label": "vs GPT-4.1 mini · $1.60", "value": 50.5, "display": "50.5%", "tone": "accent", "at": "n1" },
+                { "label": "vs GPT-4.1 · $8.00", "value": 10.1, "display": "10.1%", "tone": "info", "at": "n1" }
+              ] },
+            { "kind": "prompt", "title": "one month · 730 billed hours",
+              "note": "People line: a quarter of one engineer, who owns upgrades and incidents.",
+              "lines": [
+                { "text": "people: ¼ engineer      = $3,750", "tone": "accent", "at": "n2" },
+                { "text": "GPU: $3.49 × 730 h      = $2,548", "at": "n3" },
+                { "text": "total                   = $6,298", "at": "n3" },
+                { "text": "$6,298 ÷ $1.60 = 3,936 M tokens", "at": "n3" },
+                { "text": "$6,298 ÷ $8.00 =   787 M tokens", "at": "n4" },
+                { "text": "ceiling: 1,200 × 3,600 × 730", "tone": "bad", "at": "n4" },
+                { "text": "       = 3,154 M tokens", "tone": "bad", "at": "n4" }
+              ] }
+          ] },
+        { "step": "keypoints" }
+      ]
+    },
+    {
+      "id": "payoff", "kind": "payoff", "heading": "Back to the meeting",
+      "steps": [
+        { "step": "panel", "panels": [
+          { "kind": "stats", "items": [
+            { "value": "$0.81 / 1M", "label": "the meeting's number = 100% utilisation", "tone": "accent", "at": "a0" }
+          ] },
+          { "kind": "compare",
+            "note": "Both include the people line. 3,936 M ÷ (730 h × 3,600 s) ≈ 1,498 tok/s, served in every second of the month.",
+            "left": { "title": "vs GPT-4.1 mini · $1.60", "items": ["needs 3,936 M tokens a month", "the GPU can serve 3,154 M", "≈ 1,500 tok/s all month > 1,200", "never pays at this speed"] },
+            "right": { "title": "vs GPT-4.1 · $8.00", "items": ["needs 787 M tokens a month", "≈ a quarter of the capacity", "pays"] },
+            "at_left": "a1", "at_right": "a3" }
+        ] },
+        { "step": "panel", "panels": [
+          { "kind": "equation", "caption": "The 4-bit checkpoint changes only tokens per second", "lines": [
+            { "text": "only for its traffic shape, only after your gate", "at": "a4" },
+            { "text": "if 1.64x: 1,200 → ≈ 2,000 tok/s", "at": "a5" },
+            { "text": "vs GPT-4.1 mini: busy ≈ ¾ of every hour", "tone": "accent", "at": "a6" }
+          ] },
+          { "kind": "bars", "caption": "How far each input moves your cost", "items": [
+            { "label": "the checkpoint", "value": 1.9, "display": "< 2x", "tone": "info", "at": "a7" },
+            { "label": "utilisation 100% → 10%", "value": 10, "display": "10x", "tone": "accent", "at": "a7" }
+          ] }
+        ] },
+        { "step": "panel", "panel": {
+          "kind": "chips", "caption": "Reasons that can decide before the arithmetic",
+          "items": [
+            { "text": "Data stays in your network", "tone": "warn", "at": "a8" },
+            { "text": "A model nobody hosts", "tone": "warn", "at": "a8" },
+            { "text": "Your own latency floor", "tone": "warn", "at": "a8" },
+            { "text": "Stable prices", "tone": "warn", "at": "a8" },
+            { "text": "Otherwise: a bet on utilisation vs one named API", "tone": "accent", "at": "a9" }
+          ] } }
+      ]
+    },
+    { "id": "recap", "kind": "recap", "heading": "Recap" },
+    { "id": "end", "kind": "end" }
+  ]
+}

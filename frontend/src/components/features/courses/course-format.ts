@@ -24,8 +24,14 @@ export function onPath(course: Course): boolean {
  * number alone printed two different phases as the same one.
  */
 export function phaseLabel(phase: CoursePhase): string {
-  const match = /-phase-0*(\d+)([a-z]?)(?:-|$)/.exec(phase.slug);
-  return match ? `${match[1]}${match[2].toUpperCase()}` : String(phase.phase_order);
+  return slugPhaseLabel(phase.slug) ?? String(phase.phase_order);
+}
+
+/** The same label from a slug alone, for a video that names its phase by
+ * slug. Null when the slug carries no phase number. */
+export function slugPhaseLabel(slug: string): string | null {
+  const match = /-phase-0*(\d+)([a-z]?)(?:-|$)/.exec(slug);
+  return match ? `${match[1]}${match[2].toUpperCase()}` : null;
 }
 
 /** The title without the course name the platform repeats in every phase. */

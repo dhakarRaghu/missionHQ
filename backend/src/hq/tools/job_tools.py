@@ -366,8 +366,8 @@ def fit_score(
     pay = parse_pay(compensation) or parse_pay(pay_signal)
     pay_lakh = pay[1] if pay else None
     capped = False
-    at_bar = bool(pay and pay[1] >= bar)
-    stated_at_bar = at_bar and not pay[2]
+    at_bar = pay is not None and pay[1] >= bar
+    stated_at_bar = pay is not None and at_bar and not pay[2]
     if pay is None:
         pay_points, pay_note = 0, "no figure"
     elif pay[1] >= bar:
