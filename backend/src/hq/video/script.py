@@ -514,6 +514,7 @@ class ScriptWriter:
                     i = int(beat[1:])
                     obj["count"] = f"{i} of {n}"
                     obj["heading"] = self.plan.concepts[i - 1].heading
+                    _pin_mechanism(obj, self.beats[beat])
                 beats = [b for b in beats if b.get("id") != beat]
                 beats.append(obj if obj else {"id": beat, "kind": "invalid"})
             order = list(self.beats)
@@ -595,6 +596,24 @@ async def _start_build(job: VideoJob, deps: Any) -> str:
         parent_task_id=deps.task_id,
         payload={"stage": BUILD_STAGE, "video_id": job.id, "scale": 1},
         dedup_key=f"video:{job.id}:{BUILD_STAGE}:{deps.task_id}")
+
+
+def _pin_mechanism(beat: dict[str, Any], lines: list[Line]) -> None:
+    """Point each mechanism item at the line that starts its step.
+
+    Which line starts "Step N." is in the narration, so code sets it. When the
+    item count differs from the step count, check-spec reports it and the
+    model draws the beat again.
+    """
+    starts = [ln.key for ln in lines
+              if ln.key.startswith("m") and re.match(r"Step \d+\.", ln.text)]
+    for step in beat.get("steps") or []:
+        items = step.get("items") if isinstance(step, dict) else None
+        if step.get("step") == "mechanism" and isinstance(items, list) \
+                and len(items) == len(starts):
+            for item, key in zip(items, starts):
+                if isinstance(item, dict):
+                    item["at"] = key
 
 
 async def run(task: dict[str, Any], deps: Any) -> tuple[str, str]:

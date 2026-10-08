@@ -182,10 +182,13 @@ function conceptSteps(beat, base, steps, nb, letters, keys, letter) {
   });
   const mech = steps.find((s) => s?.step === "mechanism");
   if (mech && Array.isArray(mech.items)) {
-    const m = keys.filter((k) => letter(k) === "m");
-    if (mech.items.length !== m.length) bad(S, `${base}.steps[${steps.indexOf(mech)}].items`, `has ${mech.items.length} items; the narration has ${m.length} "m" lines and needs one item per line`);
+    // One item per "Step N." line. A step may continue on more m lines (m1b),
+    // which keep the same item lit; counting those too asked for more items
+    // than the 6 allowed, so no spec could pass (three jobs, 2026-10-08).
+    const m = nb.lines.filter((l) => letter(l.key) === "m" && /^Step \d+\./.test(l.text)).map((l) => l.key);
+    if (mech.items.length !== m.length) bad(S, `${base}.steps[${steps.indexOf(mech)}].items`, `has ${mech.items.length} items; the narration has ${m.length} "Step N." lines and needs one item per step`);
     mech.items.forEach((it, i) => {
-      if (m[i] && it.at !== m[i]) bad(S, `${base}.steps[${steps.indexOf(mech)}].items[${i}].at`, `item ${i + 1} must be at "${m[i]}", its own m line`);
+      if (m[i] && it.at !== m[i]) bad(S, `${base}.steps[${steps.indexOf(mech)}].items[${i}].at`, `item ${i + 1} must be at "${m[i]}", the line that starts Step ${i + 1}`);
     });
   }
 }

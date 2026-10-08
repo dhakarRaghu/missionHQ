@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-10-08T03:00:09.064911+05:30",
+  "built_at": "2026-10-09T03:00:06.131579+05:30",
   "courses": [
     {
       "slug": "inference-internals",
@@ -76,6 +76,15 @@
           "date": "2026-10-04",
           "read": false,
           "file": "2026-10-04-inference-internals-phase-04b-optimizing.html"
+        },
+        {
+          "slug": "inference-internals-phase-05a-client",
+          "title": "The Client Under Stress: Deadlines, Rate Limits and the Retry That Costs You the Day",
+          "one_liner": "He can set four named streaming deadlines from his own latency data, read a 429's headers to decide when and whether to retry, and choose a client policy that sheds load instead of multiplying it.",
+          "minutes": 150,
+          "date": "2026-10-08",
+          "read": false,
+          "file": "2026-10-08-inference-internals-phase-05a-client.html"
         }
       ]
     },
@@ -106,13 +115,13 @@
   ],
   "articles": [
     {
-      "title": "Where does the KV cache go when the GPU runs out of room?",
-      "one_liner": "He can size a long-context serving setup by total KV bytes across GPU, CPU and disk tiers, and can decide when offloading pays and when it is a 10-15% tax on misses.",
+      "title": "Split the server in two. The median does not move. The p99 does.",
+      "one_liner": "He can predict which latency metric moves first when two different workloads share a GPU, explain why from the mechanism, and name the per-request cost that any split of a pipeline stage must charge.",
       "topic": "",
-      "kind": "design_story",
+      "kind": "ai_latest",
       "date": "2026-10-08",
       "read": false,
-      "file": "2026-10-08-where-does-the-kv-cache-go-when-the.html"
+      "file": "2026-10-08-split-the-server-in-two-the-median-does.html"
     },
     {
       "title": "Week review: the full inference machine, from first token to self-host",

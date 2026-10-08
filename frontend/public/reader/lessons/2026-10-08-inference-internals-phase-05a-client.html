@@ -1,0 +1,1208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Client Under Stress: Deadlines, Rate Limits and the Retry That Costs You the Day</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Inference Internals — Phase 5A</div><h1>The Client Under Stress: Deadlines, Rate Limits and the Retry That Costs You the Day</h1><p class="subtitle">When the provider degrades, what does your own client do, and does it make things worse?</p></header>
+<p>Phase 4B ended with a decision: you keep the hosted API, put your meter and budget guard in front of it, and your client is a few lines of SDK code you have never read. This morning the provider slows down. Your streams hang with no error, your team adds short timeouts and retries, and by the time the provider recovers, your success rate is worse than if you had done nothing. Every phase until now measured a system that was working. This one is about the hours when it is not, and the system that decides how bad those hours get is the client you wrote.</p>
+
+<p>The hour leaves four questions. Why does a bare timeout let a dead stream hang for ten minutes while a healthy long answer survives the same setting? Where does a defensible timeout number come from if not from guessing? What exactly is a provider telling you when it answers 429, and should you retry at all? And why do the retries, backoff included, turn a bad hour into an outage? The answer each time is a policy that already lives in your process, in the SDK you never read.</p>
+<p>This lesson teaches five ideas. They are listed here so you can see where the lesson is going. They will read more clearly once each has been explained below, so come back to this list at the end.</p>
+<ol class="concepts"><li id="c1"><b>A bare timeout=N sets four independent idle deadlines, and the read timeout is a stall detector that resets on every chunk, so it never bounds total time.</b> <span>Predict when a stream will hang and configure deadlines that catch a dead stream without killing a long healthy answer.</span></li><li id="c2"><b>A timeout number is a measured downstream latency percentile chosen by the false-timeout rate you accept, not a guess made to feel safe.</b> <span>Derive a first-token and stall deadline from his own TTFT data and say what false-timeout rate each choice buys.</span></li><li id="c3"><b>A 429 is several contracts wearing one status code, so you must match the bucket, the retry-after header and your own request mix before you know when you are unblocked.</b> <span>Decide whether to retry a 429 at all, read the reset value in either provider&#x27;s format, and use prompt caching as a capacity lever on Anthropic.</span></li><li id="c4"><b>Phase 0 showed retries can make an outage worse; the new rule is that only a bounded, load-shedding policy recovers, because every unbounded retry policy ties or loses to doing nothing under load.</b> <span>Choose the four controls (one layer, retry budget, full jitter, TTFT breaker) in order, predict which policies recover under a burst, and recognise why the defect is invisible in light-load tests.</span></li><li id="c5"><b>Both SDKs enforce latency and retry policy inside your process before the network, so a wrapper built without reading that policy double-pays and mis-diagnoses.</b> <span>Predict what one SDK call will do on failure without running it: how many attempts, how long the sleeps, which errors are retried, and why stream=True changes a client-side refusal.</span></li></ol>
+<h2 data-kind="orientation">The bad morning, and the debt Phase 0 left</h2>
+<div class="cards" data-cols="2">
+<div class="card"><h4>The p99 spike and the retry that made it worse (Phase 0)</h4><p>Phase 0 told Story 2. A provider's p99 latency spiked. The team added short timeouts and retries, and the incident got worse. That story was a promise: it said the fix arrives in Phase 5. This phase pays that promise, and this time the provider's bad hour is yours.</p></div>
+<div class="card"><h4>TTFT, the wait for the first token (Phase 2)</h4><p>TTFT is the time from sending a request to the first token coming back. Phase 2A showed it measures queue depth, so it rises before any request fails. This phase turns it into two tools. One is the number your first deadline comes from. The other is the signal that tells your client to stop sending.</p></div>
+<div class="card"><h4>The token bucket (Phase 3)</h4><p>Your provider meters you with a token bucket: a capacity that refills over time and drains as you spend. Phase 3 used it for your own budget guard. This phase reads it from the other side, because a 429 is the provider's bucket telling you it is empty.</p></div>
+<div class="card"><h4>Prompt caching (Phase 3)</h4><p>A cached prefix is charged at a fraction of the input price. What Phase 3 did not need is the other effect. On Anthropic, cached tokens mostly do not count against the input-token rate limit. That makes the cache a capacity lever, not only a cost lever.</p></div>
+</div>
+
+<p>The course so far measured a working system. Phases 1 to 4 sized contexts, routed requests, guarded the bill and decided where the model runs. This phase is the first one about a degrading system. Everything in it sits on your side of the network, on an upstream you do not control. It answers the three questions the bad morning asks, in the order the morning asks them.</p>
+
+<ol class="flow">
+<li><b>When is a stream dead?</b><span>a stream goes silent at token 2, and your one timeout number cannot say when to give up</span></li>
+<li><b>What is this 429 saying?</b><span>the status line is the same for a full bucket and a spend cap, and only one of them ever unblocks on a retry</span></li>
+<li><b>Should the client retry at all?</b><span>your team's retries are why Story 2 ended at 22.7% success instead of 89%, and the standard fix does not change that</span></li>
+</ol>
+
+<p>The first question is about deadlines, the second about rate limits, the third about retry policy. Along the way you will find that both SDKs already answer parts of all three. They do this inside your own process, before the network. So the last piece of the phase is reading the policy you already run. The phase ends where the morning ends. It ends with a measured table of four retry policies under one burst, and the one policy that recovers.</p>
+<h2 data-concept="c1">Your one timeout is four timeouts, and none is a total</h2>
+<p class="why">One timeout number buys you four separate idle deadlines, and none of them is a total.</p>
+
+<p>You shipped the hosted client, and the provider is slow this morning. A stream dies at token 2 and your client sits there. When did you want it to notice? The answer depends on which failure happened, so one number cannot express it.</p>
+
+<p>A streaming call fails in four different shapes. The socket can fail to open. The server can accept the request and send no first token. The stream can start and then go silent mid-answer. The request can run away and burn budget. Each shape wants its own deadline, because the right length of patience is different for each. These are <dfn>the four deadlines</dfn>: connect, first token, stall and total.</p>
+
+<p>Both official Python SDKs send requests through httpx2, and <dfn>httpx2.Timeout</dfn> is the object that carries deadline settings to it. A bare number like <code>timeout=600</code> sets connect, read, write and pool each to 600 seconds. That is four independent ten-minute waits, not a ten-minute call budget.</p>
+
+<details class="predict"><summary>Predict: your 90-second streaming answer dies at token 2 at t=0.4s and goes silent. A client built with bare <code>timeout=600</code> notices at what time, and why does a healthy 10-minute answer survive the same setting?</summary>
+<p>It notices at about t=600.4s, ten minutes after the last chunk. The read deadline measures silence between chunks and resets each time a chunk arrives. A healthy answer keeps sending chunks, so the deadline keeps resetting and the ten minutes never run out. A dead stream sends nothing, so one worker hangs for the full 600 seconds.</p>
+</details>
+
+<p>The working detail is how httpx2 measures <code>read</code>. The read timeout waits for the next chunk of data, and every chunk that arrives restarts the wait. Your <dfn>SSE stream</dfn>, the server-sent-event format that delivers each token as one chunk, resets it on every token. The <dfn>stall timeout</dfn>, the longest silence you accept between two chunks, is the read timeout you already have. You do not build one.</p>
+
+<div class="lanes" id="s2-stall" data-play>
+<h4>Dead stream: bare number versus named stall</h4>
+<div class="lane" data-label="timeout=600">
+<i class="decode" style="--w:4" data-t="0.4s, token 2"></i>
+<i class="wait" style="--w:600" data-t="silence, 600s"></i>
+<i class="frozen" style="--w:20" data-t="ReadTimeout at 600.4s"></i></div>
+<div class="lane" data-label="read=20">
+<i class="decode" style="--w:4" data-t="0.4s, token 2"></i>
+<i class="wait" style="--w:20" data-t="silence, 20s"></i>
+<i class="frozen" style="--w:20" data-t="ReadTimeout at 20.4s"></i></div>
+<div class="lane" data-label="healthy 10-min answer, read=20">
+<i class="decode" style="--w:4" data-t="chunk"></i>
+<i class="decode" style="--w:600" data-t="chunks keep arriving, deadline keeps resetting"></i>
+<i class="ok" style="--w:20" data-t="finishes normally"></i></div>
+<p class="at" data-step="2">Step 2: both clients wait out the same silence, so the bare number waits thirty times longer.</p>
+<p class="at" data-step="3">Step 3: the healthy answer survives read=20, because a stall deadline measures gaps, not length.</p>
+<p class="at" data-step="all">Illustration from the lesson's mechanism, not measured.</p>
+</div>
+
+<p>So the fix is to name each deadline and stop passing one number.</p>
+
+<pre><code data-lang="python"># WRONG: four independent ten-minute idle waits, not one budget.
+client = OpenAI(timeout=600)
+
+# RIGHT: read is the gap between chunks, not the total.
+import httpx2
+client = OpenAI(timeout=httpx2.Timeout(
+    None,          # no total limit; a long answer is not a failure
+    connect=5.0,
+    read=20.0,     # STALL: the longest acceptable silence mid-stream
+    write=10.0,
+    pool=5.0,
+))</code></pre>
+
+<p>The wrong-belief cost has both directions. Set the number high and a dead stream holds a worker for 600 seconds while your meter from Phase 3 keeps counting. Set it low as a total-style cap and it cuts healthy long answers in half. Your own <code>run_recorder.py --live --stall-test</code> run confirmed the reset behaviour on two mock endpoints, matching the docs' "inactivity" wording.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Both <code>src/openai/_constants.py</code> at v3.25.0 and <code>src/anthropic/_constants.py</code> at v1.12.0 ship <code>DEFAULT_TIMEOUT = httpx2.Timeout(timeout=10 * 60, connect=5.0)</code>. The httpx2 docs describe the default as a wait for "5 seconds of network inactivity", and list four timeout types. The per-chunk reset itself is inferred from his mock-endpoint measurement plus the docs' wording; the httpx2 transport source was not read.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">The read timeout is a stall detector that resets on every chunk.</p>
+<p class="trap">A bare timeout=600 sets four ten-minute idle waits, so a dead stream hangs for up to ten minutes.</p>
+<p class="try">Run <code>python phase05_operations/run_recorder.py --self-test</code> and find the check named "a stall is detected".</p>
+</div>
+
+<p>Three of the four deadlines exist in the transport layer, but the first-token deadline has no flag anywhere, and that gap is what the next section fills.</p>
+<h2 data-concept="c1">The deadline no SDK gives you, and the retry no SDK does</h2>
+<p class="why">Two gaps in the SDK stay invisible until a slow day. They are the missing first-token flag, and a retry loop that ends too early.</p>
+
+<p>The section above named four deadlines, and three of them exist in the transport. Connect, stall and total are all flags on <code>httpx2.Timeout</code>. This section covers the fourth, which exists nowhere in either SDK. Then it covers a second gap that shows up only when a stream dies mid-answer.</p>
+
+<h3>The first-token deadline is your code, not a flag</h3>
+
+<p>The worst failure on a bad-weather day is the one where the socket opened, the server accepted the request, and no chunk comes back for three minutes. Your <dfn>TTFT</dfn>, the time from sending the request to the first token arriving, is normally under a second, so a wait of three minutes is almost certainly a dead call. The stall timeout cannot help here, because it counts gaps after the first chunk. No chunk has arrived, so the stall clock has not started.</p>
+
+<p>What you want is a <dfn>first-token deadline</dfn>, a limit on the wait between sending and the first content event. Neither the OpenAI nor the Anthropic Python SDK exposes one. There is no parameter and no event hook that fires at the right place.</p>
+
+<ol>
+<li>Open the stream and start a timer sized for your usual TTFT.</li>
+<li>Consume events inside a wrapper that cancels the call when the timer runs out.</li>
+<li>Lift the wrapper as soon as one content event arrives, then read the rest of the stream with only the stall timeout active.</li>
+</ol>
+
+<p>When the timer fires early, the stream is still open on the server, so you must issue your own cancel. You cannot just return from the loop. The phase's <code>record_stream</code> does exactly this in its consume loop. It checks a first-token deadline before the first chunk and a stall deadline on every chunk. Then it raises a <code>Timeout</code> that names which one fired.</p>
+
+<pre><code data-lang="python"># the shape, not the library
+async with deadline(20.0):          # first-token deadline
+    async for event in stream:
+        if event.type == "content":
+            break                   # lift it here
+    async for event in stream:      # now stall timeout only
+        consume(event)</code></pre>
+
+<p>This pattern is engineering reasoning from the phase. No provider document describes it, so its number comes from your own measurements, which the next section covers.</p>
+
+<h3>The retry that never happens</h3>
+
+<details class="predict"><summary>Predict: a stream dies at token 400 of 500. Both SDKs default to 2 retries. How many retries fire for this failure?</summary>
+<p>Zero. The SDK retry loop is built into the request method, and that method returns as soon as the response headers arrive. Token 400 comes long after the headers, so the retry loop has already left the room.</p>
+</details>
+
+<p>This is the second gap. Both SDKs retry a connection error and some status codes. But the retry logic ends the moment the server starts answering. Everything after the first byte of the body is your problem and yours alone.</p>
+
+<p>A stream that stops at token 400 of 500 leaves you holding a <dfn>partial response</dfn>. It is an answer that is mostly written and provably incomplete. You have three things you can do with it:</p>
+
+<ul>
+<li><b>Fail the request</b>, which wastes the 400 tokens you already paid for.</li>
+<li><b>Return the partial and label it</b>, so the caller knows the answer stopped at 400 of 500 tokens. Returning it without a label is the version of this bug you get blamed for.</li>
+<li><b>Continue with a second call</b>, sending the model what it wrote so far. Anthropic documents this procedure, and it differs by model generation: older models take the partial text back as an assistant message, newer ones expect a user message that asks the model to continue.</li>
+</ul>
+
+<p>All three choices cost something, and the SDK offers all three the same amount of help: none. Which one you pick is a product decision you make before the incident. At token 400 of a live request there is no time to convene about it.</p>
+
+<div class="keypoints">
+<p class="remember">The SDK finishes its job when headers arrive; the first-token watch and mid-stream retry are yours.</p>
+<p class="trap">You set max_retries=2 and trust it protects a stream, so a stream dead at token 400 fires zero retries.</p>
+<p class="try">Open <code>run_recorder.py</code> at the consume loop and find the two deadline checks it runs per chunk.</p>
+</div>
+
+<p>Every deadline in this section needs a number next to it. Picking one by feel is the trap the next section answers: where does the number come from?</p>
+<h2 data-concept="c2">Where the number comes from: your own p99.9</h2>
+<p class="why">Generous is not safe: a timeout number is a measurement, and here is where you measure it.</p>
+
+<p>The sections above named the deadlines and then handed you blanks to fill in. The examples so far picked numbers like 10 seconds and 20 seconds without saying why. This section is where the reason comes from. The answer is a measurement you already own, not a judgment call you make once and forget.</p>
+
+<p>Back in the bad morning, someone wrote <code>timeout=600</code> because it felt safe. The problem runs in both directions. A deadline set too tight cancels healthy calls that are merely slow. So you pay for tokens and throw the answer away. A deadline set too loose holds a worker on a dead stream, as the section above showed. "Safe" picked the second failure and called it the first one.</p>
+
+<p>The picture first. A deadline is a claim about your traffic. Any call slower than this point is not slow, but it is a different failure. To place that point you need three things. You need the measured latency of the call you are bounding. You need a decision about how often you are willing to be wrong. And you need the percentile where those two meet. The <dfn>false-timeout rate</dfn> is the share of calls you are willing to cancel even though they would have succeeded. Choosing 0.1% means you accept killing one healthy call in a thousand.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 640 240" role="img" aria-label="Latency histogram with percentile markers and the chosen deadline">
+  <path d="M40 200 C 90 190, 140 60, 220 50 C 300 55, 360 150, 430 175 C 480 190, 520 196, 560 199" fill="none" stroke="var(--accent)" stroke-width="2.5"/>
+  <line x1="40" y1="200" x2="560" y2="200" stroke="currentColor" stroke-width="1"/>
+  <line x1="230" y1="200" x2="230" y2="55" stroke="var(--ok)" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="236" y="70" fill="currentColor" font-size="12">p50 · 0.3 s</text>
+  <line x1="400" y1="200" x2="400" y2="120" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="406" y="135" fill="currentColor" font-size="12">p90 · 4 s</text>
+  <line x1="480" y1="200" x2="480" y2="155" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="486" y="170" fill="currentColor" font-size="12">p99 · 21 s</text>
+  <line x1="530" y1="200" x2="530" y2="40" stroke="var(--bad)" stroke-width="2.5"/>
+  <text x="524" y="32" fill="currentColor" font-size="12" text-anchor="end">deadline at p99.9 · 41 s</text>
+  <text x="545" y="218" fill="currentColor" font-size="11">past this, the call is declared dead</text>
+  <text x="40" y="218" fill="currentColor" font-size="11">first-token latency, your measured distribution</text>
+</svg>
+<figcaption>A first-token latency distribution with an example tail. The vertical line is the deadline: everything left of it is allowed to be slow, everything right of it is treated as failed. Shape is an illustration, not measured.</figcaption>
+</figure>
+
+<details class="predict"><summary>Predict: your first-token latencies have p50 of 0.3s, p90 of 4s and p99 of 21s. You accept 0.1% false timeouts. Which number do you set, and where do you get it?</summary>
+<p>The tempting answer is 21s, because p99 is the largest number on the list. But p99 cancels one healthy call in a hundred, and you decided to accept one in a thousand. You need p99.9. That is a larger tail value than 21s and must be computed from your recorded TTFT samples, not guessed. The data already exists. Phase 1 measured TTFT, the time from sending the request to the first token coming back. And <code>run_recorder.py</code> now writes it per request. Compute the percentile from those records and set the deadline to it.</p>
+</details>
+
+<p>Amazon's Builders' Library describes this as three steps, and each step is a decision rather than a lookup.</p>
+
+<ol>
+<li><b>Choose the false-timeout rate you accept.</b> This is a product decision. An interactive answer that already billed tokens is expensive to kill, so you go lower.</li>
+<li><b>Measure the latency of the downstream call as it exceeds your current timeouts.</b> Amazon adds debug logging for calls that come close to the deadline, so the tail is visible before you commit to a number.</li>
+<li><b>Read the percentile that matches your rate and use it as the deadline.</b> Accepting 0.1% means the p99.9 latency of the downstream call. The operative word is measured, because Amazon's own warning is that a percentile right for one service is rarely right for another.</li>
+</ol>
+
+<p>The same source names two conditions where the method fails, and both describe your situation. The first is clients with substantial network latency, for example across the internet. That is exactly where your calls to a hosted provider travel. The second is a service with tight latency bounds. There p99.9 sits close to p50, and the variance of short requests dominates. Amazon's advice for that case is to use p50 or p50.9. Then test how the system behaves under false-timeout pressure you impose on purpose. Your TTFT distribution does not have tight bounds, but the internet path is real. So treat the computed p99.9 as a starting point. Then watch the false-timeout count in your run record.</p>
+
+<p>This connects directly to the client you already run. The section above left <code>first_token</code> and <code>stall</code> as names with example numbers. After this section the numbers are derived. First-token latencies from your run record give the first-token deadline. The gaps between chunks on healthy streams give the stall deadline. The section before noted you cannot size it from heartbeats, because no provider documents how often they arrive.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Amazon Builders' Library, "Timeouts, retries, and backoff with jitter". A timeout accepting 0.1% false timeouts uses the p99.9 latency of the downstream call, measured rather than assumed. The same page names the two failure conditions (verified). Phase 1's TTFT measurement and <code>run_recorder.py</code>'s per-request record are his own pipeline from earlier phases.</p>
+</details>
+
+<p>Use it. Exercise 3 in the lab hands you a first-token latency list. Its p50 is 0.3s, p90 is 4s and p99 is 21s. It asks you to rank the samples and pick the deadline at 0.1%. That calculation is Amazon's step 3 run on your own data. The question it answers is whether 21s is your deadline or your p99, and those are not the same number.</p>
+
+<div class="keypoints">
+<p class="remember">A deadline is a measured latency percentile plus the false-timeout rate you chose to accept.</p>
+<p class="trap">"600 seconds to be safe" fails twice. It kills slow healthy calls on a bad day and never fires on a dead one.</p>
+<p class="try">Pull last week's TTFT values from your run record and compute p50, p99 and p99.9 side by side.</p>
+</div>
+
+<p>You can now pick your own deadline numbers from your own data. But the SDK underneath your code already runs a latency and retry policy before the network. The next section reads it, so your wrapper does not double it.</p>
+<h2 data-concept="c5">The SDK&#x27;s own policy, running before the network</h2>
+<p class="why">The SDK already retries and refuses calls inside your process, so your wrapper must know its policy first.</p>
+
+<p>You now pick your four deadlines from your own percentiles, and the stall timeout catches a dead stream. But none of that code runs first. Between your wrapper and the network sits the SDK. It already enforces a latency and retry policy of its own. Back in the bad hour, the team set <code>max_retries=4</code> in the wrapper and the retries still seemed to multiply. This section reads the source to explain why.</p>
+
+<p>The picture in three sentences. The SDK is not a thin HTTP wrapper. It computes a latency prediction before some calls. It loops on failures with its own backoff, and decides from response headers whether to retry. Your code only runs on top of all of that. So one call you write can become many requests you did not write.</p>
+
+<figure class="diagram"><svg viewBox="0 0 640 300" role="img" aria-label="Call stack: your wrapper, SDK retry loop, non-streaming guard, httpx2 timeouts, network">
+<rect x="40" y="16" width="560" height="48" rx="6" fill="var(--accent)" opacity="0.18"/>
+<text x="320" y="36" text-anchor="middle" fill="currentColor">your wrapper: retries, the four deadlines you set</text>
+<text x="320" y="54" text-anchor="middle" fill="currentColor">adds up to 4 attempts per call</text>
+<rect x="40" y="80" width="560" height="48" rx="6" fill="var(--violet)" opacity="0.18"/>
+<text x="320" y="100" text-anchor="middle" fill="currentColor">SDK retry loop: 2 retries, backoff min(0.5·2ⁿ, 8.0), partial jitter</text>
+<text x="320" y="118" text-anchor="middle" fill="currentColor">retries 408, 409, 429 and 5xx, reads retry-after</text>
+<rect x="40" y="144" width="560" height="48" rx="6" fill="var(--warn)" opacity="0.18"/>
+<text x="320" y="164" text-anchor="middle" fill="currentColor">SDK non-streaming guard: refuses long calls before the network</text>
+<text x="320" y="182" text-anchor="middle" fill="currentColor">expected_time = 3600 · max_tokens / 128000, limit 600 s</text>
+<rect x="40" y="208" width="560" height="48" rx="6" fill="var(--ok)" opacity="0.18"/>
+<text x="320" y="228" text-anchor="middle" fill="currentColor">httpx2: connect, read, write, pool deadlines</text>
+<text x="320" y="246" text-anchor="middle" fill="currentColor">read resets per chunk, so it is the stall timeout</text>
+<rect x="40" y="272" width="560" height="24" rx="6" fill="var(--muted)" opacity="0.25"/>
+<text x="320" y="289" text-anchor="middle" fill="currentColor">network</text>
+</svg><figcaption>Four layers add policy before your request reaches the network. Each layer is code you can read.</figcaption></figure>
+
+<details class="predict"><summary>Predict: which line throws on max_tokens=63_000, and why does stream=True fix it?</summary>
+<p><code>client.messages.create(max_tokens=63_000, stream=False)</code> raises a <code>ValueError</code> before any request leaves the process. The SDK computes <code>expected_time = 3600 · 63000 / 128000</code>, about 1,772 seconds. That is over the 600-second limit, so the guard refuses the call. With <code>stream=True</code> the guard is skipped. A streaming call reports its liveness chunk by chunk, so the stall timeout can catch a dead one. The same model and the same account then run to completion.</p>
+</details>
+
+<p>The mechanism has three parts, and you can verify each in the SDK source.</p>
+
+<ol>
+<li><b>The non-streaming guard.</b> Anthropic's SDK runs a <dfn>non-streaming guard</dfn>, a client-side check that refuses a non-streaming call whose predicted duration exceeds ten minutes. The prediction is <code>expected_time = 3600 · max_tokens / 128_000</code>, which assumes about 35.6 output tokens per second. The formula divides by 128,000 because that is how many tokens the model would produce in an hour at that rate. The check reads <code>max_tokens</code>, not your prompt, so the same call with <code>stream=True</code> passes.</li>
+<li><b>The shared retry defaults.</b> Both SDKs default to <code>max_retries=2</code>, so three attempts per call. The sleep before attempt n is <code>min(0.5 · 2ⁿ, 8.0)</code> seconds multiplied by <code>1 − 0.25 · random()</code>. That multiplier sits between 0.75 and 1.0, so it only shortens the sleep. Compare <dfn>full jitter</dfn>, which draws the sleep uniformly from zero up to the whole backoff value and so spreads many failed clients across a wide range. The SDK's narrow range keeps those clients bunched close together.</li>
+<li><b>The retry-after divergence.</b> When a 429 carries <code>retry-after: 300</code>, the two SDKs do opposite things. OpenAI's SDK refuses to retry above 120 seconds and raises at once. Anthropic's SDK honours the header and parks your worker for the full 300 seconds before the next attempt. One gives you a fast failure you must handle, the other gives you a worker that looks hung for five minutes.</li>
+</ol>
+
+<p>Now count the attempts across layers. Your wrapper allows 4 attempts per call. The SDK allows 3 attempts per call underneath it. One logical request can then produce 4 × 3 = <b>12 HTTP requests</b>. During a provider bad hour, most of them land while the server is weakest. During the team's incident, the wrapper's retry count was not the real retry count. The on-call graph of outgoing requests made that visible.</p>
+
+<pre><code data-lang="python"># the arithmetic behind "12 requests from one call"
+wrapper_attempts = 1 + 3   # your retry loop: 3 retries
+sdk_attempts     = 1 + 2   # SDK default max_retries=2
+total            = 4 * 3   # 12 requests possible per logical call
+</code></pre>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Verified from <code>anthropic/_base_client.py</code> v1.12.0 and <code>openai/_base_client.py</code> v3.25.0. The guard reads <code>expected_time = maximum_time * max_tokens / 128_000</code> with <code>maximum_time = 3600</code> and a 600-second refusal limit. Both SDKs share <code>DEFAULT_MAX_RETRIES = 2</code>, <code>INITIAL_RETRY_DELAY = 0.5</code>, <code>MAX_RETRY_DELAY = 8.0</code> and jitter <code>1 - 0.25 * random()</code>. OpenAI raises when retry-after exceeds 120 seconds; Anthropic honours retry-after up to a cap of 4,294,967 seconds.</p>
+</details>
+
+<p>Use it. Lab exercise E5 is the offline client audit. It hands you a client and asks three questions. One is how many attempts one logical call can produce. Another is how much sleep those layers add together, and whether the call carries one deadline or four. You can now answer all three from the source you just read. The answers are fifteen attempts, at most 1.5 seconds of SDK backoff for the default two retries, and four deadlines. None of them bounds total time. The exercise also asks whether the SDK's policy or the wrapper's should be removed. The answer depends on the retry-after divergence above. If your traffic can draw a 300-second retry-after, <code>max_retries=0</code> plus your own policy is a valid choice. The SDK's response to that header is either an unhandled raise or a five-minute parked worker.</p>
+
+<div class="keypoints">
+<p class="remember">One SDK call is already 3 attempts with its own backoff, before your wrapper adds anything.</p>
+<p class="trap">"The SDK is a thin wrapper" costs you 12 attempts per call and a worker parked 300 seconds on retry-after.</p>
+<p class="try">Find <code>max_retries</code> in your client, then read <code>_calculate_nonstreaming_timeout</code> in the installed SDK.</p>
+</div>
+
+<p>This section read what the SDK will do with a 429, but not what the 429 itself is telling you. The next section answers that. A 429 is a capacity report with several different meanings. Whether you should retry at all depends on which one you got.</p>
+<h2 data-concept="c3">A 429 is a capacity report, not an error to retry through</h2>
+<p class="why">A 429 tells you which contract you broke, but only if you read the response.</p>
+
+<p>The section above read the SDK's retry loop, so you now know how it retries. It cannot decide whether a retry makes sense, because that answer lives in the 429 response itself. This section reads that response.</p>
+
+<p>Back in the bad hour. Your retry policy waits on every 429 because the status code is all it checks. Meanwhile the provider has already told you two different things in two different bodies. One says wait 30 seconds. One says no retry will ever work. Your client treats them the same.</p>
+
+<p>A 429 is not one signal. The providers run several independent rate limiters, and each limiter is a token bucket, a rate limiter that refills a fixed amount per unit of time. A 429 alone does not tell you which bucket fired, or that a bucket fired at all. Three facts from the response tell you which one, when it refills, and whether retrying helps at all.</p>
+
+<ol class="flow" data-dir="down">
+<li><b>Did retry-after arrive?</b><span>no means a spend cap on Anthropic, so stop retrying and alert</span></li>
+<li class="hot"><b>Which header family hit zero remaining?</b><span>requests, input tokens and output tokens are separate buckets with separate resets</span></li>
+<li class="ok"><b>What did your request count against?</b><span>cache reads count on OpenAI and are free on most Anthropic models</span></li>
+</ol>
+
+<details class="predict"><summary>Predict: two 429s with the same error type</summary>
+<p>You send a 1.4M-token cached system prompt with 90 concurrent requests and get a 429 with <code>retry-after: 30</code>. A second 429 arrives with the same error type and no <code>retry-after</code> at all. What caused each, and what should the client do differently?</p>
+<p>The first is an ordinary rate limit. A bucket emptied, and <code>retry-after: 30</code> says it refills in 30 seconds, so the client should sleep 30 seconds and retry. The second is a <dfn>spend-cap 429</dfn>, the rejection Anthropic sends when your usage tier's monthly spend cap is reached. It carries the same <code>rate_limit_error</code> type but no <code>retry-after</code>, and Anthropic states that every retry fails until access resumes. That includes the SDK's automatic retries from the section above. The client must surface it as a billing event, not a congestion event, which is exactly the case where your Phase 3 budget guard fires at the same time.</p>
+</details>
+
+<h3>Match one: which bucket fired</h3>
+
+<p>Anthropic meters three buckets separately: requests, input tokens, and output tokens. Each family sends its own <code>remaining</code> and <code>reset</code> headers. OpenAI meters requests and tokens, per minute and per day. Only the header family shows which bucket emptied, so read it before you read the status.</p>
+
+<p>The bucket that fired also tells you the cheapest way back under the limit. The wrong fix wastes a minute.</p>
+
+<ul>
+<li>An empty requests bucket is throttled by fewer concurrent requests, and the reset is usually seconds.</li>
+<li>An empty input-token bucket is throttled by shorter prompts or prompt caching, the prefix reuse from Phase 3.</li>
+<li>An empty output-token bucket is throttled by shorter answers, because Anthropic counts output tokens as they are produced.</li>
+</ul>
+
+<h3>Match two: whether retry-after exists at all</h3>
+
+<p>The spend-cap case from the predict box is the extreme version of a rule that always holds. The presence of <code>retry-after</code> is itself information. An ordinary limit sends it, because the bucket refills on a clock. A spend cap does not, because a human must act. Your client should branch on the header first and on the status code second.</p>
+
+<p>Anthropic makes the spend cap machine-readable through a nested code, <code>enforced_spend_limit_reached</code> in <code>error.details.error_code</code>. A limit you set yourself is a different shape again: it returns HTTP 400, not 429. Check the code before you page anyone.</p>
+
+<h3>Match three: what your request mix bound against</h3>
+
+<p>The two providers count the same request differently. On OpenAI, cached tokens count toward the token limit, so prompt caching saves money only. On Anthropic, cache reads are free for most models, so prompt caching buys capacity as well as money. The docs' worked example takes a limit of 2,000,000 input tokens per minute and an 80% hit rate. That mix processes an effective 10,000,000 input tokens per minute.</p>
+
+<pre><code data-lang="text">2,000,000 fresh tokens / (1 − 0.80 cache hit rate) = 10,000,000 effective
+one exception in the docs: Claude Haiku 3.5 counts cache reads toward the limit</code></pre>
+
+<p>This makes the Phase 3 prompt-layout work a capacity lever on Anthropic. Moving shared context into the cached prefix raises your throughput ceiling without a tier change.</p>
+
+<h3>Two traps that survive all three matches</h3>
+
+<p>The reset values disagree in format. OpenAI sends a duration string like <code>6m0s</code>. Anthropic sends an RFC 3339 timestamp. Code that parses one format misparses the other without an error. A wrong reset time either retries every client at once or waits long after capacity returned.</p>
+
+<p>The overload status also disagrees. OpenAI returns 503 with <code>server_is_overloaded</code>. Anthropic returns 529, which is not a standard HTTP status. A handler that enumerates the 5xx codes it knows misses 529, so branch on <code>status >= 500</code> instead.</p>
+
+<p>Finally, OpenAI runs a <dfn>ramp limit</dfn>, a cap on how fast your traffic may grow, not on how much you may send. Past roughly 1 million input tokens per minute, growth is limited to 50% every 15 minutes. Breaking it returns a 429 with the code <code>slow_down</code>, and the docs say it can fire while you are inside both your request and token limits. Waiting 15 seconds does not lift it, because the limiter watches your acceleration. The only fix is a slower ramp, which matters for any feature launch that moves traffic in one step.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Anthropic's rate-limit docs state that a tier spend-cap 429 carries <code>error_code: enforced_spend_limit_reached</code> and "the response has no retry-after header. Retrying, including the SDK's automatic retries, fails until access resumes". The same page carries the 2M to 10M cache-read example and the request, input-token and output-token header families. Read in the raw docs. OpenAI's rate-limit page carries <code>slow_down</code>, the 50%-per-15-minutes ramp rule and 503 <code>server_is_overloaded</code>. A user-set spend limit returning 400 is from the same Anthropic docs section. All verified.</p>
+</details>
+
+<p>Use it. Lab exercise E7 prints your provider's rate-limit headers and checks the reset format against the documented OpenAI and Anthropic formats. The question it answers is whether your handler reads any header at all, and whether it would catch a 529.</p>
+
+<div class="keypoints">
+<p class="remember">Match the bucket, the retry-after and your request mix before you let anything retry a 429.</p>
+<p class="trap">"A 429 means wait for retry-after" retries a spend cap forever and reports it as an outage.</p>
+<p class="try">Log one real 429 today and check which header family reported a remaining of zero.</p>
+</div>
+
+<p>You can now decide whether one request should retry. The next section measures what happens when a whole team of clients retries at once, in the table behind Backoff did not fix Story 2.</p>
+<h2 data-concept="c4">Backoff did not fix Story 2: the measured table</h2>
+<p class="why">Your team's standard fix, backoff with jitter, scored 22.7% where doing nothing scored 89.0%.</p>
+
+<p>Phase 0's Story 2 left a rule without a mechanism. Retries turned a degrading provider into an outage. Phase 0 could not yet say which policy would have saved it. The section above showed you when one request should retry. This section measures what happens when every client's requests retry at once. Then you can see which client-wide policies survive a burst.</p>
+
+<p>The setup is the bad hour from your running case. One server handles 20 requests per second. Normal traffic is 12 per second, and a burst raises it to 30 per second for eight seconds. The same burst runs four times, once per client policy, and each number below is the mean of five runs. <dfn>Retry amplification</dfn> is the ratio of requests a policy sends to requests the users asked for. 1.0x means the client added nothing, 3.18x means it more than tripled the load on an already overloaded server.</p>
+
+<div class="stats">
+<div class="stat"><b>22.7%</b><span>success with backoff, vs 89.0% doing nothing</span></div>
+<div class="stat"><b>3.18x</b><span>requests sent by backoff with jitter</span></div>
+<div class="stat"><b>5.2 s</b><span>recovery time of the one policy that shed load</span></div>
+</div>
+
+<table>
+<tr><th>policy</th><th>sent</th><th>amplifier</th><th>success</th><th>wasted</th><th>recovers</th></tr>
+<tr class="pick"><td>none</td><td>1,229</td><td>1.00x</td><td class="ok">89.0%</td><td>135</td><td>18.2 s</td></tr>
+<tr><td>blind retry</td><td>3,855</td><td>3.14x</td><td class="bad">22.7%</td><td>3,576</td><td class="bad">never</td></tr>
+<tr><td>backoff + jitter</td><td>3,896</td><td>3.18x</td><td class="bad">22.7%</td><td>3,617</td><td class="bad">never</td></tr>
+<tr class="pick"><td>health signal</td><td>1,060</td><td>0.86x</td><td class="ok">85.6%</td><td>8</td><td>5.2 s</td></tr>
+</table>
+
+<details class="predict"><summary>Predict: your team adds exponential backoff with jitter after Story 2, and the next burst still scores 22.7% against 89.0% for doing nothing. Why did the standard fix fail, and what property does the policy that recovered in 5.2 seconds have?</summary>
+<p>Backoff changes <em>when</em> retries arrive, not <em>how many</em> arrive. So the amplifier stays at 3.18x, and the extra load still lands while the server is clearing its queue. The health-signal policy is the only row that sends less than the users asked for, 0.86x. It drops requests at the client instead of adding attempts. That is the property: under overload, only a policy that reduces total load can recover.</p>
+</details>
+
+<p>Three rows deserve a slow read, because two of them break the belief most engineers carry into this table.</p>
+
+<ol>
+<li><b>Blind retry converted a bad hour into an outage.</b> Doing nothing succeeded 89.0% of the time over the burst. Retrying each failure sent 3,855 requests into the same eight seconds, and the queue swallowed nearly all of them.</li>
+<li><b>Backoff with jitter tied blind retry exactly.</b> Waiting longer between attempts sounds safer, but the server recovers by draining its queue, and delayed retries land in that same queue. The row shows it: 3,896 requests sent, 22.7% success, recovery never.</li>
+<li><b>The health signal wasted 8 requests where blind retry wasted 3,576.</b> It watches TTFT, the time from sending a request to the first token coming back, and stops sending when that number crosses the target, so the server gets silence instead of more work.</li>
+</ol>
+
+<p>The mechanism under all four rows is one loop. Your retries are not separate from the load, they are the load. A retry enters the server exactly like a fresh request. Each timeout produces one more unit of work for a server. That server is already failing to finish the work it has.</p>
+
+<ol class="flow">
+<li class="hot"><b>more retries</b><span>every failed attempt re-enters as fresh load</span></li>
+<li><b>deeper queue</b><span>arrivals stay above the 20-per-second service rate</span></li>
+<li><b>higher TTFT</b><span>each request waits behind the growing queue</span></li>
+<li class="bad"><b>more timeouts</b><span>each timeout comes back as another retry</span></li>
+</ol>
+
+<p>Now the uncomfortable part, the reason this defect lives in experienced teams' code. Run the same four policies at 30% of capacity:</p>
+
+<div class="bars">
+<div class="bar" style="--v:99.7" data-label="none at 30% load" data-value="99.7%"></div>
+<div class="bar" style="--v:99.7" data-label="blind at 30% load" data-value="99.7%"></div>
+<div class="bar" style="--v:99.7" data-label="backoff at 30% load" data-value="99.7%"></div>
+<div class="bar" style="--v:99.7" data-label="health at 30% load" data-value="99.7%"></div>
+</div>
+
+<p>All four rows are identical, because at low load every retry succeeds and the amplifier costs nothing visible. Every test that does not overload the server passes, so the defective policy ships. The defect only appears on the one day the provider degrades, which is the one day you needed the policy.</p>
+
+<p>Two published postmortems show the same mechanism at production scale. In each, a client-side loop made the recovery longer:</p>
+
+<ul>
+<li>GitHub's August 2026 outage report says errors "triggered a client-side retry loop that increased traffic during recovery" in Copilot services, and its remediation list is retry limits, retry budgets and variable timeouts.</li>
+<li>Cloudflare's September 2025 dashboard outage started when a React effect issued the same API call many times per render, and on recovery every dashboard re-authenticated at once, a second burst the team had to absorb.</li>
+</ul>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The four-row table and the sweep come from his own offline simulation, <code>health_signal.py</code>. Burst of 30 requests per second against a 20-per-second server for 8 seconds. Mean of five runs, run on 2026-09-17. This is the Story 2 artifact from Phase 0, quoted from his phase and not re-run here. The GitHub wording is from "The August 17 outage, and the work ahead" on github.blog, verified. The Cloudflare mechanism is from the September 12 dashboard and API outage post on blog.cloudflare.com, verified.</p>
+</details>
+
+<p>Use it. Lab exercise E2 runs the simulation's self-test before you trust it. E4 removes the health signal's signal-clearing rule to show what breaks. The question the table answers for you beforehand: which column would your current client's policy land in today?</p>
+
+<div class="keypoints">
+<p class="remember">Under overload only a policy that sends less recovers; backoff delays retries without reducing them.</p>
+<p class="trap">"Backoff with jitter is the standard fix" ties blind retry at 22.7% and looks perfect in every light-load test.</p>
+<p class="try">Run <code>python phase05_operations/health_signal.py --sweep</code> and compare the first and third tables.</p>
+</div>
+
+<p>This table says which policy wins but not how to build it. The next section builds that policy from four named controls. It asks which layer, which budget and which signal yours should use.</p>
+<h2 data-concept="c4">The policy that sends less: one layer, a budget, and a TTFT breaker</h2>
+<p class="why">One policy in the table recovered, so this section builds it from four controls you can name.</p>
+
+<p>The table in the last section gave one verdict. Under a 30-per-second burst against a 20-per-second server, only the policy that sent less recovered, in 5.2 seconds. Blind retry and backoff with jitter both scored 22.7% and never recovered. This section builds that winning policy. It is four controls, added in order of cost, and each one answers a weakness of the control before it.</p>
+
+<ol class="flow" data-dir="down">
+<li><b>one layer</b><span>retry at one point in the stack, removing the exponent</span></li>
+<li><b>retry budget</b><span>limit retries as a share of traffic, not per request</span></li>
+<li class="ok"><b>full jitter</b><span>draw the sleep from the whole interval, not the top quarter</span></li>
+<li class="hot"><b>health signal</b><span>stop sending when TTFT crosses the SLO, before errors start</span></li>
+</ol>
+
+<h3>1. Retry at one layer</h3>
+
+<p>This control costs nothing, because it is a deletion. The failure it removes is multiplication across layers. Your wrapper retries 3 times on top of the SDK's 2 retries. One user request can become 4 x 3 = 12 attempts. The published numbers show where this ends. The Google SRE Book describes three layers of 4 attempts each producing 4&sup3; = 64 requests per user action. The Amazon Builders' Library counts five layers at three tries each as 3&#8309; = 243x. Both sources give the same rule, and Amazon states the reason in three words: <b>retries are selfish</b>. Each layer protects itself by moving its failure onto the layer below, so only one layer is allowed to.</p>
+
+<p>In your client that means one decision: the SDK keeps `max_retries=0` or your wrapper does no retrying, never both.</p>
+
+<h3>2. A retry budget</h3>
+
+<p>One layer caps the multiplication per request. But a failing server fails every request, so even 3 attempts each triples the load for the whole outage. A <dfn>retry budget</dfn>, a limit on retries as a share of all traffic, caps the total. The Google SRE Book's version allows 60 retries per minute per process and fails the request beyond that. Brooker's version is a token bucket: each success deposits a fraction of a token, and each retry spends one token.</p>
+
+<p>The deposit ratio is the design decision, because it <em>is</em> the failure rate where retries stop. With 0.1 tokens per success, each retry needs ten successes to pay for it. So above a 10% failure rate, the bucket drains and retries stop on their own. That is the property a per-request limit never has. It sheds load exactly when shedding matters, and it is invisible when the server is healthy.</p>
+
+<h3>3. Full jitter, not the SDK's jitter</h3>
+
+<p>The budget decides how many retries happen; jitter decides when they land. Both SDKs compute the sleep as `(0.75&nbsp;..&nbsp;1.0) x min(0.5 * 2^n, 8.0)`. Their jitter can only shorten the sleep by at most a quarter. But a hundred clients that failed together still retry in a narrow band. <dfn>Full jitter</dfn> draws the sleep uniformly from the whole interval: `sleep = random_between(0, min(cap, base * 2**attempt))`. The AWS Architecture Blog's simulation of 100 competing clients needed about 800 calls with full jitter. Against no jitter, it needed about 2,400 calls. The same source names the limit. Jitter improves the constant factor, while total work still grows with the square of the client count. That is why jitter is control three and not the whole fix.</p>
+
+<h3>4. The health signal, and the one line it cannot lose</h3>
+
+<p>The first three controls still send retries at a sick server, only fewer and better spread. The last control stops sending at all. It watches a <dfn>health signal</dfn>, a measurement that rises before requests fail. Here that signal is TTFT, the wait for the first token, because Phase 2A showed TTFT measures queue depth. The error rate is a lagging indicator: by the time requests fail, the queue is already deep. TTFT rises while every request still succeeds, so it tells you to stop before the errors do.</p>
+
+<p>The mechanism is a <dfn>circuit breaker</dfn>. It is a switch in the client that rejects requests at once when open. It sends nothing to the server:</p>
+
+<ol class="steps">
+<li>Track a rolling window of recent TTFT values, at least 10 samples.</li>
+<li>When the p95 of that window crosses your SLO, open the breaker for a cool-down interval and shed requests immediately, fast and cheap.</li>
+<li>When you open it, <b>discard the measurement window</b>, because those samples describe an overloaded server.</li>
+<li>After the cool-down, let a few probes through (3 by default in the script), then collect 10 fresh samples before the p95 check decides again.</li>
+</ol>
+
+<pre><code data-lang="python">if now &lt; circuit_open_until:
+    failed += 1                  # OPEN: shed, fast and cheap
+    continue
+if len(recent_ttft) &gt;= 10:
+    p95 = sorted(recent_ttft)[int(len(recent_ttft) * 0.95) - 1]
+    if p95 &gt; args.ttft_slo:
+        circuit_open_until = now + args.circuit_seconds
+        recent_ttft.clear()      # discard the stale signal
+        probes = 0
+        failed += 1
+        continue</code></pre>
+
+<p>The clear step is the line this control cannot lose. Without it, the breaker wakes after the cool-down. It reads measurements taken while the server was overloaded. It concludes the server is still sick, and opens again forever. The mutation run, which removes one rule and re-runs the simulation, shows the cost of that one line:</p>
+
+<table>
+<tr><th>change</th><th>health success</th><th>health recovery</th><th>self-test</th></tr>
+<tr class="pick"><td>none, the shipped code</td><td class="ok">85.6%</td><td class="ok">5.2 s</td><td class="ok">passes</td></tr>
+<tr><td><code>recent_ttft.clear()</code> removed</td><td class="bad">57.3%</td><td class="bad">30.1 s</td><td class="bad">fails 2 checks</td></tr>
+<tr><td>half-open branch removed</td><td class="ok">85.4%</td><td class="ok">5.2 s</td><td class="ok">still passes</td></tr>
+</table>
+
+<p>Removing the clear costs 28 points of success and six times the recovery time. Removing the explicit half-open branch costs almost nothing here. This is because the cleared window already forces 10 fresh samples before the next decision. One weakness to know: each client trips its own breaker on its own evidence. So a fleet trips at about half the rate the global failure rate suggests. That is why you run a budget <em>and</em> a breaker rather than either alone.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The mutation table and the shipped code come from his own simulation, <code>health_signal.py:131-157</code>. The mutation run on 2026-09-17 is quoted from his phase and not re-run here. The 64-requests example is from the Google SRE Book chapter on addressing cascading failures. The 243x example and "retries are selfish" are from the Amazon Builders' Library. The 800-versus-2,400-calls result is from the AWS Architecture Blog's exponential backoff and jitter post, as reported in the phase. The note could confirm only a cut of more than half. Brooker's fleet-trips-slower observation is from the same comparison, reported in the phase.</p>
+</details>
+
+<p>Use it. Exercise E4 reruns the mutation row yourself. Delete <code>recent_ttft.clear()</code> in your copy of <code>health_signal.py</code>, run it once, and watch recovery stretch from 5.2 seconds past 30. The question it answers: which of the four controls does your current client have? Which one did you assume the SDK was doing for you?</p>
+
+<div class="keypoints">
+<p class="remember">One layer, a budget, full jitter, then a TTFT breaker that sheds load, in that order.</p>
+<p class="trap">A breaker that keeps its old measurements reads an overloaded past and never closes again.</p>
+<p class="try">Delete <code>recent_ttft.clear()</code> in <code>health_signal.py</code> and rerun; recovery goes from 5.2 s to 30.1 s.</p>
+</div>
+
+<p>You can now configure a streaming client with four named deadlines. You can pick the numbers from your own TTFT percentiles and read a 429 as a capacity report. You can write a retry policy that sheds load instead of adding it. The next section restates the claims of the whole phase so you can check each one in your own words. After that, Phase 5B answers the question this client sets up. Given the run record it now writes, what can you promise as an SLO? What do you do when the promise breaks?</p>
+<h2 data-kind="recall">What you can do now, and what comes next</h2>
+<p>You started with one bad morning: p99 spiked, the team added timeouts and retries, and the incident got worse. Each section answered one part of why. Read the claims again now and check each one in your own words.</p>
+
+<ol>
+<li><b>One timeout is four deadlines, and none bounds total time.</b> A bare <code>timeout=600</code> sets connect, read, write and pool independently, and the read timeout resets on every chunk, so a dead stream hangs for ten minutes while a healthy long answer survives. (Your one timeout is four timeouts, and none is a total.)</li>
+<li><b>The first-token deadline and the mid-stream retry are yours.</b> No transport fires on the time to the first token, so you wrap the first part of your own consume loop, and neither SDK retries after the first byte, so a stream dead at token 400 is your decision: fail, label the partial, or continue. (The deadline no SDK gives you, and the retry no SDK does.)</li>
+<li><b>A timeout number is a percentile of your own measurements, not a guess.</b> Choose the false-timeout rate you accept, read the matching percentile of measured downstream latency, and use it as the deadline; 0.1% false timeouts means p99.9. (Where the number comes from: your own p99.9.)</li>
+<li><b>The SDK runs a policy before the network.</b> Both SDKs retry twice by default with a jitter that only shortens, Anthropic refuses non-streaming calls it predicts will exceed ten minutes, and a wrapper that ignores this can stack 12 attempts across two layers. (The SDK's own policy, running before the network.)</li>
+<li><b>A 429 is a capacity report.</b> Match the header family to know which bucket fired, treat a missing <code>retry-after</code> as a spend cap where every retry fails, and read the reset value in that provider's format before you wait. (A 429 is a capacity report, not an error to retry through.)</li>
+<li><b>Only a load-shedding retry policy recovers.</b> Backoff with jitter delays retries without reducing their number and ties blind retry at 22.7% success in your simulation, while the health-signal policy sheds load, sends 0.86x the requests, and recovers in 5.2 seconds; the fix is one layer, a retry budget, full jitter, then a TTFT breaker that clears its state when it opens. (Backoff did not fix Story 2; The policy that sends less.)</li>
+</ol>
+
+<p>You can now configure a streaming client with four named deadlines. You can pick the numbers from your own TTFT percentiles and read rate-limit headers as a capacity report. You can write a retry policy that sheds load instead of adding it. The lab that follows lets you run each mechanism yourself. The checkpoint tests whether you can apply them to a new scenario with numbers.</p>
+
+<p>Phase 5B answers the question this client sets up. Your client now writes a run record with named deadlines, attempt counts and the retry markers. These tell a retried request from a fresh one. Given that record, what can you promise as an SLO, and what do you do when the promise breaks?</p>
+<h2 data-kind="lab">Hands-on lab</h2>
+<p>The concepts above make claims you can now run. Five exercises are offline. E6 and E7 need an API key and cost under $0.05 in total. Work them in the order below; each group names the claim it proves.</p>
+
+<p>The first two exercises test the claim that one bare timeout number sets four independent idle deadlines, and that the read deadline is already a stall detector.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1</b> <span class="tag">offline</span></label> Read the three deadlines.
+<ul>
+<li>Run: <code>python phase05_operations/run_recorder.py --self-test</code></li>
+<li>Expected: 19 checks pass, including "a stall is detected" and "a late first token is detected".</li>
+<li>Then open <code>record_stream</code> and find the three deadline checks. The exception says <b>which</b> deadline fired.</li>
+<li>Also find the check that fires when the first token arrives late. Then find the line where live mode sets the transport read timeout. See section 5.1.</li>
+<li>Teaches: "it timed out" is not a diagnosis.</li>
+</ul></li>
+<li><label><input type="checkbox"> <b>E6</b> <span class="tag">live, unverified</span></label> Give a stream the wrong timeout, then the right one. Costs about $0.02.
+<ul>
+<li>Make a streaming call with <code>timeout=5</code> as a bare number, and ask for a long answer. Then make the same call with <code>httpx2.Timeout(None, connect=5.0, read=20.0, write=10.0, pool=5.0)</code>.</li>
+<li>Expected: the first call can fail on a healthy long answer. The second call does not fail, and it still catches a dead stream.</li>
+<li>Teaches: a single number sets four independent idle timeouts, not one total budget.</li>
+</ul></li>
+</ul>
+
+<p>The next exercise tests the claim that the SDK already runs a retry and timeout policy underneath your code, before the network.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E5</b> <span class="tag">offline</span></label> Audit your own client.
+<ul>
+<li>Find the <code>max_retries</code> and <code>timeout</code> that your code passes to its LLM client. If it passes neither, find the SDK defaults.</li>
+<li>Answer three questions:
+<ol>
+<li>How many attempts does one call make in total?</li>
+<li>What is the total added delay across those retries?</li>
+<li>Does a single <code>timeout=N</code> in your code set one deadline or four?</li>
+</ol></li>
+<li>Teaches: the defaults are two retries with at most 1.5 seconds of total backoff. That is much less protection than most people assume.</li>
+</ul></li>
+</ul>
+
+<p>The next exercise tests the claim that a 429 is a capacity report: which bucket fired, whether <code>retry-after</code> exists, and in which format.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E7</b> <span class="tag">live, unverified</span></label> Cause a 429 and read what it tells you. Costs about $0.03, break-it.
+<ul>
+<li>Send requests concurrently until the server rejects one. Print every response header whose name contains <code>ratelimit</code> or <code>retry</code>.</li>
+<li>Expected: your provider's limit, remaining and reset values. Check the reset <b>format</b>. OpenAI sends a duration such as <code>6m0s</code>. Anthropic sends an RFC 3339 timestamp.</li>
+<li>Then check whether your code reads any of these headers today.</li>
+<li>Teaches: a 429 carries the server's own capacity report, and most clients discard it.</li>
+</ul></li>
+</ul>
+
+<p>The last group tests the measured table: retries multiply load, backoff with jitter ties blind retry, and only the load-shedding signal recovers. Run the self-test first, because a simulation you have not tested is only a story.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E2</b> <span class="tag">offline</span></label> Test the retry simulation before you believe it.
+<ul>
+<li>Run: <code>python phase05_operations/health_signal.py --self-test</code></li>
+<li>Expected: 9 checks pass. Two of them are "backoff is not meaningfully better than blind retry" and "doing nothing beats both retry policies here".</li>
+<li>Teaches: a simulation you have not tested is only a story.</li>
+</ul></li>
+<li><label><input type="checkbox"> <b>E3</b> <span class="tag">offline</span></label> Watch retries turn a spike into an outage.
+<ul>
+<li>Run: <code>python phase05_operations/health_signal.py</code></li>
+<li>Expected: no-retry succeeds on 89.0%. Blind retry succeeds on 22.7% and sends 3.14x the requests. The health signal succeeds on 85.6% and sends 0.86x.</li>
+<li>Write down the wasted column for each policy. Blind retry wastes 3,576 requests. The health signal wastes 8.</li>
+<li>Teaches: retries are load.</li>
+</ul></li>
+<li><label><input type="checkbox"> <b>E4</b> <span class="tag">offline</span></label> Find out why this bug ships, then break the breaker.
+<ul>
+<li>Run: <code>python phase05_operations/health_signal.py --sweep</code></li>
+<li>Expected: in the first table, at 30% of capacity, all four policies score 99.7% and look the same.</li>
+<li>Then remove the rule that clears the signal, in a copy. Name the copy: <code>B=phase05_operations/hs_broken.py</code></li>
+<li>Make it: <code>sed 's/recent_ttft.clear()/pass/' phase05_operations/health_signal.py &gt; $B</code></li>
+<li>Run: <code>python $B</code></li>
+<li>Expected: the health row drops to 57.3% success, and recovery takes 30.1 s instead of 5.2 s.</li>
+<li>Run: <code>python $B --self-test</code></li>
+<li>Expected: <code>2 FAILED</code>. The checks "the health policy keeps most requests alive" and "the health policy recovers within 10 s of the burst" fail. An earlier version of the self-test passed here, because it never checked recovery.</li>
+<li>Clean up: <code>rm $B</code></li>
+<li>Teaches: a test that does not overload the server cannot see this defect. A test that does not check recovery cannot see the broken rule.</li>
+</ul></li>
+</ul>
+
+<div class="callout note">Every offline command above was run on the author's machine on 2026-09-14 and again on 2026-09-17, with matching outputs. E6 and E7 had no API key at review time, so their flag names and header names were checked against the provider documentation and the SDK source but not executed live.</div>
+
+<p>The checkpoint that follows tests the same claims on new scenarios with numbers you have not seen, so do it after the lab and not instead of it.</p>
+<h2 data-kind="checkpoint">Checkpoint 5A</h2>
+<p>Each question sets a scenario with numbers you have not seen yet. Write your answer first, then open the sketch and compare. The point is not to match the wording but to check that the arithmetic and the mechanism agree with yours.</p>
+
+<ol class="steps">
+<li><b>The SDK retry arithmetic.</b> Your SDK uses its defaults: two retries, a backoff of <code>min(0.5 × 2ⁿ, 8)</code> seconds, and a jitter multiplier from 0.75 to 1.0. (a) Compute the minimum and maximum of each of the two sleeps. (b) Compute the total added delay for one failed call. (c) Your provider's rate limit resets on a 60-second token bucket (a bucket that refills its capacity over a fixed window). Say whether those retries can succeed, and why.</li>
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) First sleep: 0.5 × 2⁰ = 0.5 s, times 0.75 to 1.0, so 0.375 to 0.5 s. Second sleep: 0.5 × 2¹ = 1.0 s, times the same range, so 0.75 to 1.0 s. (b) Between 1.125 and 1.5 seconds in total. (c) They cannot succeed. In 1.5 seconds, a token bucket on a 60-second window refills 1.5 / 60 = 2.5% of its capacity. All three attempts land in the same congested window. The retries add load and achieve nothing.</p>
+</details>
+
+<li><b>"Backoff with jitter fixed it."</b> A colleague says: "We added exponential backoff with jitter. So the retry storm is fixed." Give two reasons why that may be false. One reason is about what backoff changes and does not change. The other is about the jitter your SDK implements.</li>
+<details class="answer"><summary>Answer sketch</summary>
+<p>First, backoff spreads retries over time, but it does not reduce their number. Under a burst, the same volume still arrives, only later. In the simulation it arrived while the server was still clearing its queue, and it scored the same as blind retry, 22.7%. Second, the SDK jitter multiplier runs from 0.75 to 1.0, so it can only shrink the sleep, by at most a quarter. Full jitter draws the sleep from zero to the cap, and that wide range is what spreads out clients that fail together.</p>
+</details>
+
+<li><b>The two-layer exponent.</b> Your service calls an LLM through a gateway, and the gateway calls the provider. Each layer retries three times. (a) Compute the worst-case number of requests that one user action produces at the provider. (b) Name the one change that removes the exponent. (c) Your provider returns <code>retry-after: 300</code>. Describe what each official SDK does with that header, and why one of them makes things worse.</li>
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) Read "retries three times" as three attempts per layer. Then the provider sees 3 × 3 × 3 = 27 requests. Read it as three retries after the first attempt. Then each layer makes four attempts, and 4 × 4 × 4 = 64. In both cases the count is a product, not a sum. (b) Retry at one layer only. (c) The OpenAI SDK does not retry when <code>retry-after</code> is above 120 seconds. That is the safe behaviour. The Anthropic SDK ignores the header above 60 seconds and retries on its normal backoff. So <code>retry-after: 300</code> produces two retries after at most 1.5 seconds of total waiting. Both fail, and both add load during an overload that the server just reported.</p>
+</details>
+
+<li><b>The stream that dies at token 400.</b> A stream returns 400 tokens of an expected 500, then goes silent forever. Your client sets <code>timeout=600</code> as a bare number. (a) Trace what happens next, and how long it takes. (b) State what the SDK does about the partial response. (c) Give the timeout configuration that would catch this in 20 seconds, and name each deadline in it.</li>
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) A bare number sets connect, read, write and pool all to 600 seconds. The read timeout limits the gap between chunks, so the client waits ten full minutes of silence before it raises an error. (b) Nothing. Neither SDK retries after the first byte of a stream, because the retry loop ends when the response headers arrive. You must handle the partial response. (c) <code>httpx2.Timeout(None, connect=5.0, read=20.0, write=10.0, pool=5.0)</code>. Connect limits opening the socket. Read limits the silence between chunks, and it fires in this case. Write limits sending. Pool limits the wait for a free connection. The total is unlimited on purpose, because a long answer is not a failure.</p>
+</details>
+
+<li><b>Design the client policy.</b> Your feature calls one provider, and it must survive a burst of four times normal traffic. Write the client policy. Cover five points: which signal says you are in trouble, why that signal and not the error rate, what you do when it trips, how you decide to resume, and the one metric that shows afterwards whether the policy helped.</li>
+<details class="answer"><summary>Answer sketch</summary>
+<p>The signal is a rolling TTFT percentile. TTFT (the wait for the first token) measures queue depth, so it rises before any request fails, while the error rate moves only when the queue is already deep. When TTFT crosses the SLO, open a circuit and drop requests, which fails fast and adds no load. Resume through a half-open state: after a cool-down, let a few probe requests through and judge from fresh measurements. Clear the measurements taken during the overload, or the breaker stays open; in the simulation, removing that clear step cut success from 85.6% to 57.3%. Afterwards, the deciding metric is requests sent divided by requests offered. That ratio is the amplification factor, and the success rate alone cannot separate a policy that helped from one that was lucky.</p>
+</details>
+</ol>
+
+<p>Questions 1 and 3 draw on the deadline and SDK sections of this phase. Question 5 asks for the four controls in order; once you can write it, the cheatsheet compresses this phase for review, and Phase 5B asks what you can promise an SLO built on the run record this client now writes.</p>
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+<pre class="cheatsheet">THE FOUR DEADLINES (a total-duration timeout is the wrong shape for a stream)
+  connect       socket never opened                    httpx2 connect
+  first token   accepted, never started                no SDK has this: wrap your own loop
+  stall         stream started, then died              httpx2 read IS this, it resets per chunk
+  total         runaway cost, last resort only         your own outer deadline
+  httpx2.Timeout(None, connect=5.0, read=20.0, write=10.0, pool=5.0)
+  timeout=600 is NOT a 10-minute budget. It is FOUR 10-minute idle deadlines.
+  SDK default: httpx2.Timeout(timeout=10*60, connect=5.0)
+  NEITHER SDK RETRIES AFTER THE FIRST BYTE OF A STREAM.
+  Pick the number: accept 0.1% false timeouts, use your own measured p99.9.
+
+RATE LIMITS (the two providers agree on almost nothing)
+                        OpenAI                  Anthropic
+  header prefix         x-ratelimit-            anthropic-ratelimit-
+  reset format          duration "6m0s"         RFC 3339 timestamp
+  remaining             exact                   rounded to nearest 1000
+  cached tokens count   yes                     no (Haiku 3.5 excepted)
+  overload status       503                     529 (non-standard)
+  Anthropic: caching is a CAPACITY decision. 2M ITPM at 80% hit = 10M effective
+  input tokens per minute.
+  The 429 you must NOT retry: Anthropic spend cap, no retry-after,
+  error_code enforced_spend_limit_reached. Every retry fails until access resumes.
+  OpenAI ramp limit: above ~1M input TPM, grow at most 50% per 15 min (code slow_down).
+  Match >= 500, never a list, or you miss 529.
+
+SDK DEFAULTS (identical in both, checked at openai 3.25 / anthropic 1.12)
+  max_retries 2, so 3 attempts || statuses 408, 409, 429, >= 500
+  backoff   min(0.5 * 2^n, 8.0)
+  jitter    1 - 0.25*random(), multiplier 0.75..1.0, it can ONLY shrink
+  retry-after: OpenAI refuses to retry above 120 s; Anthropic ignores the header
+  above 60 s and retries anyway.
+  full jitter instead: random_between(0, min(cap, base * 2^n))
+  Anthropic non-streaming guard: expected_time = 3600 * max_tokens / 128_000,
+  raises ValueError when it exceeds 600 s. stream=True bypasses it.
+  Your 3 retries on top of the SDK's 2 = 3 * 4 = 12 attempts.
+
+RETRIES UNDER LOAD (his simulation: burst to 2.5x for 8 s, mean of 5 runs)
+  policy    sent   amp    success  wasted  recover
+  none      1229   1.00x   89.0%     135   18.2 s
+  blind     3855   3.14x   22.7%    3576   never
+  backoff   3896   3.18x   22.7%    3617   never    <- NOT better than blind
+  health    1060   0.86x   85.6%       8    5.2 s
+  AT 30% LOAD ALL FOUR SCORE 99.7%. That is why this bug ships.
+  Amplification is a PRODUCT across layers: 3 layers x 4 attempts = 64.
+
+WHAT WORKS, in order
+  1. retry at ONE layer              removes the exponent
+  2. a retry budget                  token bucket; the deposit ratio IS the
+                                     failure rate at which retries stop
+  3. full jitter, not the SDK's
+  4. a health signal that STOPS you sending   <- the only one that recovered
+
+THE HEALTH SIGNAL
+  The signal is TTFT, not the error rate. TTFT is queue depth, so it rises first.
+  Circuit breaker:
+    CLEAR the stale measurements when it opens. Without the clear: 57.3% success,
+    30.1 s recovery in the mutation run.
+    A half-open probe state: little effect in this simulation.
+  Record x-stainless-retry-count, or you cannot tell retries from new load. (Cloudflare)
+
+THE COMMANDS
+  run_recorder.py --self-test              the deadline checks, offline
+  health_signal.py --self-test             the simulation, offline
+  health_signal.py                         four policies under a burst
+  health_signal.py --sweep                 why it is invisible at light load</pre>
+<h2 data-kind="post">What you could post</h2>
+<div class="cards" data-cols="2">
+<div class="card">
+<h4>The retry table</h4>
+<p>I simulated a burst at 2.5x server capacity, mean of five runs. Doing nothing scored 89.0% success. Blind retries scored 22.7%. Exponential backoff with jitter, the standard fix, also scored 22.7%, because it delays retries without reducing their number. The only policy that recovered, in 5.2 seconds, was one that stopped sending.</p>
+<p>His because the numbers are his. The four-policy table came from his own simulation. The surprise in it, backoff tying blind retry, contradicts the advice everyone repeats.</p>
+</div>
+<div class="card">
+<h4>The stall detector you already have</h4>
+<p>Both Python SDKs ship timeout=600 as their default. That number is not a 10-minute call budget. It is an inactivity deadline that resets on every chunk, so it is already the stall detector people hand-write. A dead stream under it hangs for ten minutes.</p>
+<p>His because he measured it. His mock-endpoint run showed each arriving chunk resetting the read deadline, against a default he read in the SDK source.</p>
+</div>
+</div>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+<li><a href="https://pydantic.dev/docs/httpx2/advanced/timeouts/">pydantic.dev/docs/httpx2/advanced/timeouts/</a> — the definition behind the stall detector: the read timeout is "5 seconds of network inactivity", and the four timeout types.</li>
+<li><a href="https://raw.githubusercontent.com/openai/openai-python/v3.25.0/src/openai/_constants.py">openai-python v3.25.0, _constants.py</a> — the default <code>httpx2.Timeout(timeout=10 * 60, connect=5.0)</code> used in the four-deadlines section.</li>
+<li><a href="https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/v1.12.0/src/anthropic/_constants.py">anthropic-sdk-python v1.12.0, _constants.py</a> — the same 600-second default on the Anthropic side.</li>
+<li><a href="https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/v1.12.0/src/anthropic/_base_client.py">anthropic-sdk-python v1.12.0, _base_client.py</a> — the non-streaming guard formula, the retry constants, and the jitter line <code>1 - 0.25 * random()</code>.</li>
+<li><a href="https://raw.githubusercontent.com/openai/openai-python/v3.25.0/src/openai/_base_client.py">openai-python v3.25.0, _base_client.py</a> — the shared retry loop and the refusal to retry a retry-after above 120 seconds.</li>
+<li><a href="https://platform.claude.com/docs/en/api/rate-limits">platform.claude.com/docs/en/api/rate-limits</a> — the header families, cache-aware ITPM with the 2M to 10M worked example, and the spend-cap 429 with no retry-after header.</li>
+<li><a href="https://platform.openai.com/docs/guides/rate-limits">platform.openai.com/docs/guides/rate-limits</a> — the <code>6m0s</code> reset format, the header table, and the <code>slow_down</code> ramp-limit rule.</li>
+<li><a href="https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/">aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/</a> — the p99.9 timeout method, the 243x five-layer retry example, and "retries are selfish".</li>
+<li><a href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/</a> — Brooker's full-jitter formula, and the simulation where jitter cut competing-client calls by more than half.</li>
+<li><a href="https://sre.google/sre-book/handling-overload/">sre.google/sre-book/handling-overload/</a> — the retry budget: three attempts per request, a 10% retry ratio taking worst-case load from 3X to 1.1X, and "retries are indistinguishable from new requests".</li>
+<li><a href="https://brooker.co.za/blog/2022/02/28/retries.html">brooker.co.za/blog/2022/02/28/retries.html</a> — the token-bucket retry-budget simulation, where the deposit ratio is the failure rate at which retries stop. (In the study note's list, not independently re-fetched here.)</li>
+<li><a href="https://github.blog/news-insights/company-news/the-august-17-outage-and-the-work-ahead/">github.blog — The August 17 outage and the work ahead</a> — the client-side retry loop that increased traffic during Copilot recovery, and the remediation naming retry limits, retry budgets and variable timeouts.</li>
+<li><a href="https://blog.cloudflare.com/deep-dive-into-cloudflares-sept-12-dashboard-and-api-outage/">blog.cloudflare.com — the 12 September 2025 dashboard and API outage</a> — the dashboard retry loop, the thundering herd on recovery, and the admission that retries were hard to tell apart from new requests.</li>
+<li><a href="https://github.com/openai/openai-python/releases">github.com/openai/openai-python/releases</a> — version drift: openai 3.26.1 released 2026-10-08, with the constants above re-verified at v3.25.0.</li>
+</ul>
+
+<div class="callout note">Every page above was opened on 2026-10-08 for the study note behind this lesson. SDK behaviour ages fast, so before you quote a default in a design doc, re-read the constant in the version you actually run.</div>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

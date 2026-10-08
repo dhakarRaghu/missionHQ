@@ -3,7 +3,7 @@
 <head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Where does the KV cache go when the GPU runs out of room?</title>
+<title>Split the server in two. The median does not move. The p99 does.</title>
 <style>
 :root{
   --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
@@ -306,259 +306,281 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <div class="layout">
 <nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
 <main>
-<header class="hero"><div class="eyebrow">applies · Inference Internals, the prefix-caching and serving phases · adds: what happens to the cache past the HBM wall in a system running today</div><h1>Where does the KV cache go when the GPU runs out of room?</h1><p class="subtitle">vLLM&#x27;s answer: evicted KV is not lost, it spills to cheaper memory, and a cache hit from disk still beats one recompute</p></header>
-<p>In the last phase you saw prefix caching make a repeated prompt nearly free: the KV blocks, the attention keys and values computed for each token, stay in GPU memory and the next request reuses them instead of computing them again. That works while the blocks fit. Your chat service keeps 12,288 tokens of history per conversation and grows by 4,096 tokens each round, and a GPU holds only so many of those blocks. When 200 conversations run at once, the memory fills, and the serving engine quietly deletes the oldest blocks to make room. The next turn of that conversation then recomputes 12,000 tokens it already computed once, and your users feel it as a multi-second pause before the first word.</p>
+<header class="hero"><div class="eyebrow">measures · Inference Internals, serving phases · what a real two-GPU benchmark adds to the batching and prefill model</div><h1>Split the server in two. The median does not move. The p99 does.</h1><p class="subtitle">Two workloads with different bottlenecks share one GPU: where does the tail latency actually come from, and what do you pay to remove it?</p></header>
+<p>Your serving phase taught you why prefill and decode are different jobs, and you can now say why a server treats a new prompt differently from a streaming reply. What it could not show you is what happens to latency when one GPU runs both kinds of work at once. On the two-L40S box from the vLLM team's September 2026 guide, serving Qwen2.5-7B-Instruct with 8k-token prompts, load climbs and the median time between tokens barely moves, while the slow tail stretches past 260 ms. The same load with one GPU given to prefill and one to decode keeps that tail near 25 to 52 ms.</p>
 
-<p>So the question this lesson answers: when the GPU runs out of room, does the deleted work have to be deleted forever? It turns out those blocks can be moved, not destroyed: first into ordinary CPU memory, then onto local disk, and brought back when the conversation resumes. That changes how you size a serving setup, because capacity stops being "how much fits on the GPU" and becomes "how much KV data fits across all three places". It also has a catch, because pulling blocks back from disk is not free, and sometimes recomputing is the better deal. By the end you will be able to say which one wins, with numbers.</p>
+<p>The question this phase answers is why the two arrangements look identical at the median and very different at the tail, and what the split pays for that calm tail, because the split moves a large block of memory between the GPUs for every request. When you next see a p99 rise while the median stays clean on any box that runs two jobs, you will know whether to look at scheduling or at a physical split before you touch a config.</p>
 <p>This lesson teaches one idea. It is stated here so you can see where the lesson is going. It will read more clearly once it has been explained below, so come back to it at the end.</p>
-<ol class="concepts"><li id="c1"><b>When the KV cache outgrows GPU memory, evicted blocks can spill to CPU DRAM and disk instead of being lost, so a service&#x27;s capacity is set by total KV bytes across tiers, not by HBM alone.</b> <span>Predict which tier limits his serving capacity at a given concurrency, and decide whether enabling CPU offload is worth it for his traffic.</span></li></ol>
-<h2 data-concept="c1">What happens to an evicted block now</h2>
-<p class="why">Evicted KV blocks move down a hierarchy of memory tiers instead of being lost.</p>
+<ol class="concepts"><li id="c1"><b>When two workloads with different bottlenecks share one processor, their interference lands on the tail of latency, not the median, so splitting them moves the state, not the mean.</b> <span>Read a latency distribution on any shared-resource system and predict whether scheduling or a physical split is at fault before touching a config.</span></li></ol>
+<h2 data-concept="c1">What are the two workloads the phase split apart?</h2>
+<p class="why">Two different workloads run inside one serving process, and each sets a different latency.</p>
 
-<p>The phase gave you a simple model of the <dfn>KV cache</dfn>, the attention keys and values the GPU keeps for each request. It also gave you <dfn>prefix caching</dfn>, the reuse of one prompt's KV blocks when the same prompt appears again. In that model the GPU memory was the whole cache. A hit cost almost nothing, and an eviction meant recompute. That model was accurate for vLLM until recently.</p>
+<p>Your box has two NVIDIA L40S GPUs serving Qwen2.5-7B-Instruct with 8k-token prompts, and the vLLM team's guide measures two ways to arrange the work. Before we touch those numbers, we need the two kinds of work every serving run does, because the tail behaviour only makes sense once you see how different they are.</p>
 
-<p>Your running case shows where it breaks. Two hundred conversations of 12,288 tokens each do not fit in GPU memory at once. The engine evicts the oldest conversation, and its next turn recomputes 12,288 tokens. The change is that an evicted block is moved, not deleted. It lands in host DRAM, then optionally on disk or object storage. The whole chain is called a <dfn>tiered KV cache</dfn>, a cache whose blocks live across GPU, CPU and storage tiers under one lookup.</p>
+<p>The first is <dfn>prefill</dfn>, the single pass that reads your whole prompt at once and produces the first token. Every prompt token is processed in parallel, so prefill is limited by raw compute. The second is <dfn>decode</dfn>, the loop that generates the reply one token at a time. Each decode step re-reads the full model weights, so decode is limited by memory bandwidth, not compute. Prefill also builds the <dfn>KV cache</dfn>, the attention keys and values the GPU keeps for each request, and decode reads and extends it at every step.</p>
 
-<figure class="diagram"><svg viewBox="0 0 640 240" xmlns="http://www.w3.org/2000/svg">
-<rect x="40" y="20" width="220" height="52" rx="6" fill="var(--accent)" opacity="0.25"/><text x="150" y="42" fill="currentColor" font-size="13" text-anchor="middle">GPU HBM</text><text x="150" y="60" fill="currentColor" font-size="11" text-anchor="middle">hot blocks, serves hits directly</text>
-<rect x="40" y="96" width="220" height="52" rx="6" fill="var(--warn)" opacity="0.25"/><text x="150" y="118" fill="currentColor" font-size="13" text-anchor="middle">CPU DRAM</text><text x="150" y="136" fill="currentColor" font-size="11" text-anchor="middle">a real LRU/ARC cache</text>
-<rect x="40" y="172" width="220" height="52" rx="6" fill="var(--violet)" opacity="0.25"/><text x="150" y="194" fill="currentColor" font-size="13" text-anchor="middle">filesystem / object store</text><text x="150" y="212" fill="currentColor" font-size="11" text-anchor="middle">keys are token-sequence hashes</text>
-<path d="M300 50 L360 50 L360 120 L300 120" fill="none" stroke="currentColor" stroke-width="2"/><path d="M300 122 L296 112 M300 122 L304 112" stroke="currentColor" stroke-width="2" fill="none"/>
-<path d="M330 122 L330 196 M330 196 L326 186 M330 196 L334 186" stroke="currentColor" fill="none" stroke-width="2"/>
-<text x="330" y="88" fill="currentColor" font-size="11" text-anchor="middle">spill on eviction (async copy)</text>
-<path d="M390 196 L390 46 M390 46 L386 56 M390 46 L394 56" stroke="currentColor" fill="none" stroke-width="2"/>
-<text x="470" y="125" fill="currentColor" font-size="11" text-anchor="middle">reload climbs back up</text>
-</svg><figcaption>One request's KV blocks move down on eviction and back up on the next turn. Illustration of the mechanism, not measured.</figcaption></figure>
+<p>Each workload sets its own latency, so one serving process has two clocks. TTFT, the time to the first token, is set by prefill. ITL, the time between two tokens, is set by decode. These two clocks are why a latency SLO on an LLM server can never be a single number.</p>
 
-<p>Two properties make this a cache and not a backup. The host tier is a proper LRU cache, so blocks stay hot in DRAM and serve hits directly. On reload, blocks come back to the GPU only when a request needs them again.</p>
-
-<details class="predict"><summary>Predict: a conversation's blocks sit on local NVMe. Its next turn arrives. Which is cheaper, reloading 12,288 tokens of KV from disk or recomputing the prompt?</summary>
-<p>Reloading. A storage-backed hit beats recomputing 12,288 or more tokens from scratch. An independent project, LMCache, measured the same mechanism on Llama-3.1-8B: cold TTFT was 6.314 seconds, a storage-backed hit returned the first token in 0.148 seconds, a factor of 42.6. The details of the transfer path are the subject of the next section.</p>
-</details>
-
-<p>The consequence for sizing is the loaded sentence of the article. Capacity is set by which tier can hold your working set, not by HBM alone. In the authors' benchmark, HBM alone carried about 64 concurrent conversations of this shape, the CPU tier of 147GB carried 64 to 128, and the disk tier carried the rest.</p>
-
-<details class="evidence"><summary>Evidence</summary>
-<p>The capacity crossover numbers come from the vLLM blog benchmark: Qwen3.6-35B-A3B on 2x H100 80GB, TP=2, 12,288-token first turns over 8 rounds, concurrency up to 64, CPU tier of 147GB. Only the authors report them; no independent rerun exists. The 6.314s versus 0.148s TTFT figures were measured by LMCache, an independent project, on Llama-3.1-8B in a single-request demo.</p>
-</details>
-
-<div class="keypoints">
-<p class="remember">An evicted KV block spills to CPU and disk instead of vanishing.</p>
-<p class="trap">The belief that GPU memory is the whole cache leads you to recompute or buy more GPUs.</p>
-<p class="try">Estimate your own KV bytes per token from your model config and multiply by 12,288.</p>
+<div class="lanes" id="s1-two-workloads">
+<h4>One request, two different workloads</h4>
+<div class="lane" data-label="one request">
+<i class="prefill" style="--w:400" data-t="prefill: 8,000 tokens, one pass · compute-bound"></i>
+<i class="decode" style="--w:25"></i>
+<i class="decode" style="--w:25"></i>
+<i class="decode" style="--w:25" data-t="decode: one token per step · bandwidth-bound"></i></div>
+<p class="at" data-step="all">Illustration of the two phases; the decode steps repeat hundreds of times, not three.</p>
 </div>
 
-<p>This section said where an evicted block goes, but not how a tier as slow as NVMe can take part without stalling the GPU. The next section answers that.</p>
-<h2 data-concept="c1">Why the GPU never waits on the disk</h2>
-<p class="why">A disk tier only works if the GPU never stops to wait for it.</p>
+<details class="predict"><summary>Predict: which latency moves when a second 8k-token prompt arrives while a reply is streaming?</summary>ITL, not its own TTFT alone. The new prefill holds the whole GPU for one long pass, so the streaming decode misses steps and its gap between tokens stretches. The picture collapses here because both workloads wanted one processor.</details>
 
-<p>The tiered KV cache above holds one design problem. A reload from NVMe takes far longer than a decode step. So a naive design would pause every stream while 12,288 tokens of KV travel upward. vLLM's answer is a rule about where data waits.</p>
-
-<details class="predict"><summary>Predict: the GPU needs a block of KV that lives on NVMe. Loading it into host DRAM takes 200 milliseconds, and decoding needs GPU blocks every 50 milliseconds. Does the load block decoding?</summary>
-<p>No. <b>The reload waits in host DRAM, not in GPU memory</b>. Because GPU blocks are allocated only after the copy to host completes. Decoding keeps its blocks the whole time. The paragraphs below show why this rule holds on the way down too.</p>
-</details>
-
-<p>The rule is <dfn>host-centric routing</dfn>. Every byte of KV passes through CPU DRAM on the way out and on the way back. GPU memory is held only while data is physically in it. It works in three steps.</p>
+<p>The guide's arrangement under test follows from this. Run prefill and decode on separate GPUs and move the KV cache between them, a design called prefill-decode disaggregation. The next sections measure whether the split works and what it charges.</p>
 
 <ol>
-<li>On eviction, an asynchronous DMA copy moves the block from GPU HBM to host DRAM. This is the <dfn>spill</dfn>, the copy down to host that replaces deletion.</li>
-<li>The GPU block is freed the moment that copy completes, which the authors state happens before any disk transfer starts.</li>
-<li>On reload, the data climbs disk to host first. GPU memory is allocated only after the data has landed in host, a rule the article names <dfn>just-in-time allocation</dfn>.</li>
+<li>Prefill reads 8,000 tokens in one parallel pass, so its time is set by compute and it holds the GPU for one long stretch.</li>
+<li>Decode emits one 21 to 24 ms token at a time, and any pause in its schedule shows up directly as a gap in the stream.</li>
 </ol>
 
-<p>The copies themselves run through cudaMemcpyAsync alongside model computation, so the transfer overlaps useful work instead of displacing it. Both directions stage in host DRAM. So a storage tier at NVMe latency adds time to a miss without taking GPU blocks hostage.</p>
-
-<figure class="diagram">
-<svg viewBox="0 0 640 220" font-size="13">
-<rect x="40" y="20" width="240" height="50" rx="6" fill="none" stroke="currentColor"/>
-<text x="160" y="50" text-anchor="middle" fill="currentColor">GPU HBM: freed when DMA copy ends</text>
-<rect x="40" y="115" width="240" height="50" rx="6" fill="none" stroke="currentColor"/>
-<text x="160" y="144" text-anchor="middle" fill="currentColor">CPU DRAM: the staging point</text>
-<rect x="40" y="185" width="240" height="30" rx="6" fill="none" stroke="currentColor"/>
-<text x="160" y="204" text-anchor="middle" fill="currentColor">NVMe tier</text>
-<path d="M310 45 C 360 70 360 115 310 140" fill="none" stroke="currentColor" marker-end="url(#s2-arr)"/>
-<text x="380" y="95" fill="currentColor">spill: async DMA</text>
-<path d="M340 190 C 420 150 420 80 340 45" fill="none" stroke="currentColor" marker-end="url(#s2-arr)"/>
-<text x="440" y="120" fill="currentColor">reload lands in host first</text>
-<text x="440" y="140" fill="currentColor">then GPU allocated</text>
-<defs><marker id="s2-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="none" stroke="currentColor"/></marker></defs>
-</svg>
-<figcaption>The two transfer rules: spill frees the GPU block on DMA completion, and reload allocates it only after the data reaches host. Illustration of the design, not measured.</figcaption>
-</figure>
-
-<p>This is what makes the disk tier tolerable, and it has a checkable consequence on one box. A reload waiting on slow NVMe storage occupies zero GPU blocks while it waits.</p>
-
-<details class="evidence"><summary>Evidence</summary>
-<p>The free-on-copy-complete rule and just-in-time allocation come from the vLLM blog of 2026-09-10. The cudaMemcpyAsync behaviour comes from the official usage guide at tag v0.26.0. The 200 millisecond NVMe figure is illustrative, not measured.</p>
-</details>
-
-<p>You can see this on your own setup. Enable the default CPUOffloadingSpec on a single box with one <code>--kv-transfer-config</code>. Send a long prompt twice, and watch free memory in nvidia-smi during the second request. It should stay flat until the host copy lands, then drop.</p>
-
 <div class="keypoints">
-<p class="remember">All KV moves through host DRAM, so the GPU holds blocks only while data sits in them.</p>
-<p class="trap">The belief that a slow tier reserves GPU memory while loading makes you size HBM for it.</p>
-<p class="try">Enable CPUOffloadingSpec on one box and watch nvidia-smi free memory during a long-prompt reload.</p>
+<p class="remember">Prefill is one long compute pass; decode is a bandwidth-bound loop.</p>
+<p class="trap">Treating serving latency as one number hides which workload is hurting.</p>
+<p class="try">Send a long prompt with vllm bench serve; its prefill can stall decode, so ITL suffers.</p>
 </div>
 
-<p>This section explained one server's transfers, but a disk tier pays most when several replicas share it. The next section answers how they share one cache without talking to each other.</p>
-<h2 data-concept="c1">How two servers share one cache without talking to each other</h2>
-<p>Sections one and two gave one server a spill path from GPU to disk. With two replicas behind your router, a prefix cached on replica A is still a recompute on replica B.</p>
+<p>This named the two workloads and their latencies, but not what those latencies do when both share one GPU under load. The next section shows where the waiting lands.</p>
+<h2 data-concept="c1">Where does the waiting land when two jobs share one GPU?</h2>
+<p class="why">Same box, same model, same median, and a p99 sixfold apart.</p>
 
-<details class="predict"><summary>Predict: two users on two replicas send the same 12,288-token system prompt, and each replica spills to its own disk. Does the second request get a hit?</summary>
-<p>On private disks it does not, because replica B's disk holds nothing replica A wrote. On one shared mount the answer flips to yes, and the reason is how chunks are named.</p>
-</details>
-
-<p>The filesystem tier names each chunk by the hash of its token sequence, a scheme called <dfn>content addressing</dfn>. The name comes from the content, never the server, so the same prefix from any user or replica lands on one filename. A lookup is one hash and one file check, and servers never talk to each other.</p>
-
-<figure class="diagram">
-<svg viewBox="0 0 660 230" role="img" aria-label="Two replicas writing chunks with the same hash filename to one shared mount">
-<defs><marker id="s3-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="none" stroke="currentColor"/></marker></defs>
-<rect x="30" y="24" width="170" height="56" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
-<text x="115" y="47" text-anchor="middle" font-size="14" fill="currentColor">replica A</text>
-<text x="115" y="67" text-anchor="middle" font-size="12" fill="currentColor">user 1's prefix</text>
-<rect x="460" y="24" width="170" height="56" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
-<text x="545" y="47" text-anchor="middle" font-size="14" fill="currentColor">replica B</text>
-<text x="545" y="67" text-anchor="middle" font-size="12" fill="currentColor">user 2's same prefix</text>
-<line x1="140" y1="80" x2="280" y2="126" stroke="currentColor" stroke-width="1.5" marker-end="url(#s3-arr)"/>
-<line x1="520" y1="80" x2="380" y2="126" stroke="currentColor" stroke-width="1.5" marker-end="url(#s3-arr)"/>
-<text x="205" y="98" text-anchor="middle" font-size="12" fill="currentColor">store</text>
-<text x="455" y="98" text-anchor="middle" font-size="12" fill="currentColor">lookup</text>
-<rect x="210" y="130" width="240" height="80" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
-<text x="330" y="154" text-anchor="middle" font-size="14" fill="currentColor">shared NVMe mount</text>
-<text x="330" y="177" text-anchor="middle" font-size="12" fill="currentColor">9f3a…c1.kv = hash(tokens 1 to 12,288)</text>
-<text x="330" y="197" text-anchor="middle" font-size="12" fill="currentColor">written once, read by both</text>
-</svg>
-<figcaption>One prefix, one filename, however many replicas write it. Illustration of the naming scheme, not measured.</figcaption>
-</figure>
-
-<ol>
-<li>On store, the tier hashes the chunk's token sequence, and that hash is the filename.</li>
-<li>The host layout ignores run configuration, so the authors state a TP=2 node and a TP=4 node produce byte-identical chunks for the same KV.</li>
-<li>On lookup, the replica hashes the incoming prefix and checks one path, and a hit is a plain file read.</li>
-</ol>
-
-<div class="callout warn"><b>One seed splits the cache.</b> The v0.26.0 docs require one fixed <code>PYTHONHASHSEED</code>, for example "0", on every instance. Without it, identical content writes different files, cross-replica hits stay at zero, and nothing logs why.</div>
-
-<h3>Cache-aware routing keeps hits off the disk</h3>
-<p>A shared mount still pays an NVMe read on each first hit. The framework emits events about which instance holds which chunks. A cache-aware router such as llm-d then steers each request to the instance that already holds the prefix in faster memory. The shared disk is the floor under that.</p>
-
-<details class="evidence"><summary>Evidence</summary>
-<p>The layout and naming are from the vLLM blog of 2026-09-10, and byte-identity across TP sizes is author-stated and unconfirmed, though the docs' config digest is consistent. PYTHONHASHSEED and the "0" example are verified in the usage guide at tag v0.26.0. Ray's production docs independently confirm cache-aware routing.</p>
-</details>
-
-<p>Open the v0.26.0 usage guide, find the PYTHONHASHSEED line, and add it to your deployment checklist beside the other replica environment variables.</p>
-
-<div class="keypoints">
-<p class="remember">A chunk's filename is its token hash, so one shared mount serves every replica.</p>
-<p class="trap">One unset PYTHONHASHSEED and identical content hashes differently, so replicas silently share nothing.</p>
-<p class="try">Grep the v0.26.0 usage guide for PYTHONHASHSEED and add it to your replica checklist.</p>
-</div>
-
-<p>This section assumed shared hits are worth having. The next section answers when offloading is a tax instead of a win.</p>
-<h2 data-concept="c1">When offloading is a tax instead of a win</h2>
-<p>The first three sections showed the tiered KV cache working. None of them said when it should not be switched on.</p>
-
-<p>Offloading costs money on every request that finds nothing in the lower tiers. Ray's production docs report that on cache misses, offloading adds roughly 10 to 15 percent overhead versus pure GPU caching. A miss means the spill copies, the lookups and the hash work all ran for nothing.</p>
-
-<details class="predict"><summary>Predict: two services see 200 requests each day. One is your multi-turn chat, twelve conversations of 12,288 tokens. The other is 200 unrelated one-shot prompts. Offloading is switched on for both. Which service gets slower?</summary>
-The one-shot service. Every request both pays the offload copy and misses every tier, so it runs 10 to 15 percent slower for no gain. The chat service's later turns hit the CPU or disk tier, and one hit from NVMe beats recomputing 12,288 tokens, so it wins overall. The deciding property is how often two requests share a prefix.</details>
-
-<details class="evidence"><summary>Evidence</summary>
-<p>The 10 to 15 percent miss overhead is from Ray's Serve LLM guide, named there as per internal experiments. The hit-beats-recompute comparison rests on vLLM's own benchmark and LMCache's independent TTFT measurement (cold 6.314s versus warm 0.148s on Llama-3.1-8B, single request).</p>
-</details>
-
-<p>The decision rule follows directly. Measure your prefix-reuse rate first. Multi-turn sessions, agent retry loops and shared system prompts reuse prefixes, so offloading pays. One-shot traffic reuses nothing, so offloading is pure cost. If your requests rarely share prefixes, leave the feature off.</p>
-
-<h3 id="s4-defaults">The defaults that shape an offload config</h3>
-
-<p>When reuse is real and you do switch it on, three defaults from the v0.26.0 usage guide decide what your tiers hold.</p>
+<p>Section one named the two workloads and their latencies. But it left open what they do when both workloads share one GPU as load climbs. On the running case, the vLLM team served the same model two ways on one box to find out:</p>
 
 <ul>
-<li><b>offload_prompt_only</b> defaults to <code>true</code>, so only prefill blocks are offloaded and decode blocks are skipped.</li>
-<li><b>eviction_policy</b> defaults to <code>lru</code>, with <code>arc</code> as the alternative.</li>
-<li>The CPU tier is sized by one total across all workers, not per worker, and the docs warn that a CPU tier smaller than the aggregate GPU KV cache merely mirrors the GPU and adds no hit rate.</li>
+<li><b>Collocated</b>: both GPUs run prefill and decode together, one <code>vllm serve --data-parallel-size 2</code> process.</li>
+<li><b>Disaggregated</b>: GPU 0 runs only prefill and GPU 1 runs only decode, a design named <dfn>prefill-decode disaggregation</dfn>. Each request's KV cache then crosses to the decode GPU over <dfn>NIXL</dfn>, the transfer library vLLM uses to move KV caches between GPUs.</li>
 </ul>
 
-<p>In the running case the CPU tier was set to 147GB, about twice the GPU KV cache size, which is how it carried conversations 65 through 128 instead of duplicating what HBM already held.</p>
+<figure class="diagram">
+<svg viewBox="0 0 640 240" role="img" aria-label="Two arrangements of the same two GPUs: collocated and disaggregated">
+<defs>
+<marker id="s2-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path></marker>
+</defs>
+<text x="8" y="52" fill="currentColor" font-size="14">Collocated</text>
+<rect x="180" y="20" width="150" height="64" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+<text x="255" y="44" text-anchor="middle" fill="currentColor" font-size="13">GPU 0</text>
+<text x="255" y="64" text-anchor="middle" fill="currentColor" font-size="12">prefill + decode</text>
+<rect x="400" y="20" width="150" height="64" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+<text x="475" y="44" text-anchor="middle" fill="currentColor" font-size="13">GPU 1</text>
+<text x="475" y="64" text-anchor="middle" fill="currentColor" font-size="12">prefill + decode</text>
+<text x="8" y="192" fill="currentColor" font-size="14">Disaggregated</text>
+<rect x="180" y="160" width="150" height="64" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+<text x="255" y="184" text-anchor="middle" fill="currentColor" font-size="13">GPU 0</text>
+<text x="255" y="204" text-anchor="middle" fill="currentColor" font-size="12">prefill only</text>
+<rect x="400" y="160" width="150" height="64" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+<text x="475" y="184" text-anchor="middle" fill="currentColor" font-size="13">GPU 1</text>
+<text x="475" y="204" text-anchor="middle" fill="currentColor" font-size="12">decode only</text>
+<line x1="334" y1="192" x2="394" y2="192" stroke="currentColor" stroke-width="1.5" marker-end="url(#s2-arr)"></line>
+<text x="365" y="146" text-anchor="middle" fill="currentColor" font-size="12">KV cache over PCIe, carried by NIXL</text>
+</svg>
+<figcaption>The same two L40S GPUs, run two ways. In the split, each request's KV cache crosses from the prefill GPU to the decode GPU.</figcaption>
+</figure>
+
+<details class="predict"><summary>Predict: at 0.4 requests per second, which statistic moves first, the median ITL, the p99 ITL, or both together?</summary>Only the p99. The median ITL stays at 21 to 24 ms in both arrangements, and the collocated p99 reaches 169 ms at this rate. Why sharing one GPU produces exactly that shape is the next section's subject.</details>
+
+<p>Median ITL matched almost exactly, 21 to 24 ms in both arrangements up to 1 request per second. So the split bought nothing for a typical token. The p99 ITL separated instead:</p>
+
+<table>
+<tr><th>Request rate</th><th>Collocated p99 ITL</th><th>Disaggregated p99 ITL</th></tr>
+<tr><td>lowest rate tested</td><td>23 ms</td><td class="ok">25–52 ms</td></tr>
+<tr><td>0.4 req/s</td><td class="bad">169 ms</td><td class="ok">25–52 ms</td></tr>
+<tr><td>2 req/s</td><td class="bad">263 ms</td><td class="ok">25–52 ms</td></tr>
+</table>
+
+<p>At 0.4 requests per second the medians are indistinguishable while the p99s sit sixfold apart. A dashboard watching the median would call the collocated box healthy while one token in a hundred takes 169 ms.</p>
+
+<p>What the split actually bought is <dfn>goodput</dfn>. That is the request rate the box sustains while both its TTFT target and its ITL target hold. What moved was the load at which the ITL target breaks, a number no benchmark without latency targets can see.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>A single benchmark from the vLLM guide of 2026-09-29 (Martin Hickey, IBM Research). Fixed conditions: Qwen2.5-7B-Instruct, two L40S 48 GB on PCIe with no NVLink, 8k-token prompts. The rest were 256 output tokens, 100 Poisson-arrival requests per rate, prefix caching off. DistServe (OSDI 2024) and AMD's ROCm post on SGLang confirm the same medians-clean, tails-apart pattern on other hardware. The authors flag one untested variant: two independent replicas behind a load balancer might close part of the gap. Their summary: "The pitch isn't peak throughput... What it buys is goodput."</p>
+</details>
 
 <div class="keypoints">
-<p class="remember">Offloading pays only when prefixes repeat; on misses it costs 10 to 15 percent.</p>
-<p class="trap">Switching it on for one-shot traffic makes every request slower and gains nothing.</p>
-<p class="try">Open the v0.26.0 usage guide and find offload_prompt_only, eviction_policy and cpu_bytes_to_use before writing any config.</p>
+<p class="remember">The split changed nothing at the median and cut p99 ITL about sixfold.</p>
+<p class="trap">Expecting every request to slow a little, you watch the mean while the tail breaks.</p>
+<p class="try">Run <code>vllm bench serve</code> at two rates and check whether p99 ITL leaves p50 behind.</p>
 </div>
 
-<p>You can now decide when offloading pays and size its CPU tier. The lab below builds the full five-line config for a filesystem tier.</p>
-<h2 data-kind="lab">Lab: fifteen minutes with the offloading config</h2>
-<ul class="exercises">
-<li><label><input type="checkbox"> <b>L1</b> <span class="tag">offline</span></label>
-<span>Open the vLLM usage guide at tag v0.26.0: <code>https://raw.githubusercontent.com/vllm-project/vllm/v0.26.0/docs/features/kv_offloading_usage.md</code>. Find the <code>TieringOffloadingSpec</code> table and the <code>secondary_tiers</code> list, then write out the five lines of config that add a filesystem tier to a single-box server. Your finished config should take this shape:</span>
-<pre><code data-lang="json">--kv-transfer-config '{
-  "kv_connector": "OffloadingConnector",
-  "kv_role": "kv_both",
-  "kv_connector_extra_config": {
-    "spec_name": "TieringOffloadingSpec",
-    "cpu_bytes_to_use": ...,
-    "secondary_tiers": [ { "...": "fill in from the doc" } ]
-  }
-}'</code></pre>
-<span>Two checks while you write it: what does the doc say about <code>PYTHONHASHSEED</code>, and why does <code>cpu_bytes_to_use</code> being a total across workers matter on a 2-GPU box?</span></li>
+<p>These numbers show where the waiting lands, not why it lands there. The next section answers why the tail moves when the median does not.</p>
+<h2 data-concept="c1">Why does the tail move when the median does not?</h2>
+<p class="why">Sharing a GPU concentrates all waiting into a few unlucky requests.</p>
 
-<li><label><input type="checkbox"> <b>L2</b> <span class="tag">offline</span></label>
-<span>Size the tiers for the lesson's running case. One conversation's first turn is 12,288 tokens. Estimate KV at roughly 0.5 MB per token from your own model's head count and head dimension.</span>
-<pre><code data-lang="text">KV per conversation = 12,288 tokens x 0.5 MB/token ≈ 6.1 GB
-CPU tier            = 147 GB                      (the blog's setting)
-147 / 6.1           ≈ 24 full conversations
-GPU KV budget       = about 74 GB, the blog used CPU ≈ 2x GPU
-74 / 6.1            ≈ 12 conversations on HBM alone</code></pre>
-<span>The CPU tier doubles what fits, but a later round adds 4,096 tokens per conversation, about 2 GB each. At what round does the 147 GB tier fill up?</span></li>
+<p>Section two showed the collocated p99 separating from the median at 0.4 req/s. It did not show why sharing one GPU produces exactly that shape. The mechanism is a queue with two kinds of work in it.</p>
 
-<li><label><input type="checkbox"> <b>L3</b> <span class="tag">offline</span></label>
-<span>Check the defaults you are accepting before you would run this. confirm <code>offload_prompt_only=true</code> and <code>eviction_policy=lru</code> in the doc, then decide whether the CPU tier you sized in L2 passes the sizing rule from the last section: larger than the aggregate GPU KV cache.</span></li>
-</ul>
+<p>A prefill pass on an 8k prompt holds the GPU for hundreds of milliseconds as one indivisible unit of compute. Decode steps are short and frequent, about 20 ms each, and every streaming request needs one per token. When a prefill arrives while decodes are streaming, each of those decodes waits for the whole pass to finish. The GPU runs one batch at a time. That waiting, <dfn>prefill-decode interference</dfn>, a decode's pause while a prefill pass holds its GPU, is long and rare.</p>
 
-<p>You now have the config lines and the two numbers that decide whether this feature pays. The checkpoint puts them to work on a failure scenario with your own replicas.</p>
-<h2 data-kind="checkpoint">Checkpoint</h2>
-<div class="lab">
-<p>You run two vLLM replicas behind a router for your multi-agent system. Each agent session keeps a long history, so every new turn re-reads the whole conversation as a prefix. Traffic doubles overnight, and p99 <dfn>TTFT</dfn>, the time from sending a request to the first token, doubles with it. The GPU KV cache metric reads full. Each box has spare host RAM and an NVMe disk available.</p>
+<p>Rare and long is what makes the median useless here. At low request rates, prefills arrive far apart, so most streams complete without ever overlapping one. Their ITL stays at 21-24 ms, and that is what the median reports. The few streams unlucky enough to overlap a prefill absorb a pause ten times longer. They are too few to move the median, but exactly enough to fill the p99. Push the request rate up and collisions become more common. The p99 climbs from 23 ms to 263 ms, while the median still sits at 24 ms.</p>
 
-<ol>
-<li>Which tier do you add first: the CPU tier or the filesystem tier, and why?</li>
-<li>Your sizing rule says the CPU tier must be larger than the aggregate GPU KV cache. Each box has 74 GB of GPU KV across 2 GPUs. Does 128 GB of host RAM per box pass?</li>
-<li>After the CPU tier fills, you add the filesystem tier on the spare NVMe, mounted on both boxes. What one value must match on both replicas before the two servers share a single prefix?</li>
-<li>A week later, which single metric tells you the change paid, and what result would tell you to switch it off?</li>
-</ol>
+<div class="lanes" id="s3-block" data-play>
+<h4>One prefill blocking two streams (illustration, not measured)</h4>
+<div class="lane" data-label="stream A">
+<i class="decode" style="--w:24" data-t="24 ms"></i>
+<i class="decode" style="--w:24" data-t="24 ms"></i>
+<i class="frozen" style="--w:720" data-t="waiting"></i>
+<i class="decode" style="--w:24" data-t="24 ms"></i></div>
+<div class="lane" data-label="prefill">
+<i class="idle" style="--w:24"></i>
+<i class="idle" style="--w:24"></i>
+<i class="prefill" style="--w:720" data-t="~720 ms · 8k tokens"></i>
+<i class="idle" style="--w:24"></i></div>
+<div class="lane" data-label="stream B">
+<i class="decode" style="--w:24" data-t="24 ms"></i>
+<i class="decode" style="--w:24" data-t="24 ms"></i>
+<i class="decode" style="--w:720" data-t="720 ms gap"></i>
+<i class="decode" style="--w:24" data-t="24 ms"></i></div>
+<p class="at" data-step="3">Step 3: the prefill holds the GPU, and both streams skip roughly thirty decode steps.</p>
+<p class="at" data-step="all">Illustration from the lesson's cost model, not measured.</p>
+</div>
 
-<details class="answer"><summary>Answer sketch</summary>
-<ol>
-<li>The CPU tier first. It is the cheapest capacity to add, every byte of KV already passes through host DRAM on eviction, and it serves hits at DRAM latency instead of disk latency.</li>
-<li>Yes against one box, no against the fleet. 128 GB is larger than 74 GB on that box, so it adds hit rate there. The rule applies per server because each box's CPU tier only serves that box's spills.</li>
-<li><code>PYTHONHASHSEED</code> must be pinned to the same fixed value on every instance. Without it, identical prefixes produce different filenames per process and the shared mount silently shares nothing.</li>
-<li>Prefix cache hit rate. Sessions share long prefixes by construction, so the hit rate should rise and TTFT should fall. If the hit rate stays low, every request pays the roughly 10-15% overhead Ray's docs report for offloading on misses, and the feature is a tax.</li>
-</ol>
+<p>The phase's earlier fix, <dfn>chunked prefill</dfn>, breaking the 8k-token pass into smaller pieces so decode steps run between them. That shortens each holding period instead of removing it. The tail shrinks but stays. The best chunk size depends on the traffic mix, so tuning drifts when the workload changes. The authors also flag that their collocated baseline used one data-parallel group, whose ranks can hold each other up. Two independent replicas behind a load balancer might close some of the 6x p99 gap (their caveat, not independently checked).</p>
+
+<div class="callout note">
+<p>This shape belongs to queues, not to GPUs. Any worker that serves rare long jobs beside frequent short ones shows a clean median and a dirty tail. Your GRPC service with one slow import between fast lookups behaves the same way.</p>
+</div>
+
+<div class="keypoints">
+<p class="remember">Rare long jobs and frequent short jobs on one worker give a clean median and a dirty tail.</p>
+<p class="trap">Believing today that contention spreads evenly across requests makes you size for a median that never sees the pauses.</p>
+<p class="try">Count how many streams can overlap one prefill at your peak rate, then multiply by its duration.</p>
+</div>
+
+<p>Splitting the stages removes the interference, but section two hid the cost. The KV cache has to physically move between the two GPUs. The next section asks what that transfer charges, and where it goes wrong.</p>
+<h2 data-concept="c1">What does a split always charge, and where does it go wrong?</h2>
+<p>Splitting the stages removes the interference, but every first token pays for it. The KV cache must cross to the decode GPU, over plain PCIe on the running box.</p>
+
+<p>Decode cannot emit a token until that cache arrives. <dfn>KV transfer overhead</dfn> is the wait this adds, once per request, in series before the first token. It grows with prompt length, because the cache does.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 660 230" role="img" aria-label="Prefill on GPU 1 hands the KV cache over PCIe to decode on GPU 2">
+  <defs>
+    <marker id="s4-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker>
+  </defs>
+  <text x="330" y="24" text-anchor="middle" font-size="12" fill="currentColor">PCIe · peer-to-peer reports NS here</text>
+  <rect x="30" y="44" width="176" height="78" rx="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="118" y="76" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor">GPU 1</text>
+  <text x="118" y="97" text-anchor="middle" font-size="12.5" fill="currentColor">prefill · L40S</text>
+  <rect x="454" y="44" width="176" height="78" rx="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="542" y="76" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor">GPU 2</text>
+  <text x="542" y="97" text-anchor="middle" font-size="12.5" fill="currentColor">decode · L40S</text>
+  <line x1="210" y1="70" x2="450" y2="70" stroke="currentColor" stroke-width="1.4" marker-end="url(#s4-arr)"/>
+  <text x="330" y="62" text-anchor="middle" font-size="12.5" fill="currentColor">~470 MB KV per 8k request</text>
+  <text x="330" y="86" text-anchor="middle" font-size="12.5" fill="currentColor">1.3 s measured on this box</text>
+  <text x="30" y="158" font-size="12" fill="currentColor">GPU 1 is free for the next prefill</text>
+  <text x="454" y="158" font-size="12" fill="currentColor">decode steps continue on schedule</text>
+  <g fill="currentColor" opacity="0.4">
+    <rect x="454" y="170" width="22" height="9" rx="2"/>
+    <rect x="484" y="170" width="22" height="9" rx="2"/>
+    <rect x="514" y="170" width="22" height="9" rx="2"/>
+    <rect x="544" y="170" width="22" height="9" rx="2"/>
+    <rect x="574" y="170" width="22" height="9" rx="2"/>
+    <rect x="604" y="170" width="22" height="9" rx="2"/>
+  </g>
+</svg>
+<figcaption>What the split buys and what it charges: decode streams undisturbed, but each request's cache crosses the link once, in series. The 1.3 s and the NS are measured on the running box; spacing is illustration.</figcaption>
+</figure>
+
+<details class="predict"><summary>Predict: with prefill alone on GPU 1, what happens to median TTFT?</summary>
+<p>The natural guess is it drops, because nothing queues ahead of prefill. It tripled, from 0.7 s collocated to 2.2 s, because every first token waited behind a 1.3 s cache transfer.</p>
 </details>
-</div>
 
-<p>The two posts that follow turn this lesson's two most surprising facts into short notes he could publish.</p>
-<h2 data-kind="post">Two things he could post</h2>
-<div class="cards" data-cols="2">
-<div class="card"><h4>A cache read from disk beats recompute</h4>
-<p>Most people assume a cached prefix is lost once GPU memory evicts it. The tiered KV cache says otherwise: a hit served from local NVMe is cheaper than recomputing 12,000 prompt tokens. LMCache measured cold TTFT of 6.314s against warm 0.148s, a 42.6x gap, on Llama-3.1-8B with one request. The claim works as a post because his multi-turn agent sessions re-read the whole history every round. So he is the audience.</p>
-</div>
-<div class="card"><h4>The environment variable that silently kills cache sharing</h4>
-<p>vLLM's filesystem tier names each KV chunk by the hash of its token prefix. So replicas on a shared mount share prefixes with no coordination. But <code>PYTHONHASHSEED</code> must be pinned to the same value on every instance, or identical prefixes produce different filenames. Then the shared cache holds nothing. No error appears: every lookup misses. This works as a short operational note, verified in the vLLM docs at tag v0.26.0.</p>
-</div>
+<div class="stats">
+  <div class="stat"><b>0.7 s</b><span>median TTFT, collocated, 0.2 req/s</span></div>
+  <div class="stat"><b>2.2 s</b><span>median TTFT, split, 0.2 req/s</span></div>
+  <div class="stat"><b>1.3 s</b><span>KV transfer per 8k request</span></div>
 </div>
 
 <details class="evidence"><summary>Evidence</summary>
-<p>The TTFT numbers come from LMCache's local storage documentation (docs.lmcache.ai). It is a project independent of vLLM, measured on Llama-3.1-8B in a single-request demo. The <code>PYTHONHASHSEED</code> requirement comes from the vLLM KV offloading usage guide at tag v0.26.0.</p>
+<p>Only the guide's authors report these L40S figures (vllm.ai, 2026-09-29, one run over the rates, 8k prompts, prefix caching off). The TaiChi paper (arXiv:2508.01989) independently confirms the TTFT-versus-ITL boundary.</p>
 </details>
+
+<ol>
+<li>An 8k prompt's cache is about 470 MB, and with no GPU peer-to-peer path the bytes cross plain PCIe through NIXL.</li>
+<li>Decode cannot start token one until the cache arrives, so the transfer sits in series with every first token.</li>
+<li>Raw PCIe would move that in tens of milliseconds. Most of the 1.3 s is transfer-protocol overhead, including decode noticing the transfer only by polling between its own forward steps.</li>
+<li>Because it is per request and not interference, the split missed a 2 s TTFT target at every rate while its ITL tail stayed flat.</li>
+</ol>
+
+<div class="calc" id="s4-kv">
+  <h4>What one request pays to cross</h4>
+  <label>Prompt tokens <input type="range" name="tokens" min="1024" max="32768" step="1024" value="8192">
+    <span class="val" data-val="tokens"></span></label>
+  <div class="result">KV payload <b data-out="payload"></b></div>
+  <div class="result">Transfer at this box's measured rate <b data-out="xfer"></b></div>
+  <p>Payload uses 56 KiB per token for Qwen2.5-7B. Time scales the single measured point, 1.3 s at 8k tokens.</p>
+  <script>kit.calc('#s4-kv', function(v){ var mb = v.tokens*57344/1e6; return {payload: kit.fmt(mb,0)+' MB', xfer: kit.fmt(1.3*mb/470,2)+' s'}; });</script>
+</div>
+
+<p>The charge belongs to the split, not to this PCIe box. Moving any pipeline stage off a shared worker charges every request for carrying its state. The TaiChi paper confirms the boundary runs both ways. Tight TTFT favours staying collocated, and a strict ITL target favours splitting. Under balanced targets neither pure arrangement wins, so TaiChi's hybrid gains up to 77% goodput there.</p>
+
+<p>So price the fabric before benchmarking the split. Run <code>nvidia-smi topo -p2p r</code> between the two GPUs. This box reports NS where a capable pair reports OK. Then send long prompts and read decode's KV Transfer metrics line. If <code>Avg xfer time</code> sits in the hundreds of milliseconds, fix the fabric before anything else.</p>
+
+<div class="keypoints">
+<p class="remember">Splitting a stage off a shared worker always charges every request a state transfer.</p>
+<p class="trap">Believing intra-box transfers are cheap triples TTFT when the pair has no peer-to-peer path.</p>
+<p class="try">Fix the fabric if the lab's KV Transfer line shows hundreds of milliseconds.</p>
+</div>
+
+<p>The next section turns to the failure no latency graph reports. When a reused cache stops matching its prompt, is the model slower, or quietly wrong?</p>
+<h2 data-kind="lab">Lab: find the fingerprint and the transfer cost on any box you can reach</h2>
+<p>The teaching sections made two claims you can now check on real hardware: the interference fingerprint is a median that stays flat while the p99 climbs, and the transfer cost depends on whether the GPUs have a peer-to-peer path. Both checks take about fifteen minutes together.</p>
+
+<ul class="exercises">
+<li>
+<label><input type="checkbox"> <b>E1</b> <span class="tag">offline</span></label>
+<b>Read the peer-to-peer path.</b> This is the pre-flight check from the last section, run for real. On any box with two NVIDIA GPUs, run:
+<pre><code data-lang="bash">nvidia-smi topo -p2p r</code></pre>
+<p>On the lesson's L40S box this reported <b>NS</b>, meaning not supported, and each 8k prompt's KV cache crossed in about 1.3 s. If you read <b>OK</b>, the two GPUs can copy memory directly and the transfer stays in the tens of milliseconds range. This single output tells you whether a prefill-decode split on that box can keep its TTFT target before you spend an hour benchmarking.</p>
+</li>
+<li>
+<label><input type="checkbox"> <b>E2</b> <span class="tag">GPU</span></label>
+<b>Find the interference fingerprint.</b> Start one collocated server with prefix caching off, because cached prompts would hide the prefill work you are trying to measure:
+<pre><code data-lang="bash">vllm serve Qwen/Qwen2.5-7B-Instruct --no-enable-prefix-caching</code></pre>
+<p>Then run the load tool at two request rates, one comfortable and one heavier, with explicit latency targets:</p>
+<pre><code data-lang="bash">vllm bench serve --goodput ttft:2000 tpot:30 --request-rate 0.2 ...
+vllm bench serve --goodput ttft:2000 tpot:30 --request-rate 1.0 ...</code></pre>
+<p>Record p50 and p99 <b>ITL</b>, the time between two tokens, at each rate. The fingerprint is the gap between p50 and p99 growing as the rate climbs, because prefills start colliding with streaming decodes. If the medians match at both rates and only the p99 moves, you are looking at two-workload interference on one GPU, the shape from section two.</p>
+<p>If both p50 and p99 rise together, a split will not help you: the GPU is saturated evenly and there is no interference to remove.</p>
+</li>
+</ul>
+
+<div class="callout tip">
+<p>Write the two pairs of numbers down, p50 and p99 at each rate. The checkpoint asks you to make the same diagnosis from numbers alone.</p>
+</div>
+<h2 data-kind="checkpoint">Checkpoint</h2>
+<p>Your voice agent stack serves one model on a single PCIe server with two GPUs. Your targets are a <b>TTFT</b> limit, the time from request to first token. They are also a limit on the gap between tokens. At peak, p99 ITL, the time between two tokens, breaches your target while p50 stays flat.</p>
+
+<p>Before you pick any fix, which two measurements tell you whether this is two workloads interfering on one GPU? And what does each have to show?</p>
+
+<details class="answer" id="s6-cp1">
+<summary>Answer sketch</summary>
+
+<p>Measurement one: p50 and p99 ITL at two request rates, one comfortable and one near peak. Prefix caching stays off so cache hits do not hide the prefill work. The result must show the interference fingerprint from section two. The medians match almost exactly at both rates, and only the p99 climbs as load rises. If p50 and p99 rise together, the GPU is saturated evenly and a split has nothing to remove.</p>
+
+<p>Measurement two: the GPU peer-to-peer check, <code>nvidia-smi topo -p2p r</code>, between the two GPUs. It must report OK, not NS, because a split moves every prompt's KV cache across that link. On the lesson's L40S box with no peer-to-peer path, that transfer took 1.3 s per 8k prompt. It pushed median TTFT to 2.2 s. That would break your 1.5 s target on every request even while the ITL tail went flat.</p>
+
+<p>Your 40 ms token gap as the breached target points at a split, but the TTFT check comes first. With a slow link, chunked prefill is the cheaper fix. It breaks each prefill into smaller pieces so decodes run between them. It shortens each interference window without moving any state.</p>
+</details>
+<h2 data-kind="post">Two things he could post</h2>
+<ul>
+<li><p><b>"Two latency curves with the same median can hide a fight."</b> On the lesson's two-L40S box, the collocated and split arrangements showed medians of 21 to 24 ms, yet the collocated p99 was 6x higher at 0.4 requests per second. The same shape appears in any shared queue: prefill-decode interference, where a rare long prefill stalls streaming decodes, lands only in the tail, so a clean median tells you nothing about it.</p></li>
+<li><p><b>"A handoff that assumes the consumer sees what the producer wrote corrupts quietly."</b> With a bidirectional KV transfer, trim a few tokens between producer and consumer and vLLM returned wrong output, not slow output (vllm#43094). The same rule hits your agent work: history truncation under any KV-reuse or caching scheme is a correctness hazard, not only a token budget.</p></li>
+</ul>
 <h2 data-kind="sources">Sources</h2>
 <ul class="sources">
-<li><a href="https://vllm.ai/blog/2026-09-10-tiered-kv-offloading">vLLM blog: Tiered KV Cache Offloading (2026-09-10)</a> — the design, the host-centric routing and the benchmark. The throughput-doubling figure is author-reported only; no independent rerun exists.</li>
-<li><a href="https://raw.githubusercontent.com/vllm-project/vllm/v0.26.0/docs/features/kv_offloading_usage.md">vLLM KV offloading usage guide, tag v0.26.0</a> — the defaults (<code>eviction_policy=lru</code>, <code>offload_prompt_only=true</code>), the <code>PYTHONHASHSEED</code> requirement and the sizing rule that the CPU tier must exceed the aggregate GPU KV cache.</li>
-<li><a href="https://docs.lmcache.ai/kv_cache/local_storage.html">LMCache local storage docs</a> — the independent TTFT measurement: 6.314s cold against 0.148s warm on Llama-3.1-8B, single request.</li>
-<li><a href="https://docs.ray.io/en/latest/serve/llm/user-guides/kv-cache-offloading.html">Ray Serve LLM KV cache offloading guide</a> — the counterpoint: roughly 10-15% overhead on cache misses versus pure GPU caching.</li>
+<li><b>https://vllm.ai/blog/2026-09-29-disaggregated-serving-guide</b> — the lesson's backbone. Martin Hickey, IBM Research, 2026-09-29. Gave every L40S number, the NIXL setup, the pre-flight check, and the counterexample. Single benchmark on one box, so treat its figures as that run's, not constants.</li>
+<li><b>DistServe, arXiv:2401.09670 (OSDI 2024)</b> — independently confirms the interference mechanism and coined the goodput framing: up to 7.4x more requests at 90% SLO compliance.</li>
+<li><b>AMD ROCm blog, P/D disaggregation with SGLang, August 2025</b> — confirms the goodput gains on a different framework and hardware: up to 6.9x (chatbot) and 2.23x (heavy-decode), each tied to stated TTFT and TPOT targets.</li>
+<li><b>TaiChi, arXiv:2508.01989 (August 2025)</b> — adds the boundary the post stops short of: under balanced TTFT and TPOT targets neither pure arrangement wins, and their hybrid gains up to 77% there.</li>
+<li><b>vllm-project/vllm#43094</b> — confirms the silent-wrongness bug verbatim, including the suffix-trimming root cause. Closed as not planned; the accepted mitigation is router-level detection.</li>
+<li><b>llm-d v0.2 blog, July 2025</b> — confirms llm-d ships a tested prefill-decode path on H200 pairs with NIXL and UCX, but it does not contain the 59% and 67% latency figures the article quotes.</li>
 </ul>
+<p>Numbers only the original authors report: all L40S figures (263 ms collocated p99, 25 to 52 ms split p99, the 1.3 s transfer, 2.2 s versus 0.7 s median TTFT) and the AMD MoRI-IO 2.4x goodput. The llm-d 59% and 67% figures, the fix PRs #57571 and #47931, and the Mooncake and FlexKV deployment claims were not verified.</p>
 </main>
 </div>
 <script>
