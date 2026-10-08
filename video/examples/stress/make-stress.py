@@ -68,7 +68,9 @@ for c in range(1, N + 1):
     lines += [line("p0", 180, c), line("p1", 180, c + 2)]
     lines += [line("q0", 230, c), line("q1", 230, c + 1)]
     lines += [line(f"t{i}", 160, c + i) for i in (1, 2, 3)]
-    lines += [line(f"m{i}", 160, c + i) for i in range(1, 7)]
+    # Each m line starts "Step N.", as real narration does: check-spec gives
+    # the mechanism one item per step line.
+    lines += [{"key": f"m{i}", "text": f"Step {i}. " + fill(160 - 8, c + i)} for i in range(1, 7)]
     lines += [line("n0", 180, c), line("n1", 180, c + 1), line("n2", 180, c + 2)]
     lines += [{"key": "r0", "text": "Remember: " + fill(200, c)}, {"key": "r1", "text": "The trap: " + fill(200, c + 1)}, {"key": "r2", "text": "Try this: " + fill(200, c + 2)}]
     lines += [line("h0", 160, c), line("h1", 160, c + 1)]

@@ -144,9 +144,15 @@ def line_problems(beat: str, ln: Line) -> list[str]:
         out.append(f"{where}: names a part, phase or concept number: {part.group(0)!r}")
     if "?" in text and not (beat in ("cold", "title") or ln.key in ("q0", "q1")):
         out.append(f"{where}: a question outside the cold open and the think-it-through")
+    # A key point is exactly one r line, so "split it" there made a fourth r
+    # line, which the key-point rule then refused: the writer went back and
+    # forth between the two rules until the rewrites ran out (2026-10-08).
+    key_point = CONCEPT_BEAT.match(beat) is not None and _step_letter(ln.key) == "r"
+    fix = (f"shorten it to {LONG_WORDS} words or fewer and keep it one {ln.key} line;"
+           " a key point never gets a second line") if key_point else "split it"
     for s in sentences(text):
         if word_count(s) > LONG_WORDS:
-            out.append(f"{where}: a sentence of {word_count(s)} words; split it: {s[:90]!r}")
+            out.append(f"{where}: a sentence of {word_count(s)} words; {fix}: {s[:90]!r}")
     if NEEDS_SAY.search(text) and not ln.say.strip():
         out.append(f"{where}: `text` has digits, symbols, acronyms or code names; write `say`")
     if ln.say and SAY_FORBIDS.search(ln.say):
