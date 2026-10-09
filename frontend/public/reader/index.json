@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-10-09T03:00:06.131579+05:30",
+  "built_at": "2026-10-10T04:08:25.443614+05:30",
   "courses": [
     {
       "slug": "inference-internals",
@@ -85,6 +85,15 @@
           "date": "2026-10-08",
           "read": false,
           "file": "2026-10-08-inference-internals-phase-05a-client.html"
+        },
+        {
+          "slug": "inference-internals-phase-05b-observability",
+          "title": "Up, Fast and Wrong: SLOs, Telemetry and the Fallback Trap",
+          "one_liner": "He can define four SLO indicators that see a quality regression, turn them into burn-rate alerts that page at the right time, record each model call under real OpenTelemetry names, and say why fallback usually makes an outage worse.",
+          "minutes": 150,
+          "date": "2026-10-09",
+          "read": false,
+          "file": "2026-10-09-inference-internals-phase-05b-observability.html"
         }
       ]
     },
@@ -114,6 +123,15 @@
     }
   ],
   "articles": [
+    {
+      "title": "The 2% Hack Rate and the 67% Leak",
+      "one_liner": "He can read any contamination rate, hack rate or red-team catch rate and state which checker's detection it reports, and he can predict from a Dockerfile whether an eval environment he builds leaks its own answer.",
+      "topic": "",
+      "kind": "ai_latest",
+      "date": "2026-10-09",
+      "read": false,
+      "file": "2026-10-09-the-2-hack-rate-and-the-67-leak.html"
+    },
     {
       "title": "Split the server in two. The median does not move. The p99 does.",
       "one_liner": "He can predict which latency metric moves first when two different workloads share a GPU, explain why from the mechanism, and name the per-request cost that any split of a pipeline stage must charge.",
