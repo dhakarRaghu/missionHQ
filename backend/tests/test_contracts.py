@@ -76,7 +76,7 @@ def test_the_schedule_is_the_intended_one() -> None:
         ("sage", "40 22 * * *"), ("sage", "0 9 * * 1"), ("hunter", "0 21 * * *"),
     }
     starters = {(d[0], d[1]) for d in engine.SYSTEM_DISPATCHES}
-    assert starters == {("course_study", "30 18 * * *"), ("job_search", "15 21 * * *"),
+    assert starters == {("course_study", "30 18 * * *"), ("job_search", "0 23 * * *"),
                         ("learning_run", "0 22 * * *"), ("source_hunt", "0 7 * * 0"),
                         ("radar_collect", "30 6 * * *"), ("radar_read", "45 6 * * *"),
                         ("radar_brief", "30 7 * * 0"),

@@ -124,8 +124,8 @@ CHAT_TIMEOUT_S = 45 * 60
 # The digest carries sage's daily note to his phone, so it goes out twenty
 # minutes after the note is written. The whole nightly chain is:
 #   18:30 course study (system) -> 21:00 hunter sweep
-#   -> 21:15 job discovery (system) -> 22:00 learning run (system)
-#   -> 22:30 sage note -> 22:50 digest with the note -> 23:30 consolidation
+#   -> 22:00 learning run (system) -> 22:30 sage note
+#   -> 22:50 digest with the note -> 23:00 job discovery (system) -> 23:30 consolidation
 #   -> 03:00 reindex (vault commit and push, reader, database dump)
 # Change an agent's cron in its job.md and these two may need to move with it.
 DIGEST_HOUR, DIGEST_MINUTE = 22, 50
@@ -801,7 +801,7 @@ JOB_QUERY = ("entry-level software engineer, AI engineer, applied AI engineer,"
              " SDE-1, 0-2 years")
 SYSTEM_DISPATCHES: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
     ("course_study", "30 18 * * *", "start_course_study", {}),
-    ("job_search", "15 21 * * *", "start_job_search",
+    ("job_search", "0 23 * * *", "start_job_search",
      {"query": JOB_QUERY, "locations": "India|Bengaluru|Remote", "max_roles": 20}),
     ("learning_run", "0 22 * * *", "start_learning_run", {}),
     # Videos of lessons the learning chain did not start one for: older

@@ -24,10 +24,10 @@ evening, after your own day is done, so the work is waiting when you wake up:
 |---|---|
 | 18:30 | The next phase of your course is studied by hunter and written by tutor, once you have read the last one |
 | 21:00 | Hunter sweeps company boards for new roles, verifies them, and scores them into the job ledger |
-| 21:15 | Operator runs four LinkedIn searches in your signed-in browser, rotating through eight role families so each is searched every other night; hunter verifies what it finds. If the browser cannot be reached, it tries again twice, 15 minutes apart, before hunter falls back to the public boards |
 | 22:00 | The learning run starts today's article (or Saturday's lab card, Sunday's week review) |
 | 22:30 | Sage writes the day's note: one thing you did not know, what needs you, and one action |
 | 22:50 | The digest goes to your phone, with the day's note at the top |
+| 23:00 | Operator runs four LinkedIn searches in your signed-in browser, rotating through eight role families so each is searched every other night; hunter verifies what it finds. If the browser cannot be reached, it tries again twice, 15 minutes apart, before hunter falls back to the public boards |
 | 23:30 | Sage checks your memory blocks against the day and writes what should change to `memory/proposals/`; you promote what is right |
 | 03:00 | The vault commits once for the day, the search index is rebuilt, and new lessons are published to your phone |
 | Monday 09:00 | Sage proposes five roles to act on, with the next step for each |
@@ -60,7 +60,7 @@ Three run in-process. One more runs outside it, through an agent CLI.
 | **sage** | The one you talk to, and the keeper of memory. Routes work, writes the daily note and weekly review, proposes the job shortlist and content ideas, consolidates memory | 22:30 and 23:30 daily, Monday and Wednesday 09:00, Sunday 20:00, and whenever you chat |
 | **hunter** | Reads the web and writes what it found: verified roles with a person to reach, and the study notes lessons are built from. It can write nowhere but `quarantine/` | 21:00 daily, and when the learning run asks |
 | **tutor** | Your teacher. Plans the concepts worth knowing, writes each lesson a section at a time, checks every sentence against the study note | When the learning run or the course asks |
-| **operator** | Reads pages only your signed-in browser can open, read-only, under one contract (`agents/operator/AGENTS.md`), with your approval | 21:15 discovery, and on request |
+| **operator** | Reads pages only your signed-in browser can open, read-only, under one contract (`agents/operator/AGENTS.md`), with your approval | 23:00 discovery, and on request |
 
 ### Agent or skill?
 
