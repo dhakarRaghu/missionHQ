@@ -331,5 +331,6 @@ def test_backfilled_ticks_do_nothing_and_a_sleep_requeues_silent_runs() -> None:
     assert asyncio.run(engine._backfilled(datetime.now(UTC) - timedelta(minutes=10))) is True
     assert asyncio.run(engine._backfilled(datetime.now(UTC) - timedelta(seconds=20))) is False
     src = inspect.getsource(engine._cap_overrunning_tasks)
-    assert '"requeued_after_sleep", status="backlog"' in src
+    assert '"requeued_after_sleep"' in src
+    assert 'requeue_event, status="backlog"' in inspect.getsource(engine._stop_and_requeue)
     assert "_backfilled(scheduled)" in inspect.getsource(engine._drain_outbox_tick)

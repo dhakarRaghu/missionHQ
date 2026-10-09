@@ -100,13 +100,19 @@ async def apply(
     actor: str = "system",
     data: dict[str, Any] | None = None,
     status: str | None = None,
-) -> None:
+    expect: str | None = None,
+) -> bool:
     """Append an event; optionally move the projection to a new status.
 
     The transition is validated against ``ALLOWED`` inside the same transaction
     that holds the row lock, so two concurrent appenders cannot both pass. A
     status-changing event also records ``data["status"]`` so the event log
     alone can rebuild the projection (see ``rebuild_projection``).
+
+    With ``expect``, nothing is appended unless the task is in that status
+    under the lock, and the answer is False. Two watchdog ticks that both saw
+    a run stop then move its task once: an unguarded blocked -> blocked is
+    legal, and three ticks requeued one video in the same millisecond.
     """
     if status is not None and status not in VALID_STATUSES:
         raise ValueError(f"invalid status {status!r}")
@@ -120,6 +126,8 @@ async def apply(
         if row is None:
             raise ValueError(f"unknown task {task_id}")
         current = str(row["status"])
+        if expect is not None and current != expect:
+            return False
         if status is not None:
             if status != current and status not in ALLOWED[current]:
                 log.warning(
@@ -140,6 +148,7 @@ async def apply(
         "task.updated", task_id=task_id,
         payload={"event": event_type, **event_data, "status": status},
     )
+    return True
 
 
 async def _append_event(conn, task_id: str, actor: str, event_type: str, data: dict) -> None:

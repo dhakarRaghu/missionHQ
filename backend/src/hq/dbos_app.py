@@ -58,6 +58,7 @@ _config: DBOSConfig = {
     "name": "missionhq",
     "system_database_url": settings().database_url,
     "application_version": code_version(),
+    "max_executor_threads": 32,
 }
 
 dbos = DBOS(config=_config)

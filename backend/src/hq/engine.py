@@ -79,9 +79,37 @@ TASK_TIMEOUT_S = 40 * 60   # a cron/board run may not exceed 40 minutes
 # liveness (`_cap_overrunning_tasks`), which blocks a run that has gone
 # silent; this age limit is only the backstop for a run that never ends.
 COURSE_TIMEOUT_S = 8 * 60 * 60
-# A run whose workflow was cancelled or failed is queued again at most this
-# many times (`_close_timed_out_runs`).
+# A run whose workflow was cancelled or failed, or that the host slept
+# through, is queued again at most this many times in all
+# (`_close_timed_out_runs`, `_cap_overrunning_tasks`). A sleep requeue used to
+# be uncounted: a video slept through five runs in a row on 2026-10-08.
 TIMEOUT_REQUEUES = 3
+# The error on a run the watchdog closed after the host slept through it.
+SLEPT_RUN_ERROR = "stopped while the host slept"
+# How many of task t's runs count toward TIMEOUT_REQUEUES. A run closed
+# before SLEPT_RUN_ERROR existed, or by a tick that did not see the sleep, has
+# no error; the stopped_by_sleep event after it, with no newer run started in
+# between, says the sleep stopped it. On 2026-10-09 that matched one run per
+# wake for every task the host had slept through that had a run at all.
+TIMED_OUT_RUNS = (
+    "(SELECT count(*) FROM hq.runs x WHERE x.task_id = t.id"
+    "  AND (x.error LIKE 'workflow stopped before its run closed%%'"
+    "       OR x.error LIKE 'cancelled at its age limit%%'"
+    f"      OR x.error LIKE '{SLEPT_RUN_ERROR}%%'"
+    "       OR (x.error IS NULL AND x.outcome = 'abandoned' AND EXISTS ("
+    "         SELECT 1 FROM hq.task_events e WHERE e.task_id = x.task_id"
+    "         AND e.event_type = 'stopped_by_sleep' AND e.ts >= x.ended_at"
+    "         AND NOT EXISTS (SELECT 1 FROM hq.runs y WHERE y.task_id = x.task_id"
+    "                         AND y.started_at > x.started_at AND y.started_at < e.ts)))))"
+    # An attempt whose workflow failed before it wrote a run (`_close_timed_out_runs`).
+    " + (SELECT count(*) FROM dbos.workflow_status w"
+    "    WHERE w.workflow_uuid LIKE 'task-' || t.id::text || '%%'"
+    "    AND w.status IN ('ERROR', 'CANCELLED', 'MAX_RECOVERY_ATTEMPTS_EXCEEDED')"
+    "    AND NOT EXISTS (SELECT 1 FROM hq.runs z WHERE z.wf_id = w.workflow_uuid))"
+)
+# A workflow in one of these will never run again: enqueuing its id once more
+# only touches its updated_at and hands back the old handle.
+ENDED_WORKFLOW = ("SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED")
 # A chat turn: one full model call of sage's (llm entry timeout, 25 minutes
 # for a long answer), plus an approval wait, plus tool calls. Twelve minutes
 # cancelled any turn whose one call ran long, and any turn waiting on him.
@@ -403,6 +431,10 @@ async def _lane_of(task_id: str) -> str:
     return lane_for((row or {}).get("payload"), str((row or {}).get("agent") or ""))
 
 
+def _attempt_wf_id(task_id: str, attempt: int) -> str:
+    return f"task-{task_id}" if attempt == 0 else f"task-{task_id}-retry-{attempt}"
+
+
 async def _enqueue(task_id: str, *, attempt: int = 0, lane: str = "tasks") -> None:
     """Deterministic workflow id, so a replayed dispatch cannot start a second run.
 
@@ -424,7 +456,7 @@ async def _enqueue(task_id: str, *, attempt: int = 0, lane: str = "tasks") -> No
         # sweep below re-enqueues every backlog task, so leaving it there is
         # the same outcome the step_id branch already relies on.
         return
-    wf_id = f"task-{task_id}" if attempt == 0 else f"task-{task_id}-retry-{attempt}"
+    wf_id = _attempt_wf_id(task_id, attempt)
     cap = COURSE_TIMEOUT_S if lane in ("courses", "videos") else TASK_TIMEOUT_S
     # Durable wall-clock cap enforced by DBOS, outside the agent: a stalled or
     # hung run is cancelled instead of sitting in "running" all night.
@@ -437,13 +469,25 @@ async def requeue(task_id: str) -> None:
 
     The attempt number is the count of runs already on record, so the workflow
     id is new every time and still deterministic: pressing Retry twice on the
-    same task state cannot start two runs.
+    same task state cannot start two runs. An attempt whose workflow ended
+    before it wrote a run leaves the count where it was, so its id is passed
+    over: a week review whose workflow died on "can't start new thread" after
+    it was marked running sat in backlog from 2026-09-28, every tick handing
+    back the same failed workflow. An attempt still queued or running is not
+    passed over, so concurrent triggers all get its id and DBOS starts it once.
     """
     row = await db.fetchone(
         "SELECT count(*) AS n FROM hq.runs WHERE task_id = %s", (task_id,)
     )
-    await _enqueue(task_id, attempt=int(row["n"]) if row else 1,
-                   lane=await _lane_of(task_id))
+    attempt = int(row["n"]) if row else 0
+    ended = {r["workflow_uuid"] for r in await db.fetch(
+        "SELECT workflow_uuid FROM dbos.workflow_status"
+        " WHERE workflow_uuid LIKE 'task-' || %s || '%%' AND status = ANY(%s)",
+        (task_id, list(ENDED_WORKFLOW)),
+    )}
+    while _attempt_wf_id(task_id, attempt) in ended:
+        attempt += 1
+    await _enqueue(task_id, attempt=attempt, lane=await _lane_of(task_id))
 
 
 async def enqueue_chat(session_id: str, text: str, client_id: str) -> WorkflowHandleAsync[str]:
@@ -1172,17 +1216,18 @@ async def _cap_overrunning_tasks(slept: bool = False) -> None:
     )
     # A run row whose workflow died without closing it stays open for ever, so
     # the Runs page shows work that stopped hours ago and `hq.cli health`
-    # counts it against the success rate. Close it on the same evidence.
+    # counts it against the success rate. Close it on the same evidence. A
+    # run the host slept through says so, and counts toward TIMEOUT_REQUEUES.
     orphans = await db.fetch(
         "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now(),"
-        f" {safety.CALLS_COSTED}"
+        f" error = coalesce(r.error, %s), {safety.CALLS_COSTED}"
         " WHERE r.ended_at IS NULL AND greatest(r.started_at, coalesce("
         "   (SELECT max(e.ts) FROM hq.events e WHERE e.run_id = r.id), r.started_at),"
         "   coalesce((SELECT max(m.started_at + make_interval(secs => m.ms / 1000.0))"
         "   FROM hq.model_calls m WHERE m.run_id = r.id), r.started_at))"
         "   < now() - make_interval(secs => %s)"
         " RETURNING r.id::text",
-        (limit,),
+        (SLEPT_RUN_ERROR if slept else None, limit),
     )
     if orphans:
         await obs.emit("runs.abandoned", payload={"count": len(orphans)})
@@ -1194,15 +1239,15 @@ async def _cap_overrunning_tasks(slept: bool = False) -> None:
             # queued again and picks up where its saved steps left it. Left
             # blocked, four scheduled runs and their alarms greeted him one
             # morning for a night the laptop spent asleep.
-            await board.apply(row["id"], "stopped_by_sleep", status="blocked",
-                              data={"reason": "the host slept mid-run"})
-            await board.apply(row["id"], "requeued_after_sleep", status="backlog",
-                              data={"reason": "queued again after the host woke"})
+            await _stop_and_requeue(row["id"], "running", "stopped_by_sleep",
+                                    "the host slept mid-run", "requeued_after_sleep",
+                                    "queued again after the host woke")
             continue
         await board.apply(
             row["id"],
             "timed_out",
             status="blocked",
+            expect="running",
             data={
                 "reason": (
                     f"no sign of life for {int(limit // 60)} minutes: no tool"
@@ -1212,6 +1257,26 @@ async def _cap_overrunning_tasks(slept: bool = False) -> None:
                 )
             },
         )
+
+
+async def _stop_and_requeue(task_id: str, expect: str, stop_event: str, reason: str,
+                            requeue_event: str, requeue_reason: str) -> None:
+    """Block a task whose run stopped, and queue it again unless its stopped
+    runs, this one among them, are past TIMEOUT_REQUEUES.
+
+    Watchdog ticks run concurrently after a wake. Each used to read the count
+    before moving the board, so all of them requeued on the same count.
+    Only the tick whose stop finds the task still `expect` goes on, and it
+    counts after its stop is on record, so the budget holds whoever races.
+    """
+    if not await board.apply(task_id, stop_event, status="blocked", expect=expect,
+                             data={"reason": reason}):
+        return
+    row = await db.fetchone(
+        f"SELECT {TIMED_OUT_RUNS} AS n FROM hq.tasks t WHERE t.id = %s", (task_id,))
+    if int((row or {}).get("n") or 0) <= TIMEOUT_REQUEUES:
+        await board.apply(task_id, requeue_event, status="backlog",
+                          data={"reason": requeue_reason})
 
 
 async def _drain_outbox_tick(scheduled: datetime, context: Any) -> None:
@@ -1250,10 +1315,7 @@ async def _close_timed_out_runs() -> None:
         "             AND n.started_at > r.started_at)")
     for row in await db.fetch(
         "SELECT t.id::text AS task_id, t.status AS task_status, r.id::text AS run_id,"
-        " r.wf_id, w.status AS wf_status,"
-        " (SELECT count(*) FROM hq.runs x WHERE x.task_id = t.id"
-        "  AND (x.error LIKE 'workflow stopped before its run closed%%'"
-        "       OR x.error LIKE 'cancelled at its age limit%%')) AS timeouts"
+        " r.wf_id, w.status AS wf_status"
         " FROM hq.tasks t"
         " JOIN hq.runs r ON r.task_id = t.id AND r.ended_at IS NULL"
         " JOIN dbos.workflow_status w ON w.workflow_uuid = r.wf_id"
@@ -1263,11 +1325,15 @@ async def _close_timed_out_runs() -> None:
         "                 AND n.started_at > r.started_at)"
     ):
         wf_status = row["wf_status"].lower()
-        await db.execute(
+        # Closing the run is the claim: a concurrent tick that saw the same
+        # run finds it closed and leaves the task alone.
+        if not await db.fetch(
             "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now(), error = %s,"
-            f" {safety.CALLS_COSTED} WHERE r.id = %s",
+            f" {safety.CALLS_COSTED} WHERE r.id = %s AND r.ended_at IS NULL"
+            " RETURNING r.id::text",
             (f"workflow stopped before its run closed (workflow {wf_status})", row["run_id"]),
-        )
+        ):
+            continue
         if row["task_status"] == "needs_approval":
             # It stopped while it waited for him. Nothing waits on its ticket
             # any more, so the ticket is expired; queued again, it would do
@@ -1281,12 +1347,26 @@ async def _close_timed_out_runs() -> None:
                               data={"reason": f"its workflow ended as {wf_status} while it"
                                     " waited for an approval; the approval was expired"})
             continue
-        reason = f"its workflow ended as {wf_status} before the run closed"
-        await board.apply(row["task_id"], "workflow_stopped", status="blocked",
-                          data={"reason": reason})
-        if int(row["timeouts"]) < TIMEOUT_REQUEUES:
-            await board.apply(row["task_id"], "requeued_after_stop", status="backlog",
-                              data={"reason": "queued again; its saved work is kept"})
+        await _stop_and_requeue(row["task_id"], row["task_status"], "workflow_stopped",
+                                f"its workflow ended as {wf_status} before the run closed",
+                                "requeued_after_stop", "queued again; its saved work is kept")
+    # A task marked running whose workflow then ended before it wrote a run
+    # has no run for the query above to find; the week review of 2026-09-27
+    # stayed running until the silence limit blocked it. Its newest attempt
+    # is the one that speaks for it.
+    for row in await db.fetch(
+        "SELECT t.id::text AS task_id, w.status AS wf_status FROM hq.tasks t"
+        " JOIN LATERAL (SELECT w.workflow_uuid, w.status FROM dbos.workflow_status w"
+        "   WHERE w.workflow_uuid LIKE 'task-' || t.id::text || '%%'"
+        "   ORDER BY w.created_at DESC LIMIT 1) w ON true"
+        " WHERE t.status = 'running'"
+        " AND w.status IN ('CANCELLED', 'ERROR', 'MAX_RECOVERY_ATTEMPTS_EXCEEDED')"
+        " AND NOT EXISTS (SELECT 1 FROM hq.runs r WHERE r.wf_id = w.workflow_uuid)"
+    ):
+        wf_status = row["wf_status"].lower()
+        await _stop_and_requeue(row["task_id"], "running", "workflow_stopped",
+                                f"its workflow ended as {wf_status} before it started a run",
+                                "requeued_after_stop", "queued again as a new attempt")
 
 
 async def reap() -> None:
@@ -1358,17 +1438,24 @@ async def reap() -> None:
         " AND w.application_version IS DISTINCT FROM %s",
         (DBOS.application_version,),
     ):
+        # The run is closed before its workflow is cancelled: a watchdog tick
+        # running alongside the boot would otherwise see an open run on a
+        # cancelled workflow and stop and requeue the task a second time.
+        # A deploy stop is not counted toward TIMEOUT_REQUEUES. It happens once
+        # per deploy, not once per run, so it cannot repeat on its own.
+        if not await db.fetch(
+            "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now(),"
+            f" error = 'stopped by a deploy', {safety.CALLS_COSTED}"
+            " WHERE r.id = %s AND r.ended_at IS NULL RETURNING r.id::text",
+            (row["run_id"],),
+        ):
+            continue
         try:
             await DBOS.cancel_workflow_async(row["wf_id"])
         except REPLAY_ERRORS:
             raise
         except Exception as exc:  # noqa: BLE001
             log.warning("could not cancel old-version workflow %s: %s", row["wf_id"], exc)
-        await db.execute(
-            "UPDATE hq.runs r SET outcome = 'abandoned', ended_at = now(),"
-            f" error = 'stopped by a deploy', {safety.CALLS_COSTED} WHERE r.id = %s",
-            (row["run_id"],),
-        )
         if row["task_status"] == "needs_approval":
             for ticket in await db.fetch(
                 "SELECT id::text FROM hq.tickets WHERE wf_id = %s AND status = 'pending'",
@@ -1381,10 +1468,11 @@ async def reap() -> None:
             continue
         # running -> blocked -> backlog: the board's legal path, and the
         # backlog loop below gives it the next attempt's workflow id.
-        await board.apply(row["task_id"], "stopped_by_deploy", status="blocked",
-                          data={"reason": "the backend restarted on new code mid-run"})
-        await board.apply(row["task_id"], "requeued_after_deploy", status="backlog",
-                          data={"reason": "queued again on the new code"})
+        if await board.apply(row["task_id"], "stopped_by_deploy", status="blocked",
+                             expect="running",
+                             data={"reason": "the backend restarted on new code mid-run"}):
+            await board.apply(row["task_id"], "requeued_after_deploy", status="backlog",
+                              data={"reason": "queued again on the new code"})
 
     await _close_timed_out_runs()
 
@@ -1394,15 +1482,10 @@ async def reap() -> None:
     # A backlog task that already has runs is a retry, and its first workflow
     # id is taken: _enqueue would get the old cancelled workflow back and start
     # nothing. On 2026-09-17 a retried lesson sat in backlog through a restart
-    # for exactly that reason. requeue gives it the next attempt's id.
-    for row in await db.fetch(
-        "SELECT t.id::text AS id, EXISTS (SELECT 1 FROM hq.runs r WHERE r.task_id = t.id)"
-        " AS has_runs FROM hq.tasks t WHERE t.status = 'backlog'"
-    ):
-        if row["has_runs"]:
-            await requeue(row["id"])
-        else:
-            await _enqueue(row["id"], lane=await _lane_of(row["id"]))
+    # for exactly that reason. requeue gives it the next attempt's id, and
+    # passes over an attempt that ended without a run.
+    for row in await db.fetch("SELECT id::text AS id FROM hq.tasks WHERE status = 'backlog'"):
+        await requeue(row["id"])
 
 
 _URL_RE = re.compile(r"https?://[^\s<>\)\]\"'`]+")
@@ -2554,9 +2637,7 @@ CATCH_UP_WINDOW = timedelta(hours=12)
 async def _orphaned_backlog_step() -> list[dict[str, Any]]:
     """Backlog tasks with no live workflow: the board says do it, nothing is."""
     return await db.fetch(
-        "SELECT t.id::text AS id,"
-        " EXISTS (SELECT 1 FROM hq.runs r WHERE r.task_id = t.id) AS has_runs"
-        " FROM hq.tasks t WHERE t.status = 'backlog'"
+        "SELECT t.id::text AS id FROM hq.tasks t WHERE t.status = 'backlog'"
         " AND (t.not_before IS NULL OR t.not_before <= now())"
         " AND t.updated_at < now() - interval '30 seconds'"
         " AND NOT EXISTS (SELECT 1 FROM dbos.workflow_status w"
@@ -2573,10 +2654,7 @@ async def _reconcile_backlog() -> None:
     from the task, so this is idempotent."""
     for row in await _orphaned_backlog_step():
         try:
-            if row["has_runs"]:
-                await requeue(row["id"])
-            else:
-                await _enqueue(row["id"], lane=await _lane_of(row["id"]))
+            await requeue(row["id"])
         except REPLAY_ERRORS:
             raise
         except Exception as exc:  # noqa: BLE001 — one bad row must not stop the tick

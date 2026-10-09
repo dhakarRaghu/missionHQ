@@ -404,3 +404,275 @@ def test_a_backfilled_watchdog_tick_does_nothing() -> None:
     assert asyncio.run(engine._backfilled((now - timedelta(minutes=10)).replace(tzinfo=None)))
     assert asyncio.run(engine._backfilled(now - timedelta(seconds=20))) is False
     assert "_backfilled(scheduled)" in inspect.getsource(engine._watchdog_tick)
+
+
+class _FakeWatchdogDb:
+    """engine's db and board, faked with the two guarantees the watchdog leans
+    on: a run closes once (`ended_at IS NULL`), and a board move with `expect`
+    happens only from that status (`board.apply` holds the task's row lock).
+    Every call yields, so ticks run with asyncio.gather interleave."""
+
+    def __init__(self, monkeypatch, stale: list[dict], counted: int = 0,
+                 status: str = "running", wf_status: str = "PENDING") -> None:
+        self.stale = stale
+        self.open_runs = {"r1"}
+        self.wf_status = wf_status
+        self.no_run_attempt = False     # newest attempt ERROR, no run written
+        self.counted = counted          # stopped runs already on record
+        self.status = status
+        self.moves: list[str] = []
+        self.calls: list[str] = []
+        monkeypatch.setattr(engine.db, "fetch", self.fetch)
+        monkeypatch.setattr(engine.db, "fetchone", self.fetchone)
+        monkeypatch.setattr(engine.db, "execute", self.execute)
+        monkeypatch.setattr(engine.board, "apply", self.apply)
+        monkeypatch.setattr(engine.board, "resolve_ticket", self.nothing)
+        monkeypatch.setattr(engine.obs, "emit", self.nothing)
+        monkeypatch.setattr(engine, "_release_workflow", self.nothing)
+        monkeypatch.setattr(engine.DBOS, "cancel_workflow_async", self.cancel)
+
+    async def nothing(self, *a: Any, **kw: Any) -> None:
+        await asyncio.sleep(0)
+
+    async def cancel(self, wf_id: str) -> None:
+        self.calls.append("cancel")
+        self.wf_status = "CANCELLED"
+        await asyncio.sleep(0)
+
+    async def execute(self, sql: str, params: tuple = ()) -> None:
+        await asyncio.sleep(0)
+
+    async def fetch(self, sql: str, params: tuple = ()) -> list[dict]:
+        await asyncio.sleep(0)
+        self.calls.append(sql)
+        if sql.lstrip().startswith("UPDATE hq.runs"):
+            if "r.id = %s" in sql:
+                closed = [params[-1]] if params[-1] in self.open_runs else []
+                counts = "stopped before its run closed" in str(params[0])
+            else:
+                closed = sorted(self.open_runs)
+                counts = params[0] == engine.SLEPT_RUN_ERROR
+            self.open_runs -= set(closed)
+            self.counted += len(closed) if counts else 0
+            return [{"id": rid} for rid in closed]
+        if "JOIN LATERAL" in sql:
+            return ([{"task_id": "t1", "wf_status": "ERROR"}]
+                    if self.no_run_attempt and self.status == "running" else [])
+        if "w.status IN ('CANCELLED'" in sql:
+            return [{**row, "wf_status": self.wf_status} for row in self.stale
+                    if self.wf_status == "CANCELLED" and "r1" in self.open_runs]
+        if "w.application_version IS DISTINCT FROM" in sql:
+            return [dict(row) for row in self.stale
+                    if self.wf_status == "PENDING" and "r1" in self.open_runs]
+        if "FROM hq.tasks t WHERE t.status = 'running'" in sql:
+            return [dict(row) for row in self.stale]
+        return []
+
+    async def fetchone(self, sql: str, params: tuple = ()) -> dict:
+        await asyncio.sleep(0)
+        assert engine.TIMED_OUT_RUNS in sql
+        return {"n": self.counted}
+
+    async def apply(self, task_id: str, event: str, *, status: str | None = None,
+                    expect: str | None = None, **kw: Any) -> bool:
+        await asyncio.sleep(0)
+        if expect is not None and self.status != expect:
+            return False
+        self.moves.append(event)
+        self.status = status or self.status
+        return True
+
+
+def test_a_run_the_host_slept_through_is_closed_as_a_counted_stop(monkeypatch) -> None:
+    """2026-10-08: a video's sleep-abandoned runs had no error, so no limit ever counted them."""
+    fake = _FakeWatchdogDb(monkeypatch, [{"id": "t1"}])
+    asyncio.run(engine._cap_overrunning_tasks(slept=True))
+    assert fake.counted == 1 and fake.moves == ["stopped_by_sleep", "requeued_after_sleep"]
+    assert f"LIKE '{engine.SLEPT_RUN_ERROR}%%'" in engine.TIMED_OUT_RUNS
+    # A run closed with no error, by an older build or a tick that missed the
+    # sleep, is counted by the stopped_by_sleep event that follows it.
+    assert "x.error IS NULL AND x.outcome = 'abandoned'" in engine.TIMED_OUT_RUNS
+    assert "e.event_type = 'stopped_by_sleep' AND e.ts >= x.ended_at" in engine.TIMED_OUT_RUNS
+    # A silent run with the host awake keeps whatever error it had.
+    fake = _FakeWatchdogDb(monkeypatch, [{"id": "t1"}])
+    asyncio.run(engine._cap_overrunning_tasks(slept=False))
+    assert fake.counted == 0 and fake.moves == ["timed_out"]
+
+
+@pytest.mark.parametrize("before,requeued", [
+    (0, True), (engine.TIMEOUT_REQUEUES - 1, True), (engine.TIMEOUT_REQUEUES, False), (5, False)])
+def test_a_sleep_requeue_stops_at_the_timeout_limit(monkeypatch, before: int,
+                                                    requeued: bool) -> None:
+    """2026-10-08: a video was requeued after every sleep, five runs in a row, with no limit."""
+    fake = _FakeWatchdogDb(monkeypatch, [{"id": "t1"}], counted=before)
+    asyncio.run(engine._cap_overrunning_tasks(slept=True))
+    assert fake.moves[0] == "stopped_by_sleep"
+    assert ("requeued_after_sleep" in fake.moves) is requeued
+
+
+@pytest.mark.parametrize("before,requeued", [
+    (engine.TIMEOUT_REQUEUES - 1, True), (engine.TIMEOUT_REQUEUES, False)])
+def test_a_stopped_workflow_counts_sleeps_toward_the_same_limit(monkeypatch, before: int,
+                                                                requeued: bool) -> None:
+    """2026-10-08: sleep stops and workflow stops each had their own count, or none."""
+    row = {"task_id": "t1", "task_status": "running", "run_id": "r1", "wf_id": "task-t1"}
+    fake = _FakeWatchdogDb(monkeypatch, [row], counted=before, wf_status="CANCELLED")
+    asyncio.run(engine._close_timed_out_runs())
+    assert fake.moves[0] == "workflow_stopped"
+    assert ("requeued_after_stop" in fake.moves) is requeued
+
+
+def test_concurrent_ticks_after_a_wake_stop_and_requeue_a_task_once(monkeypatch) -> None:
+    """2026-10-09: three watchdog ticks blocked and requeued one video in the same millisecond."""
+    async def three_ticks() -> None:
+        await asyncio.gather(*(engine._cap_overrunning_tasks(slept=True) for _ in range(3)))
+
+    fake = _FakeWatchdogDb(monkeypatch, [{"id": "t1"}], counted=engine.TIMEOUT_REQUEUES - 1)
+    asyncio.run(three_ticks())
+    assert fake.moves == ["stopped_by_sleep", "requeued_after_sleep"]
+    # The last stop the budget allows: every tick saw the same count, none requeues.
+    fake = _FakeWatchdogDb(monkeypatch, [{"id": "t1"}], counted=engine.TIMEOUT_REQUEUES)
+    asyncio.run(three_ticks())
+    assert fake.moves == ["stopped_by_sleep"]
+    # A tick that missed the sleep, racing one that saw it: one of them moves the task.
+    fake = _FakeWatchdogDb(monkeypatch, [{"id": "t1"}])
+
+    async def mixed() -> None:
+        await asyncio.gather(engine._cap_overrunning_tasks(slept=False),
+                             engine._cap_overrunning_tasks(slept=True))
+
+    asyncio.run(mixed())
+    assert fake.moves in (["timed_out"], ["stopped_by_sleep", "requeued_after_sleep"])
+
+
+def test_concurrent_ticks_close_a_stopped_workflow_once(monkeypatch) -> None:
+    """2026-10-09: ticks running together each counted the same stop and each requeued."""
+    row = {"task_id": "t1", "task_status": "running", "run_id": "r1", "wf_id": "task-t1"}
+
+    async def two_ticks() -> None:
+        await asyncio.gather(engine._close_timed_out_runs(), engine._close_timed_out_runs())
+
+    fake = _FakeWatchdogDb(monkeypatch, [row], counted=engine.TIMEOUT_REQUEUES,
+                           wf_status="CANCELLED")
+    asyncio.run(two_ticks())
+    assert fake.counted == engine.TIMEOUT_REQUEUES + 1
+    assert fake.moves == ["workflow_stopped"]
+
+
+def test_a_deploy_stops_and_requeues_a_run_once(monkeypatch) -> None:
+    """2026-09-23: a deploy requeues runs in flight; a tick alongside the boot must not do it twice."""
+    row = {"task_id": "t1", "task_status": "running", "run_id": "r1", "wf_id": "task-t1"}
+    fake = _FakeWatchdogDb(monkeypatch, [row])
+
+    async def boot_and_tick() -> None:
+        await asyncio.gather(engine.reap(), engine.reap(), engine._close_timed_out_runs())
+
+    asyncio.run(boot_and_tick())
+    assert fake.moves == ["stopped_by_deploy", "requeued_after_deploy"]
+    # The run is closed before its workflow is cancelled, so no tick sees an
+    # open run on a cancelled workflow; and a deploy stop is not a counted one.
+    claim = next(i for i, c in enumerate(fake.calls) if "'stopped by a deploy'" in c)
+    assert claim < fake.calls.index("cancel")
+    assert fake.counted == 0 and "stopped by a deploy" not in engine.TIMED_OUT_RUNS
+
+
+def _fake_requeue(monkeypatch, runs: int, ended: set[str]) -> list[str]:
+    """requeue against a task with `runs` runs and these ended workflows; the
+    workflow ids it enqueues are recorded."""
+    started: list[str] = []
+
+    async def fetchone(sql: str, params: tuple = ()) -> dict:
+        await asyncio.sleep(0)
+        return {"n": runs}
+
+    async def fetch(sql: str, params: tuple = ()) -> list[dict]:
+        await asyncio.sleep(0)
+        assert list(params[1]) == list(engine.ENDED_WORKFLOW)
+        return [{"workflow_uuid": w} for w in sorted(ended)]
+
+    async def enqueue(task_id: str, *, attempt: int = 0, lane: str = "tasks") -> None:
+        started.append(engine._attempt_wf_id(task_id, attempt))
+
+    async def lane(task_id: str) -> str:
+        return "courses"
+
+    monkeypatch.setattr(engine.db, "fetchone", fetchone)
+    monkeypatch.setattr(engine.db, "fetch", fetch)
+    monkeypatch.setattr(engine, "_enqueue", enqueue)
+    monkeypatch.setattr(engine, "_lane_of", lane)
+    return started
+
+
+@pytest.mark.parametrize("runs,ended,expected", [
+    # 2026-09-28: marked running, workflow died before its run: attempt 0 is spent.
+    (0, {"task-t1"}, "task-t1-retry-1"),
+    # Two attempts in a row died before their runs.
+    (1, {"task-t1", "task-t1-retry-1"}, "task-t1-retry-2"),
+    # The ordinary retry after a run, and a first attempt still to start.
+    (1, {"task-t1"}, "task-t1-retry-1"),
+    (0, set(), "task-t1"),
+])
+def test_a_retry_never_reuses_a_workflow_that_ended(monkeypatch, runs: int, ended: set[str],
+                                                    expected: str) -> None:
+    """2026-09-28: a week review sat in backlog 11 days; every tick re-enqueued its ERROR workflow."""
+    started = _fake_requeue(monkeypatch, runs, ended)
+    asyncio.run(engine.requeue("t1"))
+    assert started == [expected]
+
+
+def test_concurrent_retries_of_one_task_start_one_attempt(monkeypatch) -> None:
+    """2026-09-28: the backlog sweep, a boot and a Retry can all requeue one task at once."""
+    started = _fake_requeue(monkeypatch, 0, {"task-t1"})
+
+    async def five() -> None:
+        await asyncio.gather(*(engine.requeue("t1") for _ in range(5)))
+
+    asyncio.run(five())
+    # One id for all of them; DBOS keys a workflow on its id, so it starts once.
+    assert set(started) == {"task-t1-retry-1"}
+
+
+def test_the_backlog_sweeps_pick_ids_through_requeue() -> None:
+    """2026-09-28: the sweeps enqueued attempt 0 for a task with no runs, whatever had ended."""
+    assert "await requeue(" in inspect.getsource(engine._reconcile_backlog)
+    assert "_enqueue(" not in inspect.getsource(engine._reconcile_backlog)
+    assert "_enqueue(" not in inspect.getsource(engine.reap)
+
+
+@pytest.mark.parametrize("before,requeued", [
+    (engine.TIMEOUT_REQUEUES, True), (engine.TIMEOUT_REQUEUES + 1, False)])
+def test_a_workflow_that_died_before_its_run_is_stopped_and_counted(monkeypatch, before: int,
+                                                                   requeued: bool) -> None:
+    """2026-09-27: a week review was marked running, its workflow failed, and no run was written."""
+    # `before` already includes the failed attempt: TIMED_OUT_RUNS counts it.
+    assert "AND NOT EXISTS (SELECT 1 FROM hq.runs z WHERE z.wf_id = w.workflow_uuid)" \
+        in engine.TIMED_OUT_RUNS
+    fake = _FakeWatchdogDb(monkeypatch, [], counted=before)
+    fake.no_run_attempt = True
+    asyncio.run(engine._close_timed_out_runs())
+    assert fake.moves[0] == "workflow_stopped"
+    assert ("requeued_after_stop" in fake.moves) is requeued
+
+
+def test_concurrent_ticks_stop_a_runless_failed_attempt_once(monkeypatch) -> None:
+    """2026-10-09: watchdog ticks run together after a wake; each saw the same failed attempt."""
+    fake = _FakeWatchdogDb(monkeypatch, [], counted=1)
+    fake.no_run_attempt = True
+
+    async def three_ticks() -> None:
+        await asyncio.gather(*(engine._close_timed_out_runs() for _ in range(3)))
+
+    asyncio.run(three_ticks())
+    assert fake.moves == ["workflow_stopped", "requeued_after_stop"]
+
+
+def test_the_dbos_thread_pool_is_capped() -> None:
+    """2026-10-08: unset, DBOS's pool (also asyncio.to_thread's) grew to the 2048-thread limit."""
+    from dbos._dbos_config import translate_dbos_config_to_config_file
+
+    from hq import dbos_app
+
+    assert dbos_app._config["max_executor_threads"] == 32
+    # DBOS rebuilds runtimeConfig from the top-level key; a nested one is dropped.
+    translated = translate_dbos_config_to_config_file(dbos_app._config)
+    assert translated["runtimeConfig"]["max_executor_threads"] == 32

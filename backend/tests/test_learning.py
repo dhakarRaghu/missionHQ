@@ -1607,7 +1607,8 @@ def test_a_retried_task_left_in_backlog_runs_after_a_restart() -> None:
     from hq import engine
 
     src = inspect.getsource(engine.reap)
-    assert "has_runs" in src and "await requeue(" in src
+    # Every backlog task goes through requeue, which picks the attempt's id.
+    assert "await requeue(" in src and "await _enqueue(" not in src
 
 
 def test_a_published_phase_gets_an_enhanced_page_and_a_planned_one_is_never_written_here() -> None:
