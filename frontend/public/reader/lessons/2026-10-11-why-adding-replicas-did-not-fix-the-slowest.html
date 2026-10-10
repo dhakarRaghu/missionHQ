@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why adding replicas did not fix the slowest replica: sticky routing has a variance floor</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">applies · Inference Internals, Phase 3B: Routing, Batches and the KV Cache · a production trace of sticky-session routing at hundreds of billions of tokens per day</div><h1>Why adding replicas did not fix the slowest replica: sticky routing has a variance floor</h1><p class="subtitle">Does the Phase 3B routing model hold in a production serving stack today, and what does it cost when the router ignores the cache?</p></header>
+<p class="why">A uniform hash spreads sessions evenly on average, but the average hides the spread, and scaling out does not shrink it.</p>
+
+<p>In Phase 3B you learned to route a session back to the replica that already holds its KV cache, so the request skips a second full prefill. Stickiness solved the recomputation problem, but it left a question your rollout plan cannot dodge: if a uniform hash decides which replica each session lands on, how uneven is the load across your replicas? On Modal's Kimi K2.6 coding-agent service, 50 replicas and 250 sticky sessions aimed at 5 per replica, yet about 4% of replicas sat at 1 session or fewer while others reached 12.</p>
+
+<p>The reasonable guess is that this is a small-scale problem, and that adding more replicas lets the law of large numbers smooth it out. This phase measures what actually happens: why the spread between your idlest and busiest replica has a floor set by the hashing itself, why doubling replicas and sessions together changes nothing about it, and the one load-aware fix worth adding to your own router.</p>
+<p>This lesson teaches one idea. It is stated here so you can see where the lesson is going. It will read more clearly once it has been explained below, so come back to it at the end.</p>
+<ol class="concepts"><li id="c1"><b>Uniform session hashing over S servers is a Poisson process whose variance equals its mean, so the relative load spread across replicas never shrinks as you add replicas.</b> <span>Predict idle-replica and overloaded-replica percentages for his own router before he builds autoscaling, and decide when load-aware placement is worth the complexity.</span></li></ol>
+<h2 data-concept="c1">What does a request actually cost when it lands on the wrong replica?</h2>
+<p class="why">A request on the wrong replica replays a 100,000-token prefill it could have skipped. Here is why.</p>
+
+<p>You run several GPU replicas behind a router, and a user's turn can land on any of them. This section shows what that landing costs, and the cost is lopsided: the same request is nearly free on one replica and ruinously expensive on another. The reason is the shape of one coding-agent request, so start there.</p>
+
+<p>A coding agent works in turns, and each turn resends the whole conversation. The article calls this <dfn>session history replay</dfn>: turn T's input is the full history of turns 1 to T-1 plus something new. On Modal's Kimi K2.6 service, one request carried roughly 100,000 input tokens and produced roughly 500 output tokens. That is 200 input tokens per output token.</p>
+
+<div class="stack">
+  <h4>One coding-agent request, by tokens</h4>
+  <div class="whole">
+    <i style="--w:99500;--c:var(--warn)" data-label="input: history replayed" data-value="~100,000 tokens" data-note="processed before any output"></i>
+    <i style="--w:500;--c:var(--ok)" data-label="output" data-value="~500 tokens" data-note="what the user reads"></i>
+  </div>
+</div>
+
+<p>llm-d, a separate team on different hardware, reports agentic ratios above 100:1. So this shape belongs to the workload class, including your own support agents. It is not a Modal peculiarity.</p>
+
+<p>The GPU does not have to recompute the shared history every turn. It keeps the <dfn>KV cache</dfn>, the attention keys and values computed for tokens it has already seen. When the history is cached, the prefill (the single pass that processes input tokens before the first output token) only handles the new tokens. When it is not cached, prefill replays all 100,000.</p>
+
+<details class="predict"><summary>Predict: turn 15 lands on a replica without the KV cache. The new turn adds about 500 tokens. How much more input does prefill process on a miss than on a hit: about 2x, 20x, or 200x?</summary>
+<p>About 200x. A cache hit prefills only the roughly 500 new tokens. A miss replays the near-100,000-token history. The user feels this as time to first token, the wait before the first word of the reply. llm-d measured the consequence: P90 time to first token of 0.542s with cache-aware routing against ~93s cache-blind, on 8 vLLM pods and 16 H100s.</p></details>
+
+<p>There is one catch: a KV cache lives in one replica's GPU memory. A session's history is cheap only on the replica that processed it. So the router needs <dfn>session affinity</dfn>, the rule that keeps a session on the replica holding its KV cache. Affinity converts one expensive decision, where a session first lands, into a permanent commitment.</p>
+
+<ol class="flow" data-dir="down">
+  <li><b>turn arrives</b><span>history plus ~500 new tokens</span></li>
+  <li><b>router picks a replica</b><span>this choice decides the cost</span></li>
+  <li class="ok"><b>holds the cache</b><span>prefill ~500 tokens</span></li>
+  <li class="bad"><b>no cache</b><span>prefill ~100,000 tokens</span></li>
+</ol>
+
+<p>Notice what this does to load. A replica holding one extra session is not holding one extra request. It may be repaying a 100,000-token prefill on every turn. An overloaded replica's slowest users are slow by a factor of hundreds, not percent. That amplification is why an uneven spread of sessions across replicas, however small it looks as a count, is a latency problem.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The 100k input, 500 output and 200:1 figures are quoted from Modal's engineering post on their production Kimi K2.6 coding-agent service, a single team and a single workload. The &gt;100:1 agentic ratio and the 0.542s versus ~93s P90 TTFT comparison are llm-d's own measurements on 8 vLLM pods and 16 H100s. Both urls are in the sources list.</p></details>
+
+<div class="keypoints">
+<p class="remember">A cache hit prefills 500 tokens; a miss prefills 100,000, so routing decides the cost.</p>
+<p class="trap">Treating one session as one unit of load, when a session is 200 input tokens per output token.</p>
+<p class="try">Log input and output token counts per request on your own agent and compute their ratio.</p>
+</div>
+
+<p>So the router must be sticky. But stickiness raises a question this section left open: once sessions are pinned by a hash, how uneven does the fleet get, and does adding replicas even it out?</p>
+<h2 data-concept="c1">Why does a uniform hash stay uneven at any scale?</h2>
+<p class="why">Knowing why scale cannot fix a sticky router saves you building autoscaling to fix it.</p>
+
+<p>The section above showed why the router must be sticky: a session on the wrong replica repays a 100,000-token prefill. It left open how uneven that constraint makes the fleet, which is what this section measures.</p>
+
+<p>Here is the mechanism, one level below "the router hashes sessions". Most routers use <dfn>consistent hashing</dfn>. It assigns each session to a replica by hashing its session id. So adding one replica remaps only some sessions instead of all of them. Two facts follow.</p>
+
+<ol>
+<li>Each session id hashes to a replica uniformly and independently. Put N sessions over S replicas and each replica's count is a binomial draw, which at these sizes behaves as a Poisson distribution with rate N/S, the average sessions per replica.</li>
+<li>A Poisson distribution's variance equals its mean. So when the target is 5 sessions per replica, the spread around 5 has the same shape whether you run 50 replicas or 500. This is the <dfn>Poisson variance floor</dfn>: the relative unevenness of uniform hashing does not shrink when you add replicas, because adding replicas adds sessions in the same ratio.</li>
+</ol>
+
+<details class="predict"><summary>Predict: how many replicas sit near idle, and does doubling the fleet help?</summary>
+<p>You run 50 replicas and 250 sticky sessions, hashed uniformly, aiming at 5 sessions per replica. What share of replicas sit at 1 session or fewer? Does that share fall if you double everything to 100 replicas and 500 sessions?</p>
+<p>About 4% at 1 session or fewer, and no, doubling changes nothing. The Poisson rate stays 5, so the shape of the spread stays the same. The reasonable belief that the law of large numbers smooths this out fails. That is because the mean scales with the fleet, and the variance scales with the mean.</p>
+</details>
+
+<p>Move the sliders and watch both tails. See the share of replicas at 1 session or fewer. Also see the share at 12 or more, under a Poisson at your chosen rate.</p>
+
+<div class="calc" id="s2-poisson">
+<h4>Sessions per replica under uniform hashing</h4>
+<label>Replicas <input type="range" name="replicas" min="10" max="200" value="50">
+<span class="val" data-val="replicas"></span></label>
+<label>Target sessions per replica <input type="range" name="rate" min="2" max="10" value="5">
+<span class="val" data-val="rate"></span></label>
+<div class="result">At 1 session or fewer <b data-out="idle"></b></div>
+<div class="result">At 12 sessions or more <b data-out="hot"></b></div>
+<script>kit.calc('#s2-poisson', function(v){
+  function pois(k,m){var p=Math.exp(-m),s=p,f=p;for(var i=1;i<=k;i++){f=f*m/i;s+=f;}return s;}
+  function tail(k,m){var s=0,f=Math.exp(-m);for(var i=1;i<k;i++){f=f*m/i;s+=f;}return Math.max(0,1-s);}
+  var idle=pois(1,v.rate), hot=tail(12,v.rate);
+  return {idle:(idle*100).toFixed(1)+'% of '+v.replicas+' replicas',
+          hot:(hot*100).toFixed(1)+'% of '+v.replicas+' replicas'};
+});</script>
+</div>
+
+<p>At 50 replicas, 250 sessions and a target of 5, Modal measured about 4% of replicas at 1 session or fewer and about 0.5% at 12 or more, matching the Poisson shape and invariant to total scale. Their production spread was worse than the theory, with variance several times the mean. The cause is the <dfn>session burst</dfn>: clients control session ids, and tree-structured agent flows with sub-agents and branches fire many concurrent requests under one session id, so all of that load pins one replica while the hash still counts it as one session.</p>
+
+<div class="bars">
+<div class="bar" style="--v:4" data-label="≤1 session" data-value="~4%"></div>
+<div class="bar" style="--v:80" data-label="3–7 sessions" data-value="most replicas"></div>
+<div class="bar" style="--v:0.5" data-label="≥12 sessions" data-value="~0.5%"></div>
+</div>
+<p class="legend"><span>Modal's production fleet, 50 replicas, target 5 sessions per replica.</span></p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The 4% and 0.5% dispersion figures are Modal's own measurements. So is "variance several times the mean". They were measured on their Kimi K2.6 coding-agent service, one team and one workload. A second team measured the failure this math predicts. llm-d reports P90 time to first token of 0.542s with cache-aware scheduling. That is against ~31s approximate and ~93s cache-blind, on 8 vLLM pods and 16 H100s. Both urls are in the sources list.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">Uniform sticky hashing is Poisson, so the load spread never shrinks as you add replicas.</p>
+<p class="trap">Expecting the law of large numbers to even out the fleet; the variance grows with the mean.</p>
+<p class="try">Set the calculator to your replica count and read the idle share before planning autoscaling.</p>
+</div>
+
+<p>So the spread is mathematical, not bad luck. What a router can do about it without breaking stickiness is the next section's subject. It covers what Modal changed, and which fix applies to your stack.</p>
+<h2 data-concept="c1">What did Modal change in the router, and which fix applies to his stack?</h2>
+<p>The section above showed the load spread is mathematical, not bad luck. What it left open is what your router can do about it without breaking stickiness. Modal changed their router in three ways, and each one maps to one cause from the spread.</p>
+
+<h3>Three fixes, one per cause</h3>
+
+<ol>
+<li><b>Split heavy sessions past a threshold.</b> A session burst, the many concurrent requests a tree-shaped agent fires under one session id, pins all of them on one replica. Past a load threshold the router deliberately places one session on two replicas. Some KV is recomputed, because a shared prefill is cheaper than one overloaded replica running while others idle.</li>
+<li><b>Place new sessions by live load, not by hash.</b> Sessions differ by orders of magnitude in tokens, so counting sessions miscounts work. The router reads fine-grained signals from each replica, such as running requests and KV utilization, and puts a new session on the least loaded one. This is <dfn>load-aware placement</dfn>, choosing a replica from measured load instead of from a hash over session counts. Session affinity still holds after placement, so the session stays put and keeps its cache.</li>
+<li><b>On scale-up, send new sessions to the new replicas.</b> Consistent hashing reroutes about 1/N of sessions whenever the replica count changes, and each rerouted session recomputes its full KV. New replicas are empty by definition, so they are the best placement and no existing session has to move.</li>
+</ol>
+
+<p>The result was strongly sub-Poisson dispersion, meaning a variance under half the mean. The uniform hash from the section above has a variance equal to its mean. So Modal's router beats the floor rather than sitting on it.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The three fixes and "variance under half the mean" are Modal's own report on their Kimi K2.6 coding-agent router. It is one team and one workload. llm-d measured the same fix class paying off on different hardware. P90 time to first token of 0.542s with cache-aware scheduling against ~93s cache-blind, on 8 vLLM pods and 16 H100s. Both urls are in the sources list.</p>
+</details>
+
+<h3>What transfers to your router</h3>
+
+<details class="predict"><summary>Predict: your stack is small, a handful of replicas. Of Modal's three fixes, splitting heavy sessions, load-aware placement, and placing new sessions on new replicas, which is least worth building first?</summary>
+<p>The session split. It is more machinery than a small router needs. The hotspot it fixes comes from client-controlled bursts, which you may not have. The other two matter at any scale, because the Poisson floor never improves with scale.</p>
+</details>
+
+<p>At four replicas a trivial sticky router with load-aware placement is a real improvement, not a premature optimization. The maths makes this clear: the floor does not fall as the fleet grows. So a small fleet does not escape it either. Placing new sessions on the least loaded replica is a few lines in any router. It removes the left tail of idle replicas before you ever autoscale.</p>
+
+<p>One check fits this week. Log sessions per replica and its variance next to cache hit rate, as a first-class metric. When variance climbs past the mean, placement has drifted back toward the hash. Time to first token will show it first.</p>
+
+<div class="keypoints">
+<p class="remember">Fix the hash's spread by placing new sessions on measured load, then keep each session where it landed.</p>
+<p class="trap">Treating routing as a small-scale concern and waiting for autoscaling; the Poisson floor is identical at 4 and 50 replicas.</p>
+<p class="try">Add one log line per placement. Then plot sessions per replica next to cache hit rate and look for the left tail.</p>
+</div>
+
+<p>You can now read this phase's sticky-session rule with one condition on it. Stickiness sets where a session can go, but the hash still decides the spread. A uniform hash leaves about 4% of replicas nearly idle and a tail overloaded at any replica count. The recall section collects the claims.</p>
+<h2 data-kind="lab">Lab: watch the Poisson floor in fifteen minutes</h2>
+<p>The section above gave you the claim and its fix. This lab lets you produce the Poisson floor yourself in fifteen minutes. It uses the same 50-replica, 250-session setup from Modal's service. So the 4% number becomes something you measured rather than something you read.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1</b> <span class="tag">offline</span></label>
+<b>The floor at 5 sessions per replica.</b> Hash 250 random session ids onto 50 buckets, the way a sticky router hashes sessions onto replicas.
+<div class="lab">
+<pre><code data-lang="python">import hashlib, random
+
+def spread(sessions, replicas):
+    counts = [0] * replicas
+    for i in range(sessions):
+        h = hashlib.sha256(f"session-{i}-{random.random()}".encode()).digest()
+        counts[int.from_bytes(h[:8]) % replicas] += 1
+    idle = sum(1 for c in counts if c &lt;= 1) / replicas
+    hot = sum(1 for c in counts if c &gt;= 12) / replicas
+    return idle, hot
+
+print("50 x 250:", spread(250, 50))
+# Expected (Poisson with mean 5, illustration, not measured):
+# ~4% of buckets at 1 session or fewer
+# ~0.5% of buckets at 12 sessions or more</code></pre>
+<p>Compare your shares against Modal's measured numbers from section 2. They should land close, because the math is the mechanism.</p>
+</div>
+</li>
+<li><label><input type="checkbox"> <b>E2</b> <span class="tag">offline</span></label>
+<b>Scale changes nothing.</b> The <a href="#s4-e1">first exercise</a> showed the shape at 50 replicas. Now double everything and confirm the shares barely move.
+<div class="lab">
+<pre><code data-lang="python">print("100 x 500:", spread(100, 500))
+# Expected: the same ~4% idle and ~0.5% hot shares.
+# If your numbers move, run each size a few dozen times
+# and average; a single run has noise.</code></pre>
+<p>This is the result the law of large numbers said should not happen. The mean load doubled and the relative spread did not shrink.</p>
+</div>
+</li>
+<li><label><input type="checkbox"> <b>E3</b> <span class="tag">offline</span></label>
+<b>The session burst makes it worse.</b> The two exercises above count sessions as equal. In the running case, sessions with sub-agents fire many concurrent requests under one session id, so a session's true weight is skewed. Weight each bucket by a skewed session size instead of counting.
+<div class="lab">
+<pre><code data-lang="python">import random
+def weighted_spread(sessions, replicas):
+    load = [0] * replicas
+    for i in range(sessions):
+        h = hashlib.sha256(f"session-{i}-{random.random()}".encode()).digest()
+        r = int.from_bytes(h[:8]) % replicas
+        load[r] += random.paretovariate(1.2)  # heavy-tailed session sizes
+    mean = sum(load) / replicas
+    var = sum((x - mean) ** 2 for x in load) / replicas
+    return var / mean  # ratio of variance to mean
+
+print(weighted_spread(250, 50))
+# Expected: a ratio of several, not 1.0. Load-aware
+# placement would push it under 0.5.</code></pre>
+<p>The uniform hash promised variance equal to the mean. A skewed workload pays several times that, which matches Modal's production observation.</p>
+</div>
+</li>
+</ul>
+
+<div class="callout tip">Keep these three scripts. When you add the sessions-per-replica metric from section 3 to your router, E1 gives you the baseline its variance should beat.</div>
+
+<p>You have now measured the floor, confirmed it does not move with scale, and watched the session burst widen it. The checkpoint next gives you a user's complaint and asks you to explain it from these numbers.</p>
+<h2 data-kind="checkpoint">Checkpoint</h2>
+<p>The lab showed the floor in scripts you ran yourself. Now use the concept on a live complaint.</p>
+
+<div class="cards" data-cols="1">
+<div class="card">
+<h4>The complaint</h4>
+<p>Your multi-agent system runs 4 replicas, each holding its own KV cache, with 40 sticky sessions hashed uniformly across them. You log sessions per replica and see 7, 9, 10, and 14.</p>
+<p>A user on the replica with 14 sessions reports a time to first token twice the others. You scale out to 8 replicas. After the scale-out, the counts read 3, 4, 4, 5, 5, 5, 6, 8, and the same class of complaint comes back two days later.</p>
+</div>
+</div>
+
+<p>Answer these from Concept 1 before opening the sketch:</p>
+
+<ol>
+<li>Why did scaling from 4 to 8 replicas not remove the slowest replica?</li>
+<li>Which two router changes would remove it?</li>
+</ol>
+
+<details class="answer">
+<summary>Answer sketch</summary>
+<p><b>1. Scaling cannot fix it.</b> Uniform hashing of N sessions over S replicas is Poisson with rate N/S, and Poisson variance equals the mean, so the relative spread stays the same at any replica count. At 5 target sessions per replica, about 0.5% of replicas still sit at 12 or more sessions. Autoscaling halves the absolute load on every replica, but the share of replicas sitting far above the mean does not move, so some replica always accumulates the tail and its prefill queue doubles its time to first token.</p>
+<p><b>2. The two fixes.</b> First, place new sessions by measured load, such as running requests and KV utilization, instead of by hash alone, which is load-aware placement over a sticky session. Second, past a load threshold, split a hot session across two replicas, because a session whose sub-agents fire concurrent requests can pin one replica on its own, and duplicating some KV is cheaper than one hotspot. Both fixes keep session affinity after placement, so cache hit rate is preserved.</p>
+<p>The Poisson floor was Modal's measurement on a 200:1 coding-agent workload; your exercise E1 reproduced the same shape with a hash and a for loop.</p>
+</details>
+<h2 data-kind="post">Things he could post</h2>
+<p>Two posts this lesson supports:</p>
+
+<div class="cards" data-cols="2" id="s6-posts">
+<div class="card">
+<h4>The counterintuitive number</h4>
+<p>Random sticky routing leaves about 4% of replicas at one session or fewer at five sessions per replica. That is true at any scale. Doubling the fleet does not shrink the share. What makes it his is the figure: his own simulation from the lab above. It shows two overlaid histograms at 50 and 100 replicas showing the same shape.</p>
+</div>
+<div class="card">
+<h4>Two teams, one failure</h4>
+<p>A short note comparing Modal's Poisson floor with llm-d's P90 time to first token of 0.542s cache-aware. That is against about 93s cache-blind on 8 vLLM pods and 16 H100s. The claim is that two independent teams hit the same routing failure on different stacks. So it is a property of cache-aware serving, not of one vendor.</p>
+</div>
+</div>
+
+<p>The first post works because the number contradicts the reasonable belief that scale smooths random hashing. The second works because two measurements of one mechanism are stronger evidence than either alone.</p>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+<li><a href="https://modal.com/blog/trillion-tokens-trillion-parameters">Modal Engineering, "Serving trillions of tokens for trillion-parameter coding agents" (2026-09-23)</a>: the primary trace for this lesson. Gave the routing math, the Poisson dispersion numbers at 50 replicas and 250 sessions, the session burst effect, and the three router fixes.</li>
+<li><a href="https://llm-d.ai/blog/kvcache-wins-you-can-see">llm-d, "KV-Cache Wins You Can See"</a>: the independent measurement of the same failure class on different hardware. Gave the P90 time to first token of 0.542s cache-aware against about 31s approximate and about 93s cache-blind, and the agentic input to output ratios above 100:1.</li>
+</ul>
+
+<p>Read the numbers with their strength. Every headline dispersion figure (about 4% near idle, about 0.5% overloaded) is Modal's own, from one team and one workload, so treat it as one production observation on top of the math. llm-d measured the same mechanism differently, through latency percentiles rather than per-replica spread, and their result confirms the failure is real without confirming Modal's exact percentages.</p>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>
