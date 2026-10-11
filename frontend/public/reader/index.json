@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-10-11T03:00:09.102543+05:30",
+  "built_at": "2026-10-12T03:02:29.216356+05:30",
   "courses": [
     {
       "slug": "inference-internals",
@@ -123,6 +123,15 @@
     }
   ],
   "articles": [
+    {
+      "title": "Week in Review: Tails, Deadlines and What a Number Actually Measures",
+      "one_liner": "A short recall pass over the week's five lessons, three self-checks on older phases with worked arithmetic, and one decision about what comes next.",
+      "topic": "week review",
+      "kind": "",
+      "date": "2026-10-11",
+      "read": false,
+      "file": "2026-10-11-week-review-2026-w41.html"
+    },
     {
       "title": "Why adding replicas did not fix the slowest replica: sticky routing has a variance floor",
       "one_liner": "He can predict the load spread of any sticky-session router from two numbers (sessions per replica, replica count), explain why scaling out leaves the spread unchanged, and name the one load-aware fix he could add to his own multi-agent router this week.",
