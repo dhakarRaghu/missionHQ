@@ -189,6 +189,38 @@ def is_context_overflow(exc: BaseException) -> bool:
     return bool(_OVERFLOW_RE.search(f"{exc.message} {exc.body}"))
 
 
+# How the gateway words its own count, both seen on 2026-10-13:
+# "The input (295561 tokens) is longer than the model's context length" and
+# "You requested a total of 263874 tokens: 199874 tokens from the input messages".
+_INPUT_COUNT_RE = re.compile(
+    r"input \((\d[\d,]*) tokens\)|(\d[\d,]*) tokens from the input", re.IGNORECASE)
+
+
+def overflow_input_tokens(exc: BaseException) -> int | None:
+    """The input tokens the gateway counted in a refusal for length, when it says."""
+    m = _INPUT_COUNT_RE.search(f"{getattr(exc, 'message', '')} {getattr(exc, 'body', '')}")
+    return int((m.group(1) or m.group(2)).replace(",", "")) if m else None
+
+
+# And how it words its window and the room it kept for the answer:
+# "longer than the model's context length (262144 tokens)", "maximum context
+# length of 262144 tokens", "64000 tokens for the completion".
+_WINDOW_RE = re.compile(r"context length (?:\(|of )(\d[\d,]*) tokens", re.IGNORECASE)
+_ANSWER_RE = re.compile(r"(\d[\d,]*) tokens for the completion", re.IGNORECASE)
+
+
+def overflow_input_limit(exc: BaseException) -> int | None:
+    """The most input the refusing model takes, when the refusal says: its
+    window less the room it kept for the answer."""
+    text = f"{getattr(exc, 'message', '')} {getattr(exc, 'body', '')}"
+    window = _WINDOW_RE.search(text)
+    if not window:
+        return None
+    answer = _ANSWER_RE.search(text)
+    return int(window.group(1).replace(",", "")) - (
+        int(answer.group(1).replace(",", "")) if answer else 0)
+
+
 def moves_to_spare(exc: Exception) -> bool:
     """Which failures hand the request to the next model in the chain.
 

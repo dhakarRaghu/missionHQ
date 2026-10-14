@@ -113,15 +113,9 @@ frontend change, then restart the frontend service.
 
 ### Mac (launchd)
 
-Every plist in `ops/` has the repo path written into it
-(`/Users/raghvendra.dhakar/Desktop/project/code/missionHq`). If your checkout
-lives elsewhere, replace that path in the four plists first:
-
-```bash
-sed -i '' 's#/Users/raghvendra.dhakar/Desktop/project/code/missionHq#/path/to/missionHq#g' ops/*.plist
-```
-
-Also check the `uv`, `npm` and `caddy` paths in the plists match your machine
+The plists in `ops/` are templates. Each install script fills in this
+machine's repo path (and the `npm` / `caddy` location) when it installs, so
+there is nothing to edit. Check that `uv`, `npm` and `caddy` are installed
 (`which uv npm caddy`). Then:
 
 ```bash

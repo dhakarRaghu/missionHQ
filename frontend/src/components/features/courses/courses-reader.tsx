@@ -407,8 +407,8 @@ function NotBuilt({
           <p className="text-sm text-muted-foreground">
             Mission HQ researches past the phase, then builds the page you read
             here: the whole phase, visual and interactive, with what changed
-            since, corrections and real incidents worked in. It is built on the
-            evening run, or now.
+            since, corrections and real incidents worked in. It is built only
+            when you ask for it.
           </p>
           {building ? (
             <p className="text-sm text-primary">

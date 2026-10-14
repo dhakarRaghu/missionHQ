@@ -106,8 +106,8 @@ manifest, and the file must resolve inside the media folder.
 Use this procedure for a video made outside Mission HQ, such as one made with
 the `video-remotion` skill. The video pipeline registers its own videos.
 
-1. Set the media folder of the repo that runs the backend:
-   `M=/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/media`
+1. Set the media folder of the repo that runs the backend (run this from the
+   repo root): `M="$PWD/data/media"`
 2. Make the course folder: `mkdir -p "$M/inference-internals"`
 3. Link the video into it. Use `ln`, not `cp`. A hard link uses no extra
    disk space: `ln -f <render folder>/InfEp13-4K.mp4 "$M/inference-internals/yt-13.mp4"`

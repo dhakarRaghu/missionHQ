@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from pathlib import Path
 
 from hq.config import REPO_DIR
@@ -45,9 +46,20 @@ def prompts_dir() -> Path:
 
 
 def node_bin() -> Path:
-    """Remotion needs an arm64 Node on this Mac; an x86 Node fails at bundling."""
-    return _env_path("VIDEO_NODE_BIN",
-                     Path.home() / ".nvm" / "versions" / "node" / "v22.23.2" / "bin")
+    """Folder holding the `node` that runs the Remotion scripts.
+
+    Remotion needs an arm64 Node on Apple Silicon; an x86 Node fails at
+    bundling. VIDEO_NODE_BIN names the folder; without it, the `node` on PATH
+    is used, so nvm and Homebrew installs both work.
+    """
+    configured = os.environ.get("VIDEO_NODE_BIN", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    found = shutil.which("node")
+    if found:
+        return Path(found).parent
+    raise FileNotFoundError(
+        "node is not on PATH. Install Node 20+ or set VIDEO_NODE_BIN to the folder holding it.")
 
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,80}$")

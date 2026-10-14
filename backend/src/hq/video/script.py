@@ -222,8 +222,11 @@ async def gather(payload: dict[str, Any]) -> dict[str, Any]:
     if not text:
         raise ValueError(f"lesson {lesson_md!r} is missing or outside learning/lessons")
     row = await db.fetchone(
-        "SELECT title, kind, phase_slug FROM hq.lessons WHERE md_path = %s", (lesson_md,))
-    slug = str((row or {}).get("phase_slug") or payload.get("slug") or "")
+        "SELECT title, kind, phase_slug, course_slug FROM hq.lessons WHERE md_path = %s",
+        (lesson_md,))
+    # A course lesson keeps its phase in course_slug; phase_slug is for topic lessons.
+    slug = str((row or {}).get("phase_slug") or payload.get("slug")
+               or (row or {}).get("course_slug") or "")
     course = ""
     if slug:
         crow = await db.fetchone("SELECT course FROM hq.course_phases WHERE slug = %s", (slug,))
@@ -623,7 +626,9 @@ async def run(task: dict[str, Any], deps: Any) -> tuple[str, str]:
     lesson_md = str(payload.get("lesson_md") or "")
     video_id = str(payload.get("video_id") or video_id_for(lesson_md))
     job = load_job(video_id) or VideoJob(id=video_id, mode=cast(Any, mode), lesson_md=lesson_md)
-    job.state, job.script_task_id = "writing", str(task.get("id") or "")
+    # A new script is not the old one's build: clear it, so a stop here is
+    # never taken for a checked script that only needs building again.
+    job.state, job.script_task_id, job.build_task_id = "writing", str(task.get("id") or ""), ""
     await _job_step(job.model_dump())
     await _reset_step(video_id)
     with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent="tutor"):

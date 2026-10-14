@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Week review: the freeze, the budget, and the rule that must survive</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Week review · 2026-W40</div><h1>Week review: the freeze, the budget, and the rule that must survive</h1><p class="subtitle">Ten minutes to make the week&#x27;s lessons stick, then point at next week.</p></header>
+<p class="why">Last week you could explain why a long prompt pauses every stream; this week asks what of it you still hold.</p>
+<p>Two weeks ago you saw that a serving system's throughput is queue design, and this week you worked through three results on top of it: one long prompt can stop every other stream while it runs, most of the extra tokens a schema costs live in the prompt rather than the output, and a summary quietly drops rules from the conversation. Each result was clear when you read it, but a week later the version you kept is shorter than the one you read, and the gaps show only when a question arrives in a different shape.</p>
+<p>So today we test the kept version against three scenarios you have not seen, and one of them asks a harder question: when a faster system appears, which of the rules you learned this week survive, and which were properties of one tool. What survives decides whether your evening project stays on the same path or changes, and the review ends with the first step of next week.</p>
+<div class="keypoints"><p class="remember">The freeze is a scheduling choice, the schema tax is a prompt choice, and a dropped rule is a choice you made at the trigger.</p></div>
+<h2 data-kind="recall">What you read this week</h2>
+<p>This week you read three results. Each one below is the claim again. Read each sentence and ask whether you could defend it against a question you have not seen. The scenario section after this one tests exactly that.</p>
+
+<h3>The freeze</h3>
+<p>Prefill and decode share one forward pass through the model. One long prompt therefore either waits behind a token budget or runs in one pass. It then stops every decoding stream while it runs. The budget is the dial between those two choices, so it is a product decision, not a tuning detail.</p>
+<p>You read such a pause in the maximum inter-token gap, the longest time between two tokens of one response. Your time-to-first-token and total-time medians cannot show it. The pause sits in the middle of a stream that already started. This idea came in \"The five things worth keeping\" below. The queue lesson of 2026-09-12 gave it its base. Throughput is queue design, so a pause is a scheduling choice. The question from the 2026-09-25 paper session is whether continuous batching removes the freeze or only moves it. It is the same idea one level down.</p>
+
+<h3>The window and the schema</h3>
+<p>A bigger context window does not remove the budget problem, it only postpones it. Accuracy falls with input length and with where in the prompt a fact sits, well before the token limit. You therefore treat the window as a budget split into zones. Room is kept for the reply and for the summarising call.</p>
+<p>Schema and compaction work the same way, each at one boundary:</p>
+<ul>
+<li>A JSON schema controls <b>which</b> token is legal next, never <b>when</b> generation stops, and most of its measured accuracy cost comes from asking for the format in the prompt, not from the decoder.</li>
+<li>A summary keeps what the summariser found interesting, not what you need, so a rule that must survive compaction crosses the boundary as literal text, copied word for word.</li>
+</ul>
+
+<p>Notice the line that connects all four claims: none of them names a model version or a provider flag. Each one is a mechanism, and a mechanism outlives the tool you measured it on.</p>
+
+<p>The next section picks the five claims worth carrying, with the numbers that back each one.</p>
+<h2 data-kind="recall">The five things worth keeping</h2>
+<p>Five claims from the week are worth carrying. Each is one line, with the number that backs it.</p>
+
+<ol>
+<li>Prefill and decode share one forward pass, so one 24,000-token prompt froze three streams for 720ms in Phase 2B. This claim lasts because it is a mechanism, not a version behaviour.</li>
+<li>You read a freeze in the maximum inter-token gap, never in TTFT. TTFT measures only the wait for the first token, and the pause sits mid-stream.</li>
+<li>A schema constrains which token comes next, never when to stop. Most of the measured accuracy cost comes from asking for the format, so a reasoning field placed first in the schema fixes it.</li>
+<li>The context window is a budget you split into zones. Accuracy falls with length and position well before the token limit.</li>
+<li>ConstraintRot measured 0% violations when the constraint survived compaction and 38% when it was dropped. So a policy rule crosses the compaction boundary as word-for-word text.</li>
+</ol>
+
+<p>Notice what all five share: none names a model version or a provider flag. Each is a mechanism, and a mechanism outlives the tool you measured it on.</p>
+
+<p>The next section tests these five claims against three scenarios from older material: a budget calculation, a schema fix, and a compaction design.</p>
+<h2 data-kind="checkpoint">Three questions from older material</h2>
+<details class="checkpoint"></details>
+
+<p>The claims above are only useful if you can run them on a new problem. Work each of these three scenarios in your own words before you open the sketch. Each is answerable from this week's material alone.</p>
+
+<div class="lab">
+<h4>Q1: the freeze, in numbers</h4>
+<p>A server uses the cost model from <code>batching_sim.py</code>: prefill costs 0.03ms per token, each decode step costs 18ms plus 0.12ms per decoding request. Three requests are decoding. A 24,000-token prompt arrives, and the token budget, the maximum tokens processed in one iteration, is 2,048.</p>
+<ol>
+<li>How long do the three streams freeze if the prompt runs in one pass, without chunking?</li>
+<li>With chunked prefill, how many prompt tokens fit in each iteration, and how many iterations does the prompt need?</li>
+<li>How long is each chunked iteration, and what do the streams feel now?</li>
+</ol>
+<details class="answer"><summary>Answer sketch</summary>
+<ol>
+<li><code>24,000 × 0.03 = 720ms</code>. The three streams get no token during that pass. In the default measured run the worst gap is 764ms, because the decode passes sit on each side of it.</li>
+<li>The budget reserves 3 tokens for the decodes, so <code>2,048 − 3 = 2,045</code> prompt tokens fit per iteration. <code>24,000 / 2,045 = 11.7</code>, so the prompt needs 12 iterations.</li>
+<li><code>2,045 × 0.03 + 18 + 0.12 × 3 = 61.35 + 18.36 = 79.7ms</code> per iteration. The streams now pause about 80ms per token instead of 720ms once. The measured worst gap is 81ms, because the real batch holds more decodes than three.</li>
+</ol>
+</details>
+</div>
+
+<div class="lab">
+<h4>Q2: the schema that cost 9 points</h4>
+<p>Your classification service returns valid JSON that matches the schema on every call, and <code>finish_reason</code> is <code>stop</code>. Accuracy still dropped 9 points after you enabled strict mode last week. Your labeled set has 12 items.</p>
+<ol>
+<li>Give the most likely cause.</li>
+<li>Describe the exact schema change you would test, including its place in the property order.</li>
+<li>Name the measurement that would settle it, and say why one run is not enough.</li>
+</ol>
+<details class="answer"><summary>Answer sketch</summary>
+<ol>
+<li>The schema forces the model to commit to the label field early, with no room to reason in text first. The tax comes from asking for the format, not from the decoder enforcing it.</li>
+<li>Add a <code>reasoning</code> string field as the first property, before the constrained fields, and add it to <code>required</code> with <code>additionalProperties: false</code>. A reasoning field placed last changes nothing, because decoding runs left to right.</li>
+<li>Run the same labeled set through both schemas with <code>structured_lab.py</code> and use <code>--repeat</code>. Sampling varies between runs, so on 12 items a 9-point gap can appear by chance.</li>
+</ol>
+</details>
+</div>
+
+<div class="lab">
+<h4>Q3: the rule that must cross the boundary</h4>
+<p>Your agent runs 200 tool-calling steps over several hours. A policy rule says it must never issue a refund above 200 EUR. The context will be compacted several times in that span. Design the context strategy: the trigger, what you copy, what you summarise, and what you drop.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<ul>
+<li>Trigger at a fixed token threshold well below the window, for example 50% to 60% of it, checked before every call.</li>
+<li>Copy word for word: the refund limit rule, every other policy constraint, and the last few turns.</li>
+<li>Summarise the earlier conversation into decisions, constraints, and open items.</li>
+<li>Drop full tool results and replace them with pointers you can fetch again, such as an order id.</li>
+</ul>
+<p>The justification is the ConstraintRot measurement: 0% violations when the constraint survived compaction as literal text, 38% when it was dropped. So the refund rule must never depend on what the summariser found interesting. And the summarising call is a second billed call, so add its cost to the same run record.</p>
+</details>
+</div>
+
+<p>All three answers use mechanisms from this week, not settings from one provider. The next section asks whether anything new on the frontier should change the path these mechanisms sit on.</p>
+<h2 data-kind="orientation">Does the path change?</h2>
+<p>This week's three answers rest on mechanisms that do not change with a provider version. Now you check whether anything new on the frontier changes the path they sit on.</p>
+
+<p>The frontier shortlist holds one open subject: <dfn>rare-failure verification</dfn>, the question of how to check a system for failures that appear once in many runs. It has come up once in two weeks. A subject that appears once is a sighting, not a pattern, so the path stands and nothing from this week is postponed.</p>
+
+<p>One note before you close the question. That entry asked how to trust a positive signal, a system that reports success. The same shape appeared this week in a different place. A rule dropped during compaction is a quiet failure: the agent keeps answering, finish_reason says <code>stop</code>, and the refund cap is simply gone. Nothing in the output says the rule was lost. You found it only because you measured violations with and without the rule, 38% against 0%.</p>
+
+<p>So the subject of rare-failure verification is alive inside your own week. It has not yet asked you for a decision. The decision point would be a second recurrence, or a question in your agent work that the current lessons cannot answer.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The frontier shortlist entry on rare-failure verification was recorded on 2026-09-24 and has not recurred since. The violation rates are the ConstraintRot numbers from the Phase 2B lesson of 2026-09-22.</p>
+</details>
+
+<p>The path holds, so the next section picks where on it the week ahead should start.</p>
+<h2 data-kind="orientation">Next week</h2>
+<p>The path holds, so the question left is where on it the week ahead should start.</p>
+
+<p>A new lesson arrived this week: <i>The Bill and the Cache</i>, on caching. The plan decides the first step for you, because this week already gave you the measurement it depends on.</p>
+
+<p>The first step is to re-run the stream-freeze measurement from the Phase 2B lab, with the cache turned on. That is the one where a 24,000-token prefill froze three streams for 720ms. The reason is that caching changes what a re-sent prefix costs. A prompt whose beginning is already cached does not pay the full prefill price. So the freeze shrinks by an amount you cannot predict from the old run.</p>
+
+<p>That re-run is the one number that connects the two phases. It takes the worst gap you measured in the Phase 2B lab, 764ms without chunking. Then it asks what caching does to it.</p>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+  <li><b>Phase 2B lesson of 2026-09-22</b>: the freeze arithmetic (24,000 × 0.03 = 720ms), the cost model, the schema-accuracy findings, and the ConstraintRot result of 0% versus 38% violations.</li>
+  <li></li>
+  <li><b>Queue-design lesson of 2026-09-12</b>: the throughput material behind the claim that the queue is the design.</li>
+  <li></li>
+  <li></li>
+</ul>
+
+<p>Every number in this review traces to one of these notes. Nothing external is repeated here; open the lessons themselves if a number needs checking.</p>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+</body>
+</html>

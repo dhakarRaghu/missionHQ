@@ -743,6 +743,190 @@
       ],
       "file": "inference-internals/the-408-that-was-never-a-timeout.mp4",
       "captions": "inference-internals/the-408-that-was-never-a-timeout.srt"
+    },
+    {
+      "id": "routing-before-the-lifecycle",
+      "kind": "article",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-01-lifecycle",
+      "phase_slugs": [
+        "inference-internals-phase-01-lifecycle"
+      ],
+      "number": null,
+      "title": "Does cache-aware routing actually pay? The measured answer",
+      "duration_s": 1889.4,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "Would a router that knows the cache pay?"
+        },
+        {
+          "t": 114.267,
+          "title": "Why does a cached 100K-token turn still cost full prefill?"
+        },
+        {
+          "t": 381.833,
+          "title": "Does token-aware routing beat round-robin, measured?"
+        },
+        {
+          "t": 682.367,
+          "title": "How do you set the stickiness limit without tuning?"
+        },
+        {
+          "t": 953.633,
+          "title": "Why doesn't the published stickiness limit transfer?"
+        },
+        {
+          "t": 1231.9,
+          "title": "What does cache warmth look like on one rented GPU?"
+        },
+        {
+          "t": 1509.1,
+          "title": "Where does cache-aware routing stop working?"
+        },
+        {
+          "t": 1721.433,
+          "title": "Turn 37, answered: yes, with conditions"
+        },
+        {
+          "t": 1816.933,
+          "title": "Cache-aware routing, in six lines"
+        }
+      ],
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-09-17-routing-before-the-lifecycle.md",
+      "think_questions": [
+        "If reusing a cached prefix is cheaper than rebuilding it, where in the system is the choice to reuse it actually made? Let's think it through.",
+        "If the router knows where your cache lives, how much more load can the same GPUs carry? Let's think it through.",
+        "Or can the release point be computed from one number you measure once? Let's think it through.",
+        "What does another H100 deployment prefill at? Let's think it through.",
+        "Is that good, and what is it worth in GPU-hours? Let's think it through.",
+        "Is the router failing? Let's think it through."
+      ],
+      "file": "inference-internals/routing-before-the-lifecycle.mp4",
+      "captions": "inference-internals/routing-before-the-lifecycle.srt"
+    },
+    {
+      "id": "inference-internals-phase-05a-client",
+      "kind": "course",
+      "course": "inference-internals",
+      "phase_slug": "inference-internals-phase-05a-client",
+      "phase_slugs": [
+        "inference-internals-phase-05a-client"
+      ],
+      "number": null,
+      "title": "Why two retries turned a latency spike into a 22.7% outage",
+      "duration_s": 2173.0,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "The day two retries caused an outage"
+        },
+        {
+          "t": 94.8,
+          "title": "What did timeout=600 actually promise?"
+        },
+        {
+          "t": 324.933,
+          "title": "Where does the stall deadline live?"
+        },
+        {
+          "t": 526.3,
+          "title": "Where does the first-token deadline live?"
+        },
+        {
+          "t": 743.867,
+          "title": "What do you hold when a stream dies mid-answer?"
+        },
+        {
+          "t": 956.567,
+          "title": "How much do two retries cost under a burst?"
+        },
+        {
+          "t": 1196.633,
+          "title": "Why can't backoff and jitter fix it?"
+        },
+        {
+          "t": 1464.833,
+          "title": "Which 429 must you never retry?"
+        },
+        {
+          "t": 1721.6,
+          "title": "How does a breaker recover in seconds?"
+        },
+        {
+          "t": 1978.633,
+          "title": "Why did two retries cause a 22.7% outage?"
+        },
+        {
+          "t": 2080.267,
+          "title": "Timeouts, retries and recovery"
+        }
+      ],
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-10-10-inference-internals-phase-05a-client.md",
+      "think_questions": [
+        "At what second does your code find out the stream is dead? Let's think it through.",
+        "Why did your dead stream hang for the full ten minutes? Let's think it through.",
+        "Can twenty legal calls fit inside the 30-second request? Let's think it through.",
+        "Where exactly does the retry loop end, and which exceptions raised while you iterate can still reach it? Let's think it through.",
+        "Does success rise or fall, and by roughly how much does the sent request count grow? Let's think it through.",
+        "What share of the window do the sleeps span? Let's think it through.",
+        "Which two fields should you have read before retrying once? Let's think it through.",
+        "Which single line is missing? Let's think it through."
+      ],
+      "file": "learn/inference-internals-phase-05a-client.mp4",
+      "captions": "learn/inference-internals-phase-05a-client.srt"
+    },
+    {
+      "id": "why-netflix-s-autoscaler-could-not-see-a",
+      "kind": "article",
+      "course": "",
+      "phase_slug": null,
+      "phase_slugs": [],
+      "number": null,
+      "title": "Why a fully busy job read as idle to its autoscaler",
+      "duration_s": 1196.6,
+      "chapters": [
+        {
+          "t": 0,
+          "title": "The job that looked idle"
+        },
+        {
+          "t": 78.267,
+          "title": "Why did a busy job look idle at 15% CPU?"
+        },
+        {
+          "t": 300.5,
+          "title": "How does throughput divided by busy give a ceiling?"
+        },
+        {
+          "t": 523.5,
+          "title": "Why aim for 45% busy when 100% fits more work?"
+        },
+        {
+          "t": 796.6,
+          "title": "Where does the same blind spot sit in your model server?"
+        },
+        {
+          "t": 1029.6,
+          "title": "Why did a full job look idle?"
+        },
+        {
+          "t": 1128.933,
+          "title": "Recap"
+        }
+      ],
+      "youtube_id": null,
+      "source_lesson": "learning/lessons/2026-10-09-why-netflix-s-autoscaler-could-not-see-a.md",
+      "think_questions": [
+        "Which metric fires the alert first, CPU, or the fraction of each second the worker spends unable to accept work? Let's think it through.",
+        "Scale it up, or leave it? Let's think it through.",
+        "Should your target utilization be 0.95, 0.7, or 0.45? Let's think it through.",
+        "Does your CPU-driven HPA add replicas? Let's think it through."
+      ],
+      "file": "learn/why-netflix-s-autoscaler-could-not-see-a.mp4",
+      "captions": "learn/why-netflix-s-autoscaler-could-not-see-a.srt"
     }
   ]
 }

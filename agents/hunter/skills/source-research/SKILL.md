@@ -10,6 +10,11 @@ can state it plainly.
   from memory or a guessed address.
 - Record the date you read each source beside it.
 - If a page would not load or was cut off, say what you did not read.
+- A long run keeps itself inside the model's window: a result may come back
+  as part 1 of several, or later as an extract with a reference. Both were
+  saved whole. Before you quote one or take a number from it, read the part
+  that holds it with the call its note gives. Never cite from an extract or
+  an outline.
 
 ## Rank what you find
 

@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clapperboard, Play, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Play, X } from "lucide-react";
 
-import { VideoJobSheet } from "@/components/features/courses/video-job-sheet";
-import { JobStateBadge, useVideoJobs } from "@/components/features/courses/video-jobs";
+import { GenerateVideo } from "@/components/features/courses/generate-video";
 import { VideoPanel } from "@/components/features/learn/video-panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,11 +29,9 @@ import { cn } from "@/lib/utils";
  *
  * Most phases have no video, and then this renders nothing. An empty state
  * on every such phase would be noise, not information. The exception is a
- * phase with a written lesson and no course video: it gets one small button.
- * While a job for the lesson exists, the button is the job's state and opens
- * it; with no job, it is "Make video", which starts the script and opens the
- * job. Videos are made on their own after a lesson is written, so the button
- * is for a lesson from before that, or one whose job was removed.
+ * phase with a written lesson and no course video: it gets "Generate video"
+ * (`GenerateVideo`), the only way a video is made, which also shows the
+ * job's state while it is made and "Generate again" when it stopped.
  */
 export function PhaseVideos({
   course,
@@ -54,19 +51,6 @@ export function PhaseVideos({
     staleTime: 10 * 60_000,
   });
   const [playing, setPlaying] = useState<string | null>(null);
-  const [openJob, setOpenJob] = useState<string | null>(null);
-  const queryClient = useQueryClient();
-  const make = useMutation({
-    mutationFn: (path: string) => mediaApi.makeVideo(path),
-    onSuccess: (data) => {
-      void queryClient.invalidateQueries({ queryKey: mediaKeys.jobs });
-      if (data.video_id) setOpenJob(data.video_id);
-    },
-  });
-  // The job file is written when the script task starts, not when it is
-  // queued, so after "Make video" the list is polled until it appears.
-  const started = make.data?.video_id;
-  const jobs = useVideoJobs({ enabled: Boolean(lessonMd), expecting: Boolean(started) });
 
   if (videos.isPending) return <Skeleton className="h-8 w-full shrink-0" />;
   if (videos.isError) {
@@ -84,58 +68,15 @@ export function PhaseVideos({
   const episodes = list.filter((v) => v.kind === "youtube");
   const current = list.find((v) => v.id === playing);
 
-  // The lesson's job, if one exists. A built job is a video in the list, so
-  // only one still on its way is shown. Nothing is offered until the jobs are
-  // known: a "Make video" that flashes and turns into a state chip misleads.
-  const job = lessonMd
-    ? jobs.data?.find((j) => j.lesson_md === lessonMd && j.state !== "built")
-    : undefined;
-  const canMake =
-    Boolean(lessonMd) && !courseVideo && jobs.isSuccess && !job && !started;
-  const jobId = job?.id ?? (courseVideo ? undefined : started);
-  const jobControl = jobId ? (
-    <button
-      type="button"
-      onClick={() => setOpenJob(jobId)}
-      title="Open the video job"
-      className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs transition-colors hover:bg-muted"
-    >
-      <Clapperboard aria-hidden className="size-3.5 text-muted-foreground" />
-      <span className="text-muted-foreground">Video</span>
-      {job ? (
-        <JobStateBadge state={job.state} />
-      ) : (
-        <span className="text-muted-foreground">· queued</span>
-      )}
-    </button>
-  ) : canMake && lessonMd ? (
-    <Button
-      size="sm"
-      variant="outline"
-      disabled={make.isPending}
-      onClick={() => make.mutate(lessonMd)}
-      title="Write a narrated video of this lesson. You review the script before it is built."
-    >
-      <Clapperboard aria-hidden className="size-3.5" />
-      {make.isPending ? "Starting…" : "Make video"}
-    </Button>
+  const generate = lessonMd ? (
+    <GenerateVideo lessonMd={lessonMd} mode="course" hasVideo={Boolean(courseVideo)} />
   ) : null;
-  const makeNote = make.isError ? (
-    <p role="alert" className="text-xs text-destructive">
-      Could not start the video: {(make.error as Error).message}
-    </p>
-  ) : make.data && !make.data.started ? (
-    <p className="text-xs text-muted-foreground">{make.data.reason}</p>
-  ) : null;
-  const sheet = <VideoJobSheet jobId={openJob} onClose={() => setOpenJob(null)} />;
 
   if (!list.length) {
-    if (!jobControl && !makeNote && !openJob) return null;
+    if (!generate) return null;
     return (
-      <section aria-label="Video for this phase" className="shrink-0 space-y-1">
-        <div className="flex flex-wrap items-center gap-2">{jobControl}</div>
-        {makeNote}
-        {sheet}
+      <section aria-label="Video for this phase" className="shrink-0">
+        {generate}
       </section>
     );
   }
@@ -172,7 +113,7 @@ export function PhaseVideos({
             ))}
           </div>
         ) : null}
-        {jobControl}
+        {generate}
         {current ? (
           <Button
             size="sm"
@@ -195,8 +136,6 @@ export function PhaseVideos({
           <VideoPanel key={current.id} video={current} />
         </div>
       ) : null}
-      {makeNote}
-      {sheet}
     </section>
   );
 }

@@ -204,7 +204,8 @@ def test_the_nightly_cron_calls_the_pipeline_and_nothing_else() -> None:
 
     starters = {d[0]: d for d in engine.SYSTEM_DISPATCHES}
     assert starters["learning_run"][1:3] == ("0 22 * * *", "start_learning_run")
-    assert starters["course_study"][1:3] == ("30 18 * * *", "start_course_study")
+    # A course phase is built only when he asks (Courses page or chat).
+    assert "course_study" not in starters
     sage = scan(strict=True)["sage"]
     assert not [c for c in sage.cron if "start_" in c.prompt]
     assert "start_learning_run" in sage.tools  # he can still ask for one in chat

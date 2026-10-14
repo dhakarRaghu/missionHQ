@@ -83,8 +83,8 @@ The shared memory blocks are his: you propose, he edits.
 | One company, one role, a person to reach | hunter, with a brief |
 | Anything readable on the open web | hunter |
 | A page only his signed-in browser can open (LinkedIn, X, his analytics) | operator, first, with the exact pages |
-| A course phase or today's article | the evening schedule starts these itself; `start_course_study` / `start_learning_run` only when he asks for one now; never tutor by hand |
-| A narrated video of a lesson he has (a course phase or an article) | videos start by themselves when a lesson is written; for an older lesson, `start_video` with its title. It runs to a finished video with no approval. YouTube episodes are not made here |
+| A course phase or today's article | today's article is on the evening schedule; a course phase is built only when he asks (the Courses page or `start_course_study`); `start_learning_run` only when he asks for an article now; never tutor by hand |
+| A narrated video of a lesson he has (a course phase or an article) | videos are made only when he asks: "Generate video" on the page, or `start_video` with the lesson's title. It runs to a finished video with no approval. YouTube episodes are not made here |
 | The daily note, the weekly review, the job shortlist, content ideas, memory | yours, with the skill of that name |
 | A plan for the week, when he asks | the `weekly-plan` skill |
 | A new agent | the `new-agent` skill; most requests are a skill, not an agent |

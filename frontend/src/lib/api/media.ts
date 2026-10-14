@@ -90,20 +90,31 @@ export const mediaApi = {
     getJson<VideoJobDetail>(`/videos/jobs/${encodeURIComponent(id)}`),
   jobSheet: (id: string) =>
     getBlob(`/videos/jobs/${encodeURIComponent(id)}/sheet`),
-  /** Starts the script for a lesson. `lesson_md` is a learning/lessons/*.md path. */
-  makeVideo: (lessonMd: string, mode: "course" | "article" = "course") =>
+  /**
+   * "Generate video" for a lesson (`lesson_md` is a learning/lessons/*.md path).
+   * A stopped job whose script passed its checks is built again from it;
+   * `fresh` writes a new script instead.
+   */
+  makeVideo: (
+    lessonMd: string,
+    mode: "course" | "article" = "course",
+    fresh = false,
+  ) =>
     sendJson<VideoStart>("POST", "/videos/make", {
       lesson_md: lessonMd,
       mode,
+      fresh,
     }),
 };
 
 // --- video jobs (GET/POST /api/videos/*) ------------------------------------
 // A job is one video on its way: the script, the two reviews, then the voice
-// and the render, with no approval step. It starts by itself after a course
-// phase or an article is written; Courses → Videos shows how far it got. See backend/src/hq/api/videos.py.
+// and the render, with no approval step. It starts only when he presses
+// "Generate video"; Courses → Videos shows how far it got. See backend/src/hq/api/videos.py.
 
 export type VideoJobState =
+  /** A new task for a stopped or finished job, waiting to start. */
+  | "queued"
   | "writing"
   | "script_ready"
   | "approved"
@@ -113,6 +124,7 @@ export type VideoJobState =
 
 /** The states in which a task is working on the job, so the list polls. */
 export const ACTIVE_JOB_STATES: readonly VideoJobState[] = [
+  "queued",
   "writing",
   "approved",
   "building",
@@ -129,8 +141,10 @@ export interface VideoJobRow {
   /** Zero until the video is built. */
   duration_s: number;
   updated: string;
-  /** Script length; not sent by the list today, read when it is. */
+  /** Script length, once the script is written. */
   minutes?: number;
+  /** Stopped with a checked script: "Generate" builds it again, no new script. */
+  can_rebuild: boolean;
 }
 
 /** The answer of make. */
@@ -138,6 +152,8 @@ export interface VideoStart {
   started: boolean;
   video_id?: string;
   task_id: string;
+  /** "build" when a checked script is built again, "script" when it is written. */
+  stage?: "script" | "build" | "";
   /** Why nothing started, such as a task already running for it. */
   reason?: string;
 }
@@ -236,6 +252,7 @@ export interface VideoReview {
 /** GET /api/videos/jobs/{id}. Each file is null until its step has run. */
 export interface VideoJobDetail {
   job: VideoJob;
+  can_rebuild: boolean;
   plan: VideoPlan | null;
   narration: Narration | null;
   review: VideoReview | null;
@@ -270,6 +287,6 @@ export function sortVideos(videos: Video[]): Video[] {
     (a, b) =>
       rank[a.kind] - rank[b.kind] ||
       (a.number ?? 0) - (b.number ?? 0) ||
-      a.phase_slug.localeCompare(b.phase_slug),
+      (a.phase_slug ?? "").localeCompare(b.phase_slug ?? ""),
   );
 }

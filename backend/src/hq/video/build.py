@@ -116,13 +116,24 @@ async def _run_long(video_id: str, phase: str, command: str, deps: Any) -> None:
         waited += POLL_S
 
 
+# narrate.mjs's timing format. Below 2, line starts were summed from per-line
+# MP3s and ran up to a second ahead of the voice; such a voice is made again.
+TIMING_VERSION = 2
+
+
 def _voice_is_current(video_id: str) -> bool:
     """The voice finished, and the narration has not changed since: a second
     build after a failed frame review or render does not voice it again."""
     w = paths.work_dir(video_id)
     done, timing, nar = w / "narrate.done", w / f"{video_id}.timing.json", w / "narration.json"
-    return (done.is_file() and done.read_text().strip() == "0" and timing.is_file()
-            and timing.stat().st_mtime >= nar.stat().st_mtime)
+    if not (done.is_file() and done.read_text().strip() == "0" and timing.is_file()
+            and timing.stat().st_mtime >= nar.stat().st_mtime):
+        return False
+    try:
+        version = int(json.loads(timing.read_text()).get("version") or 0)
+    except (ValueError, TypeError):
+        return False
+    return version >= TIMING_VERSION
 
 
 def commands(video_id: str, scale: int) -> dict[str, str]:
@@ -332,7 +343,7 @@ async def run(task: dict[str, Any], deps: Any) -> tuple[str, str]:
     payload = dict(task.get("payload") or {})
     video_id = str(payload.get("video_id") or "")
     job = load_job(video_id)
-    if job is None or job.state not in ("approved", "building", "failed"):
+    if job is None or job.state not in ("approved", "building", "failed", "script_ready"):
         return "blocked", f"video {video_id!r} has no checked script to build"
     job.state, job.build_task_id = "building", str(task.get("id") or "")
     await _job_step(job.model_dump())

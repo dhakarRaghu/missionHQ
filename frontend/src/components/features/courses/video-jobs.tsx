@@ -70,6 +70,7 @@ export function isActive(state: VideoJobState): boolean {
 }
 
 const STATE_LABEL: Record<VideoJobState, string> = {
+  queued: "queued",
   writing: "writing script",
   script_ready: "script only",
   approved: "approved, queued",
@@ -82,6 +83,7 @@ const STATE_TONE: Record<
   VideoJobState,
   "running" | "approval" | "success" | "danger" | "muted"
 > = {
+  queued: "running",
   writing: "running",
   script_ready: "muted",
   approved: "running",
@@ -90,7 +92,7 @@ const STATE_TONE: Record<
   failed: "danger",
 };
 
-/** The job's state as a chip. "Ready for review" is the one that waits for him. */
+/** The job's state as a chip. "Failed" is the one that waits for him. */
 export function JobStateBadge({ state }: { state: VideoJobState }) {
   return (
     <Badge variant="secondary" tone={STATE_TONE[state]} className="shrink-0">
@@ -110,11 +112,12 @@ export function jobMinutes(job: {
 }
 
 /**
- * Top of the video library: the videos still on their way.
+ * Top of the video library: the videos still on their way, and the stopped
+ * ones.
  *
  * One row per job that is not built. A built job is a video in the library
- * below, so it is not listed twice. Clicking a row opens the job, where he
- * approves the script or sends it back with notes.
+ * below, so it is not listed twice. Clicking a row opens the job, with its
+ * notes and, for a stopped one, "Generate again".
  */
 export function VideosBeingMade({
   courses,
@@ -151,8 +154,8 @@ export function VideosBeingMade({
       </ol>
     ) : (
       <p className="mt-1 px-1.5 text-xs text-muted-foreground">
-        Nothing is being made. A video starts on its own after a course phase
-        lesson is written.
+        Nothing is being made. Videos are made only when you ask: press
+        “Generate video” on a phase or an article.
       </p>
     );
   }

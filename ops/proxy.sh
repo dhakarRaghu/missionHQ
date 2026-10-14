@@ -47,7 +47,8 @@ case "$ACTION" in
   install)
     need_caddy
     mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/data/logs" "$ROOT/data/caddy"
-    cp "$SRC" "$DST"
+    # The plist is a template: fill in this machine's repo and caddy paths.
+    sed -e "s|__REPO__|$ROOT|g" -e "s|__CADDY__|$CADDY|g" "$SRC" > "$DST"
     launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
     launchctl bootstrap "$DOMAIN" "$DST"
     echo "installed and started $LABEL"

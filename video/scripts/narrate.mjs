@@ -13,7 +13,7 @@
  * most 0.5 s): the frame where the line's visuals appear.
  *
  * Engine "kokoro" (default for the course) runs every line in one Python process, so the model loads once.
- * KOKORO_DIR points at a folder with .venv/, models/ and kokoro_batch.py (default: course-videos/tools/tts).
+ * KOKORO_DIR points at a folder with .venv/, models/ and kokoro_batch.py (default: <repo>/tools/tts).
  * KOKORO_THREADS caps onnxruntime threads (kokoro_batch.py reads it; default 3). Engine "say" is macOS `say`,
  * for timing drafts only. NARRATE_DRY=1 writes silent audio with estimated line lengths, for layout checks.
  */
@@ -21,6 +21,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 const [, , cfgPath, outDirArg, timingOut] = process.argv;
 if (!cfgPath || !outDirArg || !timingOut) {
@@ -33,7 +34,9 @@ mkdirSync(outDir, { recursive: true });
 mkdirSync(dirname(resolve(timingOut)), { recursive: true });
 
 const FPS = 30;
-const KOKORO_DIR = process.env.KOKORO_DIR ?? "/Users/raghvendra.dhakar/Desktop/project/code/course-videos/tools/tts";
+// This file is <repo>/video/scripts/narrate.mjs, so the repo root is two folders up.
+const REPO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const KOKORO_DIR = process.env.KOKORO_DIR ?? join(REPO_DIR, "tools", "tts");
 // NARRATE_DRY=1: no voice. Each line is silence as long as the voice would roughly take (14.5 characters a
 // second), so layouts and timing can be checked before the voice runs. Never ship a dry timing file.
 const DRY = process.env.NARRATE_DRY === "1";
@@ -88,10 +91,12 @@ if (engine === "dry") {
   }
 }
 
-// every line to one format, so lines concat cleanly
-const toMp3 = (src, out) =>
+// Every line to one format, so lines concat cleanly. The lines stay PCM until the whole beat is joined: an MP3
+// per line carries its own encoder padding (about 35 ms), which the joined beat drops, so line starts summed
+// from per-line MP3s ran ahead of the voice by that much per line, about a second by a beat's last line.
+const toWav = (src, out) =>
   run("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error", "-i", src, "-af", "loudnorm=I=-14:TP=-1:LRA=11",
-    "-ar", "44100", "-ac", "1", "-codec:a", "libmp3lame", "-q:a", "4", out]);
+    "-ar", "44100", "-ac", "1", "-codec:a", "pcm_s16le", out]);
 
 // ---------------------------------------------------------------- captions
 
@@ -164,8 +169,8 @@ for (const beatId of beatOrder) {
   const chunks = [];
   const lineDur = [];
   beat.lines.forEach((line, i) => {
-    const m = join(tmp, `${beatId}-${i}.mp3`);
-    toMp3(raw.get(`${beatId}-${i}`), m);
+    const m = join(tmp, `${beatId}-${i}.norm.wav`);
+    toWav(raw.get(`${beatId}-${i}`), m);
     chunks.push(m);
     lineDur.push(dur(m));
   });
@@ -188,8 +193,8 @@ for (const beatId of beatOrder) {
   const audioStart = Math.round(preDelayS * FPS);
   const beatFrames = audioStart + Math.round((audioS + holdS) * FPS);
 
-  // Line starts come from the summed durations of the lines before it, measured on the encoded chunks.
-  // The concat of MP3 chunks can differ from that sum by a few ms per line (encoder padding); the
+  // Line starts come from the summed durations of the lines before it, measured on the PCM chunks, which
+  // the beat's MP3 joins exactly. The MP3 only pads its end (a few tens of ms, once per beat); the
   // difference between sumS and audioS is printed below so a drift would show.
   const steps = [];
   const cues = [];
@@ -217,7 +222,8 @@ for (const beatId of beatOrder) {
 
 const last = beats[beatOrder[beatOrder.length - 1]];
 const totalFrames = last.end + FPS; // one second of paper after the end card's hold
-const timing = { version: 1, fps: FPS, totalFrames, order: beatOrder, beats };
+// version 2: line starts measured on PCM (see toWav). build.py voices a job again when its timing is older.
+const timing = { version: 2, fps: FPS, totalFrames, order: beatOrder, beats };
 const tmpOut = `${resolve(timingOut)}.tmp`;
 writeFileSync(tmpOut, JSON.stringify(timing, null, 1) + "\n");
 renameSync(tmpOut, resolve(timingOut));

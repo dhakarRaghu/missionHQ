@@ -29,7 +29,8 @@ LOG="$ROOT/data/logs/backup.log"
 case "${1:-status}" in
   install)
     mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/data/logs" "$ROOT/data/snapshots"
-    cp "$SRC" "$DST"
+    # The plist carries __ROOT__ so this repo can live anywhere.
+    sed "s|__ROOT__|$ROOT|g" "$SRC" > "$DST"
     launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
     launchctl bootstrap "$DOMAIN" "$DST"
     echo "installed $LABEL (runs nightly at 03:30)"

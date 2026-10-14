@@ -21,3 +21,10 @@ HALT
 # The root vault is its own git repo (own history, own private remote). Anchor
 # this rule so frontend feature folders named "vault" remain trackable.
 /vault/
+
+# Model weights are downloaded, never committed (GitHub rejects files over
+# 100 MB). Fetch them into tools/tts/models/ on each machine.
+tools/tts/models/
+*.onnx
+*.gguf
+*.safetensors

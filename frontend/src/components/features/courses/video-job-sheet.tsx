@@ -153,7 +153,7 @@ function JobBody({ detail }: { detail: VideoJobDetail }) {
         </section>
       ) : null}
 
-      <JobActions job={job} />
+      <JobActions job={job} canRebuild={detail.can_rebuild} />
 
       {detail.has_sheet ? <ContactSheet id={job.id} updated={job.updated} /> : null}
 
@@ -185,25 +185,61 @@ function JobBody({ detail }: { detail: VideoJobDetail }) {
 /**
  * No approval step: a video goes from script to render by itself. A job
  * that stopped (a fact still wrong after its repair rounds, a code check
- * still open, a failed render) can be started again from the same lesson.
+ * still open, a failed render, a task that died) can be made again. When its
+ * script passed every check, "Build again" renders that script again, and
+ * "Write a new script" starts over from the lesson.
  */
-function JobActions({ job }: { job: VideoJob }) {
+function JobActions({ job, canRebuild }: { job: VideoJob; canRebuild: boolean }) {
   const queryClient = useQueryClient();
+  const mode = job.mode === "article" ? "article" : "course";
   const again = useMutation({
-    mutationFn: () => mediaApi.makeVideo(job.lesson_md, job.mode === "article" ? "article" : "course"),
+    mutationFn: (fresh: boolean) => mediaApi.makeVideo(job.lesson_md, mode, fresh),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: mediaKeys.jobs }),
   });
-  if (job.state !== "failed") return null;
+  if (job.state !== "failed" && job.state !== "script_ready") return null;
+  const startedText =
+    again.data?.stage === "build"
+      ? "Started. The video is being built again from this script."
+      : "Started. The script is being written again.";
   return (
-    <section aria-label="Try again" className="space-y-2 rounded-md border p-3">
+    <section aria-label="Generate again" className="space-y-2 rounded-md border p-3">
       <p className="text-sm text-muted-foreground">
-        This video stopped. The reasons are in the notes below.
+        {job.state === "failed"
+          ? "This video stopped. The reasons are in the notes below."
+          : "The script is written and checked, but the video was not built."}
       </p>
-      <Button size="sm" variant="secondary" disabled={again.isPending} onClick={() => again.mutate()}>
-        <RotateCcw aria-hidden className="size-3.5" />
-        {again.isPending ? "Starting…" : "Make it again"}
-      </Button>
-      <Outcome mutation={again} started="Started. The script is being written again." />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={again.isPending}
+          onClick={() => again.mutate(false)}
+          title={
+            canRebuild
+              ? "Voice and render this checked script again"
+              : "Write the script again from the lesson, then build the video"
+          }
+        >
+          <RotateCcw aria-hidden className="size-3.5" />
+          {again.isPending && again.variables === false
+            ? "Starting…"
+            : canRebuild
+              ? "Build again"
+              : "Generate again"}
+        </Button>
+        {canRebuild ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={again.isPending}
+            onClick={() => again.mutate(true)}
+            title="Discard this script and write a new one from the lesson"
+          >
+            {again.isPending && again.variables === true ? "Starting…" : "Write a new script"}
+          </Button>
+        ) : null}
+      </div>
+      <Outcome mutation={again} started={startedText} />
     </section>
   );
 }

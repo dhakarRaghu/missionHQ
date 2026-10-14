@@ -123,7 +123,7 @@ CHAT_TIMEOUT_S = 45 * 60
 #
 # The digest carries sage's daily note to his phone, so it goes out twenty
 # minutes after the note is written. The whole nightly chain is:
-#   18:30 course study (system) -> 21:00 hunter sweep
+#   21:00 hunter sweep
 #   -> 22:00 learning run (system) -> 22:30 sage note
 #   -> 22:50 digest with the note -> 23:00 job discovery (system) -> 23:30 consolidation
 #   -> 03:00 reindex (vault commit and push, reader, database dump)
@@ -316,11 +316,17 @@ def bootstrap_pre_launch() -> None:
     durability = DBOSDurability(
         models=llm.registry().all_instances(),
         # pydantic-ai's StepConfig type has not caught up with DBOS's
-        # timeout_seconds option; DBOS.step accepts it at runtime.
+        # timeout_seconds and should_retry options; DBOS.step accepts them.
+        #
+        # A refusal for length is the same refusal on every attempt; it goes
+        # straight back to the agent's context budget, which shortens the
+        # conversation and sends it again (hq.context_budget). Retried here,
+        # it was refused twice and ended the run (2026-10-13).
         model_step_config=cast(StepConfig, {
             "retries_allowed": True, "max_attempts": MODEL_STEP_ATTEMPTS,
             "interval_seconds": 5.0, "backoff_rate": 2.0,
             "timeout_seconds": model_step_limit_s(),
+            "should_retry": lambda exc: not llm.is_context_overflow(exc),
         }),
     )
     for name, spec in scan().items():
@@ -517,6 +523,8 @@ def friendly_error(exc: BaseException) -> str:
     low = raw.lower()
     if "is a directory" in low:
         return "a tool was given a folder where a file path was expected"
+    if llm.is_context_overflow(exc) or "contextwindowexceeded" in low:
+        return "the conversation outgrew the model's context window"
     if "exceeded its maximum" in low and "retries" in low:
         # DBOS names the step it gave up on. A model request and a tool call
         # fail for different reasons, and saying "a tool" for a gateway
@@ -799,15 +807,13 @@ async def _reply_outbound(text: str, *, idempotency_key: str, html: bool = False
 # The job query is his decision (memory/decisions.md), stated here once.
 JOB_QUERY = ("entry-level software engineer, AI engineer, applied AI engineer,"
              " SDE-1, 0-2 years")
+# Course phases and videos are not on the schedule: he starts each one from
+# the Courses page ("Build enhanced version", "Generate video") or in chat.
+# Only the daily article (learning_run) is written without being asked.
 SYSTEM_DISPATCHES: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
-    ("course_study", "30 18 * * *", "start_course_study", {}),
     ("job_search", "0 23 * * *", "start_job_search",
      {"query": JOB_QUERY, "locations": "India|Bengaluru|Remote", "max_roles": 20}),
     ("learning_run", "0 22 * * *", "start_learning_run", {}),
-    # Videos of lessons the learning chain did not start one for: older
-    # lessons, phases published from /study, stopped videos. One a night, at
-    # an hour when nothing else renders or writes. Code only.
-    ("video_backfill", "0 1 * * *", "start_next_video", {}),
     ("source_hunt", "0 7 * * 0", "start_source_hunt", {}),
     # The radar collects before his day starts. Code only: no model is asked.
     ("radar_collect", "30 6 * * *", "collect_radar", {}),
@@ -2005,50 +2011,6 @@ async def _course_shape_step(course: str, slug: str) -> list[dict[str, Any]]:
     return out
 
 
-_PAGE_RE = re.compile(r"Page: `(learning/lessons/[^`]+)\.html`")
-
-
-def lesson_md_from_output(output: str) -> str:
-    """The staged writer's report names the page it wrote ("Page: `....html`")."""
-    m = _PAGE_RE.search(output or "")
-    return f"{m.group(1)}.md" if m else ""
-
-
-async def _start_lesson_video(parent_task_id: str, md: str, mode: str) -> str | None:
-    """A written lesson starts its video: script, reviews, voice and render,
-    with no approval in between (hq.video). VIDEO_AUTO=0 turns it off."""
-    if not md or not video_auto():
-        return None
-    from hq.video import SCRIPT_STAGE
-    from hq.video.script import video_id_for
-
-    video_id = video_id_for(md)
-    return await dispatch(
-        agent="tutor", title=f"Video: {video_id}",
-        brief="A narrated video of a finished lesson (hq.video).", source="agent",
-        parent_task_id=parent_task_id,
-        payload={"stage": SCRIPT_STAGE, "video_id": video_id, "lesson_md": md, "mode": mode},
-        # One video per written lesson task, stable across replays.
-        dedup_key=f"video-auto:{parent_task_id}",
-    )
-
-
-def video_auto() -> bool:
-    """A finished course phase starts its video unless VIDEO_AUTO=0."""
-    import os
-
-    return os.environ.get("VIDEO_AUTO", "1").strip() not in {"0", "false", "no", ""}
-
-
-@DBOS.step()
-async def _course_lesson_md_step(phase_slug: str) -> str:
-    """The newest course lesson written for this phase."""
-    row = await db.fetchone(
-        "SELECT md_path FROM hq.lessons WHERE kind = 'course' AND phase_slug = %s"
-        " AND md_path <> '' ORDER BY lesson_date DESC LIMIT 1", (phase_slug,))
-    return str((row or {}).get("md_path") or "")
-
-
 @DBOS.step()
 async def _phase_articles_step(phase_slug: str) -> list[dict[str, Any]]:
     """Articles already written around this phase, which he may have read."""
@@ -2253,13 +2215,9 @@ async def _advance_learning(
     if learning.is_course_written(payload):
         # The staged writer checked its plan, every part, the whole page, and
         # every sentence against the study note before recording it; what did
-        # not map is on the lesson. What follows a written phase is its video:
-        # the same course, taught aloud, for him to watch next to the page.
-        if result != "done":
-            return None
-        md = lesson_md_from_output(output) or await _course_lesson_md_step(
-            str(payload.get("slug") or ""))
-        return await _start_lesson_video(task_id, md, "course")
+        # not map is on the lesson. The chain ends here: a video is made only
+        # when he presses "Generate video" on the phase.
+        return None
 
     if learning.is_deep_study(payload):
         urls = [str(u) for u in (payload.get("urls") or [])]
@@ -2282,9 +2240,7 @@ async def _advance_learning(
             payload={**lesson, "run_id": run_id},
             dedup_key=f"learning-lesson:{task_id}",
         )
-    if payload.get("stage") == learning.LESSON_STAGE and result == "done":
-        # Today's article is written; its video follows, like a course phase's.
-        return await _start_lesson_video(task_id, lesson_md_from_output(output), "article")
+    # Today's article ends the chain too; its video is made only on request.
     return None
 
 

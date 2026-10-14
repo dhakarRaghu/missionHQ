@@ -4,9 +4,9 @@ Mission HQ makes a long, narrated teaching video from any finished lesson: a
 course phase, or a Learn article. The video teaches every concept the lesson
 teaches, in the lesson's depth, told as one story: a cold open with a
 question, one running case, a bridge from each concept to the next, and a
-payoff that answers the question. There is no approval step: when a course
-phase or an article is written, its video starts by itself and goes from
-script to render on its own.
+payoff that answers the question. A video is made only when he asks for it
+("Generate video" on the page, or in chat); from there it goes from script to
+render on its own, with no approval step.
 
 YouTube episodes are not made here. They are cut by hand in a Claude session
 with the `video-remotion` skill from the `dhakarRaghu/claude-plugin` repo.
@@ -90,29 +90,28 @@ finished videos (`data/media/<course>/`) are not: one video is 160 MB to
 the endpoints and the manifest entry are in [videos.md](videos.md).
 
 Environment, all optional: `VIDEO_PROJECT_DIR`, `VIDEO_WORK_DIR`, `MEDIA_DIR`,
-`VIDEO_NODE_BIN` (an arm64 Node; an x86 Node breaks Remotion), `KOKORO_DIR`,
-`VIDEO_AUTO` (0 stops the learning chain from starting videos).
+`VIDEO_NODE_BIN` (an arm64 Node; an x86 Node breaks Remotion; without it the
+`node` on PATH), `KOKORO_DIR`.
 
 Running one lesson by hand, without a second backend:
 `uv run python scripts/video_run.py script|repair|build …` in `backend/`.
 
 ## How a video starts
 
-Mission HQ has two ways to start work, and videos use both, the same way the
-rest of the learning pipeline does:
+Only when he asks. Nothing on the learning chain or the schedule starts a
+video: a written phase or article ends its chain, and the nightly backfill is
+gone. The two starts are "Generate video" on a phase or an article
+(`POST /videos/make`) and sage's `start_video` in chat; both call
+`hq.video.jobs.start`, which:
 
-1. **The learning chain** (`engine._advance_learning`). Work that follows
-   another task's result is the next stage of the chain, keyed by the task it
-   follows, so a replay never starts it twice: course study → lesson, scan →
-   study → article. A written course phase or article starts its video here
-   (`_start_lesson_video`, key `video-auto:<lesson task id>`).
-2. **A system starter** (`engine.SYSTEM_DISPATCHES`). Work on a schedule, with
-   no model. `video_backfill` runs at 01:00 and calls `start_next_video`,
-   which starts the video of the oldest lesson with no video and no job:
-   lessons written before videos existed, phases published from Claude
-   `/study`, and anything the chain missed. One a night, because a render
-   keeps the CPU busy.
+- leaves a video alone while a task is making it (any task whose payload
+  names the video);
+- builds a stopped job again from its script when that script passed every
+  check and review and the lesson has not changed since (`can_rebuild`), so a
+  failed render costs a render, not hours of writing; `fresh` writes anew;
+- otherwise writes the script from the lesson, then builds it.
 
-By hand: "Make video" on a phase page, or ask sage in chat (`start_video`).
-`VIDEO_AUTO=0` turns off the chain's start; the starter can be removed from
-`SYSTEM_DISPATCHES`.
+A job file is written by its task, so a task that dies without writing it
+(a missing program, a deploy, a timeout) would leave it "writing" forever.
+`jobs.settle` compares the file with the task board on every read and marks
+such a job failed, with the task's own error, so the page offers it again.

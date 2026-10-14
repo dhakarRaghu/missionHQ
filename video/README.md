@@ -35,16 +35,15 @@ draw the spec in the Sketchbook look. The model never writes React.
 
 ## Setup
 
-Remotion needs the arm64 Node. The x86 Node breaks the renderer. Put it first on `PATH` in every shell:
+Remotion needs the arm64 Node. The x86 Node breaks the renderer. Make sure the `node` on your `PATH` is arm64 (the backend uses it, or the folder named in `VIDEO_NODE_BIN`):
 
 ```bash
-export PATH=~/.nvm/versions/node/v22.23.2/bin:$PATH
 node -p process.arch        # must print arm64
 cd video && npm install
 ```
 
 The voice is Kokoro (`af_heart`). `narrate.mjs` looks for it in `KOKORO_DIR`, which defaults to
-`/Users/raghvendra.dhakar/Desktop/project/code/course-videos/tools/tts` (a folder with `.venv/`,
+`<repo>/tools/tts` (a folder with `.venv/`,
 `models/` and `kokoro_batch.py`). Do not copy the models into this repo.
 
 ## Commands
@@ -74,7 +73,7 @@ uses the proven upload flags: H.264, CRF 18, x264 `slow`, yuv420p, BT.709, AAC 3
 Long jobs: background shells stop after 30 minutes, so run narration and renders detached:
 
 ```bash
-nohup bash -c 'export PATH=~/.nvm/versions/node/v22.23.2/bin:$PATH; node scripts/render.mjs out/ep12 ep12; echo $? > out/ep12/render.done' > out/ep12/render.log 2>&1 &
+nohup bash -c 'node scripts/render.mjs out/ep12 ep12; echo $? > out/ep12/render.done' > out/ep12/render.log 2>&1 &
 ```
 
 Layout debug: add `"debugFit": true` to the props (for example in `<out>/props.json`) and every `FitBox`

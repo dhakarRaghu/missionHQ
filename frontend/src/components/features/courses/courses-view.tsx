@@ -35,9 +35,9 @@ import { cn } from "@/lib/utils";
  * what is in it on the right — and the lesson itself gets the width.
  *
  * "One at a time" is the rule, not a preference: exactly one course is active,
- * the evening run only touches that one, and the rest sit still until he
- * switches. Tutor teaches one phase a night, and will not start the next while
- * the last lesson is unread.
+ * the daily article orbits that one, and the rest sit still until he
+ * switches. A phase is built only when he presses "Build enhanced version";
+ * nothing builds one on a schedule.
  *
  * The left column carries both halves of "where am I": the switcher over
  * every course and every module of the plan, and under it the syllabus of the
@@ -98,8 +98,8 @@ export function CoursesView() {
   if (!current) {
     return (
       <EmptyState title="No courses yet">
-        Hunter syncs your study platform before each evening run. Once it has,
-        your courses and their phases appear here.
+        Your courses appear here once your study platform is synced
+        (run sync-courses after publishing from /study).
       </EmptyState>
     );
   }

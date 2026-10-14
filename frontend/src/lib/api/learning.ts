@@ -119,7 +119,7 @@ export interface Course {
   taught: number;
   minutes: number;
   next_title: string | null;
-  /** Exactly one course is active; the evening run only touches that one. */
+  /** Exactly one course is active; the daily article orbits that one. */
   active: boolean;
   /** What the course is for, in a line. Optional: the backend adds these two
    * later, so every reader must cope with them being absent. */

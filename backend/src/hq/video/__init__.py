@@ -1,7 +1,7 @@
 """Narrated teaching videos, made from a finished lesson, with no approval step.
 
-A written course phase or article starts its video by itself
-(engine._start_lesson_video). Two tasks, both run by tutor as code, not as
+A video starts only when he asks (`jobs.start`: "Generate video" on the
+page, or sage's `start_video`). Two tasks, both run by tutor as code, not as
 an agent loop:
 
 1. SCRIPT (`script.py`): gather the lesson and its study note, plan the

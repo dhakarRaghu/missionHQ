@@ -1,0 +1,274 @@
+{
+ "topic": "elite-performance",
+ "title": "Performance, concurrency and the machine",
+ "module": 1,
+ "spec": "missionHQ/learning/courses/01-performance/course.md (written for Go; adapted to Python by the owner's choice on 2026-09-25)",
+ "language": "python",
+ "totalPhases": 5,
+ "currentPhase": 5,
+ "anchors": [],
+ "anchorDecision": "learning-only: labs run from elite-performance/code, nothing is added to Mission HQ (owner, 2026-09-25)",
+ "buildsOn": [
+  "inference-internals 1.2 and 1.6 (waiting time versus service time, measuring a stream), 4.3 (the throughput and latency sweep, one client against pinned configurations), 4B (the paired bootstrap interval and the noise floor), 5.1 (the three timeouts: connect, stall, total), 5.4 (percentile ladders), 6.1 (Little's law, the knee, pooling)"
+ ],
+ "outline": [
+  {
+   "phase": 1,
+   "title": "Measurement before optimisation",
+   "subtitle": "Why do most benchmarks report a number that production will never show, and how do you write one that does not?",
+   "minutes": 90,
+   "status": "completed",
+   "file": "elite-performance-phase-01a-measure.md",
+   "sections": [
+    "1.1 — The distribution of one Python endpoint",
+    "1.2 — Open-loop versus closed-loop load",
+    "1.3 — Warm-up, caches and the first minute",
+    "1.4 — Baseline, one change, repeat",
+    "1.5 — The prediction sheet"
+   ],
+   "concepts": [
+    "A closed-loop generator sends the next request only after the last one returns, so a stall is recorded once, not once for every request that would have waited during it.",
+    "A latency result is a distribution with run-to-run variance, so one run, or one percentile without its spread, cannot show that a change helped.",
+    "A short run of a busy service reports too low a p99, and a different one each time, because the rare long queues that set the tail seldom fit into it; the first seconds differ in either direction because every run starts with an empty queue, while the CPython interpreter is warm after about one request.",
+    "A prediction written before the run turns a number into a finding: the gap between prediction and measurement points at the thing you did not model."
+   ],
+   "description": "Why do most benchmarks report a number that production will never show, and how do you write one that does not? Sections: The distribution of one Python endpoint; Open-loop versus closed-loop load; Warm-up, caches and the first minute; Baseline, one change, repeat; The prediction sheet",
+   "decides": "for one endpoint, write the prediction first, measure it open-loop with a histogram, repeat three times, and say whether a change is real given the run-to-run spread.",
+   "codeDir": "code/phase01_measure",
+   "parts": [
+    "elite-performance-phase-01a-measure.md",
+    "elite-performance-phase-01b-variance-prediction.md"
+   ],
+   "estimatedSessions": 2
+  },
+  {
+   "phase": 2,
+   "title": "Queueing, saturation and tail latency",
+   "subtitle": "The CPU is at 60% and p99 is already bad. Which resource is saturating, and where is the knee for your service?",
+   "minutes": 240,
+   "status": "completed",
+   "file": "elite-performance-phase-02a-where-time-goes.md",
+   "sections": [
+    "2.1 — Fan-out amplification",
+    "2.2 — Head-of-line blocking",
+    "2.3 — Pools that fill",
+    "2.4 — Backpressure",
+    "2.5 — The capacity envelope"
+   ],
+   "concepts": [
+    "A request that waits for N calls is as slow as its slowest call: at fan-out 100 with 1% of calls slow, 63% of requests are slow. In Python each call also costs the caller about 2 ms of CPU on one event loop.",
+    "An asyncio event loop is one queue, so one blocking call inside an async handler stalls every request in flight, whatever the CPU graph shows.",
+    "A small pool that waits fills before the CPU does, and shows it first as a rising wait at a flat error rate. A pool that refuses shows errors at once. httpx's pool timeout applies to each wait, so it may never turn a full pool into errors.",
+    "Work beyond capacity goes to a buffer, a blocked caller or a refused client. A queue that adds work as it grows, such as retries or a pool that walks its queue, can keep a service down after its trigger is gone.",
+    "A service's capacity is at most the smallest of its resources' limits. A queue that costs work can push it into a bad state below every computed limit, so the knee is found by loading the service there, and headroom is read per resource."
+   ],
+   "description": "The CPU is at 60% and p99 is already bad. Which resource is saturating, and where is the knee for your service? Sections: Fan-out amplification; Head-of-line blocking; Pools that fill; Backpressure; The capacity envelope",
+   "decides": "for one service, predict the knee from its pools and service times, find the resource that saturates first, and read headroom per resource.",
+   "codeDir": "code/phase02_queueing",
+   "estimatedSessions": 2,
+   "parts": [
+    "elite-performance-phase-02a-where-time-goes.md",
+    "elite-performance-phase-02b-past-the-limit.md"
+   ]
+  },
+  {
+   "phase": 3,
+   "title": "Profiling Python systems",
+   "subtitle": "When the service is slow, how do you find the line of code responsible in under an hour, and prove the fix helped?",
+   "minutes": 150,
+   "status": "completed",
+   "file": "elite-performance-phase-03a-profilers.md",
+   "sections": [
+    "3.1 — The profilers and what each is blind to",
+    "3.2 — Wall-clock versus CPU time",
+    "3.3 — Allocations and the garbage collector",
+    "3.4 — Lock and GIL contention",
+    "3.5 — The timeline: tracing the event loop",
+    "3.6 — Symptom versus root cause",
+    "3.7 — Proving a fix"
+   ],
+   "concepts": [
+    "Each profiler measures one kind of cost. A CPU profile cannot see time spent waiting for a lock, the GIL, a pool or the network.",
+    "A handler whose CPU per request is small next to its latency is waiting. Only a wall-clock view that follows the await shows where: an async profile of one request, a timed lock, or a timeline of spans. For the GIL, the view is the event loop's lag.",
+    "The garbage collector runs when container allocations minus deallocations pass 2,000. So its cost follows the containers a request keeps alive at once, and those that stay alive for good, not the count of allocations. Keeping fewer alive removes the collector's time and its pauses.",
+    "A fix is proven by the latency distribution at fixed throughput, measured the way the problem was found, with errors and memory checked for regression."
+   ],
+   "description": "When the service is slow, how do you find the line of code responsible in under an hour, and prove the fix helped? Sections: The profilers and what each is blind to; Wall-clock versus CPU time; Allocations and the garbage collector; Lock and GIL contention; The timeline: tracing the event loop; Symptom versus root cause; Proving a fix",
+   "decides": "for a slow path, pick the profile that can see the cost, test one hypothesis per measurement, and prove the fix with the distribution at fixed throughput.",
+   "codeDir": "code/phase03_profiling",
+   "estimatedSessions": 2,
+   "parts": [
+    "elite-performance-phase-03a-profilers.md",
+    "elite-performance-phase-03b-cause-proof.md"
+   ]
+  },
+  {
+   "phase": 4,
+   "title": "Concurrency correctness",
+   "subtitle": "How does a program that passes every test still corrupt state, or leak a task per request, in production?",
+   "minutes": 180,
+   "status": "completed",
+   "file": "elite-performance-phase-04a-shared-state.md",
+   "sections": [
+    "4.1 — What the GIL guarantees, and what it does not",
+    "4.2 — Data races versus logical races",
+    "4.3 — Ownership",
+    "4.4 — Locks, queues and asyncio primitives",
+    "4.5 — Cancellation and deadlines",
+    "4.6 — Bounded concurrency",
+    "4.7 — Task and thread leaks",
+    "4.8 — Deterministic and property-based concurrency tests"
+   ],
+   "concepts": [
+    "The GIL makes no read-modify-write atomic. It only limits where a thread can be switched out: on CPython 3.13, counter += 1 lost 0 of 1.6 million updates and counter += one() lost about 1.1 million. Only a lock, or a single owner, makes the update correct.",
+    "In asyncio, a task runs without interruption only between two points where it really suspends. A check and an act with a real suspension between them is a race that no standard tool reports, and a fake that never suspends hides it from tests.",
+    "Every piece of shared state and every task needs a written owner. State with one owner needs no lock. A task whose owner does not bound it and wait for it leaks, once per request.",
+    "A client disconnect stops nothing by itself: uvicorn does not cancel the handler. A cancel stops work only at a suspension point, and only if nothing swallows CancelledError, and shared state can be half done there.",
+    "A concurrency test is deterministic only when the test controls the interleaving. asyncio runs tasks in the same order on every run, so running a test more is not a search."
+   ],
+   "description": "How does a program that passes every test still corrupt state or leak a goroutine per request in production? Sections: What the GIL guarantees, and what it does not; Data races versus logical races; Ownership; Locks, queues and asyncio primitives; Cancellation and deadlines; Bounded concurrency; Task and thread leaks; Deterministic and property-based concurrency tests",
+   "decides": "for one concurrent path, write its ownership and ordering rules, find the race the detector cannot, and prove every task and thread exits on cancellation.",
+   "codeDir": "code/phase04_concurrency",
+   "estimatedSessions": 2,
+   "parts": [
+    "elite-performance-phase-04a-shared-state.md",
+    "elite-performance-phase-04b-lifetimes-tests.md"
+   ]
+  },
+  {
+   "phase": 5,
+   "title": "The machine beneath an API request",
+   "subtitle": "Where do the 40 milliseconds go between a client sending a request and the first byte of the response, and which of them are yours?",
+   "minutes": 210,
+   "status": "completed",
+   "file": "elite-performance-phase-05a-network.md",
+   "sections": [
+    "5.1 — DNS",
+    "5.2 — TCP",
+    "5.3 — TLS",
+    "5.4 — HTTP/1.1 versus HTTP/2 versus gRPC",
+    "5.5 — Connection pools done right",
+    "5.6 — Syscalls, buffers and the page cache",
+    "5.7 — Deadlines through the stack",
+    "5.8 — The container's limits"
+   ],
+   "concepts": [
+    "The first request on a new connection pays DNS, TCP and TLS round trips before the request itself. A warm pool pays none of them. So the pool's size and its keep-alive limits decide how often you pay.",
+    "Python's network calls wait where no single timeout looks. asyncio runs the blocking getaddrinfo in its default thread pool, which other blocking work shares. Each httpx timeout starts again at every step. So only a deadline set above the call bounds the total, and the server is not told when it passes.",
+    "HTTP/2 moves head-of-line blocking from the request to the TCP connection. So one lost packet stalls every stream on it.",
+    "A read from the page cache costs about 2 µs. A read from a local SSD costs tens to hundreds of microseconds, and one from a network disk milliseconds. The code is the same, so what is cached decides.",
+    "A CPU quota is enforced per period. A container that spends its quota early waits for the rest of the period, which adds up to the period minus the quota to a request: 50 ms for --cpus=0.5 at the default 100 ms period. So the p50 stays, and the p99 rises."
+   ],
+   "description": "Where do the 40 milliseconds go between a client sending a request and the first byte of the response, and which of them are yours? Sections: DNS; TCP; TLS; HTTP/1.1 versus HTTP/2 versus gRPC; Connection pools done right; Syscalls, buffers and the page cache; Deadlines through the stack; The container's limits",
+   "decides": "for one request, account for every millisecond from DNS to first byte, and name which layer moved when one is broken on purpose.",
+   "codeDir": "code/phase05_machine",
+   "estimatedSessions": 2,
+   "parts": [
+    "elite-performance-phase-05a-network.md",
+    "elite-performance-phase-05b-host.md"
+   ]
+  }
+ ],
+ "commitments": [
+  {
+   "madeIn": 1,
+   "dueIn": 2,
+   "status": "done",
+   "text": "Phase 2 section 2.4 teaches a queue that feeds itself: once a queue forms, more connections and more waiting make each request costlier. A first measurement on 2026-09-25, 2 ms exponential service at open 250/s, collapsed in some runs (p99 12.7 to 52 s, 1,131 in flight). That run used the same random sequence for arrivals and service times, which makes a queue less likely, so the collapse is real but its numbers must be measured again with named streams (shared/rng.py). Raw run: code/runs/diag250.json.",
+   "resolution": "Section 2.4: re-measured with named streams and the raw-socket generator, 3 runs at 250/s, p99 19.2 to 25.2 ms, no collapse. Lab part K2 ran the same service through the httpx client: 5 to 6 times the generator CPU, p99 22 times worse on a busy laptop and 1.4 times on a quieter one. The 12.7 s collapse itself did not reproduce, so its cause is stated as inferred."
+  },
+  {
+   "madeIn": 1,
+   "dueIn": 2,
+   "status": "done",
+   "text": "Section 1.5 'Where this model stops': Phase 2 measures what one M/M/1 queue leaves out: several workers, several resources, and retries and timeouts that feed load back into the queue.",
+   "resolution": "Sections 2.3 to 2.5 measure several servers (M/M/c, Erlang C), several resources (the capacity envelope), and retries feeding load back (retry_storm.py, Huang's bound)."
+  },
+  {
+   "madeIn": 1,
+   "dueIn": 5,
+   "status": "done",
+   "text": "Section 1.3 cold-state table: 'OS page cache: first read of a file after boot comes from disk. Phase 5 measures it.'",
+   "resolution": "Section 5.6 measures a page-cache hit against an SSD read without sudo, by writing the test file with F_NOCACHE: medians 1.5 µs against 88.7 to 89.8 µs, 58 to 62 times apart. A first read after a reboot needs sudo and is stated as not measured."
+  },
+  {
+   "madeIn": 5,
+   "dueIn": null,
+   "status": "deferred",
+   "text": "What fsync promises about durability, beyond its latency, belongs to a later course, as the course spec says."
+  }
+ ],
+ "reviewLog": [
+  {
+   "phase": 1,
+   "date": "2026-09-25",
+   "fixed": [
+    "Lab found a bug in itself: generator and service seeded random.Random(seed) in both processes, so arrivals and service times were one sequence and long requests never queued (p99 57 ms vs 224 predicted). Fixed at the root with shared/rng.py named streams, a correlation self-test and a mutation check.",
+    "Part C re-run alternated (before, after, control per round) instead of blocked; one run disturbed by other programs (generator lag p99 27.8 ms) is now left out by a validity rule fixed in advance (compare_runs.py LAG_LIMIT_MS=10), with --keep-invalid to show its effect.",
+    "The first 2 seconds at 93% busy were slower: traced to arrival bunching (194 to 206 arrivals vs 182 expected), not a cold process; warm-up claims rewritten.",
+    "Hedged against sample-order dependence: --aa sorts inputs; every quoted output saved to runs/lab.log, lab-c.log, lab-w.log with conditions; windows.py and predict.py --shared-seed-check added so every number is reproducible.",
+    "First independent review: 63 findings (17 wrong facts, e.g. old blocked-order numbers, off-by-one p99 rank, a 14 ms lag called valid, E10 restore via git that fails, wrong Wakart unit, 1/(1-rho) vs rho/(1-rho)). Second review: 60 resolved, 18 new (drifted file:line anchors, unlabelled log sessions, 137 vs 136 ms); all fixed except heading brackets, kept to match the quality-bar template.",
+    "Split into 1A (1.1-1.3) and 1B (1.4-1.5) at 70 KB."
+   ]
+  },
+  {
+   "phase": 2,
+   "date": "2026-09-25",
+   "fixed": [
+    "Live fan-out at 10 req/s and fan-out 50 pinned the API at 100% CPU: each httpx call costs about 2 ms on one event loop. Redesigned with a fixed call budget and taught as the second cost of fan-out.",
+    "Load generator bug: reused keep-alive connections that uvicorn had closed after 5 s idle were counted as errors. RawPool now resends once on a stale connection, with a self-test and a mutation check.",
+    "Pool sweep with 20 ms holds could not separate pool from CPU. Moved to 100 ms holds, re-ran the whole lab, and kept the first attempt as runs/lab2-first-attempt-20ms.log.",
+    "Verified: httpcore 1.0.9 pool timeout applies to each wait. 400 requests through 5 connections at a 5 s timeout all succeeded, the last after 9.23 s, one entering the wait 66 times. With 6 s holds, 5 of 10 failed. Shipped pool_timeout.py.",
+    "Verified: httpcore pool CPU grows with the queue, 482 to 2,563 us per request from 50 to 800 queued, and with connections open, 1,583 to 8,122 us from 5 to 200. Shipped pool_cost.py.",
+    "Envelope prediction from a light-load CPU probe failed for pools of 50 and 100. Kept as the WRONG/RIGHT pair: capacity has two states, about 2 ms of CPU per request when healthy and 6.7 to 10.2 ms once a queue forms.",
+    "Independent review, 66 findings, all fixed: the hedge's effect on p50 was stated backwards; pool busy was presented as measured; invalid runs were used as evidence and re-run; a retrograde 'bigger pool lowers capacity' claim was unsupported and removed; the Huang safe-load bound was missing a factor, now 25/s with 3 retries, checked by a 5-seed sweep; GitLab and OpenTelemetry claims corrected; 2.3 and 2.4 made consistent about httpx.",
+    "Phase 1 commitment: the 250/s collapse did not reproduce. Stated honestly with the httpx-generator measurement: 5 to 6 times the CPU, p99 22 times worse on a busy laptop and 1.4 times on a quieter one."
+   ]
+  },
+  {
+   "phase": 4,
+   "date": "2026-09-25",
+   "fixed": [
+    "Independent review, 35 findings (3 high, 9 medium, 23 low), all fixed.",
+    "4.6 tied a gather's failures to httpx's pool timeout. httpx's timeout restarts on each wait, so the text now separates a per-call deadline, modelled by bounded.py, from httpx's pool timeout, with Phase 2's 9.23 s and 0 timeouts.",
+    "The Phase 2 cross-references contradicted section 2.3 and quoted old titles. Fixed to the published headings.",
+    "'The loss never reaches zero while a call sits inside the update' was contradicted by a 3.14.3 trial with 0 lost. Restated as a range.",
+    "Loss percentages now carry their switch interval. The switch-point mechanism is matched to the pinned CPython source.",
+    "The Check-it grep commands failed in zsh. Quoted the globs.",
+    "Scripts had been edited after the quoted logs. Every lab part was re-run, and the text quotes only the new logs."
+   ]
+  },
+  {
+   "phase": 3,
+   "date": "2026-09-25",
+   "fixed": [
+    "Independent review, 36 findings (5 high, 10 medium, 21 low). 34 fixed in the phase, 2 in Phase 4 and course.json.",
+    "Section 3.4 named the wrong cause for the long lock waits. The releasing request runs its own summarise step before the next waiter starts, a handoff of about 4.5 ms. So the lock is 73 to 81% busy, not 51%. app.py now measures the handoff and an M/G/1 model is printed next to every measured wait: predicted 23.2, 39.5 and 41.0 ms against 21.6, 30.9 and 51.9 ms. The 3.5 prediction became 51.5 ms against 52 ms drawn.",
+    "The GIL figures came from cProfile, which records every thread on 3.12 and later. Replaced by a timer on the loop's own select call.",
+    "Checkpoint 3A-4 said 2 collections per request. It is 1, checked with gcpause.py.",
+    "cProfile's extra time was blamed on its hooks. It is off-CPU time, because cProfile uses a wall clock.",
+    "The pool fix now has a numeric prediction, a 42 ms p99, and 3.7 reports the 6 to 10 ms miss.",
+    "Logs older than their scripts were all re-run. The GC fix verdict moved from 'not shown' to a narrow 'real', -10.3% (-20.6% to -1.5%). The text says an earlier session did not show it."
+   ]
+  },
+  {
+   "phase": 5,
+   "date": "2026-09-25",
+   "fixed": [
+    "Independent review, 48 findings (3 high, 18 medium, 27 low). All fixed, three only in part and labelled.",
+    "Concept 5 said the p99 step is near the period length. It is at most the period minus the quota, 50 ms for --cpus=0.5. The quota lab's generator ran inside the limited container with lag p99 11.13 ms, breaking the 10 ms rule. It now runs in its own container, lag p99 2.46 to 3.92 ms. Measured rise +25.5 to +48.2 ms against +43 predicted.",
+    "The budget deadline test gave the client 1.0 s, not 0.5 s. With the real 0.5 s and a 50 ms server margin, the 504 arrives at 0.45 to 0.46 s. With no margin the client gives up first, now a break-it exercise and a mutation check.",
+    "The grpc.io table was misquoted. Now 455.1, 195.4 and 132.2 ms, then about 69 to 71 ms from the fourth RPC.",
+    "Fast page-cache misses were blamed on read-ahead. They were offsets sharing a 16 KiB page on the M2. Offsets are now drawn one per page: 0 of 2,000 fast misses.",
+    "Handshake CPU is measured, 0.580 to 0.672 ms per handshake. diagnose.py prints generator lag, and one invalid run was re-run. Every p99 gives its sample count.",
+    "The timeline.py self-test did not catch the DNS subtraction being removed. It now does. Every log was re-run after the last code change."
+   ]
+  }
+ ],
+ "createdAt": "2026-09-25",
+ "lastActive": "2026-09-25",
+ "status": "completed",
+ "question": "Why is the p99 your load test reports not the p99 production shows, and which resource, profile, race or layer explains the gap?",
+ "notes": "Published on the platform but unread by him past 3A: link each assumed section by name and recap it in three sentences.",
+ "pythonTool": "uv"
+}

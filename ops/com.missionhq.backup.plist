@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template. `ops/backup-schedule.sh install` substitutes __ROOT__ for this
+  machine's checkout and writes the result to ~/Library/LaunchAgents.
+  Nothing here may name a user: the repo is cloned onto other machines.
+-->
 <plist version="1.0">
 <dict>
   <key>Label</key>
@@ -8,12 +13,12 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/ops/backup.sh</string>
+    <string>__ROOT__/ops/backup.sh</string>
     <string>run</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq</string>
+  <string>__ROOT__</string>
 
   <key>EnvironmentVariables</key>
   <dict>
@@ -36,8 +41,8 @@
   <false/>
 
   <key>StandardOutPath</key>
-  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/backup.log</string>
+  <string>__ROOT__/data/logs/backup.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/raghvendra.dhakar/Desktop/project/code/missionHq/data/logs/backup.log</string>
+  <string>__ROOT__/data/logs/backup.log</string>
 </dict>
 </plist>
