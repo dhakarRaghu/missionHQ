@@ -59,6 +59,8 @@ export const ClaimCard: React.FC<{ count?: string; claim: string; mark?: string;
 );
 
 export const ThinkView: React.FC<{ s: ThinkStep; b: TimingBeat; k: K }> = ({ s, b }) => {
+  // v1: check-spec requires all three fields.
+  const first = s.first ?? "", misses = s.misses ?? "", real = s.real ?? "";
   const q = linesOf(b, "q");
   const t = linesOf(b, "t");
   const question = q.length ? q[q.length - 1] : null;
@@ -81,23 +83,23 @@ export const ThinkView: React.FC<{ s: ThinkStep; b: TimingBeat; k: K }> = ({ s, 
         {t[0] ? (
           <Appear at={t[0].at} style={{ marginTop: 30 }}>
             <Kicker color={theme.mut}>First thought</Kicker>
-            <HandwriteBox text={keepUnits(s.first)} size={50}>
-              <Handwrite text={keepUnits(s.first)} at={t[0].at + 10} size={50} color={theme.mut} strikeAt={t[1]?.at} />
+            <HandwriteBox text={keepUnits(first)} size={50}>
+              <Handwrite text={keepUnits(first)} at={t[0].at + 10} size={50} color={theme.mut} strikeAt={t[1]?.at} />
             </HandwriteBox>
           </Appear>
         ) : null}
         {t[1] ? (
           <Appear at={t[1].at} style={{ marginTop: 24 }}>
             <Kicker>What it misses</Kicker>
-            <HandwriteBox text={keepUnits(s.misses)} size={50}>
-              <Handwrite text={keepUnits(s.misses)} at={t[1].at + 10} size={50} color={C.cascade} />
+            <HandwriteBox text={keepUnits(misses)} size={50}>
+              <Handwrite text={keepUnits(misses)} at={t[1].at + 10} size={50} color={C.cascade} />
             </HandwriteBox>
           </Appear>
         ) : null}
         {t[2] ? (
           <Appear at={t[2].at} style={{ marginTop: 32 }}>
             <Panel hotAt={t[2].at} drawAt={t[2].at} style={{ padding: "16px 30px", display: "inline-block" }}>
-              <span style={{ fontFamily: font, fontSize: 36, fontWeight: 600 }}>{keepUnits(s.real)}</span>
+              <span style={{ fontFamily: font, fontSize: 36, fontWeight: 600 }}>{keepUnits(real)}</span>
             </Panel>
           </Appear>
         ) : null}
@@ -155,9 +157,54 @@ export const KeypointsView: React.FC<{ b: TimingBeat }> = ({ b }) => {
   );
 };
 
+/**
+ * Version 2 thinking: the question, then the first answer (handwritten, struck through when the voice
+ * reaches what it misses) and what it misses. No real-question box: the question was asked once, above.
+ */
+export const ThinkViewV2: React.FC<{ s: ThinkStep; b: TimingBeat; k: K }> = ({ s, b, k }) => {
+  const q = linesOf(b, "q");
+  const t = linesOf(b, "t");
+  const question = q.length ? q[q.length - 1] : null;
+  const givens = q.length > 1 ? q.slice(0, -1) : [];
+  const firstAt = s.first_at ? k(s.first_at) : t[0]?.at;
+  const missesAt = s.misses_at ? k(s.misses_at) : t.length > 1 ? t[t.length - 1].at : undefined;
+  return (
+    <div style={{ position: "absolute", left: 140, top: BOX.top }}>
+      <FitBox w={1640} h={BOX.h} valign="center" reflow grow={1.4} fill={0.7}>
+        {givens.map((g) => (
+          <Appear key={g.key} at={g.at} style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: font, fontSize: 32, color: theme.mut, lineHeight: 1.3 }}>{keepUnits(cleanQuestion(g.text))}</div>
+          </Appear>
+        ))}
+        {question ? (
+          <Appear at={question.at}>
+            <div style={{ fontFamily: hand, fontSize: 64, fontWeight: 700, lineHeight: 1.12 }}>{keepUnits(cleanQuestion(question.text))}</div>
+          </Appear>
+        ) : null}
+        {s.first && firstAt !== undefined ? (
+          <Appear at={firstAt} style={{ marginTop: 34 }}>
+            <Kicker color={theme.mut}>First answer</Kicker>
+            <HandwriteBox text={keepUnits(s.first)} size={50}>
+              <Handwrite text={keepUnits(s.first)} at={firstAt + 10} size={50} color={theme.mut} strikeAt={missesAt} />
+            </HandwriteBox>
+          </Appear>
+        ) : null}
+        {s.misses && missesAt !== undefined ? (
+          <Appear at={missesAt} style={{ marginTop: 24 }}>
+            <Kicker>What it misses</Kicker>
+            <HandwriteBox text={keepUnits(s.misses)} size={50}>
+              <Handwrite text={keepUnits(s.misses)} at={missesAt + 10} size={50} color={C.cascade} />
+            </HandwriteBox>
+          </Appear>
+        ) : null}
+      </FitBox>
+    </div>
+  );
+};
+
 // ---------------------------------------------------------------- the concept beat
 
-const find = <S extends Step["step"]>(steps: Step[], name: S) => steps.find((s) => s.step === name) as Extract<Step, { step: S }> | undefined;
+const find =<S extends Step["step"]>(steps: Step[], name: S) => steps.find((s) => s.step === name) as Extract<Step, { step: S }> | undefined;
 
 export const ConceptBeat: React.FC<{ beat: Beat; t: TimingBeat }> = ({ beat, t }) => {
   const k = keyFrame(t);
@@ -192,6 +239,56 @@ export const ConceptBeat: React.FC<{ beat: Beat; t: TimingBeat }> = ({ beat, t }
       {num ? <PanelSeq panels={panelsOf(num)} k={k} from={n0} to={r0} source={num.source?.text} /> : null}
       <Phase from={r0} to={h0}><KeypointsView b={t} /></Phase>
 
+      {bridge ? (
+        <>
+          {bridge.label ? (
+            <Phase from={h0}>
+              <Appear at={h0} style={{ position: "absolute", left: 100, top: 118 }}>
+                <Kicker color={C.router} style={{ fontSize: 34 }}>{bridge.label}</Kicker>
+              </Appear>
+            </Phase>
+          ) : null}
+          <PanelSeq panels={panelsOf(bridge)} k={k} from={h0} to={end} />
+        </>
+      ) : null}
+    </AbsoluteFill>
+  );
+};
+
+/**
+ * Version 2, the story order: the running case, the question and the thinking, the picture, the
+ * mechanism and the number, and only then the claim, as the takeaway card ("2 of 3", highlighter on
+ * `mark`), then the bridge. No step rail: the viewer follows the question, not a list of stages.
+ */
+export const ConceptBeatV2: React.FC<{ beat: Beat; t: TimingBeat }> = ({ beat, t }) => {
+  const k = keyFrame(t);
+  const steps = beat.steps ?? [];
+  const end = 1e9;
+  const q0 = firstOf(t, "q") ?? firstOf(t, "t") ?? end;
+  const p0 = firstOf(t, "p");
+  const m0 = firstOf(t, "m") ?? end;
+  const n0 = firstOf(t, "n");
+  const k0 = firstOf(t, "k") ?? end;
+  const bridge = find(steps, "bridge") as BridgeStep | undefined;
+  const h0 = bridge ? firstOf(t, "h") ?? end : end;
+  const claim = linesOf(t, "k").map((l) => l.text).join(" ");
+  const situation = find(steps, "situation") as SituationStep | undefined;
+  const think = find(steps, "think") as ThinkStep | undefined;
+  const picture = find(steps, "picture") as PictureStep | undefined;
+  const mech = find(steps, "mechanism") as MechanismStep | undefined;
+  const num = find(steps, "number") as NumberStep | undefined;
+  const afterThink = picture && p0 !== null ? p0 : m0;
+  const afterMech = num && n0 !== null ? n0 : k0;
+  return (
+    <AbsoluteFill>
+      {situation ? <PanelSeq panels={panelsOf(situation)} k={k} from={0} to={q0} /> : null}
+      {think ? <Phase from={q0} to={afterThink}><ThinkViewV2 s={think} b={t} k={k} /></Phase> : null}
+      {picture && p0 !== null ? <PanelSeq panels={panelsOf(picture)} k={k} from={p0} to={m0} /> : null}
+      {mech ? <Phase from={m0} to={afterMech}><MechanismView s={mech} k={k} from={m0} to={afterMech} /></Phase> : null}
+      {num && n0 !== null ? <PanelSeq panels={panelsOf(num)} k={k} from={n0} to={k0} source={num.source?.text} /> : null}
+      <Phase from={k0} to={h0}>
+        <ClaimCard count={beat.count} claim={keepUnits(claim)} mark={beat.mark ? keepUnits(beat.mark) : undefined} markAt={k0 + 40} />
+      </Phase>
       {bridge ? (
         <>
           {bridge.label ? (

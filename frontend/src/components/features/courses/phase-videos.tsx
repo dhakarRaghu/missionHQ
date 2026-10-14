@@ -10,8 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   formatDuration,
+  lessonVideoComplete,
   mediaApi,
   mediaKeys,
+  partLabel,
   sortVideos,
   type Video,
 } from "@/lib/api/media";
@@ -20,7 +22,8 @@ import { cn } from "@/lib/utils";
 /**
  * The videos made from one phase, above its lesson.
  *
- * Closed, it is one row: the course video and the phase's short YouTube
+ * Closed, it is one row: the course video (or its parts, about ten minutes
+ * each, when the lesson is told as a series) and the phase's short YouTube
  * episodes. The lesson frame keeps the height, because the lesson is still
  * the thing he reads. Opening a video puts the player above the lesson, and
  * the same row switches between the videos. The frame itself is not touched:
@@ -64,12 +67,16 @@ export function PhaseVideos({
     );
   }
   const list = sortVideos(videos.data);
-  const courseVideo = list.find((v) => v.kind === "course");
+  const courseVideos = list.filter((v) => v.kind === "course");
   const episodes = list.filter((v) => v.kind === "youtube");
   const current = list.find((v) => v.id === playing);
 
   const generate = lessonMd ? (
-    <GenerateVideo lessonMd={lessonMd} mode="course" hasVideo={Boolean(courseVideo)} />
+    <GenerateVideo
+      lessonMd={lessonMd}
+      mode="course"
+      hasVideo={lessonVideoComplete(courseVideos)}
+    />
   ) : null;
 
   if (!list.length) {
@@ -84,20 +91,21 @@ export function PhaseVideos({
   return (
     <section aria-label="Videos for this phase" className="shrink-0 space-y-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        {courseVideo ? (
+        {courseVideos.map((video) => (
           <Button
+            key={video.id}
             size="sm"
-            variant={current?.id === courseVideo.id ? "default" : "secondary"}
-            onClick={() => setPlaying(courseVideo.id)}
-            title={courseVideo.title}
+            variant={current?.id === video.id ? "default" : "secondary"}
+            onClick={() => setPlaying(video.id)}
+            title={video.title}
           >
             <Play aria-hidden className="size-3.5" />
-            Watch the course video
+            {partLabel(video) ? `Part ${video.part}` : "Watch the course video"}
             <span className="tabular-nums opacity-80">
-              · {formatDuration(courseVideo.duration_s)}
+              · {formatDuration(video.duration_s)}
             </span>
           </Button>
-        ) : null}
+        ))}
         {episodes.length ? (
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span className="text-xs text-muted-foreground">
@@ -131,6 +139,7 @@ export function PhaseVideos({
         <div className="space-y-1">
           <p className="text-sm font-medium">
             {current.number ? `#${current.number} · ` : ""}
+            {partLabel(current) ? `${partLabel(current)} · ` : ""}
             {current.title}
           </p>
           <VideoPanel key={current.id} video={current} />

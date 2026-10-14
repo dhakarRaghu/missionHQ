@@ -6,8 +6,13 @@ once, at speaking speed, with no way to read it again. The teacher file above
 describes the viewer and the plain English he needs. Everything in it applies.
 This file adds what changes when the words are spoken.
 
-These rules come from twelve finished episodes and the reviews that corrected
-them. Each one is here because a video broke it and had to be rebuilt.
+These rules come from the finished videos and what was wrong with them. The
+first form was correct line by line and still lost the
+viewer after five to ten minutes. Watched end to end, each concept gave its
+answer before its question, the same fixed phrases came back in every
+concept, every point was said four to six times, and the case switched
+between unrelated examples, so he could not tell why a line was being said.
+These rules fix that. Keep them.
 
 ## What the viewer must never get
 
@@ -15,36 +20,42 @@ them. Each one is here because a video broke it and had to be rebuilt.
   skipped. The unit is the concept, and each concept is taught in the order
   below.
 - **A pause.** No "pause and think", no countdown, no "take a moment". The
-  viewer follows a person reasoning, including the wrong first step.
-- **A part name.** Never "Phase 2B", "Part A", "Concept 3" or "in this
-  module" in a spoken line. (The screen's small "3 of 6" count on a claim card
-  is drawn by the template and is allowed.) A video may say "this lesson" and name an
-  earlier lesson by what it taught, never by its number.
+  viewer follows a person reasoning, including the wrong first answer.
+- **The answer before the question.** A concept's claim is its last line,
+  never its first. He hears the situation, then the question, then the
+  thinking, and only then the answer.
+- **The same point twice.** Each idea is said once, where it is earned. The
+  recap at the end is the only second time. No "Remember:" line repeating
+  the claim, no summary of the paragraph before.
+- **A fixed phrase.** No line that could open every concept: "Here is the
+  question", "Let's think it through", "A first thought is", "That is
+  reasonable", "So the real question is", "Step 1.", "Remember:", "The trap:",
+  "Try this:". Say the same thing in the words this concept needs.
+- **A part name.** Never "Phase 2B", "Part 2", "Concept 3" or "in this
+  module" in a spoken line. The title card shows "Part 2 of 3"; the voice says
+  "the last part" or "the next part". A video may say "this lesson" and name
+  an earlier lesson by what it taught, never by its number.
 - **A promise the video does not keep.** The cold open asks one question, and
   the payoff answers it with this video's numbers.
 
-## The concept, in this order
+## One concept, in this order
 
-Every concept beat has these steps, and every line key starts with the step's
-letter.
+Every concept beat has these steps, and every line key starts with the
+step's letter.
 
 | Key | Step | What is said |
 |---|---|---|
-| `k0` | Claim | The concept's claim in one sentence: what is true, with its reason. |
-| `s0`… | Situation | Where the running case meets this concept, with its one surprising number. |
-| `p0`… | Picture | What the thing is, what it does and why it exists. Define every new term here, in the sentence that first uses it. No numbers yet. |
-| `q0`, `q1` | The question | `q0` starts with "Here is the question." and sets the scene of the question. `q1` asks it, ending with "?", then "Let's think it through." |
-| `t1` | First thought | "A first thought is …, because …" A reasonable engineer's answer, with why it is reasonable. |
-| `t2` | What it misses | "That is reasonable …, but …" What the first thought does not account for. |
-| `t3` | The real question | "So the real question is …" |
-| `m1`… | Mechanism | "Step 1. …", "Step 2. …": two to six steps, each with its reason (because, so). |
-| `n0`… | The number | The one number or failure, with its conditions in the same sentence. Constants and units are named before the first number that uses them; then the formula in words; then the numbers; then one sentence on what to notice. |
-| `r0` | Remember | "Remember: …" the claim again, as the viewer would say it to a colleague. |
-| `r1` | The trap | "The trap: …" the specific wrong move, with its cost. |
-| `r2` | Try this | "Try this: …" one action on the viewer's own system. |
-| `h0`… | Bridge | What happened next in the running case, which leads to the next concept's question. The last concept's bridge leads to the payoff. |
+| `s0`… | Situation | Where the running case reaches this concept: what just happened, and the one number that shows it costs something. Start from the last line of the beat before. |
+| `q0`… | The question | The question this concept answers, in his words, as the case raises it. The last `q` line is the question and ends with "?". Lines before it set the scene of the question. |
+| `t0`… | Thinking it through | 2 to 4 lines. The answer a reasonable engineer gives first, and why it is reasonable, from something he has built. Then, with "but", what it misses, concretely. This is the heart of the concept: think aloud, as a person at a whiteboard. |
+| `p0`… | Picture | Only when the mechanism needs parts or terms he does not have: what each thing is and does, defined in the sentence that first uses it. Often none. |
+| `m0`… | Mechanism | How it really works, in 2 to 6 steps, each with its reason (because, so). Each step follows from the one before. No numbering phrase. |
+| `n0`… | The number | The one number or failure that proves it, with its conditions in the same sentence. Constants and units are named before the first number that uses them, then the formula in words, then the numbers, then one sentence on what to notice. |
+| `k0` | Takeaway | The concept's claim, once, as he would say it to a colleague. One line, two at most. It is the answer to the `q` question. |
+| `h0`… | Bridge | What happened next in the running case, which raises the next concept's question. The last concept has no bridge: the payoff follows. |
 
-Questions appear only in the cold open, the title line, and `q0`/`q1`. Nowhere else.
+Questions are spoken only in the cold open, the title line, the `q` lines,
+and the end beat that hands over to the next part. Nowhere else.
 
 ## Sentences that work when heard
 
@@ -64,6 +75,24 @@ Questions appear only in the cold open, the title line, and `q0`/`q1`. Nowhere e
   second on the same prompts", never "much slower".
 - Round numbers the way a person says them, and keep the exact value on
   screen: say "about 80 milliseconds" and show "79.7 ms".
+
+## One running case
+
+The video follows one situation from the cold open to the payoff, and every
+number in the story belongs to it. A second example with its own numbers is
+the thing that made him lose the thread: the autoscaler video moved from
+Netflix to "your pipeline", "your Go services", "your multi-agent system",
+"your model server" and "the checkpoint case", each with new figures.
+
+- The case is his own system when the lesson's case is ("your support
+  agent"). When the lesson follows another team's incident, the case is that
+  incident, told in the third person ("Netflix's job"): never wrap it in a
+  made-up case of his, and never open the video on his system and then switch.
+- Where the lesson maps the case onto his own system, do it once, as that
+  mapping ("your model server has the same blind spot"), in the concept the
+  lesson does it, and keep the case's own numbers beside it.
+- A comparison to something he has built ("in your Go services, a waiting
+  goroutine...") is one clause inside the thinking, not a new case.
 
 ## The `say` field
 
@@ -87,34 +116,41 @@ whenever `text` holds anything a voice reads badly:
 - Recompute every number you use from the material's own figures. If the
   material contradicts its own arithmetic, use the correct value and list the
   mismatch in your notes.
+- The numbers agree across the whole video. A value said to hold steady in
+  one line is never a different value in the next, and one comparison is
+  made one way only ("0.55 of slack against 0.30", never also "eleven times").
 - A quote from a source says exactly what the source says. "A common mistake"
   is not "the first mistake". "Millions of users" is not "millions of tasks".
-- Keep the material's labels. Verified stays verified, inferred is said to be
-  inferred, and anything marked unconfirmed stays out of the voice.
+- Keep the material's labels, inside the sentence that states the fact:
+  "Netflix reports that it saved 25 to 45 percent". Say a label once, where
+  the fact is first said, never as a sentence of its own ("That figure is
+  reported by Netflix alone"), and never again on a later mention. The
+  screen carries the source line. Anything marked unconfirmed stays out of
+  the voice.
 - One price list per video. Name the model, or say "illustrative prices", once,
   and use the same prices everywhere in the video.
-- A worked example you built yourself is said to be an example: "for example,
-  at these prices, …".
+- A worked example you built yourself is said to be an example, once, in the
+  sentence that starts it: "for example, at these prices, …".
 
-## Length
+## Length: parts of about ten minutes
 
-- A course video teaches every concept of its lesson in full depth: about
-  2.5 to 3 minutes per concept, plus about 2 minutes for the cold open,
-  title, payoff, recap and end. A ten-concept phase is a thirty-minute video,
-  and that is right.
-- An article video: the same depth for the article's concepts, usually 6 to
-  15 minutes.
-- Kokoro speaks about 150 words a minute at speed 0.94.
+A lesson is taught in full, every concept in its depth, but in parts of
+about ten minutes: 2 to 4 concepts each, about 2 to 3 minutes a concept,
+plus about a minute and a half for the cold open, title, payoff, recap and
+end. Each part is its own video with its own question, answered inside it.
+A part that is not the last ends on the question the next part answers, so
+he wants to watch it.
 
-Length is not the lever. A concept that needs two more sentences gets them.
-Never cut the sentence that makes a step clear, and never drop a concept the
-lesson teaches to save time.
+Kokoro speaks about 150 words a minute at speed 0.94. Length is not the
+lever. A concept that needs two more sentences gets them. Never cut the
+sentence that makes a step clear, and never drop a concept the part teaches
+to save time. What you cut is repetition.
 
-## A long video is still one story
+## A video is one story
 
-The depth comes from the lesson; the way it is told comes from the episodes
-that worked. One running case from the cold open to the payoff. Every concept
-starts from what just happened in that case and ends with what happened next.
-The cold open asks one question and the payoff answers it with the video's
-own numbers. A viewer who stops at any minute should be able to say what
-question the video is answering and how far it has got.
+One running case from the cold open to the payoff. Every concept starts from
+what just happened in that case and ends with what happened next. The cold
+open asks one question and the payoff answers it with the video's own
+numbers. A viewer who stops at any minute should be able to say what
+question the video is answering, how far it has got, and why the sentence he
+just heard was said.

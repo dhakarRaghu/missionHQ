@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -51,3 +52,14 @@ def upsert_video(entry: dict[str, Any]) -> None:
         videos.append(entry)
         data["videos"] = videos
         _write(paths.manifest_path(), data)
+
+
+def drop_videos(match: Callable[[dict[str, Any]], bool]) -> list[str]:
+    """Remove the entries `match` picks; returns their ids."""
+    with _LOCK:
+        data = manifest()
+        gone = [str(v.get("id")) for v in data["videos"] if match(v)]
+        if gone:
+            data["videos"] = [v for v in data["videos"] if not match(v)]
+            _write(paths.manifest_path(), data)
+        return gone

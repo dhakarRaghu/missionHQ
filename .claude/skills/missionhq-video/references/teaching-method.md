@@ -30,24 +30,25 @@ Plan about 2.5–3 minutes a concept, plus about 1.5 minutes for cold open, titl
 Facts, numbers and config keys stay only when they hang from a concept. The rest goes into the
 YouTube description ("teach the core, list the rest").
 
-## The order inside one concept
+## The order inside one concept (story order, spec version 2)
 
-The order comes from the Mission HQ tutor (`agents/tutor/writer/section.md`). A rail under the
-heading (`ConceptRail` in `video/src/kit-sketch/teach.tsx`) shows the viewer which step they are in.
+The first order (claim card, rail, think it through with fixed phrases, key points) taught
+correctly and still lost the viewer: the answer came before the question, the same phrases came
+back in every concept, and the claim was said three times. Since 2026-10-14 a concept asks first
+and answers once:
 
 | Step | What is said | What is on screen |
 |---|---|---|
-| Claim card | "Concept 1." and the claim in one sentence | "Concept 1 of 5" and the claim, with a highlighter on the key phrase |
-| Situation | the running case, where not knowing this costs something | the case in a small diagram and its one surprising number |
-| Picture first | what the thing is, what it does, why it exists, with no numbers | a flow or lanes that build up as the voice names each part |
-| Think it through | the question; the first thought a reasonable engineer has and why it is reasonable; what it misses; the real question | "First thought" handwritten, then struck through (`Handwrite strikeAt`); "What it misses" in orange; the real question in a box |
-| Mechanism | numbered steps, each with its reason ("so", "because") | numbered list on the left, the math written live on the right (`Handwrite`, `Circled`) |
-| The number | the one number or failure, with its conditions | chart or table; the source on an `Evidence` sticky note |
-| Key points | Remember, The trap, Try this | three `KeyPoint` cards |
-| Next | what is still unexplained, and the next concept's question | an "up next" card with that question |
+| Situation (`s`) | where the running case reaches this concept, with the number that makes it matter | the case in a small diagram and its one surprising number |
+| Question (`q`) | the question, in his words; the last `q` line ends with "?" | the question, handwritten large |
+| Thinking it through (`t`) | the first answer a reasonable engineer gives, why it is reasonable, then with "but" what it misses; in this concept's own words, no fixed phrase | "First answer" handwritten, struck through at `misses_at`; "What it misses" in orange |
+| Picture (`p`, optional) | the parts and terms the mechanism needs | a flow that builds up as the voice names each part |
+| Mechanism (`m`) | how it works, each step with its reason; no "Step N." | numbered items on the left, the math written live on the right |
+| The number (`n`, optional) | the number that proves it, with its conditions | chart or table; the source line carries the labels |
+| Takeaway (`k`) | the claim, once, now earned | the claim card, "2 of 3", highlighter on the key phrase |
+| Bridge (`h`) | what happened next, which raises the next question | a small panel |
 
-Think aloud. Do not stop the video and wait for the viewer. The viewer follows a person reasoning,
-including the wrong first step and how it gets corrected.
+No step rail. The recap is the only second time a claim is said.
 
 ## Narration rules (from the Mission HQ teacher)
 
@@ -84,34 +85,31 @@ correct trap built from the lesson's own mechanism, and the error was reported t
 
 ## Files in Mission HQ
 
-- `video/src/spec/templates/concept.tsx`: the concept template the pipeline
-  draws from a spec. It fixes the order, the step rail, the think-it-through
-  layout and the key points. The narration keys must follow the convention in
-  `video/SPEC.md`: `k` claim, `s` situation, `p` picture, `q` `t` think it
-  through, `m` mechanism, `n` the number, exactly three `r` key points, `h`
-  bridge.
+- `video/src/spec/templates/concept.tsx`: the concept templates the pipeline
+  draws from a spec. `ConceptBeatV2` is the story order above (spec version
+  2, keys `s q t p m n k h`); `ConceptBeat` is the first order (version 1),
+  kept for the ep12 example and videos made before.
 - `video/src/kit-sketch/teach.tsx`: `ConceptRail`, `Handwrite` (live writing
   with a pen, `strikeAt`), `Circled`, `Tick`, `KeyPoint`.
-- `video/examples/ep12/`: a full real episode as narration and spec.
+- `video/examples/ep12/`: a full real episode as narration and spec (version 1);
+  `ep12-v2/` and `stress-v2/` are the same in version 2, written by `examples/v2.py`.
 
-## A long course video, told like an episode (2026-10-06)
+## A lesson told as parts of about ten minutes (2026-10-14)
 
-The owner watches course videos to understand a course phase he is reading.
-So a course video keeps the lesson's full depth: every concept, the
-mechanism, the number and the failure. What it takes from the YouTube
-episodes is the way the story is told, because that is what made them easy
-to follow:
+The owner watches these videos to understand a phase he is reading, so they keep the lesson's
+full depth: every concept, the mechanism, the number and the failure. One video per lesson ran
+20 to 49 minutes and was not watched to the end, so the lesson is told as a series: a series task
+plans parts of 2 to 4 concepts, each part is its own video with its own question, and every part
+but the last ends on the question the next part answers. What each part takes from the YouTube
+episodes:
 
-- One running case from the cold open to the payoff, owned by the viewer
-  ("your support agent"). Every concept starts from what just happened in it.
-- A cold open that tells the case's failure with its numbers and asks one
-  question. The payoff answers it with the video's own numbers.
-- A bridge at the end of every concept: what this concept changed in the
-  case, and what is still wrong, so the next question follows.
-- The think-it-through in every concept, with the fixed phrases.
-- No thumbnail, no description, no end-screen space: the video is for
-  learning, not for an audience.
+- One running case from the cold open to the payoff, owned by the viewer ("your support agent").
+  Every concept starts from what just happened in it. No second example with its own numbers.
+- A cold open that tells the case's failure with its numbers and asks one question. The payoff
+  answers it with the video's own numbers, briefly.
+- A bridge at the end of every concept: what it changed in the case, and what is still wrong.
+- Source labels said once, inside the sentence, and carried on screen; never a sentence of their own.
+- No thumbnail, no description, no end-screen space: the video is for learning, not for an audience.
 
-Mission HQ makes these automatically after a course phase is written:
-`docs/video-pipeline.md` in the Mission HQ repo, and the `missionhq-video`
-skill in that repo (`.claude/skills/missionhq-video`).
+Mission HQ makes these when he presses "Generate video": `docs/video-pipeline.md` in the Mission HQ
+repo, and the `missionhq-video` skill in that repo (`.claude/skills/missionhq-video`).

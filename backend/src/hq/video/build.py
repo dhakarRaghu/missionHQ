@@ -6,7 +6,9 @@ way the twelve episodes were built: a process the backend starts and then
 polls, writing a log and a done marker in the job folder. Each poll is a
 durable step and records a progress event, so the hang watchdog sees a
 render as alive, and a backend restart resumes polling instead of starting
-the render again.
+the render again. A build the watchdog queued again after the host slept
+runs as a new workflow; each long step records its inputs and its process,
+so that build skips what already finished and polls what is still running.
 
 Before the render, the teacher model reviews a still of every scene step
 against what the voice says during it, and failing beats are redrawn. After
@@ -18,6 +20,7 @@ scene frames, keyframes, loudness, black frames and stream format.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import shlex
@@ -61,23 +64,108 @@ def _env() -> dict[str, str]:
     return env
 
 
-def _spawn(video_id: str, phase: str, command: str) -> int:
+CAFFEINATE = "/usr/bin/caffeinate"
+
+# The files each long step reads. A step that finished on the same inputs is
+# not run again, so a build queued again after the host slept (the watchdog
+# starts it as a new workflow, with none of the old steps' records) picks up
+# at the step it was in, instead of voicing and rendering from the start.
+INPUTS: dict[str, tuple[str, ...]] = {
+    "narrate": ("narration.json",),
+    "stills": ("spec.json", "{id}.timing.json"),
+    "render": ("spec.json", "{id}.timing.json"),
+    "verify": ("{id}.mp4", "{id}-4K.mp4", "{id}.timing.json", "spec.json"),
+    "meta": ("{id}.timing.json", "spec.json"),
+}
+
+
+# The steps that draw frames read the templates too: a template fixed since
+# runs them again.
+DRAWS = frozenset({"stills", "render"})
+
+
+def _templates_stamp() -> str:
+    """The newest change and the count of the template files under video/src."""
+    src = paths.project_dir() / "src"
+    files = [f for f in src.rglob("*") if f.is_file()] if src.is_dir() else []
+    return f"{len(files)}:{max((f.stat().st_mtime_ns for f in files), default=0)}"
+
+
+def _fingerprint(video_id: str, phase: str, command: str) -> str:
+    """The command and the size and time of every input: any change runs it again."""
+    w = paths.work_dir(video_id)
+    h = hashlib.sha256(command.encode())
+    if phase in DRAWS:
+        h.update(f"|templates:{_templates_stamp()}".encode())
+    for name in INPUTS.get(phase, ()):
+        p = w / name.format(id=video_id)
+        st = p.stat() if p.is_file() else None
+        h.update(f"|{name}:{st.st_size}:{st.st_mtime_ns}".encode() if st else f"|{name}:-".encode())
+    return h.hexdigest()[:20]
+
+
+def _alive(pid: int, video_id: str) -> bool:
+    """The process is running, and it is this video's (a pid can be reused)."""
+    try:
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return False
+    out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True,
+                         text=True, check=False).stdout
+    return video_id in out
+
+
+def process_state(video_id: str, phase: str, command: str) -> tuple[str, str]:
+    """("done" | "running" | "start", fingerprint) for one long step.
+
+    "done": it finished with exit 0 on these inputs. "running": a process
+    started on these inputs is still alive, so it is polled, never started a
+    second time (two renders at once halve both and write the same file).
+    """
+    w = paths.work_dir(video_id)
+    fp = _fingerprint(video_id, phase, command)
+    record = w / f"{phase}.run.json"
+    try:
+        rec = json.loads(record.read_text()) if record.is_file() else {}
+    except ValueError:
+        rec = {}
+    if rec.get("fp") != fp:
+        return "start", fp
+    done = w / f"{phase}.done"
+    if done.is_file():
+        return ("done" if done.read_text().strip() == "0" else "start"), fp
+    return ("running" if _alive(int(rec.get("pid") or 0), video_id) else "start"), fp
+
+
+def _spawn(video_id: str, phase: str, command: str, fp: str = "") -> int:
     folder = paths.work_dir(video_id)
     folder.mkdir(parents=True, exist_ok=True)
     done = folder / f"{phase}.done"
     done.unlink(missing_ok=True)
     wrapped = f"{command}; echo $? > {shlex.quote(str(done))}"
+    argv = ["bash", "-c", wrapped]
+    if Path(CAFFEINATE).is_file():
+        # The process holds the Mac awake itself (-i: no idle sleep, on
+        # battery too), so a render keeps it awake even while the backend
+        # restarts. Closing the lid still sleeps.
+        argv = [CAFFEINATE, "-i", *argv]
     with open(folder / f"{phase}.log", "w") as log:
-        proc = subprocess.Popen(["bash", "-c", wrapped], cwd=str(paths.project_dir()),
+        proc = subprocess.Popen(argv, cwd=str(paths.project_dir()),
                                 stdout=log, stderr=subprocess.STDOUT, env=_env(),
                                 start_new_session=True)
+    (folder / f"{phase}.run.json").write_text(json.dumps({"fp": fp, "pid": proc.pid}) + "\n")
     return proc.pid
 
 
+@DBOS.step(name="video.process_state")
+async def _state_step(video_id: str, phase: str, command: str) -> tuple[str, str]:
+    return await asyncio.to_thread(process_state, video_id, phase, command)
+
+
 @DBOS.step(name="video.start_process")
-async def _start_step(video_id: str, phase: str, command: str) -> int:
+async def _start_step(video_id: str, phase: str, command: str, fp: str = "") -> int:
     """Start one long step detached; it writes <phase>.log and <phase>.done."""
-    return await asyncio.to_thread(_spawn, video_id, phase, command)
+    return await asyncio.to_thread(_spawn, video_id, phase, command, fp)
 
 
 @DBOS.step(name="video.poll_process")
@@ -99,7 +187,11 @@ def _log_tail(video_id: str, phase: str, lines: int = 12) -> str:
 async def _run_long(video_id: str, phase: str, command: str, deps: Any) -> None:
     from hq.runner import emit_step
 
-    await _start_step(video_id, phase, command)
+    state, fp = await _state_step(video_id, phase, command)
+    if state == "done":
+        return
+    if state == "start":
+        await _start_step(video_id, phase, command, fp)
     waited = 0.0
     while True:
         code = await _poll_step(video_id, phase)
@@ -280,6 +372,47 @@ async def review_frames(video_id: str, cmds: dict[str, str], deps: Any) -> list[
     return [p for items in failing.values() for p in items]
 
 
+def _spec_hash(video_id: str) -> str:
+    spec = paths.work_dir(video_id) / "spec.json"
+    return hashlib.sha256(spec.read_bytes()).hexdigest()[:20] if spec.is_file() else ""
+
+
+def frames_passed(video_id: str) -> bool:
+    """The frame review passed on this exact spec, so a resumed build skips it."""
+    ok = paths.work_dir(video_id) / "frames.ok"
+    return ok.is_file() and ok.read_text().strip() == _spec_hash(video_id) != ""
+
+
+@DBOS.step(name="video.frames_passed")
+async def _frames_passed_step(video_id: str) -> bool:
+    return frames_passed(video_id)
+
+
+@DBOS.step(name="video.frames_pass")
+async def _frames_pass_step(video_id: str) -> None:
+    (paths.work_dir(video_id) / "frames.ok").write_text(_spec_hash(video_id) + "\n")
+
+
+# What a failed build forgets, so "Build again" draws, reviews and renders
+# again: verify always exits 0 (its report decides), so without this a
+# rebuild found render and verify "done" on the same inputs and read the
+# same failing report for ever. The voice is kept: a stopped build never
+# changes the narration.
+FORGET_ON_FAILURE = ("stills.run.json", "render.run.json", "verify.run.json", "meta.run.json",
+                     "frames.ok")
+
+
+def forget(video_id: str) -> None:
+    w = paths.work_dir(video_id)
+    for name in FORGET_ON_FAILURE:
+        (w / name).unlink(missing_ok=True)
+
+
+@DBOS.step(name="video.forget")
+async def _forget_step(video_id: str) -> None:
+    forget(video_id)
+
+
 def verify_problems(report: dict[str, Any]) -> list[str]:
     """verify.mjs prints one JSON report; "ok" is the verdict, the parts say why."""
     if report.get("ok") is True:
@@ -335,7 +468,18 @@ async def _publish_step(video_id: str) -> dict[str, Any]:
         "source_lesson": job.lesson_md, "think_questions": review.get("think_questions", []),
         **files,
     }
+    if job.series_id:
+        from hq.video.series import load_series
+
+        series = load_series(job.series_id) or {}
+        entry.update(series_id=job.series_id, part=job.part, parts=job.parts,
+                     series_title=str(series.get("title") or job.title))
     register.upsert_video(entry)
+    if job.series_id:
+        # The lesson's earlier video, one long video made before lessons were
+        # told in parts, gives way to the parts as soon as the first is up.
+        register.drop_videos(lambda v: v.get("source_lesson") == job.lesson_md
+                             and not v.get("series_id") and v.get("kind") == job.mode)
     return entry
 
 
@@ -352,10 +496,12 @@ async def run(task: dict[str, Any], deps: Any) -> tuple[str, str]:
         if not _voice_is_current(video_id):
             await _run_long(video_id, "narrate", cmds["narrate"], deps)
         await _run_long(video_id, "stills", cmds["stills"], deps)
-        frame_problems = await review_frames(video_id, cmds, deps)
-        if frame_problems:
-            raise RuntimeError("the frame review still fails after "
-                               f"{FRAME_ROUNDS} redraws: " + " | ".join(frame_problems[:8]))
+        if not await _frames_passed_step(video_id):
+            frame_problems = await review_frames(video_id, cmds, deps)
+            if frame_problems:
+                raise RuntimeError("the frame review still fails after "
+                                   f"{FRAME_ROUNDS} redraws: " + " | ".join(frame_problems[:8]))
+            await _frames_pass_step(video_id)
         for phase in ("render", "verify"):
             await _run_long(video_id, phase, cmds[phase], deps)
         text = (paths.work_dir(video_id) / "verify.json").read_text().strip()
@@ -366,6 +512,7 @@ async def run(task: dict[str, Any], deps: Any) -> tuple[str, str]:
         await _run_long(video_id, "meta", cmds["meta"], deps)  # captions + chapters
         entry = await _publish_step(video_id)
     except RuntimeError as exc:
+        await _forget_step(video_id)
         job = load_job(video_id) or job
         job.state = "failed"
         job.report = [*job.report, str(exc)[:1500]]

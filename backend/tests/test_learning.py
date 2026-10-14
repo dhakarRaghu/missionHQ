@@ -2027,7 +2027,7 @@ def test_a_course_build_gets_the_time_it_needs_and_a_reachable_reading_limit() -
     assert engine.COURSE_TIMEOUT_S > engine.TASK_TIMEOUT_S
     enqueue = inspect.getsource(engine._enqueue)
     # Video builds share the long cap since commit 7ddc247.
-    assert 'lane in ("courses", "videos")' in enqueue and "SetWorkflowTimeout(cap)" in enqueue
+    assert 'lane in ("courses", "videos", "video_scripts")' in enqueue and "SetWorkflowTimeout(cap)" in enqueue
 
     # A plain source: the page may be plain too, not plainer.
     source = ("## 1.1 — Queues\n" + " ".join(["The queue grows when work arrives faster."] * 60))

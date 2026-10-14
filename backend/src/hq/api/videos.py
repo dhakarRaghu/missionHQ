@@ -24,6 +24,7 @@ from hq.api.deps import require_auth
 from hq.learning_pipeline import LESSON_DIR
 from hq.video import MODES, jobs, paths
 from hq.video.script import load_job
+from hq.video.series import load_series
 
 router = APIRouter(prefix="/videos", dependencies=[Depends(require_auth)])
 
@@ -44,6 +45,32 @@ async def _job_or_404(video_id: str) -> Any:
     return await jobs.settle(job)
 
 
+async def _series_row(series: dict[str, Any], *, always: bool = False) -> dict[str, Any] | None:
+    """A series as one row. In the list it stands for the lesson only while it
+    has no part of its own to show: while it is planned, while its parts wait
+    to start, or when planning failed. `always` gives the row anyway, its
+    state summed up from its parts, for the series' own detail view."""
+    series = await jobs.settle_series(series)
+    state = {"planning": "writing", "failed": "failed"}.get(str(series.get("state")))
+    if state is None:
+        parts = [load_job(v) for v in series.get("parts") or []]
+        if all(parts) and not always:
+            return None  # every part has its own row now
+        live = await jobs.live_task(str(series["id"]))
+        if not all(parts):
+            state = "queued" if live else "failed"
+        else:
+            shown = [await jobs.shown_state(j) for j in parts if j]
+            state = ("built" if all(x == "built" for x in shown)
+                     else "building" if live else "failed")
+    return {"id": series["id"], "mode": series.get("mode") or "course",
+            "title": series.get("title") or "Planning the parts of this lesson",
+            "lesson_md": series.get("lesson_md") or "", "course": series.get("course") or "",
+            "duration_s": 0.0, "updated": series.get("updated") or "", "state": state,
+            "minutes": None, "can_rebuild": False, "series_id": series["id"], "part": 0,
+            "parts": len(series.get("parts") or [])}
+
+
 @router.post("/make", operation_id="makeVideo")
 async def make_video(body: MakeVideo) -> dict[str, Any]:
     if body.mode not in MODES:
@@ -61,11 +88,25 @@ async def list_jobs() -> list[dict[str, Any]]:
         return []
     out = []
     for folder in sorted(root.iterdir()):
-        job = load_job(folder.name) if paths.valid_id(folder.name) else None
+        if not paths.valid_id(folder.name):
+            continue
+        series = load_series(folder.name)
+        if series:
+            # A series folder may still hold the lesson's one long video from
+            # before parts; the series and its parts stand for it now.
+            if srow := await _series_row(series):
+                out.append(srow)
+            continue
+        job = load_job(folder.name)
+        if job and job.series_id:
+            # A part the series no longer has (planned again with fewer parts).
+            owner = load_series(job.series_id)
+            if owner and job.id not in (owner.get("parts") or []):
+                continue
         if job:
             state = await jobs.shown_state(job)
-            row = job.model_dump(include={"id", "mode", "title", "lesson_md",
-                                          "course", "duration_s", "updated"})
+            row = job.model_dump(include={"id", "mode", "title", "lesson_md", "course",
+                                          "duration_s", "updated", "series_id", "part", "parts"})
             row["state"] = state
             # The script's spoken length, before a render exists.
             row["minutes"] = (job.review or {}).get("minutes")
@@ -76,6 +117,20 @@ async def list_jobs() -> list[dict[str, Any]]:
 
 @router.get("/jobs/{video_id}", operation_id="getVideoJob")
 async def get_job(video_id: str) -> dict[str, Any]:
+    series = load_series(video_id) if paths.valid_id(video_id) else None
+    if series:
+        row = await _series_row(series, always=True) or {}
+        plan = series.get("plan") or {}
+        parts = plan.get("parts") or []
+        report = [*series.get("report", []),
+                  *[f"Part {n}: {p.get('title')}" for n, p in enumerate(parts, 1)]]
+        return {"job": {**row, "id": video_id, "state": row.get("state") or "built",
+                        "phase_slugs": [], "script_task_id": series.get("task_id") or "",
+                        "build_task_id": "", "report": report,
+                        "mismatches": plan.get("mismatches") or [], "verify": {},
+                        "series_parts": series.get("parts") or []},
+                "can_rebuild": False, "plan": None, "narration": None, "review": None,
+                "series": plan, "has_sheet": False}
     job = await _job_or_404(video_id)
     folder = paths.work_dir(video_id)
 

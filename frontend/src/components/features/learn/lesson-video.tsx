@@ -7,16 +7,24 @@ import { Play, X } from "lucide-react";
 import { GenerateVideo } from "@/components/features/courses/generate-video";
 import { VideoPanel } from "@/components/features/learn/video-panel";
 import { Button } from "@/components/ui/button";
-import { formatDuration, mediaApi, mediaKeys } from "@/lib/api/media";
+import {
+  formatDuration,
+  lessonVideoComplete,
+  mediaApi,
+  mediaKeys,
+  partLabel,
+  sortVideos,
+} from "@/lib/api/media";
 
 const FILTER = { kind: "article" };
 
 /**
  * The video made from one Learn article, above the article.
  *
- * The same row as a course phase's videos, for one video: closed, it is one
- * button, and opening it puts the player above the page. The video is found
- * by the lesson file it was made from (`source_lesson`), because an article
+ * The same row as a course phase's videos: closed, it is one button (or one
+ * per part, when the article is told as a series of about ten minutes each),
+ * and opening one puts the player above the page. The videos are found by
+ * the lesson file they were made from (`source_lesson`), because an article
  * has no phase of its own.
  *
  * An article with no video (`canMake`) gets "Generate video", the only way
@@ -30,34 +38,41 @@ export function LessonVideo({ lessonMd, canMake }: { lessonMd: string; canMake: 
     queryFn: () => mediaApi.videos(FILTER),
     staleTime: 10 * 60_000,
   });
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
 
-  const video = videos.data?.find((v) => v.source_lesson === lessonMd);
+  const list = sortVideos((videos.data ?? []).filter((v) => v.source_lesson === lessonMd));
+  const current = list.find((v) => v.id === open);
 
-  if (video) {
+  if (list.length) {
     return (
       <section aria-label="Video of this article" className="shrink-0 space-y-2">
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant={open ? "default" : "secondary"}
-            onClick={() => setOpen(true)}
-            title={video.title}
-          >
-            <Play aria-hidden className="size-3.5" />
-            Watch the video
-            <span className="tabular-nums opacity-80">
-              · {formatDuration(video.duration_s)}
-            </span>
-          </Button>
-          {open ? (
-            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setOpen(false)}>
+        <div className="flex flex-wrap items-center gap-2">
+          {list.map((video) => (
+            <Button
+              key={video.id}
+              size="sm"
+              variant={open === video.id ? "default" : "secondary"}
+              onClick={() => setOpen(video.id)}
+              title={video.title}
+            >
+              <Play aria-hidden className="size-3.5" />
+              {partLabel(video) ? `Part ${video.part}` : "Watch the video"}
+              <span className="tabular-nums opacity-80">
+                · {formatDuration(video.duration_s)}
+              </span>
+            </Button>
+          ))}
+          {canMake && !lessonVideoComplete(list) ? (
+            <GenerateVideo lessonMd={lessonMd} mode="article" />
+          ) : null}
+          {current ? (
+            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setOpen(null)}>
               <X aria-hidden className="size-3.5" />
               Close video
             </Button>
           ) : null}
         </div>
-        {open ? <VideoPanel key={video.id} video={video} /> : null}
+        {current ? <VideoPanel key={current.id} video={current} /> : null}
       </section>
     );
   }

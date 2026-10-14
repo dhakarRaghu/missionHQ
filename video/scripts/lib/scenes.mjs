@@ -39,7 +39,26 @@ export function scenes(spec, timing, before = 15) {
         local.push({ name: panels.length > 1 ? `${name}.${j + 1}` : name, from: a, to: b });
       });
     };
-    if (beat.kind === "concept") {
+    if (beat.kind === "concept" && spec.version === 2) {
+      // ConceptBeatV2: situation, think, picture, mechanism, number, takeaway, bridge.
+      const end = until;
+      const steps = beat.steps ?? [];
+      const get = (n) => steps.find((s) => s.step === n);
+      const q0 = firstOf(tb, "q") ?? firstOf(tb, "t") ?? end;
+      const p0 = get("picture") ? firstOf(tb, "p") : null;
+      const m0 = firstOf(tb, "m") ?? end;
+      const n0 = get("number") ? firstOf(tb, "n") : null;
+      const k0 = firstOf(tb, "k") ?? end;
+      const bridge = get("bridge");
+      const h0 = bridge ? firstOf(tb, "h") ?? end : end;
+      if (get("situation")) addPanels("situation", panelsOf(get("situation")), 0, q0);
+      local.push({ name: "think", from: q0, to: p0 ?? m0 });
+      if (p0 !== null) addPanels("picture", panelsOf(get("picture")), p0, m0);
+      local.push({ name: "mechanism", from: m0, to: n0 ?? k0 });
+      if (n0 !== null) addPanels("number", panelsOf(get("number")), n0, k0);
+      local.push({ name: "takeaway", from: k0, to: h0 });
+      if (bridge) addPanels("bridge", panelsOf(bridge), h0, end);
+    } else if (beat.kind === "concept") {
       const end = until;
       const s0 = firstOf(tb, "s") ?? end;
       const p0 = firstOf(tb, "p") ?? s0;

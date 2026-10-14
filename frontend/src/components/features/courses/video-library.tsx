@@ -18,6 +18,7 @@ import {
   formatDuration,
   mediaApi,
   mediaKeys,
+  partLabel,
   sortVideos,
   type Video,
 } from "@/lib/api/media";
@@ -207,13 +208,14 @@ function VideoList({
   );
 }
 
-/** "Phase 2A, 2B · 28 min · 14 chapters" */
+/** "Phase 2A · Part 1 of 3 · 10 min · 5 chapters" */
 function meta(video: Video): string {
   const labels = video.phase_slugs
     .map((slug) => slugPhaseLabel(slug))
     .filter((label): label is string => Boolean(label));
   const parts = [
     labels.length ? `Phase ${labels.join(", ")}` : "",
+    partLabel(video),
     formatDuration(video.duration_s),
     video.chapters.length ? `${video.chapters.length} chapters` : "",
   ];

@@ -15,19 +15,33 @@ missed one sentence see what that sentence meant.
 
 - **situation**: the running case in a few chips or a small flow, with its
   one surprising number as a stat.
-- **picture**: a flow of the parts the voice names, left to right, one node
-  appearing per line; or a compare panel for a before and after.
-- **think**: three short handwritten paraphrases: the first thought, what it
-  misses, and the real question. The template strikes the first thought
-  through as the voice says "but".
-- **mechanism**: one item per "Step N." line (short, max 48 characters), and
-  on the right an `equation` panel that writes the arithmetic as the voice
-  does it, or a `prompt` panel that shows the log, prompt or JSON the step
-  talks about.
-- **number**: the one number as `stats`, `bars` or a `table`, with the
-  source in `source` and "illustration, not measured" in `note` where that
-  is true.
+- **think**: two short handwritten paraphrases: `first`, the first answer,
+  and `misses`, what it misses. Set `first_at` to the `t` line that gives the
+  first answer and `misses_at` to the `t` line that says what it misses (the
+  one with "but"); the template strikes the first answer through there. The
+  question is drawn from the `q` lines. There is no `real` field.
+- **picture**: only when the beat has `p` lines. A flow of the parts the voice
+  names, left to right, one node appearing per line; or a compare panel for a
+  before and after.
+- **mechanism**: 2 to 6 short items (max 48 characters), each `at` the `m`
+  line that starts that step, each on its own later line; on the right an
+  `equation` panel that writes the arithmetic as the voice does it, or a
+  `prompt` panel that shows the log, prompt or JSON the step talks about.
+- **number**: only when the beat has `n` lines. The one number as `stats`,
+  `bars` or a `table`. The source goes in `source`, and "illustration, not
+  measured" in `note` where that is true: the screen carries the labels so
+  the voice does not have to repeat them.
+- **takeaway**: `{ "step": "takeaway" }`. The template draws the claim card
+  from the `k` lines, with `count` and the highlighter on `mark` (words from
+  the `k` lines).
+- **bridge**: only when the beat has `h` lines: what happens next, as a chip
+  or a small flow.
 - **cold** and **payoff**: one or two panels that tell the story's numbers.
+
+A concept beat's steps come in this order: `situation`, `think`, `picture`
+(only with `p` lines), `mechanism`, `number` (only with `n` lines),
+`takeaway`, `bridge` (only with `h` lines). Every element's `at` uses its
+step's letter: `s` for situation, `t` for think, `p`, `m`, `n`, `h`.
 
 ## Rules
 

@@ -4,11 +4,15 @@ Nothing starts a video by itself. "Generate video" on a phase or an article
 (POST /videos/make) and sage's `start_video` in chat both come through
 `start`, so the two can never disagree about what a press does:
 
-- a video already being made is left alone;
-- a job whose script passed every check and review, and whose build then
-  stopped (a failed render check, a frame review, a crash), is built again
-  from that script, which saves the hours of writing and reviewing;
-- anything else writes the script from the lesson, then builds it.
+- a lesson whose video is being made (its series task or any part) is left
+  alone;
+- a series already planned for the unchanged lesson goes on part by part: a
+  built part is kept, a part whose script passed and whose build stopped is
+  built again from that script, and any other part writes its script again;
+- anything else plans the series anew (`series.py`), which starts its parts.
+
+A video made before series existed (one job for the whole lesson) is still
+built again from its checked script when its build stopped.
 
 The job file is written by the task working on it, so a task that dies
 without writing (a program missing on this machine, a deploy, a timeout)
@@ -23,7 +27,7 @@ from typing import Any
 
 from hq import db
 from hq.config import REPO_DIR
-from hq.video import BUILD_STAGE, SCRIPT_STAGE, paths
+from hq.video import BUILD_STAGE, SCRIPT_STAGE, SERIES_STAGE, paths
 from hq.video.models import VideoJob
 
 LIVE_TASK = ("backlog", "queued", "running", "needs_approval")
@@ -32,13 +36,40 @@ ACTIVE = ("writing", "approved", "building")
 BRIEF = "A narrated video of a finished lesson (hq.video)."
 
 
-async def live_task(video_id: str) -> str | None:
-    """The task making this video now, whichever way it was started."""
+async def live_task(video_id: str, *, parts: bool = True) -> str | None:
+    """The task making this video now, whichever way it was started. For a
+    series id, also any task making one of its parts, unless `parts` is off."""
+    if not parts:
+        row = await db.fetchone(
+            "SELECT id::text FROM hq.tasks WHERE payload->>'video_id' = %s"
+            " AND status = ANY(%s) ORDER BY created_at DESC LIMIT 1",
+            (video_id, list(LIVE_TASK)))
+        return str(row["id"]) if row else None
     row = await db.fetchone(
-        "SELECT id::text FROM hq.tasks WHERE payload->>'video_id' = %s"
-        " AND status = ANY(%s) ORDER BY created_at DESC LIMIT 1",
-        (video_id, list(LIVE_TASK)))
+        "SELECT id::text FROM hq.tasks WHERE (payload->>'video_id' = %s"
+        " OR payload->>'series' = %s) AND status = ANY(%s) ORDER BY created_at DESC LIMIT 1",
+        (video_id, video_id, list(LIVE_TASK)))
     return str(row["id"]) if row else None
+
+
+def _lesson_unchanged(lesson_md: str, since: float) -> bool:
+    lesson = REPO_DIR / lesson_md
+    return not lesson.is_file() or lesson.stat().st_mtime <= since
+
+
+async def settle_series(data: dict[str, Any]) -> dict[str, Any]:
+    """A series whose planning task ended without saying so is failed."""
+    from hq.video.series import save_series
+
+    if data.get("state") != "planning" or not _is_task_id(str(data.get("task_id") or "")):
+        return data
+    if await live_task(str(data["id"])):
+        return data
+    data = {**data, "state": "failed",
+            "report": [*data.get("report", []),
+                       "Stopped while planning the series: its task is no longer running"]}
+    save_series(str(data["id"]), data)
+    return data
 
 
 def _is_task_id(value: str) -> bool:
@@ -106,32 +137,80 @@ def can_rebuild(job: VideoJob) -> bool:
     return not lesson.is_file() or lesson.stat().st_mtime <= narration.stat().st_mtime
 
 
+async def _dispatch(stage: str, title: str, payload: dict[str, Any], *, source: str,
+                    parent_task_id: str | None, key: str) -> str:
+    from hq import engine
+
+    return await engine.dispatch(
+        agent="tutor", title=title, brief=BRIEF, source=source,
+        parent_task_id=parent_task_id, payload={"stage": stage, **payload},
+        dedup_key=f"video:{payload['video_id']}:{stage}:{key}")
+
+
 async def start(lesson_md: str, mode: str, *, source: str, fresh: bool = False,
                 parent_task_id: str | None = None, attempt: str = "") -> dict[str, Any]:
-    """Make the video of one lesson. `fresh` writes a new script even when the
-    last one could be built again. `attempt` makes the task's dedup key stable
-    for one request (a chat run's id); a press of the button is its own."""
-    from hq import engine
+    """Make the video of one lesson. `fresh` plans and writes everything anew
+    even when stopped parts could be built again. `attempt` makes the task's
+    dedup key stable for one request (a chat run's id); a press of the button
+    is its own."""
     from hq.video.script import load_job, video_id_for
+    from hq.video.series import load_series
 
-    video_id = video_id_for(lesson_md)
-    if live := await live_task(video_id):
-        return {"started": False, "video_id": video_id, "task_id": live, "stage": "",
+    series_id = video_id_for(lesson_md)
+    key = attempt or uuid.uuid4().hex[:8]
+    # The series task itself (or a video made before series); a part still
+    # being made is checked on its own below, so a stopped part beside it can
+    # still be started again.
+    if live := await live_task(series_id, parts=False):
+        return {"started": False, "video_id": series_id, "task_id": live, "stage": "",
                 "reason": "this video is already being made"}
-    job = load_job(video_id)
-    if job:
-        job = await settle(job)
-    build = job is not None and not fresh and can_rebuild(job)
-    if build:
-        assert job is not None
-        stage, title = BUILD_STAGE, f"Video build: {job.title or video_id}"
-        payload: dict[str, Any] = {"stage": stage, "video_id": video_id, "scale": 1}
-    else:
-        stage, title = SCRIPT_STAGE, f"Video script: {video_id}"
-        payload = {"stage": stage, "video_id": video_id, "lesson_md": lesson_md, "mode": mode}
-    task_id = await engine.dispatch(
-        agent="tutor", title=title, brief=BRIEF, source=source,
-        parent_task_id=parent_task_id, payload=payload,
-        dedup_key=f"video:{video_id}:{stage}:{attempt or uuid.uuid4().hex[:8]}")
-    return {"started": True, "video_id": video_id, "task_id": task_id,
-            "stage": "build" if build else "script"}
+    series = load_series(series_id)
+    folder = paths.work_dir(series_id)
+    if (series and series.get("state") == "planned" and not fresh
+            and _lesson_unchanged(lesson_md, (folder / "series.json").stat().st_mtime)):
+        started: list[tuple[str, str, str]] = []
+        busy: list[tuple[str, str]] = []
+        for n, vid in enumerate(series["parts"], 1):
+            if part_live := await live_task(vid):
+                busy.append((vid, part_live))  # its script or its build is queued or running
+                continue
+            job = load_job(vid)
+            if job:
+                job = await settle(job)
+            if job and job.state == "built":
+                continue
+            if job and can_rebuild(job):
+                tid = await _dispatch(BUILD_STAGE, f"Video build: {job.title or vid}",
+                                      {"video_id": vid, "scale": 1, "series": series_id},
+                                      source=source,
+                                      parent_task_id=parent_task_id, key=key)
+                started.append((vid, tid, "build"))
+            else:
+                tid = await _dispatch(SCRIPT_STAGE, f"Video script: {vid}",
+                                      {"video_id": vid, "lesson_md": lesson_md, "mode": mode,
+                                       "series": series_id, "part": n}, source=source,
+                                      parent_task_id=parent_task_id, key=key)
+                started.append((vid, tid, "script"))
+        if started:
+            vid, tid, stage = started[0]
+            return {"started": True, "video_id": vid, "task_id": tid, "stage": stage,
+                    "parts": [v for v, _, _ in started]}
+        if busy:
+            # Nothing stopped, but parts are still being made: planning anew
+            # now would write a second series over them.
+            return {"started": False, "video_id": busy[0][0], "task_id": busy[0][1],
+                    "stage": "", "reason": "this video is already being made"}
+        # Every part is built: a press asks for the video again, so plan anew.
+    elif not series and not fresh:
+        job = load_job(series_id)
+        if job:
+            job = await settle(job)
+        if job is not None and can_rebuild(job):
+            tid = await _dispatch(BUILD_STAGE, f"Video build: {job.title or series_id}",
+                                  {"video_id": series_id, "scale": 1}, source=source,
+                                  parent_task_id=parent_task_id, key=key)
+            return {"started": True, "video_id": series_id, "task_id": tid, "stage": "build"}
+    tid = await _dispatch(SERIES_STAGE, f"Video series: {series_id}",
+                          {"video_id": series_id, "lesson_md": lesson_md, "mode": mode},
+                          source=source, parent_task_id=parent_task_id, key=key)
+    return {"started": True, "video_id": series_id, "task_id": tid, "stage": "series"}

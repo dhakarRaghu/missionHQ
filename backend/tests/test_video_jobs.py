@@ -12,9 +12,10 @@ from typing import Any
 import pytest
 
 from hq import engine
-from hq.video import BUILD_STAGE, SCRIPT_STAGE, build, jobs
+from hq.video import BUILD_STAGE, SCRIPT_STAGE, SERIES_STAGE, build, jobs
 from hq.video.models import VideoJob
 from hq.video.script import load_job, save_job
+from hq.video.series import save_series
 
 TASK = "0d6f6a52-6f8e-4d3c-9a57-1f1f2c3b4a5d"
 LESSON = "learning/lessons/2026-10-10-some-lesson.md"
@@ -97,7 +98,7 @@ def test_a_failed_build_is_built_again_from_its_checked_script(work, monkeypatch
     assert sent[0]["payload"]["stage"] == BUILD_STAGE
 
 
-def test_fresh_or_a_stopped_script_writes_the_script_again(work, monkeypatch) -> None:
+def test_fresh_or_a_stopped_script_plans_the_series_anew(work, monkeypatch) -> None:
     sent = _board(monkeypatch, live=None, run=None)
     _job("failed", build_task_id=TASK)
     _checked_script(work / "some-lesson")
@@ -105,8 +106,52 @@ def test_fresh_or_a_stopped_script_writes_the_script_again(work, monkeypatch) ->
     # A script that stopped at its own checks never had a build.
     _job("failed")
     asyncio.run(jobs.start(LESSON, "course", source="web"))
-    assert [s["payload"]["stage"] for s in sent] == [SCRIPT_STAGE, SCRIPT_STAGE]
+    assert [s["payload"]["stage"] for s in sent] == [SERIES_STAGE, SERIES_STAGE]
     assert sent[0]["payload"]["lesson_md"] == LESSON
+
+
+def _planned(work: Path, n: int) -> list[str]:
+    parts = [f"some-lesson-p{i}" for i in range(1, n + 1)]
+    save_series("some-lesson", {"id": "some-lesson", "mode": "course", "lesson_md": LESSON,
+                                "task_id": TASK, "state": "planned", "parts": parts})
+    return parts
+
+
+def _part(vid: str, state: str, **extra: Any) -> None:
+    save_job(VideoJob(id=vid, mode="course", lesson_md=LESSON, state=state,
+                      script_task_id=TASK, series_id="some-lesson", **extra))
+
+
+def test_a_planned_series_goes_on_part_by_part(work, monkeypatch) -> None:
+    # Part 1 is on the page, part 2's render failed after its script passed,
+    # and part 3 never started: only parts 2 and 3 are made, and part 2 only
+    # renders again.
+    sent = _board(monkeypatch, live=None, run=None)
+    p1, p2, p3 = _planned(work, 3)
+    _part(p1, "built")
+    _part(p2, "failed", build_task_id=TASK)
+    _checked_script(work / p2)
+    out = asyncio.run(jobs.start(LESSON, "course", source="web"))
+    assert out["started"] and out["parts"] == [p2, p3]
+    assert [(s["payload"]["stage"], s["payload"]["video_id"]) for s in sent] == [
+        (BUILD_STAGE, p2), (SCRIPT_STAGE, p3)]
+    assert sent[1]["payload"]["series"] == "some-lesson" and sent[1]["payload"]["part"] == 3
+
+
+def test_a_series_with_every_part_built_is_planned_again(work, monkeypatch) -> None:
+    sent = _board(monkeypatch, live=None, run=None)
+    for vid in _planned(work, 2):
+        _part(vid, "built")
+    asyncio.run(jobs.start(LESSON, "course", source="web"))
+    assert [s["payload"]["stage"] for s in sent] == [SERIES_STAGE]
+
+
+def test_a_series_whose_planning_task_died_reads_as_failed(work, monkeypatch) -> None:
+    _board(monkeypatch, live=None, run=None)
+    data = {"id": "some-lesson", "state": "planning", "task_id": TASK, "report": []}
+    save_series("some-lesson", data)
+    settled = asyncio.run(jobs.settle_series(data))
+    assert settled["state"] == "failed" and "no longer running" in settled["report"][-1]
 
 
 def test_a_video_being_made_is_not_started_twice(work, monkeypatch) -> None:
@@ -135,3 +180,53 @@ def test_an_old_voice_is_made_again(work) -> None:
     timing.write_text(json.dumps({"version": 2}))
     os.utime(timing, (later, later))
     assert build._voice_is_current("some-lesson")
+
+
+def test_a_part_whose_build_is_queued_is_left_alone(work, monkeypatch) -> None:
+    # Part 1's render failed while part 2 waited for the videos lane: pressing
+    # "Build again" rebuilt part 1 and also wrote part 2 again from scratch,
+    # deleting the files its queued build was about to render.
+    dispatched: list[dict[str, Any]] = []
+
+    async def fetchone(sql: str, params: tuple = ()) -> dict | None:
+        if "FROM hq.tasks" in sql:
+            return {"id": "part-2-build"} if params[0] == "some-lesson-p2" else None
+        return None
+
+    async def dispatch(**kwargs: Any) -> str:
+        dispatched.append(kwargs)
+        return "new-task"
+
+    monkeypatch.setattr(jobs.db, "fetchone", fetchone)
+    monkeypatch.setattr(engine, "dispatch", dispatch)
+    p1, p2 = _planned(work, 2)
+    _part(p1, "failed", build_task_id=TASK)
+    _checked_script(work / p1)
+    _part(p2, "approved")
+    asyncio.run(jobs.start(LESSON, "course", source="web"))
+    assert [(d["payload"]["stage"], d["payload"]["video_id"]) for d in dispatched] == [
+        (BUILD_STAGE, p1)]
+    assert dispatched[0]["payload"]["series"] == "some-lesson"
+
+
+def test_parts_still_being_made_are_never_planned_over(work, monkeypatch) -> None:
+    # Part 1 is built and part 2's build is queued: nothing is stopped, so a
+    # press must not fall through to planning a new series over part 2.
+    dispatched: list[dict[str, Any]] = []
+
+    async def fetchone(sql: str, params: tuple = ()) -> dict | None:
+        if "FROM hq.tasks" in sql:
+            return {"id": "part-2-build"} if params[0] == "some-lesson-p2" else None
+        return None
+
+    async def dispatch(**kwargs: Any) -> str:
+        dispatched.append(kwargs)
+        return "new-task"
+
+    monkeypatch.setattr(jobs.db, "fetchone", fetchone)
+    monkeypatch.setattr(engine, "dispatch", dispatch)
+    p1, p2 = _planned(work, 2)
+    _part(p1, "built")
+    _part(p2, "approved")
+    out = asyncio.run(jobs.start(LESSON, "course", source="web"))
+    assert not out["started"] and out["task_id"] == "part-2-build" and not dispatched

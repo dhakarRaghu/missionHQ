@@ -341,12 +341,16 @@ const CRITERION_LABEL: Record<EditorCriterion, string> = {
   defined: "Defined",
   spoken: "Spoken",
   numbers: "Numbers",
+  stakes: "Stakes",
   transfer: "Transfer",
 };
 
 /** Beat × the seven criteria. A score under the bar carries the warning token. */
 function EditorScores({ scores }: { scores: VideoReview["editor"]["scores"] }) {
   if (!scores.length) return null;
+  // The criteria this job was scored on: a newer script has `stakes`, an
+  // older one `transfer`.
+  const criteria = EDITOR_CRITERIA.filter((c) => scores.some((s) => typeof s[c] === "number"));
   return (
     <section>
       <h3 className="text-sm font-semibold">Editor scores</h3>
@@ -357,7 +361,7 @@ function EditorScores({ scores }: { scores: VideoReview["editor"]["scores"] }) {
         <TableHeader>
           <TableRow>
             <TableHead className="h-8">Beat</TableHead>
-            {EDITOR_CRITERIA.map((c) => (
+            {criteria.map((c) => (
               <TableHead key={c} className="h-8 text-center">
                 {CRITERION_LABEL[c]}
               </TableHead>
@@ -368,8 +372,8 @@ function EditorScores({ scores }: { scores: VideoReview["editor"]["scores"] }) {
           {scores.map((score) => (
             <TableRow key={score.beat}>
               <TableCell className="py-1 font-mono">{score.beat}</TableCell>
-              {EDITOR_CRITERIA.map((c) => {
-                const low = score[c] < EDITOR_BAR;
+              {criteria.map((c) => {
+                const low = (score[c] ?? EDITOR_BAR) < EDITOR_BAR;
                 return (
                   <TableCell
                     key={c}

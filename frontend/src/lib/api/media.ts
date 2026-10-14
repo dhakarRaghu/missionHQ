@@ -37,6 +37,15 @@ export interface Video {
   youtube_id: string | null;
   /** The lesson file the video was made from. */
   source_lesson?: string | null;
+  /**
+   * A lesson longer than about ten minutes is told as parts, each its own
+   * video: `part` of `parts` in the series `series_id`. Absent on a video
+   * made before parts.
+   */
+  series_id?: string | null;
+  part?: number | null;
+  parts?: number | null;
+  series_title?: string | null;
   /** False when this machine does not have the file the manifest names. */
   available: boolean;
   /**
@@ -145,6 +154,10 @@ export interface VideoJobRow {
   minutes?: number;
   /** Stopped with a checked script: "Generate" builds it again, no new script. */
   can_rebuild: boolean;
+  /** The series this job is a part of; part 0 is the series' own row while it is planned. */
+  series_id?: string;
+  part?: number;
+  parts?: number;
 }
 
 /** The answer of make. */
@@ -152,8 +165,13 @@ export interface VideoStart {
   started: boolean;
   video_id?: string;
   task_id: string;
-  /** "build" when a checked script is built again, "script" when it is written. */
-  stage?: "script" | "build" | "";
+  /**
+   * "series" when the lesson's parts are planned anew, "build" when a checked
+   * script is built again, "script" when a stopped part's script is written.
+   */
+  stage?: "series" | "script" | "build" | "";
+  /** The stopped parts started again, when a planned series goes on. */
+  parts?: string[];
   /** Why nothing started, such as a task already running for it. */
   reason?: string;
 }
@@ -200,7 +218,11 @@ export interface Narration {
   beats: Record<string, { chapter?: string; lines: NarrationLine[] }>;
 }
 
-/** The seven things the teaching editor scores, 1 to 5, per beat. */
+/**
+ * What the teaching editor scores, 1 to 5, per beat: seven criteria. Scripts
+ * written since 2026-10-14 score `stakes` (he knows why the beat matters
+ * before it explains); older ones scored `transfer` in its place.
+ */
 export const EDITOR_CRITERIA = [
   "answers_question",
   "connected",
@@ -208,6 +230,7 @@ export const EDITOR_CRITERIA = [
   "defined",
   "spoken",
   "numbers",
+  "stakes",
   "transfer",
 ] as const;
 export type EditorCriterion = (typeof EDITOR_CRITERIA)[number];
@@ -215,7 +238,7 @@ export type EditorCriterion = (typeof EDITOR_CRITERIA)[number];
 /** A criterion under this sends a beat back to the writer (EDITOR_BAR). */
 export const EDITOR_BAR = 4;
 
-export type BeatScore = { beat: string } & Record<EditorCriterion, number>;
+export type BeatScore = { beat: string } & Partial<Record<EditorCriterion, number>>;
 
 export interface EditorFinding {
   beat: string;
@@ -287,6 +310,23 @@ export function sortVideos(videos: Video[]): Video[] {
     (a, b) =>
       rank[a.kind] - rank[b.kind] ||
       (a.number ?? 0) - (b.number ?? 0) ||
-      (a.phase_slug ?? "").localeCompare(b.phase_slug ?? ""),
+      (a.phase_slug ?? "").localeCompare(b.phase_slug ?? "") ||
+      (a.part ?? 0) - (b.part ?? 0),
   );
+}
+
+/**
+ * True when a lesson's video is all there: one video made before parts, or
+ * every part of its series. A series with a part still missing (stopped or
+ * being made) is not, so "Generate again" stays offered for it.
+ */
+export function lessonVideoComplete(videos: Video[]): boolean {
+  if (!videos.length) return false;
+  const parts = Math.max(...videos.map((v) => v.parts ?? 1));
+  return videos.length >= parts;
+}
+
+/** "Part 2 of 3" for a part of a series of more than one; "" otherwise. */
+export function partLabel(video: Pick<Video, "part" | "parts">): string {
+  return video.part && video.parts && video.parts > 1 ? `Part ${video.part} of ${video.parts}` : "";
 }

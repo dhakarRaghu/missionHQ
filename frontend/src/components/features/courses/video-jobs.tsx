@@ -13,6 +13,7 @@ import {
   ACTIVE_JOB_STATES,
   mediaApi,
   mediaKeys,
+  partLabel,
   type VideoJobRow,
   type VideoJobState,
 } from "@/lib/api/media";
@@ -180,6 +181,7 @@ function JobRow({
   const course = courses.find((c) => c.course === job.course);
   const meta = [
     course ? courseTitle(course) : job.course,
+    job.part === 0 && job.parts ? `${job.parts} parts` : partLabel(job),
     jobMinutes(job),
   ].filter(Boolean);
   return (

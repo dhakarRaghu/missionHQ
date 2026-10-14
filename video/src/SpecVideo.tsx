@@ -4,7 +4,7 @@ import { Lesson, font, theme } from "./kit-sketch/visuals";
 import type { SpecVideoProps, TimingBeat } from "./spec/types";
 import { toBeatT } from "./spec/templates/common";
 import { SpecBeatShell } from "./spec/templates/shell";
-import { ConceptBeat } from "./spec/templates/concept";
+import { ConceptBeat, ConceptBeatV2 } from "./spec/templates/concept";
 import { ColdBeat, EndBeat, PayoffBeat, RecapBeat, TitleBeat } from "./spec/templates/beats";
 
 // The whole video from { spec, timing, audioDir }. Every beat is a Sequence that starts at the frame the
@@ -46,7 +46,7 @@ export const SpecVideo: React.FC<SpecVideoProps> = ({ spec, timing, audioDir }) 
           case "title":
             return <SpecBeatShell {...shell} noCaptions><TitleBeat spec={spec} beat={beat} t={t} hold={until(i) - t.start} /></SpecBeatShell>;
           case "concept":
-            return <SpecBeatShell {...shell} heading={beat.heading} headingW={headingW}><ConceptBeat beat={beat} t={t} /></SpecBeatShell>;
+            return <SpecBeatShell {...shell} heading={beat.heading} headingW={headingW}>{spec.version === 2 ? <ConceptBeatV2 beat={beat} t={t} /> : <ConceptBeat beat={beat} t={t} />}</SpecBeatShell>;
           case "payoff":
             return <SpecBeatShell {...shell} heading={beat.heading} headingW={headingW}><PayoffBeat beat={beat} t={t} /></SpecBeatShell>;
           case "recap":

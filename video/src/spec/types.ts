@@ -1,4 +1,6 @@
-// The VideoSpec contract (video/SPEC.md, version 1) as TypeScript types.
+// The VideoSpec contract (video/SPEC.md, versions 1 and 2) as TypeScript types.
+// Version 2 changes only the concept beat: the question comes before the answer, and the claim is the
+// takeaway at the end (situation, think, picture, mechanism, number, takeaway, bridge).
 // video/spec/video-spec.schema.json is the same contract as JSON Schema, for Python and check-spec.mjs.
 // Keep the two in step: every limit here is a maxLength or maxItems there.
 
@@ -68,7 +70,12 @@ type Visual = { panel: Panel; panels?: never } | { panels: Panel[]; panel?: neve
 export type ClaimStep = { step: "claim" };
 export type SituationStep = { step: "situation" } & Visual;
 export type PictureStep = { step: "picture" } & Visual;
-export type ThinkStep = { step: "think"; first: string; misses: string; real: string }; // 70, 70, 90
+/**
+ * v1: first, misses and real are required, one per `t` line. v2: first and misses are optional (both or
+ * neither), `real` is not used, and `first_at` / `misses_at` name the `t` lines they appear on (default:
+ * the first and the last `t` line); the first thought is struck through at `misses_at`.
+ */
+export type ThinkStep = { step: "think"; first?: string; misses?: string; real?: string; first_at?: At; misses_at?: At }; // 70, 70, 90
 export type MechanismStep = {
   step: "mechanism";
   items: { text: string; at: At }[]; // 2–6, one per m line, text max 48
@@ -76,11 +83,13 @@ export type MechanismStep = {
 };
 export type NumberStep = { step: "number"; source?: { text: string } } & Visual; // source max 160
 export type KeypointsStep = { step: "keypoints" };
+export type TakeawayStep = { step: "takeaway" }; // v2: the claim card, drawn from the `k` lines and `count`
 export type BridgeStep = { step: "bridge"; label?: string } & Visual; // label max 40
 export type PanelStep = { step: "panel" } & Visual;
 
 export type Step =
-  | ClaimStep | SituationStep | PictureStep | ThinkStep | MechanismStep | NumberStep | KeypointsStep | BridgeStep | PanelStep;
+  | ClaimStep | SituationStep | PictureStep | ThinkStep | MechanismStep | NumberStep | KeypointsStep | TakeawayStep
+  | BridgeStep | PanelStep;
 export type StepName = Step["step"];
 
 export type BeatKind = "cold" | "title" | "concept" | "payoff" | "recap" | "end";
@@ -95,14 +104,14 @@ export type Beat = {
 };
 
 export type VideoSpec = {
-  version: 1;
+  version: 1 | 2;
   id: string; // max 80
   mode: "course" | "youtube" | "article";
   series: string; // max 40
   number: number | null;
   title: string; // max 70
   label: string; // max 40
-  next?: { number: number | null; title: string | null }; // title max 60
+  next?: { number: number | null; title: string | null; label?: string }; // title max 60, label max 24 ("Next part")
   site?: string; // max 40
   beats: Beat[];
 };

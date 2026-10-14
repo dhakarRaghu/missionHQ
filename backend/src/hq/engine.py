@@ -59,6 +59,7 @@ from hq.job_pipeline import (
 )
 from hq.loader import EXTERNAL_RUNTIMES, AgentSpec, build_agent, scan
 from hq.video import STAGES as VIDEO_STAGES
+from hq.video import WRITING_STAGES as VIDEO_WRITING_STAGES
 from hq.video import pipeline as video_pipeline
 
 # Doubled 2026-09-10 alongside high reasoning effort and tripled call caps: a
@@ -364,6 +365,11 @@ async def bootstrap_post_launch() -> None:
     # Narrated videos: a render keeps the CPU about 97% busy (measured on the
     # 4K episode renders), so a second one at once only halves both.
     _queues["videos"] = await DBOS.register_queue_async("videos", worker_concurrency=1)
+    # Video scripts only call the model, so they do not wait behind a render:
+    # the parts of one lesson are written two at a time. The gateway's slot
+    # limit (llm._slot_limit) still caps the requests in flight.
+    _queues["video_scripts"] = await DBOS.register_queue_async("video_scripts",
+                                                               worker_concurrency=2)
     await DBOS.apply_schedules_async(_schedules)
     wanted = {s["schedule_name"] for s in _schedules}
     for sched in await DBOS.list_schedules_async(schedule_name_prefix="cron_"):
@@ -418,6 +424,8 @@ def lane_for(payload: Any, agent: str = "") -> str:
     if agent and _runs_in_browser(agent):
         return "browser"
     stage = payload.get("stage") if isinstance(payload, dict) else None
+    if stage in VIDEO_WRITING_STAGES:
+        return "video_scripts"
     if stage in VIDEO_STAGES:
         # A render holds every core for an hour; one video at a time, and
         # never in the course lane, so a video never delays a lesson.
@@ -463,7 +471,7 @@ async def _enqueue(task_id: str, *, attempt: int = 0, lane: str = "tasks") -> No
         # the same outcome the step_id branch already relies on.
         return
     wf_id = _attempt_wf_id(task_id, attempt)
-    cap = COURSE_TIMEOUT_S if lane in ("courses", "videos") else TASK_TIMEOUT_S
+    cap = COURSE_TIMEOUT_S if lane in ("courses", "videos", "video_scripts") else TASK_TIMEOUT_S
     # Durable wall-clock cap enforced by DBOS, outside the agent: a stalled or
     # hung run is cancelled instead of sitting in "running" all night.
     with SetWorkflowID(wf_id), SetWorkflowTimeout(cap):

@@ -32,6 +32,7 @@ draw the spec in the Sketchbook look. The model never writes React.
 | `scripts/build-schema.mjs` | writes the two JSON Schemas; run after a contract change |
 | `examples/ep12/` | Inference Internals #12 ported to the spec format (the proof) |
 | `examples/stress/make-stress.py` | writes a spec with every text field at its limit and ten concepts |
+| `examples/v2.py`, `examples/ep12-v2/`, `examples/stress-v2/` | the two examples in spec version 2 (the story order the pipeline writes), to prove `ConceptBeatV2` |
 
 ## Setup
 

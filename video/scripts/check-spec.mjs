@@ -13,7 +13,9 @@
  *   3. every `at` key exists in its beat, and `at` keys never go backwards inside a step or across a beat's visuals
  *   4. every text field is within its limit (maxLength / maxItems in the schema, reported with the field path)
  *   5. concept beats have the steps in order (claim … keypoints, then bridge exactly when the beat has `h` lines),
- *      every step's letter exists in the narration, and each step's `at` keys use that step's letter
+ *      every step's letter exists in the narration, and each step's `at` keys use that step's letter.
+ *      Version 2 (the story order): situation, think, picture (when there are `p` lines), mechanism, number
+ *      (when there are `n` lines), takeaway, then bridge exactly when the beat has `h` lines
  * TODO(check 6): the narration rules (sentence length, banned words, no part names, terms defined at first use,
  *   numbers in `text` spelled out in `say`) are checked by the Python backend, agents/tutor/video/rules.md.
  */
@@ -151,12 +153,15 @@ function structural() {
       }
     });
 
-    if (beat.kind === "concept") conceptSteps(beat, base, steps, nb, letters, keys, letter);
+    if (beat.kind === "concept") {
+      if (spec.version === 2) conceptStepsV2(beat, base, steps, nb, letters, keys, letter, pos);
+      else conceptSteps(beat, base, steps, nb, letters, keys, letter);
+    }
   });
 }
 
 const sideAts = [];
-const STEP_LETTER = { situation: ["s"], picture: ["p"], mechanism: ["m"], number: ["n"], bridge: ["h"] };
+const STEP_LETTER = { situation: ["s"], picture: ["p"], think: ["t"], mechanism: ["m"], number: ["n"], bridge: ["h"] };
 const ORDER = ["claim", "situation", "picture", "think", "mechanism", "number", "keypoints"];
 const NEEDS = { claim: ["k"], situation: ["s"], picture: ["p"], think: ["q", "t"], mechanism: ["m"], number: ["n"], keypoints: ["r"] };
 
@@ -171,6 +176,8 @@ function conceptSteps(beat, base, steps, nb, letters, keys, letter) {
   }
   if (letters.has("t") && keys.filter((k) => letter(k) === "t").length < 3) bad(N, `$.beats.${beat.id}.lines`, `think it through needs three "t" lines: first thought, what it misses, the real question`);
   if (keys.filter((k) => letter(k) === "r").length !== 3) bad(N, `$.beats.${beat.id}.lines`, `key points need exactly three "r" lines: remember, the trap, try this`);
+  const think = steps.find((s) => s?.step === "think");
+  if (think) for (const f of ["first", "misses", "real"]) if (!think[f]) bad(S, `${base}.steps[${steps.indexOf(think)}]`, `a version 1 think step needs "${f}"`);
   // narration letters must come in step order, so every step's window is one block of lines
   const seq = ["k", "s", "p", "q", "t", "m", "n", "r", "h"];
   let maxRank = -1;
@@ -193,10 +200,59 @@ function conceptSteps(beat, base, steps, nb, letters, keys, letter) {
   }
 }
 
+// Version 2: the question before the answer, and the claim said once, as the takeaway at the end.
+const V2_SEQ = ["s", "q", "t", "p", "m", "n", "k", "h"];
+const V2_NEEDS = { situation: ["s"], think: ["q", "t"], mechanism: ["m"], takeaway: ["k"] };
+
+function conceptStepsV2(beat, base, steps, nb, letters, keys, letter, pos) {
+  const names = steps.map((s) => s?.step);
+  const want = ["situation", "think", ...(letters.has("p") ? ["picture"] : []), "mechanism",
+    ...(letters.has("n") ? ["number"] : []), "takeaway", ...(letters.has("h") ? ["bridge"] : [])];
+  if (names.join(",") !== want.join(",")) {
+    bad(S, `${base}.steps`, `concept steps must be ${JSON.stringify(want)} (picture when the narration has p lines, number when it has n lines, bridge when it has h lines); found ${JSON.stringify(names)}`);
+  }
+  for (const [step, ls] of Object.entries(V2_NEEDS)) {
+    for (const l of ls) if (!letters.has(l)) bad(N, `$.beats.${beat.id}.lines`, `the ${step} step needs "${l}" lines (${l}0, ${l}1, …)`);
+  }
+  const count = (l) => keys.filter((k) => letter(k) === l).length;
+  if (letters.has("t") && (count("t") < 2 || count("t") > 4)) bad(N, `$.beats.${beat.id}.lines`, `thinking it through takes 2 to 4 "t" lines (a first answer, why it is reasonable, what it misses); found ${count("t")}`);
+  if (count("k") > 2) bad(N, `$.beats.${beat.id}.lines`, `the takeaway is said once, in 1 or 2 "k" lines; found ${count("k")}`);
+  const qs = nb.lines.filter((l) => letter(l.key) === "q");
+  if (qs.length && !qs[qs.length - 1].text.trim().endsWith("?")) bad(N, `$.beats.${beat.id}.lines`, `the last "q" line is the question and ends with "?"`);
+  let maxRank = -1;
+  nb.lines.forEach((l, i) => {
+    const r = V2_SEQ.indexOf(letter(l.key));
+    if (r < 0) bad(N, `$.beats.${beat.id}.lines[${i}].key`, `"${l.key}": concept line keys start with one of ${V2_SEQ.join(", ")}`);
+    else if (r < maxRank) bad(N, `$.beats.${beat.id}.lines[${i}].key`, `"${l.key}" comes after a later step's line; keep the lines in the order ${V2_SEQ.join(" ")}`);
+    else maxRank = r;
+  });
+  const think = steps.find((s) => s?.step === "think");
+  if (think) {
+    const ti = steps.indexOf(think);
+    if (think.real !== undefined) bad(S, `${base}.steps[${ti}].real`, `"real" is a version 1 field; version 2 has no real-question line`);
+    if (Boolean(think.first) !== Boolean(think.misses)) bad(S, `${base}.steps[${ti}]`, `"first" and "misses" come together, or neither`);
+    if (think.first_at && think.misses_at && pos.get(think.misses_at) <= pos.get(think.first_at)) {
+      bad(S, `${base}.steps[${ti}].misses_at`, `"${think.misses_at}" must be a later line than first_at "${think.first_at}"`);
+    }
+  }
+  const mech = steps.find((s) => s?.step === "mechanism");
+  if (mech && Array.isArray(mech.items)) {
+    const mi = steps.indexOf(mech);
+    if (mech.items.length > count("m")) bad(S, `${base}.steps[${mi}].items`, `has ${mech.items.length} items for ${count("m")} "m" lines; each item appears on its own line`);
+    mech.items.forEach((it, i) => {
+      if (i && pos.get(it.at) === pos.get(mech.items[i - 1].at)) bad(S, `${base}.steps[${mi}].items[${i}].at`, `"${it.at}" is the line of the item before; each item appears on its own, later line`);
+    });
+  }
+}
+
 /** Every `at` key in a step, in screen order, with its JSON path. */
 function collectAts(st, sp) {
   const out = [];
   if (!st || typeof st !== "object") return out;
+  if (st.step === "think") {
+    for (const f of ["first_at", "misses_at"]) if (st[f]) out.push({ key: st[f], path: `${sp}.${f}` });
+    return out;
+  }
   if (st.step === "mechanism") {
     (st.items ?? []).forEach((it, i) => out.push({ key: it.at, path: `${sp}.items[${i}].at` }));
     // the side panel is a second column; its keys are checked on their own, so the columns may interleave

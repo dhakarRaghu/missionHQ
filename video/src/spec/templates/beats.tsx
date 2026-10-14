@@ -117,7 +117,7 @@ export const EndBeat: React.FC<{ spec: VideoSpec; t: TimingBeat }> = ({ spec, t 
           {nextText ? (
             <Appear at={a + 30} style={{ marginTop: 40 }}>
               <Panel drawAt={a + 30} hotAt={a + 50} hot={C.router} style={{ padding: "20px 40px", textAlign: "center" }}>
-                <Kicker color={C.router}>{yt ? "Next episode" : "Next lesson"}</Kicker>
+                <Kicker color={C.router}>{next?.label ?? (yt ? "Next episode" : "Next lesson")}</Kicker>
                 <div style={{ fontFamily: hand, fontSize: 60, fontWeight: 700, lineHeight: 1.05, color: C.router, marginTop: 4 }}>{nextText}</div>
               </Panel>
             </Appear>

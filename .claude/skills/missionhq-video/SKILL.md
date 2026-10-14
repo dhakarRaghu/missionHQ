@@ -6,8 +6,9 @@ argument-hint: "<what to improve, or a lesson to run>"
 
 # Mission HQ videos
 
-Mission HQ turns a finished course phase or Learn article into a long
-narrated video when he presses "Generate video", with no approval step after. Kimi writes; fixed templates draw;
+Mission HQ turns a finished course phase or Learn article into narrated
+videos when he presses "Generate video", with no approval step after: a
+series of parts of about ten minutes, each its own video. Kimi writes; fixed templates draw;
 code checks. This skill is for improving that system, not for hand-building
 one video. The full design is in `docs/video-pipeline.md`; read it first.
 
@@ -16,6 +17,7 @@ one video. The full design is in `docs/video-pipeline.md`; read it first.
 | Part | Path | Change it when |
 |---|---|---|
 | Narration rules and stage prompts | `agents/tutor/video/` (`rules.md`, `plan.md`, `beat.md`, `editor.md`, `factcheck.md`, `scenes.md`, `frames.md`) | the teaching or the spoken style is wrong |
+| Series stage (the parts of a lesson) | `backend/src/hq/video/series.py`, prompt `agents/tutor/video/series.md` | how a lesson is split into parts |
 | Script stage (plan, beats, editor, facts, scenes) | `backend/src/hq/video/script.py` | a stage's order, rounds or inputs are wrong |
 | Line and plan checks in code | `backend/src/hq/video/checks.py` | a rule can be settled by code, not a model |
 | Build stage (voice, stills, frame review, render, verify, publish) | `backend/src/hq/video/build.py` | a long step or a review is wrong |
@@ -33,7 +35,9 @@ one video. The full design is in `docs/video-pipeline.md`; read it first.
   write React.
 - **Every template change is proven on the examples**: `video/examples/ep12`
   (a real episode) and `video/examples/stress` (every field at its limit, 10
-  concepts). Run `check-spec`, render the stills, and look at the sheets.
+  concepts), and their version 2 copies `ep12-v2` and `stress-v2` (written by
+  `examples/v2.py`). Run `check-spec`, render the stills (`NARRATE_DRY=1` for
+  the voice), and look at the sheets.
 - **arm64 Node only** (check `node -p process.arch`; the backend uses the
   `node` on PATH, or the folder in `VIDEO_NODE_BIN`); an x86 Node breaks
   Remotion.
@@ -51,8 +55,9 @@ backend's `.env`:
 
 ```bash
 cd backend
-uv run python scripts/video_run.py script learning/lessons/<date>-<slug>.md course
-uv run python scripts/video_run.py build <video-id>
+uv run python scripts/video_run.py series learning/lessons/<date>-<slug>.md course
+uv run python scripts/video_run.py script learning/lessons/<date>-<slug>.md 1   # part 1
+uv run python scripts/video_run.py build <slug>-p1
 ```
 
 ## References

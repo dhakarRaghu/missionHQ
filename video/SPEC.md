@@ -1,4 +1,4 @@
-# Video spec, version 1
+# Video spec, versions 1 and 2
 
 A video is **data, not code**. The model writes a `VideoSpec` (JSON). Code checks it
 against this contract. A fixed set of tested Remotion templates draws it. The model never
@@ -45,6 +45,8 @@ The same format the course videos already use (`course-videos/scripts/*.narratio
   Other beats: `co` cold open, `t` title, `y` payoff, `r` recap, `x` end. (The ep12 example keeps its
   original `a` keys in the payoff; code does not check the prefixes outside concept beats.)
 - Each beat may set `cueLeadS` (default 0.25, at most 0.5): how long before the voice a line's visuals appear.
+- **Version 2** (the pipeline writes only this since 2026-10-14) changes only the concept beat; see
+  "Version 2: the story order" below.
 
 ## Spec (`<id>.spec.json`)
 
@@ -150,6 +152,39 @@ prompt lines) at least 24 px and notes and sources at least 20 px, except where 
 limits must shrink to fit (a full 4x6 table, or a mechanism side panel at every limit). A number and
 its unit ("30 s", "2.72 %") never break across lines. Ten recap lines of 200 characters still fit,
 but at a small size; keep recap lines under about 120 characters.
+
+## Version 2: the story order
+
+The version 1 concept opened with its claim and walked a fixed rail of steps with fixed phrases,
+then said the claim twice more (Remember, the recap). Watched end to end, the answer came before the
+question and the same pattern repeated in every concept (2026-10-14). Version 2 asks first and
+answers once. Set `"version": 2`; everything outside concept beats is unchanged.
+
+Narration keys inside a concept beat, in this order (s q t p m n k h):
+
+| Key | Step | Lines |
+|---|---|---|
+| `s` | situation: where the running case reaches this concept, with the number that makes it matter | 1 or more |
+| `q` | the question, in the viewer's words; the last `q` line ends with "?" | 1 or more |
+| `t` | thinking it through: a first answer, why it is reasonable, what it misses | 2 to 4 |
+| `p` | picture: the parts and terms the mechanism needs | optional |
+| `m` | mechanism: how it works, each step with its reason; no "Step N." phrase | 1 or more |
+| `n` | the number that proves it, with its conditions | optional |
+| `k` | the takeaway: the concept's claim, said once, now earned | 1 or 2 |
+| `h` | bridge: what happened next, leading to the next concept's question | optional (not on the last concept) |
+
+Steps of a concept beat, in this order: `situation`, `think`, `picture` (exactly when there are `p`
+lines), `mechanism`, `number` (exactly when there are `n` lines), `takeaway`, then `bridge` (exactly when
+there are `h` lines). There is no step rail.
+
+| step | slots |
+|---|---|
+| `situation`, `picture`, `number`, `bridge` | as in version 1 |
+| `think` | optional `first` (max 70) and `misses` (max 70), together or not at all; optional `first_at` and `misses_at`, `t` keys, `misses_at` later (default: the first and the last `t` line). The question comes from the `q` lines; the first answer is struck through at `misses_at`. No `real`. |
+| `mechanism` | `items` (2–6, text max 48), each `at` an `m` line, each on its own later line; at most one item per `m` line; optional `side` |
+| `takeaway` | none: the claim card, drawn from the `k` lines with `count` ("2 of 3") and `mark` (part of the `k` lines) |
+
+`next` may carry `label` (max 24), the kicker of the end card's next panel: "Next part" for a series.
 
 ## What code checks before anything is rendered
 

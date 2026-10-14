@@ -21,7 +21,9 @@ Order of work, each step checked before the next:
             checks the whole spec; a failing beat is sent back
 
 Every model call is a DBOS step and every artifact is written to the job
-folder as soon as it exists, so a restart resumes where it stopped.
+folder as soon as it exists, so a restart resumes where it stopped. The job
+also records each finished stage, so the same task queued again as a new
+workflow (the watchdog does that after the host sleeps) resumes there too.
 """
 
 from __future__ import annotations
@@ -47,6 +49,7 @@ from hq.video.models import (
     EditorVerdict,
     FactVerdict,
     Line,
+    SeriesPlan,
     VideoJob,
     VideoPlan,
 )
@@ -172,7 +175,9 @@ async def _reset_step(video_id: str) -> None:
     import shutil
 
     folder = paths.work_dir(video_id)
-    for name in ("spec.json", f"{video_id}.timing.json", "verify.json", "sheet.jpg"):
+    # The plan and narration go too: a resumed task reads them as its own.
+    for name in ("spec.json", f"{video_id}.timing.json", "verify.json", "sheet.jpg",
+                 "plan.json", "narration.json", "frames.ok"):
         (folder / name).unlink(missing_ok=True)
     for sub in ("stills", "audio"):
         shutil.rmtree(folder / sub, ignore_errors=True)
@@ -203,6 +208,32 @@ def save_job(job: VideoJob) -> None:
 @DBOS.step(name="video.job")
 async def _job_step(job: dict[str, Any]) -> None:
     save_job(VideoJob.model_validate(job))
+
+
+def saved_script(video_id: str, task_id: str) -> dict[str, Any] | None:
+    """What this task already wrote of this script, or None to write it anew.
+
+    After the host sleeps mid-run, the watchdog queues the same task again as
+    a new workflow, which has none of the old steps' records. Without this
+    the script wiped its folder and wrote itself again: on 2026-10-11 the
+    phase-05a script slept in its editor review and spent another 80 minutes
+    on the plan and all 62 beat calls it had already made.
+    """
+    job = load_job(video_id)
+    if (job is None or not task_id or job.script_task_id != task_id
+            or job.state != "writing" or "plan" not in job.stages):
+        return None
+    folder = paths.work_dir(video_id)
+    plan, narration = folder / "plan.json", folder / "narration.json"
+    if not plan.is_file():
+        return None
+    beats = json.loads(narration.read_text()).get("beats", {}) if narration.is_file() else {}
+    return {"job": job.model_dump(), "plan": json.loads(plan.read_text()), "beats": beats}
+
+
+@DBOS.step(name="video.saved_script")
+async def _saved_step(video_id: str, task_id: str) -> dict[str, Any] | None:
+    return saved_script(video_id, task_id)
 
 
 # --- material --------------------------------------------------------------------------
@@ -247,9 +278,15 @@ async def gather(payload: dict[str, Any]) -> dict[str, Any]:
         next_title = str((nxt or {}).get("title") or "") if payload.get("mode") == "course" else ""
     asked = []
     for v in register.manifest()["videos"]:
-        if course and v.get("course") == course:
+        this_series = payload.get("series") and v.get("series_id") == payload.get("series")
+        if course and v.get("course") == course and not this_series:
             asked += [f"- {q}" for q in v.get("think_questions") or []]
+    series: dict[str, Any] | None = None
+    if payload.get("series"):
+        path = paths.work_dir(str(payload["series"])) / "series.json"
+        series = json.loads(path.read_text())["plan"] if path.is_file() else None
     return {
+        "series": series, "part": int(payload.get("part") or 0),
         "lesson_md": lesson_md, "title": str((row or {}).get("title") or Path(lesson_md).stem),
         "kind": str((row or {}).get("kind") or ""), "slug": slug, "course": course,
         "lesson": text[:MATERIAL_CHARS], "note_path": note_path, "note": note[:NOTE_CHARS],
@@ -270,10 +307,34 @@ def material_text(m: dict[str, Any]) -> str:
 
 # --- prompts -----------------------------------------------------------------------------
 
+def part_of(m: dict[str, Any]) -> tuple[SeriesPlan, int] | None:
+    """The series plan and this video's part number (1-based), when it is a part."""
+    if not m.get("series") or not m.get("part"):
+        return None
+    return SeriesPlan.model_validate(m["series"]), int(m["part"])
+
+
+def _part_text(m: dict[str, Any]) -> str:
+    found = part_of(m)
+    if not found:
+        return ""
+    series, n = found
+    part = series.parts[n - 1]
+    lines = [f"## This video is part {n} of {len(series.parts)} of the series",
+             "", "```json", series.model_dump_json(indent=1), "```", "",
+             f"This part's title: {part.title}", f"Its question: {part.question}",
+             f"Its concepts, in order: {part.concepts}"]
+    if n > 1:
+        lines.append(f"The last part ended on this question: {series.parts[n - 2].leads_to}")
+    lines.append(f"It hands over to the next part with: {part.leads_to}" if part.leads_to
+                 else "It is the last part: it ends the series.")
+    return "\n".join(lines)
+
+
 def _plan_prompt(mode: str, m: dict[str, Any], problems: Sequence[str],
                  previous: dict[str, Any] | None) -> str:
     prompt = (f"Mode: {mode}\nCourse: {m.get('course') or '(an article, no course)'}\n\n"
-              + material_text(m))
+              + (_part_text(m) + "\n\n" if part_of(m) else "") + material_text(m))
     if problems:
         prompt += ("\n\n## Your previous plan\n\n```json\n"
                    + json.dumps(previous, ensure_ascii=False) + "\n```\n\n## What was sent back\n\n"
@@ -283,13 +344,17 @@ def _plan_prompt(mode: str, m: dict[str, Any], problems: Sequence[str],
     return prompt
 
 
-def _beat_row(plan: VideoPlan, beat: str) -> str:
+def _beat_row(plan: VideoPlan, beat: str, m: dict[str, Any] | None = None) -> str:
+    found = part_of(m) if m else None
     if checks.CONCEPT_BEAT.match(beat):
         c = next(c for c in plan.concepts if c.id == beat)
         return json.dumps(c.model_dump(), ensure_ascii=False, indent=1)
     if beat == "cold":
-        return json.dumps({"running_case": plan.running_case, "cold_open": plan.cold_open,
-                           "question": plan.question}, ensure_ascii=False, indent=1)
+        row: dict[str, Any] = {"running_case": plan.running_case, "cold_open": plan.cold_open,
+                               "question": plan.question}
+        if found and found[1] > 1:
+            row["the_last_part_ended_on"] = found[0].parts[found[1] - 2].leads_to
+        return json.dumps(row, ensure_ascii=False, indent=1)
     if beat == "title":
         return json.dumps({"title": plan.title,
                            "concepts": [c.heading for c in plan.concepts]}, ensure_ascii=False)
@@ -297,8 +362,13 @@ def _beat_row(plan: VideoPlan, beat: str) -> str:
         return json.dumps({"question": plan.question, "payoff": plan.payoff},
                           ensure_ascii=False, indent=1)
     if beat == "recap":
-        return json.dumps({"remember": [c.claim for c in plan.concepts]}, ensure_ascii=False)
-    return json.dumps({"left_out": plan.left_out}, ensure_ascii=False)
+        return json.dumps({"takeaways": [c.takeaway for c in plan.concepts]}, ensure_ascii=False)
+    if found and found[1] < len(found[0].parts):
+        nxt = found[0].parts[found[1]]
+        return json.dumps({"hand_over": found[0].parts[found[1] - 1].leads_to,
+                           "next_part": {"title": nxt.title, "question": nxt.question}},
+                          ensure_ascii=False, indent=1)
+    return json.dumps({"try_this": plan.try_this, "left_out": plan.left_out}, ensure_ascii=False)
 
 
 def _beat_prompt(mode: str, m: dict[str, Any], plan: VideoPlan, beat: str,
@@ -307,7 +377,7 @@ def _beat_prompt(mode: str, m: dict[str, Any], plan: VideoPlan, beat: str,
     tail = "\n".join(f"{ln.key}: {ln.text}" for ln in list(before)[-4:]) or "(this is the first beat)"
     prompt = (f"Mode: {mode}\n\n## The whole plan\n\n```json\n"
               + plan.model_dump_json(indent=1) + "\n```\n\n"
-              f"## Write this beat: {beat}\n\n{_beat_row(plan, beat)}\n\n"
+              f"## Write this beat: {beat}\n\n{_beat_row(plan, beat, m)}\n\n"
               f"## The last lines of the beat before\n\n{tail}\n\n"
               f"## The material\n\n{material_text(m)}")
     if problems:
@@ -354,7 +424,9 @@ class ScriptWriter:
         for attempt in range(1, PLAN_ATTEMPTS + 1):
             raw = await _plan_step(_plan_prompt(self.job.mode, self.m, problems, previous))
             plan = VideoPlan.model_validate(raw)
-            problems = checks.plan_problems(plan, self.job.mode, material)
+            found = part_of(self.m)
+            part = found[0].parts[found[1] - 1] if found else None
+            problems = checks.plan_problems(plan, self.job.mode, material, part)
             if not problems:
                 self.note(f"plan accepted on attempt {attempt}: {len(plan.concepts)} concepts")
                 return plan
@@ -388,6 +460,8 @@ class ScriptWriter:
     async def write_all(self) -> None:
         assert self.plan is not None
         for beat in checks.beat_order(len(self.plan.concepts)):
+            if beat in self.beats:
+                continue  # written before the task was queued again
             self.beats[beat] = await self.write_beat(beat)
             await _save_step(self.job.id, "narration.json", self.narration())
 
@@ -425,8 +499,12 @@ class ScriptWriter:
                 for beat in self.beats:
                     if re.search(rf"\b{re.escape(beat)}\b", item):
                         weak.setdefault(beat, []).append(f"whole video: {item}")
-            if not weak or round_no == REVIEW_ROUNDS:
+            if not weak:
                 break
+            # What the last round finds is rewritten too, not only noted: on
+            # 2026-10-15 a part went through with a merged figure and a line
+            # that contradicted another, both found in the last round. The
+            # fact check runs after this, so a rewritten fact is checked.
             for beat, items in weak.items():
                 self.beats[beat] = await self.write_beat(
                     beat, items or [("the teaching editor scored this beat under the bar;"
@@ -436,7 +514,7 @@ class ScriptWriter:
         means = {s.beat: round(s.mean(), 2) for s in verdict.scores}
         self.note("editor means: " + ", ".join(f"{b} {v}" for b, v in means.items()))
         for w in verdict.whole_video:
-            self.note(f"editor, whole video: {w}")
+            self.note(f"editor, whole video (sent back to its beats): {w}")
         return verdict.model_dump()
 
     async def check_facts(self, only: Sequence[str] | None = None) -> list[dict[str, Any]]:
@@ -445,8 +523,11 @@ class ScriptWriter:
         for beat in [b for b in self.beats if only is None or b in only]:
             for round_no in range(REVIEW_ROUNDS + 1):
                 lines = "\n".join(f"{ln.key}: {ln.text}" for ln in self.beats[beat])
+                # The whole narration rides along, so a value that disagrees
+                # with another line is caught, not only one against the material.
                 verdict = FactVerdict.model_validate(await _fact_step(
-                    f"## The material\n\n{material}\n\n## The narration of beat {beat}\n\n{lines}"))
+                    f"## The material\n\n{material}\n\n## The whole narration, for context\n\n"
+                    f"{_narration_text(self.beats)}\n\n## Check this beat: {beat}\n\n{lines}"))
                 wrong = [i for i in verdict.items if i.verdict in ("contradicted", "unsupported")]
                 if not wrong or round_no == REVIEW_ROUNDS:
                     table += [{"beat": beat, **i.model_dump()} for i in verdict.items]
@@ -480,11 +561,19 @@ class ScriptWriter:
         # its slug; "Learn" for an article.
         label = (self.m.get("course_title") or str(self.m.get("course") or "Learn")
                  .replace("-", " ").title())[:40]
+        part = part_of(self.m)
+        series = label
+        if part and len(part[0].parts) > 1:
+            tail = f" · Part {part[1]} of {len(part[0].parts)}"
+            series = label[:40 - len(tail)] + tail
         spec: dict[str, Any] = {
-            "version": 1, "id": self.job.id, "mode": self.job.mode, "series": label,
+            "version": 2, "id": self.job.id, "mode": self.job.mode, "series": series,
             "number": None, "title": self.plan.title, "label": label,
             "site": "Mission HQ · Learn", "beats": []}
-        if self.m.get("next_title"):
+        if part and part[1] < len(part[0].parts):
+            spec["next"] = {"number": None, "title": part[0].parts[part[1]].title[:60],
+                            "label": "Next part"}
+        elif self.m.get("next_title"):
             spec["next"] = {"number": None, "title": str(self.m["next_title"])[:60]}
         beats: list[dict[str, Any]] = []
         problems: dict[str, list[str]] = {}
@@ -503,7 +592,7 @@ class ScriptWriter:
             for beat in redo:
                 lines = "\n".join(f"{ln.key}: {ln.text}" for ln in self.beats[beat])
                 ask = (f"## Return the spec beat for: {beat}\n\nIts narration:\n{lines}\n\n"
-                       f"## Its plan row\n\n{_beat_row(self.plan, beat)}\n\n"
+                       f"## Its plan row\n\n{_beat_row(self.plan, beat, self.m)}\n\n"
                        "Return only the JSON object of this one beat.")
                 if problems.get(beat):
                     ask += "\n\n## What check-spec refused last time\n\n" + "\n".join(
@@ -517,7 +606,6 @@ class ScriptWriter:
                     i = int(beat[1:])
                     obj["count"] = f"{i} of {n}"
                     obj["heading"] = self.plan.concepts[i - 1].heading
-                    _pin_mechanism(obj, self.beats[beat])
                 beats = [b for b in beats if b.get("id") != beat]
                 beats.append(obj if obj else {"id": beat, "kind": "invalid"})
             order = list(self.beats)
@@ -597,26 +685,9 @@ async def _start_build(job: VideoJob, deps: Any) -> str:
         agent="tutor", title=f"Video build: {job.title or job.id}", source="agent",
         brief="A narrated video of a finished lesson (hq.video).",
         parent_task_id=deps.task_id,
-        payload={"stage": BUILD_STAGE, "video_id": job.id, "scale": 1},
+        payload={"stage": BUILD_STAGE, "video_id": job.id, "scale": 1,
+                 **({"series": job.series_id} if job.series_id else {})},
         dedup_key=f"video:{job.id}:{BUILD_STAGE}:{deps.task_id}")
-
-
-def _pin_mechanism(beat: dict[str, Any], lines: list[Line]) -> None:
-    """Point each mechanism item at the line that starts its step.
-
-    Which line starts "Step N." is in the narration, so code sets it. When the
-    item count differs from the step count, check-spec reports it and the
-    model draws the beat again.
-    """
-    starts = [ln.key for ln in lines
-              if ln.key.startswith("m") and re.match(r"Step \d+\.", ln.text)]
-    for step in beat.get("steps") or []:
-        items = step.get("items") if isinstance(step, dict) else None
-        if step.get("step") == "mechanism" and isinstance(items, list) \
-                and len(items) == len(starts):
-            for item, key in zip(items, starts):
-                if isinstance(item, dict):
-                    item["at"] = key
 
 
 async def run(task: dict[str, Any], deps: Any) -> tuple[str, str]:
@@ -625,32 +696,71 @@ async def run(task: dict[str, Any], deps: Any) -> tuple[str, str]:
     mode = str(payload.get("mode") or "course")
     lesson_md = str(payload.get("lesson_md") or "")
     video_id = str(payload.get("video_id") or video_id_for(lesson_md))
-    job = load_job(video_id) or VideoJob(id=video_id, mode=cast(Any, mode), lesson_md=lesson_md)
-    # A new script is not the old one's build: clear it, so a stop here is
-    # never taken for a checked script that only needs building again.
-    job.state, job.script_task_id, job.build_task_id = "writing", str(task.get("id") or ""), ""
-    await _job_step(job.model_dump())
-    await _reset_step(video_id)
+    task_id = str(task.get("id") or "")
+    saved = await _saved_step(video_id, task_id)
+    if saved:
+        job = VideoJob.model_validate(saved["job"])
+    else:
+        job = load_job(video_id) or VideoJob(id=video_id, mode=cast(Any, mode), lesson_md=lesson_md)
+        # A new script is not the old one's build: clear it, so a stop here is
+        # never taken for a checked script that only needs building again.
+        job.state, job.script_task_id, job.build_task_id = "writing", task_id, ""
+        job.stages, job.review, job.report = [], {}, []
+        await _job_step(job.model_dump())
+        await _reset_step(video_id)
     with llm.call_context(run_id=deps.run_id, task_id=deps.task_id, agent="tutor"):
         m = await _gather_step(payload)
         job.course, job.phase_slugs = m["course"], [m["slug"]] if m["slug"] else []
+        if found := part_of(m):
+            job.series_id, job.part, job.parts = str(payload["series"]), found[1], len(found[0].parts)
         w = ScriptWriter(job, m)
-        w.plan = await w.write_plan()
+
+        async def done(stage: str) -> None:
+            job.stages = [*job.stages, stage]
+            job.report = w.report
+            await _save_step(video_id, "narration.json", w.narration())
+            await _job_step(job.model_dump())
+
+        if saved:
+            w.report = list(job.report)
+            w.plan = VideoPlan.model_validate(saved["plan"])
+            w.beats = {b: [Line.model_validate(x) for x in v.get("lines", [])]
+                       for b, v in saved["beats"].items()}
+            w.note(f"queued again after a stop; resumed after: {', '.join(job.stages)}")
+        else:
+            w.plan = await w.write_plan()
+            await _save_step(video_id, "plan.json", w.plan.model_dump())
+            await done("plan")
         job.title, job.mismatches = w.plan.title, w.plan.mismatches
-        await _save_step(video_id, "plan.json", w.plan.model_dump())
-        await w.write_all()
-        await w.review_whole()
-        editor = await w.edit()
-        facts = await w.check_facts()
-        await w.review_whole()
-        await _save_step(video_id, "narration.json", w.narration())
+        if "beats" not in job.stages:
+            await w.write_all()
+            await done("beats")
+        if "whole" not in job.stages:
+            await w.review_whole()
+            await done("whole")
+        if "editor" in job.stages:
+            editor = cast(dict[str, Any], job.review["editor"])
+        else:
+            editor = await w.edit()
+            job.review = {**job.review, "editor": editor}
+            await done("editor")
+        if "facts" in job.stages:
+            facts = cast(list[dict[str, Any]], job.review["facts"])
+        else:
+            facts = await w.check_facts()
+            job.review = {**job.review, "facts": facts}
+            await done("facts")
+        if "whole2" not in job.stages:
+            await w.review_whole()
+            await done("whole2")
         # The reviews are saved before the scenes, so a scene failure keeps them.
         remaining = checks.narration_problems(w.beats, mode=mode,
                                               n_concepts=len(w.plan.concepts))
         job.review = {"editor": editor, "facts": facts, "remaining": remaining,
                       "minutes": round(checks.minutes(w.beats), 1),
-                      "think_questions": [ln.text for b in w.beats.values() for ln in b
-                                          if ln.key == "q1"]}
+                      "think_questions": [qs[-1].text for b, lines in w.beats.items()
+                                          if checks.CONCEPT_BEAT.match(b)
+                                          and (qs := [ln for ln in lines if ln.key.startswith("q")])]}
         job.report = w.report
         await _save_step(video_id, "review.json", job.review)
         await _job_step(job.model_dump())

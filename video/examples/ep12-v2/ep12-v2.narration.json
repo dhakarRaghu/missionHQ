@@ -1,0 +1,495 @@
+{
+  "engine": "kokoro",
+  "voice": "af_heart",
+  "speed": 0.94,
+  "fadeTailS": 0.3,
+  "leadinS": 0.3,
+  "holdS": 1.8,
+  "gapS": 0.8,
+  "beats": {
+    "cold": {
+      "chapter": "The $0.81 in the meeting",
+      "cueLeadS": 0.2,
+      "preDelayS": 0.4,
+      "holdS": 1.2,
+      "gapS": 0.6,
+      "lines": [
+        {
+          "key": "co0",
+          "text": "Your rented H100 GPU costs $3.49 an hour, and at full load it serves 1,200 output tokens per second.",
+          "say": "Your rented H one hundred G P U costs three dollars and forty-nine cents an hour, and at full load it serves twelve hundred output tokens per second."
+        },
+        {
+          "key": "co1",
+          "text": "In a meeting, someone divides $3.49 by 4.32 million tokens an hour, which gives about $0.81 per million tokens.",
+          "say": "In a meeting, someone divides three dollars forty-nine by four point three two million tokens an hour, which gives about eighty-one cents per million tokens."
+        },
+        {
+          "key": "co2",
+          "text": "The hosted API you use charges $1.60 per million, so self-hosting, serving the model yourself, looks twice as cheap.",
+          "say": "The hosted A P I you use charges one dollar sixty per million, so self-hosting, serving the model yourself, looks twice as cheap."
+        },
+        {
+          "key": "co3",
+          "text": "A teammate adds a 4-bit checkpoint, a copy of the model that stores each weight in 4 bits instead of 16.",
+          "say": "A teammate adds a four bit checkpoint, a copy of the model that stores each weight in four bits instead of sixteen."
+        },
+        {
+          "key": "co4",
+          "text": "Its page reports about 99% recovery, its benchmark score as a share of the original's, so the teammate expects a lower cost.",
+          "say": "Its page reports about ninety-nine percent recovery, its benchmark score as a share of the original's, so the teammate expects a lower cost."
+        },
+        {
+          "key": "co5",
+          "text": "So is self-hosting really cheaper than the API, and what would the 4-bit checkpoint actually change?",
+          "say": "So is self-hosting really cheaper than the A P I, and what would the four bit checkpoint actually change?"
+        }
+      ]
+    },
+    "title": {
+      "gapS": 1,
+      "holdS": 1,
+      "lines": [
+        {
+          "key": "t0",
+          "text": "Is self-hosting your LLM cheaper than the API?",
+          "say": "Is self-hosting your L L M cheaper than the A P I?"
+        },
+        {
+          "key": "t1",
+          "text": "Three questions follow: what a 4-bit checkpoint makes faster, whether you can trust its 99% score, and what your real cost is.",
+          "say": "Three questions follow: what a four bit checkpoint makes faster, whether you can trust its ninety-nine percent score, and what your real cost is."
+        }
+      ]
+    },
+    "c1": {
+      "chapter": "What does a 4-bit checkpoint make faster?",
+      "cueLeadS": 0.25,
+      "preDelayS": 0.3,
+      "lines": [
+        {
+          "key": "s0",
+          "text": "Your $0.81 came from 1,200 tokens per second at full load, so the checkpoint lowers it only if it raises that number.",
+          "say": "Your eighty-one cents came from twelve hundred tokens per second at full load, so the checkpoint lowers it only if it raises that number."
+        },
+        {
+          "key": "q0",
+          "text": "Here is the question. Your server runs at full load, and the checkpoint stores each weight in a quarter of the bits."
+        },
+        {
+          "key": "q1",
+          "text": "Does it cut your cost per token by four?"
+        },
+        {
+          "key": "t1",
+          "text": "A first thought is yes, because the GPU now moves a quarter of the bytes for every weight.",
+          "say": "A first thought is yes, because the G P U now moves a quarter of the bytes for every weight."
+        },
+        {
+          "key": "t2",
+          "text": "That is reasonable when reading sets the speed, but at full load the math sets most of it."
+        },
+        {
+          "key": "t3",
+          "text": "So the real question is which part of a request's time each format makes smaller."
+        },
+        {
+          "key": "p0",
+          "text": "A request has two phases, and prefill reads your whole prompt in one pass, mostly doing matrix multiplications, the bulk math."
+        },
+        {
+          "key": "p1",
+          "text": "Decode writes the answer one token at a time, and each token reads every weight from GPU memory.",
+          "say": "Decode writes the answer one token at a time, and each token reads every weight from G P U memory."
+        },
+        {
+          "key": "p2",
+          "text": "With one request at a time, decode is memory-bound, which means reading the weights, not the math, sets its speed."
+        },
+        {
+          "key": "p3",
+          "text": "With many requests at once, each read of the weights serves the whole batch, so the math becomes the limit."
+        },
+        {
+          "key": "m1",
+          "text": "Step 1. The 4-bit format, called W4A16, stores the weights in 4 bits, so decode reads about a quarter of the bytes.",
+          "say": "Step one. The four bit format, called W four A sixteen, stores the weights in four bits, so decode reads about a quarter of the bytes."
+        },
+        {
+          "key": "m2",
+          "text": "Step 2. It turns the weights back into 16 bits before each multiplication, so the math costs what it did before.",
+          "say": "Step two. It turns the weights back into sixteen bits before each multiplication, so the math costs what it did before."
+        },
+        {
+          "key": "m3",
+          "text": "Step 3. The 8-bit format, called W8A8, stores the weights and the activations, the numbers passed between layers, in 8 bits.",
+          "say": "Step three. The eight bit format, called W eight A eight, stores the weights and the activations, the numbers passed between layers, in eight bits."
+        },
+        {
+          "key": "m4",
+          "text": "Step 4. Its multiplications then run in cheaper 8-bit math, so prefill and busy batches get faster too.",
+          "say": "Step four. Its multiplications then run in cheaper eight bit math, so prefill and busy batches get faster too."
+        },
+        {
+          "key": "n0",
+          "text": "One study measured both formats on Llama 3.1 70B in vLLM, an open-source serving engine.",
+          "say": "One study measured both formats on Llama three point one, seventy B, in V L L M, an open-source serving engine."
+        },
+        {
+          "key": "n0b",
+          "text": "It compared them with BF16, the original 16-bit format of the weights.",
+          "say": "It compared them with B F sixteen, the original sixteen bit format of the weights."
+        },
+        {
+          "key": "n1",
+          "text": "With one request at a time, a code-completion task took 50.7 seconds in BF16 on two A100 GPUs.",
+          "say": "With one request at a time, a code completion task took fifty point seven seconds in B F sixteen on two A one hundred G P Us."
+        },
+        {
+          "key": "n2",
+          "text": "The 4-bit checkpoint took 35.0 seconds on one A100, while the 8-bit one took 54.3 seconds on one A100.",
+          "say": "The four bit checkpoint took thirty-five seconds on one A one hundred, while the eight bit one took fifty-four point three seconds on one A one hundred."
+        },
+        {
+          "key": "n3",
+          "text": "Under load, with continuous batching, which packs many requests into each step, BF16 on four A100s served 1.4 queries per second.",
+          "say": "Under load, with continuous batching, which packs many requests into each step, B F sixteen on four A one hundreds served one point four queries per second."
+        },
+        {
+          "key": "n4",
+          "text": "The 8-bit checkpoint served 2.4 and the 4-bit one 2.3, and over seven tasks the study averages 1.87x and 1.64x.",
+          "say": "The eight bit checkpoint served two point four, and the four bit one two point three, and over seven tasks the study averages one point eight seven times and one point six four times."
+        },
+        {
+          "key": "n5",
+          "text": "So 4 bits win clearly only on the quiet server, and under load the gain in this study stayed below 2x.",
+          "say": "So four bits win clearly only on the quiet server, and under load the gain in this study stayed below two times."
+        },
+        {
+          "key": "k0",
+          "text": "A 4-bit checkpoint helps a quiet server most, and on a busy server 8 bits usually help as much or more.",
+          "say": "A four bit checkpoint helps a quiet server most, and on a busy server eight bits usually help as much or more."
+        },
+        {
+          "key": "h0",
+          "text": "But a faster checkpoint is worth nothing until its answers are as good as the original's."
+        },
+        {
+          "key": "h1",
+          "text": "The teammate's page answers that with one line: about 99% recovery on standard benchmarks.",
+          "say": "The teammate's page answers that with one line: about ninety-nine percent recovery on standard benchmarks."
+        }
+      ]
+    },
+    "c2": {
+      "chapter": "Can you trust the 99% recovery score?",
+      "cueLeadS": 0.25,
+      "preDelayS": 0.3,
+      "lines": [
+        {
+          "key": "s0",
+          "text": "For 4-bit Llama 3.1 models at three sizes, the study reports 98.7 to 100.0% recovery on one standard benchmark suite.",
+          "say": "For four bit Llama three point one models at three sizes, the study reports ninety-eight point seven to one hundred percent recovery on one standard benchmark suite."
+        },
+        {
+          "key": "s1",
+          "text": "The teammate asks to ship the checkpoint today, because 99% sounds like no loss at all.",
+          "say": "The teammate asks to ship the checkpoint today, because ninety-nine percent sounds like no loss at all."
+        },
+        {
+          "key": "q0",
+          "text": "Here is the question. Your gate puts the drop in an interval, the range it likely sits in, of 0.2 to 3.4 points.",
+          "say": "Here is the question. Your gate puts the drop in an interval, the range it likely sits in, of point two to three point four points."
+        },
+        {
+          "key": "q1",
+          "text": "Your limit is 2 points, so do you ship the checkpoint or hold it?",
+          "say": "Your limit is two points, so do you ship the checkpoint or hold it?"
+        },
+        {
+          "key": "t1",
+          "text": "A first thought is ship, because the middle of that interval is 1.8 points, under your limit.",
+          "say": "A first thought is ship, because the middle of that interval is one point eight points, under your limit."
+        },
+        {
+          "key": "t2",
+          "text": "That is reasonable for a single measurement, but the interval says a 3.4-point drop is still possible.",
+          "say": "That is reasonable for a single measurement, but the interval says a three point four point drop is still possible."
+        },
+        {
+          "key": "t3",
+          "text": "So the real question is which end of the interval must stay inside your limit."
+        },
+        {
+          "key": "p0",
+          "text": "A benchmark is a sample of tasks, and a standard suite samples mostly short English questions with answer options."
+        },
+        {
+          "key": "p1",
+          "text": "Multiple choice absorbs small rounding errors, because the right option only needs to rank first."
+        },
+        {
+          "key": "p2",
+          "text": "Damage concentrates in maths, non-Latin scripts and long reasoning, because each token's error feeds the next token."
+        },
+        {
+          "key": "p3",
+          "text": "One study of multilingual models measured this gap on a 103-billion-parameter model with 4-bit weights.",
+          "say": "One study of multilingual models measured this gap on a one hundred three billion parameter model with four bit weights."
+        },
+        {
+          "key": "p4",
+          "text": "Its automatic Japanese tasks dropped 1.7%, but human evaluators reported a 16.0% drop on realistic prompts.",
+          "say": "Its automatic Japanese tasks dropped one point seven percent, but human evaluators reported a sixteen percent drop on realistic prompts."
+        },
+        {
+          "key": "p5",
+          "text": "So the decision belongs to a quantization gate, a pass or fail test on your own items before a checkpoint replaces yours."
+        },
+        {
+          "key": "m1",
+          "text": "Step 1. Draw the items from your own traffic, your task and your languages, because damage hides where suites do not look.",
+          "say": "Step one. Draw the items from your own traffic, your task and your languages, because damage hides where suites do not look."
+        },
+        {
+          "key": "m2",
+          "text": "Step 2. Run them at your real maximum context and output length, because errors compound along long answers.",
+          "say": "Step two. Run them at your real maximum context and output length, because errors compound along long answers."
+        },
+        {
+          "key": "m3",
+          "text": "Step 3. Score both checkpoints on the same items, then resample the items many times, which gives a paired interval for the drop.",
+          "say": "Step three. Score both checkpoints on the same items, then resample the items many times, which gives a paired interval for the drop."
+        },
+        {
+          "key": "m4",
+          "text": "Step 4. Judge the interval at its worst end, so 3.4 points against a limit of 2 means hold.",
+          "say": "Step four. Judge the interval at its worst end, so three point four points against a limit of two means hold."
+        },
+        {
+          "key": "n0",
+          "text": "The gate also needs enough items, and with 20 items each item is worth 5 points.",
+          "say": "The gate also needs enough items, and with twenty items each item is worth five points."
+        },
+        {
+          "key": "n1",
+          "text": "One flipped item moves the score 5 points, and its interval reaches a 15-point drop, so the gate holds.",
+          "say": "One flipped item moves the score five points, and its interval reaches a fifteen point drop, so the gate holds."
+        },
+        {
+          "key": "n2",
+          "text": "The interval rules out zero only when 4 items regress, a 20-point drop, so 20 items cannot see a 2-point drop.",
+          "say": "The interval rules out zero only when four items regress, a twenty point drop, so twenty items cannot see a two point drop."
+        },
+        {
+          "key": "n3",
+          "text": "So pick the smallest drop you care about first, then add items until the interval can see it."
+        },
+        {
+          "key": "k0",
+          "text": "A recovery score measures only the tasks its benchmark samples, so your gate must use your own traffic."
+        },
+        {
+          "key": "h0",
+          "text": "Suppose the checkpoint passes your gate, and your next full-load test shows a higher rate."
+        },
+        {
+          "key": "h1",
+          "text": "The meeting's $0.81 still hides one more input, and it is not the tokens per second.",
+          "say": "The meeting's eighty-one cents still hides one more input, and it is not the tokens per second."
+        }
+      ]
+    },
+    "c3": {
+      "chapter": "So is it cheaper than the API?",
+      "cueLeadS": 0.25,
+      "preDelayS": 0.3,
+      "lines": [
+        {
+          "key": "s0",
+          "text": "The meeting's math assumed 1,200 tokens in every second of every hour, which is 4.32 million tokens an hour.",
+          "say": "The meeting's math assumed twelve hundred tokens in every second of every hour, which is four point three two million tokens an hour."
+        },
+        {
+          "key": "s1",
+          "text": "But your users send fewer requests at night and at weekends, and the rental bills every hour anyway."
+        },
+        {
+          "key": "q0",
+          "text": "Here is the question. The H100 bills $3.49 an hour and serves 1,200 tokens per second at full load.",
+          "say": "Here is the question. The H one hundred bills three dollars and forty-nine cents an hour, and serves twelve hundred tokens per second at full load."
+        },
+        {
+          "key": "q1",
+          "text": "Which one input moves your cost per million tokens ten times, without touching the GPU or the model?",
+          "say": "Which one input moves your cost per million tokens ten times, without touching the G P U or the model?"
+        },
+        {
+          "key": "t1",
+          "text": "A first thought is the hourly price, because a cheaper rental lowers the price of every token."
+        },
+        {
+          "key": "t2",
+          "text": "That moves it, but the price is fixed once you rent, and your busy hours can fall to a tenth."
+        },
+        {
+          "key": "t3",
+          "text": "So the real question is how much of each paid hour serves real requests."
+        },
+        {
+          "key": "p0",
+          "text": "Cost per million tokens has four inputs, and the hourly rate and the number of GPUs sit on top.",
+          "say": "Cost per million tokens has four inputs, and the hourly rate and the number of G P Us sit on top."
+        },
+        {
+          "key": "p1",
+          "text": "Below them sit the sustained tokens per second, the rate your server holds at full load, and utilisation."
+        },
+        {
+          "key": "p2",
+          "text": "Utilisation is the share of paid hours that serve real requests, and it is the input people forget."
+        },
+        {
+          "key": "m1",
+          "text": "Step 1. Start from billed time, because the H100 costs $3.49 an hour whether it writes tokens or waits.",
+          "say": "Step one. Start from billed time, because the H one hundred costs three dollars and forty-nine cents an hour, whether it writes tokens or waits."
+        },
+        {
+          "key": "m2",
+          "text": "Step 2. Use the sustained rate from your own full-load test, 1,200 tokens per second, which is 4.32 million an hour.",
+          "say": "Step two. Use the sustained rate from your own full-load test, twelve hundred tokens per second, which is four point three two million an hour."
+        },
+        {
+          "key": "m3",
+          "text": "Step 3. Multiply by utilisation, so the cost is about $0.81 per million at 100% and $8.08 at 10%.",
+          "say": "Step three. Multiply by utilisation, so the cost is about eighty-one cents per million at one hundred percent, and eight dollars and eight cents at ten percent."
+        },
+        {
+          "key": "m4",
+          "text": "Step 4. Divide that full-load cost by the price of one named API, which gives the break-even utilisation.",
+          "say": "Step four. Divide that full-load cost by the price of one named A P I, which gives the break-even utilisation."
+        },
+        {
+          "key": "n0",
+          "text": "The prices in this video are OpenAI's: GPT-4.1 mini at $1.60 and GPT-4.1 at $8.00 per million output tokens.",
+          "say": "The prices in this video are Open A I's: G P T four point one mini at one dollar sixty, and G P T four point one at eight dollars per million output tokens."
+        },
+        {
+          "key": "n1",
+          "text": "Against GPT-4.1 mini, self-hosting is cheaper only above 50.5% utilisation, and against GPT-4.1 above 10.1%.",
+          "say": "Against G P T four point one mini, self-hosting is cheaper only above fifty point five percent utilisation, and against G P T four point one, above ten point one percent."
+        },
+        {
+          "key": "n2",
+          "text": "Then add the people line: a quarter of one engineer, who owns upgrades and incidents, costs $3,750 a month.",
+          "say": "Then add the people line: a quarter of one engineer, who owns upgrades and incidents, costs three thousand seven hundred fifty dollars a month."
+        },
+        {
+          "key": "n3",
+          "text": "With the GPU's $2,548 a month, the total is $6,298, so self-hosting must serve 3,936 million tokens to beat GPT-4.1 mini.",
+          "say": "With the G P U's two thousand five hundred forty-eight dollars a month, the total is six thousand two hundred ninety-eight dollars, so self-hosting must serve three thousand nine hundred thirty-six million tokens to beat G P T four point one mini."
+        },
+        {
+          "key": "n4",
+          "text": "Against GPT-4.1 it must serve 787 million, and this GPU's ceiling at full load is 3,154 million.",
+          "say": "Against G P T four point one it must serve seven hundred eighty-seven million, and this G P U's ceiling at full load is three thousand one hundred fifty-four million."
+        },
+        {
+          "key": "k0",
+          "text": "Your cost per token divides the hourly bill by the tokens you actually serve, so idle hours raise every token's price."
+        }
+      ]
+    },
+    "payoff": {
+      "chapter": "Back to the meeting",
+      "cueLeadS": 0.25,
+      "preDelayS": 0.3,
+      "lines": [
+        {
+          "key": "a0",
+          "text": "Back in the meeting, the $0.81 assumed the GPU serves 1,200 tokens every second of every hour, which is 100% utilisation.",
+          "say": "Back in the meeting, the eighty-one cents assumed the G P U serves twelve hundred tokens every second of every hour, which is one hundred percent utilisation."
+        },
+        {
+          "key": "a1",
+          "text": "Against GPT-4.1 mini, with the people line, you need 3,936 million tokens a month, and the GPU can serve 3,154 million.",
+          "say": "Against G P T four point one mini, with the people line, you need three thousand nine hundred thirty-six million tokens a month, and the G P U can serve three thousand one hundred fifty-four million."
+        },
+        {
+          "key": "a2",
+          "text": "That is about 1,500 tokens every second of the month, above this GPU's full-load rate, so it never pays at this speed.",
+          "say": "That is about fifteen hundred tokens every second of the month, above this G P U's full-load rate, so it never pays at this speed."
+        },
+        {
+          "key": "a3",
+          "text": "Against GPT-4.1, the 787 million tokens need the GPU busy about a quarter of the time, so there it pays.",
+          "say": "Against G P T four point one, the seven hundred eighty-seven million tokens need the G P U busy about a quarter of the time, so there it pays."
+        },
+        {
+          "key": "a4",
+          "text": "The 4-bit checkpoint changes only tokens per second, only for the traffic shape it fits, and only after it passes your gate.",
+          "say": "The four bit checkpoint changes only tokens per second, only for the traffic shape it fits, and only after it passes your gate."
+        },
+        {
+          "key": "a5",
+          "text": "If your own test matched the study's 1.64x under load, this GPU would reach about 2,000 tokens per second.",
+          "say": "If your own test matched the study's one point six four times under load, this G P U would reach about two thousand tokens per second."
+        },
+        {
+          "key": "a6",
+          "text": "Against GPT-4.1 mini it would then need to be busy about three quarters of every hour, all month.",
+          "say": "Against G P T four point one mini, it would then need to be busy about three quarters of every hour, all month."
+        },
+        {
+          "key": "a7",
+          "text": "So the checkpoint moves your cost by less than 2x, while utilisation alone moved it ten times.",
+          "say": "So the checkpoint moves your cost by less than two times, while utilisation alone moved it ten times."
+        },
+        {
+          "key": "a8",
+          "text": "Four reasons can settle it before any arithmetic: data that stays in your network, a model nobody hosts, your own latency floor, and stable prices."
+        },
+        {
+          "key": "a9",
+          "text": "Without one of them, self-hosting is a bet on utilisation against one named API, with a people line on top.",
+          "say": "Without one of them, self-hosting is a bet on utilisation against one named A P I, with a people line on top."
+        }
+      ]
+    },
+    "recap": {
+      "chapter": "Recap",
+      "cueLeadS": 0.3,
+      "holdS": 3,
+      "lines": [
+        {
+          "key": "r0",
+          "text": "Self-hosting, in three lines."
+        },
+        {
+          "key": "r1",
+          "text": "4 bits speed a quiet server most, because decode reads fewer bytes, and 8 bits usually lift a busy one more.",
+          "say": "Four bits speed a quiet server most, because decode reads fewer bytes, and eight bits usually lift a busy one more."
+        },
+        {
+          "key": "r2",
+          "text": "A benchmark measures only the tasks it samples, so gate a checkpoint on your own traffic, at the interval's worst end."
+        },
+        {
+          "key": "r3",
+          "text": "Cost per token divides the bill by served tokens, so state a utilisation, name the API and add the people line.",
+          "say": "Cost per token divides the bill by served tokens, so state a utilisation, name the A P I, and add the people line."
+        }
+      ]
+    },
+    "end": {
+      "cueLeadS": 0.2,
+      "holdS": 9,
+      "lines": [
+        {
+          "key": "x0",
+          "text": "The full lesson, with two more optimisations, is on my site, and the link is in the description."
+        }
+      ]
+    }
+  }
+}

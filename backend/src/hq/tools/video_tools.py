@@ -22,9 +22,11 @@ async def start_video(ctx: RunContext[HQDeps], lesson: str, mode: str = "") -> s
 
     `lesson` is the lesson's title or its learning/lessons/*.md path. `mode`
     is "course" for a course phase or "article" for a Learn article; leave it
-    empty to take it from the lesson. It runs to a finished video with no
-    approval step, unless a check stops it. A video whose build stopped is
-    built again from its checked script.
+    empty to take it from the lesson. The lesson is told as parts of about
+    ten minutes, each its own video, written side by side and built one after
+    another, with no approval step unless a check stops a part. Parts already
+    built are kept; a part whose build stopped is built again from its
+    checked script.
     """
     from hq.video import jobs  # late import: hq.video.script imports the tools package
 
@@ -45,7 +47,11 @@ async def start_video(ctx: RunContext[HQDeps], lesson: str, mode: str = "") -> s
                               attempt=ctx.deps.run_id or "")
     if not result["started"]:
         return f"The video {result['video_id']} is already being made (task {result['task_id']})."
-    what = ("Building it again from its checked script" if result["stage"] == "build"
-            else "Writing its script")
-    return (f"{what}: the {mode} video of {md} (task {result['task_id']}). It runs to a"
-            " finished video by itself; Courses → Videos shows how far it got.")
+    what = {"build": "Building it again from its checked script",
+            "series": "Planning its parts",
+            "script": "Writing the script"}.get(result["stage"], "Starting it")
+    parts = result.get("parts") or []
+    if len(parts) > 1:
+        what += f" of {len(parts)} stopped parts"
+    return (f"{what}: the {mode} video of {md} (task {result['task_id']}). It runs to"
+            " finished videos by itself; Courses → Videos shows how far it got.")

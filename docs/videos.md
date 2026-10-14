@@ -100,6 +100,7 @@ manifest, and the file must resolve inside the media folder.
 | `file`, `captions` | Paths relative to the media folder. |
 | `youtube_id` | Set when the video is uploaded to YouTube as a private video. |
 | `source_lesson` | The lesson the video was made from. |
+| `series_id`, `part`, `parts`, `series_title` | A part of a lesson told as a series of about ten minutes a part: part `part` of `parts`. The phase and article pages show one button per part. Absent on a video made before series. |
 
 ## Add a video by hand
 
