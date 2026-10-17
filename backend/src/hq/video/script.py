@@ -75,6 +75,13 @@ _STEP: dict[str, Any] = {"retries_allowed": True, "max_attempts": 2, "interval_s
 
 # --- instructions ----------------------------------------------------------------
 
+def _chapter(text: str, limit: int = 60) -> str:
+    """A chapter label is a short name; a title may run to 70, so cut it at a word."""
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
+
+
 def _read(name: str) -> str:
     return (paths.prompts_dir() / name).read_text()
 
@@ -545,8 +552,8 @@ class ScriptWriter:
 
     def narration(self) -> dict[str, Any]:
         assert self.plan is not None
-        heads = {c.id: c.heading for c in self.plan.concepts}
-        heads.update({"cold": self.plan.title, "payoff": "Back to the question", "recap": "Recap"})
+        heads = {c.id: _chapter(c.heading) for c in self.plan.concepts}
+        heads.update({"cold": _chapter(self.plan.title), "payoff": "Back to the question", "recap": "Recap"})
         return {
             "engine": "kokoro", "voice": "af_heart", "speed": 0.94, "fadeTailS": 0.3,
             "leadinS": 0.4, "holdS": 1.8, "gapS": 0.8,

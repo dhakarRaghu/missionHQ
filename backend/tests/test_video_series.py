@@ -101,3 +101,12 @@ def test_what_the_last_editor_round_finds_is_rewritten_not_only_noted(monkeypatc
     w.beats = {"c1": [Line(key="k0", text="A line.")]}
     asyncio.run(w.edit())
     assert rewrites == ["c1"] * (script.REVIEW_ROUNDS + 1)
+
+
+def test_a_long_title_becomes_a_chapter_the_spec_accepts() -> None:
+    title = "Your service froze for 3 s, but the load test printed p99 50 ms"
+    assert len(title) > 60
+    chapter = script._chapter(title)
+    assert len(chapter) <= 60
+    assert title.startswith(chapter)
+    assert script._chapter("Short title") == "Short title"
