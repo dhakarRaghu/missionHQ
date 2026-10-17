@@ -63,6 +63,7 @@ CALL_LIMIT_S = 1500.0         # a long beat at high effort; the idle limit catch
 PLAN_ATTEMPTS = 4
 BEAT_RETRIES = 2
 REVIEW_ROUNDS = 2
+WHOLE_ROUNDS = 3                # rewrite, check, rewrite again: the last round is checked too
 SCENE_ATTEMPTS = 3
 EDITOR_BAR = 4                # a criterion under this sends the beat back
 EDITOR_MEAN = 3.5             # so does a beat whose mean is under this
@@ -472,17 +473,31 @@ class ScriptWriter:
             self.beats[beat] = await self.write_beat(beat)
             await _save_step(self.job.id, "narration.json", self.narration())
 
-    async def review_whole(self) -> None:
+    async def review_whole(self) -> list[str]:
+        """Send each whole-narration finding to the beats it names, and the
+        total length to the longest concepts, then check again: a rewrite can
+        miss its length, and the last one was never checked before the stop
+        (2026-10-17). Returns the beats it rewrote."""
         assert self.plan is not None
+        rewritten: list[str] = []
+        for _ in range(WHOLE_ROUNDS):
+            problems = checks.narration_problems(self.beats, mode=self.job.mode,
+                                                 n_concepts=len(self.plan.concepts))
+            grouped = checks.by_beat(problems)
+            for beat, items in checks.length_cuts(self.beats, mode=self.job.mode).items():
+                grouped.setdefault(beat, []).extend(items)
+            todo = {b: items for b, items in grouped.items() if b in self.beats}
+            if not todo:
+                break
+            for beat, items in todo.items():
+                self.beats[beat] = await self.write_beat(beat, items)
+                if beat not in rewritten:
+                    rewritten.append(beat)
         problems = checks.narration_problems(self.beats, mode=self.job.mode,
                                              n_concepts=len(self.plan.concepts))
-        grouped = checks.by_beat(problems)
-        for beat, items in grouped.items():
-            if beat in self.beats:
-                self.beats[beat] = await self.write_beat(beat, items)
-        rest = [p for b, items in grouped.items() if b not in self.beats for p in items]
-        for p in rest:
+        for p in problems:
             self.note(f"whole video: {p}")
+        return rewritten
 
     async def edit(self) -> dict[str, Any]:
         assert self.plan is not None
@@ -758,7 +773,11 @@ async def run(task: dict[str, Any], deps: Any) -> tuple[str, str]:
             job.review = {**job.review, "facts": facts}
             await done("facts")
         if "whole2" not in job.stages:
-            await w.review_whole()
+            # A beat rewritten here comes after the fact check, so it is
+            # checked again: a cut can drop the line a number rested on.
+            if again := await w.review_whole():
+                facts = [f for f in facts if f["beat"] not in again] + await w.check_facts(again)
+                job.review = {**job.review, "facts": facts}
             await done("whole2")
         # The reviews are saved before the scenes, so a scene failure keeps them.
         remaining = checks.narration_problems(w.beats, mode=mode,

@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import subprocess
+from collections import Counter
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
@@ -323,11 +324,31 @@ def trim_to_cap(rel_path: str, content: str) -> tuple[str, int]:
     return head + "\n".join([*title, *rest]).rstrip() + "\n", dropped
 
 
+def added_text(existing: str | None, content: str) -> str:
+    """The lines of ``content`` that ``existing`` does not already hold, in
+    order. A line kept from the current file is not new; a second copy of an
+    old line is."""
+    if not existing:
+        return content
+    left = Counter(existing.splitlines())
+    out: list[str] = []
+    for line in content.splitlines():
+        if left[line] > 0:
+            left[line] -= 1
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
 def write_problem(rel_path: str, content: str, *, actor: str, existing: str | None) -> str | None:
     """Every code gate that needs only the target path, the new content and
     the current content: owner-only block, memory-block cap (``block_cap``),
     future date in the filename, future date in a heading, destructive edit.
     Also the employer gate (``hq.privacy``) for every writer but the owner.
+    It reads only the lines this write adds (``added_text``): a name already
+    in the file is the owner's to remove, and refusing it again sent the
+    writer to rewrite text that never held it. From 2026-10-09 every nightly
+    posts run failed so, on three old lines of projects/content/ideas.md.
     ``actor == 'owner'`` skips the owner-only, employer, future-heading and
     destructive gates (the owner may rewrite anything). Returns the refusal text or None."""
     if actor != "owner" and rel_path in OWNER_ONLY:
@@ -337,7 +358,7 @@ def write_problem(rel_path: str, content: str, *, actor: str, existing: str | No
             f" {PROPOSALS_DIR}<YYYY-MM-DD>.md and the owner promotes it"
         )
     if actor != "owner":
-        refused = privacy.problem(rel_path, content)
+        refused = privacy.problem(rel_path, added_text(existing, content))
         if refused:
             return refused
     cap = block_cap(rel_path)

@@ -291,6 +291,41 @@ def narration_problems(beats: Mapping[str, Sequence[Line]], *, mode: str,
     return out
 
 
+LENGTH_MARGIN = 0.25             # minutes under the limit a cut aims for, so a rewrite that runs a little long still fits
+
+
+def length_cuts(beats: Mapping[str, Sequence[Line]], *, mode: str) -> dict[str, list[str]]:
+    """When the whole narration runs past its limit, a finding for each of the
+    longest concept beats with how many words to cut there. The total-length
+    finding names no beat, so ``by_beat`` cannot send it anywhere: on
+    2026-10-17 a 14.6-minute script was only noted, never cut, and stopped
+    before the voice. The cut levels the longest concepts down to one length,
+    never below a concept's minimum."""
+    high = MINUTES[mode][1]
+    mins = minutes(beats)
+    if mins <= high:
+        return {}
+    excess = round((mins - high + LENGTH_MARGIN) * WORDS_PER_MINUTE)
+    floor = round(PER_CONCEPT[0] * WORDS_PER_MINUTE)
+    words = {b: minutes({b: lines}) * WORDS_PER_MINUTE
+             for b, lines in beats.items() if CONCEPT_BEAT.match(b)}
+    # Lower one level across the longest beats until the cut covers the excess.
+    level = max(words.values(), default=0.0)
+    while level > floor and sum(max(0.0, w - level) for w in words.values()) < excess:
+        level -= 1
+    out: dict[str, list[str]] = {}
+    for beat, w in sorted(words.items(), key=lambda kv: -kv[1]):
+        cut = round(w - level)
+        if cut <= 0:
+            break
+        out[beat] = [(f"{beat}: the whole narration runs about {mins:.1f} minutes; a {mode}"
+                      f" video runs at most {high:g}, and this is one of its longest concepts."
+                      f" Cut about {cut} words here, from about {round(w)} to {round(w) - cut}."
+                      " Keep every step, number and term; drop repeats, side remarks and"
+                      " sentences that say a point twice")]
+    return out
+
+
 def by_beat(problems: Sequence[str]) -> dict[str, list[str]]:
     """Group findings by the beat they name, so only those beats are rewritten."""
     out: dict[str, list[str]] = {}

@@ -110,3 +110,38 @@ def test_a_long_title_becomes_a_chapter_the_spec_accepts() -> None:
     assert len(chapter) <= 60
     assert title.startswith(chapter)
     assert script._chapter("Short title") == "Short title"
+
+
+def test_the_whole_review_cuts_a_long_script_and_checks_the_last_rewrite(monkeypatch) -> None:
+    """2026-10-17: a 14.6-minute script was only noted, never cut, and the
+    rewrite of a long concept was never checked again before the stop."""
+    import asyncio
+    import math
+    import re
+    from types import SimpleNamespace
+
+    from hq.video import checks
+    from hq.video.models import Line, VideoJob
+
+    def words(n: int) -> list:
+        return [Line(key=f"m{i}", text=" ".join(["word"] * 9) + " end.") for i in range(n // 10)]
+
+    calls: list[str] = []
+
+    async def write_beat(self, beat: str, problems=()) -> list:
+        calls.append(beat)
+        asked = [int(m.group(1)) for p in problems if (m := re.search(r"Cut about (\d+)", p))]
+        if not asked:
+            return self.beats[beat]
+        # The first rewrite of a beat cuts only half of what it was asked.
+        cut = asked[0] if calls.count(beat) > 1 else asked[0] // 2
+        return self.beats[beat][: len(self.beats[beat]) - math.ceil(cut / 10)]
+
+    monkeypatch.setattr(script.ScriptWriter, "write_beat", write_beat)
+    w = script.ScriptWriter(VideoJob(id="x-p1", mode="course", lesson_md="l.md"), {})
+    w.plan = SimpleNamespace(concepts=[1, 2, 3])
+    w.beats = {"cold": words(100), "c1": words(900), "c2": words(800), "c3": words(400)}
+    rewritten = asyncio.run(w.review_whole())
+    assert checks.minutes(w.beats) <= checks.MINUTES["course"][1]
+    assert "c1" in rewritten and calls.count("c1") >= 2
+    assert not any("narration runs" in n for n in w.report)

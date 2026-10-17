@@ -447,6 +447,24 @@ def test_the_vault_refuses_the_name_from_every_writer_but_the_owner(monkeypatch)
     assert memory.write_problem("projects/a.md", text, actor="owner", existing=None) is None
 
 
+def test_a_name_already_in_the_file_does_not_refuse_a_clean_addition(monkeypatch) -> None:
+    """2026-10-09 to 10-17: three old lines of ideas.md named an employer, and
+    every nightly posts batch was refused for them however it was rewritten."""
+    monkeypatch.setattr(settings(), "private_employers", ("Acme Corp",))
+    old = "# Content ideas\n\n## 2026-09-22\n\nemployer=Acme Corp (never written about)\n"
+    clean = old.replace("# Content ideas\n\n", "# Content ideas\n\n## 2026-10-17\n\nA post.\n\n")
+    assert memory.write_problem("projects/a.md", clean, actor="sage", existing=old) is None
+    named = clean.replace("A post.", "A post about Acme Corp.")
+    assert memory.write_problem("projects/a.md", named, actor="sage",
+                                existing=old) == privacy.REFUSAL
+    # A second copy of an old line is new text.
+    twice = clean + "employer=Acme Corp (never written about)\n"
+    assert memory.write_problem("projects/a.md", twice, actor="sage",
+                                existing=old) == privacy.REFUSAL
+    assert [ln for ln in memory.added_text(old, clean).splitlines() if ln] == [
+        "## 2026-10-17", "A post."]
+
+
 def test_only_the_owner_writes_the_shared_memory_blocks() -> None:
     assert memory.OWNER_ONLY == frozenset(memory.BLOCK_CAPS)
     assert "memory/rules.md" not in memory.BLOCK_CAPS

@@ -8,6 +8,8 @@ on fixed phrases and the parts of about ten minutes are checked here.
 
 from __future__ import annotations
 
+import re
+
 from hq.video import checks
 from hq.video.models import Line, PartPlan, SeriesPlan
 
@@ -124,3 +126,25 @@ def test_a_mechanism_has_at_least_two_lines() -> None:
     # passed every narration check and then failed every scene round.
     found = checks.concept_problems("c1", _concept(m1=""))
     assert any("at least 2 m lines" in p for p in found)
+
+
+def _words(n: int, key: str = "m") -> list[Line]:
+    """A beat of ``n`` words, in lines of ten."""
+    return [Line(key=f"{key}{i}", text=" ".join(["word"] * 9) + " end.") for i in range(n // 10)]
+
+
+def test_a_long_narration_is_cut_from_its_longest_concepts() -> None:
+    beats = {"cold": _words(100), "c1": _words(900), "c2": _words(800), "c3": _words(400)}
+    assert checks.minutes(beats) > checks.MINUTES["course"][1]
+    cuts = checks.length_cuts(beats, mode="course")
+    assert set(cuts) == {"c1", "c2"}
+    asked = {b: int(re.search(r"Cut about (\d+) words", items[0]).group(1))
+             for b, items in cuts.items()}
+    assert asked["c1"] > asked["c2"]
+    over = checks.minutes(beats) - checks.MINUTES["course"][1]
+    assert sum(asked.values()) >= over * checks.WORDS_PER_MINUTE
+    assert checks.by_beat([cuts["c1"][0]]) == {"c1": cuts["c1"]}
+
+
+def test_a_narration_within_its_limit_is_not_cut() -> None:
+    assert checks.length_cuts({"c1": _words(900), "c2": _words(800)}, mode="course") == {}
