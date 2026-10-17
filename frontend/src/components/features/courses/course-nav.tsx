@@ -30,10 +30,17 @@ import { cn } from "@/lib/utils";
  * scrolled sideways, the menu covered the cards, and the phases were pushed
  * below the fold. A column takes one more course without changing shape.
  *
- * Three groups, in the order he uses them: the path he is working through,
- * the applied-AI curriculum behind it (mostly still a plan), and the platform
- * courses, which are reference and stay closed until he asks for them. Above
- * them, one row opens the videos made from the courses.
+ * Two groups: the path he is working through, and the other courses, which
+ * are reference and stay closed until he asks for them. Above them, one row
+ * opens the videos made from the courses.
+ *
+ * Each course is listed once. Step 2 of the path, Applied AI, is the 21
+ * modules of the applied-AI curriculum, each a course of its own on the
+ * platform. Until 2026-10-17 the same courses showed three times: as a
+ * curriculum module, as an untitled platform course, and, for inference
+ * internals (module 1), as path step 3. The old five-phase spec behind step 2
+ * (`learning/courses/02-applied-ai/course.md`) is no longer listed: the
+ * modules are that course now.
  */
 export function CourseNav({
   courses,
@@ -62,9 +69,22 @@ export function CourseNav({
   onOpenModule: (module: CurriculumModule) => void;
   onOpenVideos: () => void;
 }) {
-  const path = courses.filter(onPath);
-  const others = courses.filter((c) => !onPath(c));
   const modules = curriculum?.modules ?? [];
+  const topics = new Set(modules.map((m) => m.topic).filter(Boolean));
+  // A curriculum course is reached through its module, never on its own row.
+  const own = courses.filter((c) => !topics.has(c.course));
+  const path = own.filter(onPath);
+  const others = own.filter((c) => !onPath(c));
+  // The path slot the modules take. Without its spec row they go last.
+  const slot = path.findIndex((c) => c.course === APPLIED_AI_COURSE);
+  const steps: PathStep[] = path
+    .filter((c) => c.course !== APPLIED_AI_COURSE)
+    .map((course) => ({ kind: "course", course }));
+  steps.splice(slot < 0 ? steps.length : slot, 0, {
+    kind: "applied",
+    title: slot < 0 ? "Applied AI" : courseTitle(path[slot]),
+  });
+  const inApplied = topics.has(current.course);
   // The same key as the library's list, so opening it costs no second fetch.
   const videos = useQuery({
     queryKey: mediaKeys.videos({ kind: "course,youtube" }),
@@ -73,14 +93,18 @@ export function CourseNav({
   });
   const reading = !openModule && !videosOpen;
 
-  const [open, setOpen] = useState<Record<GroupName, boolean>>({
-    path: true,
-    curriculum: true,
+  // Undefined until he clicks: the modules arrive after the courses, so the
+  // default for Applied AI is worked out on each render, not once.
+  const [clicked, setClicked] = useState<Partial<Record<GroupName, boolean>>>({});
+  const open: Record<GroupName, boolean> = {
+    path: clicked.path ?? true,
+    // Open while he is reading one of its modules, which is most of the time.
+    applied: clicked.applied ?? inApplied,
     // Reference, not the plan: it stays closed until he opens it.
-    platform: false,
-  });
+    others: clicked.others ?? false,
+  };
   const toggle = (name: GroupName) =>
-    setOpen((was) => ({ ...was, [name]: !was[name] }));
+    setClicked((was) => ({ ...was, [name]: !open[name] }));
 
   return (
     <nav aria-label="Courses" className="courses-switcher -mx-1 px-1">
@@ -104,89 +128,95 @@ export function CourseNav({
       <Group
         name="path"
         title="Your path"
-        count={path.length}
+        count={steps.length}
         open={open.path}
         onToggle={toggle}
       >
         <ol className="space-y-0.5">
-          {path.map((course) => (
-            <li key={course.course}>
-              <CourseRow
-                course={course}
-                step={course.course_order}
-                selected={reading && course.course === current.course}
-                onSelect={() => onPickCourse(course.course)}
-              />
-            </li>
-          ))}
+          {steps.map((step, index) =>
+            step.kind === "course" ? (
+              <li key={step.course.course}>
+                <CourseRow
+                  course={step.course}
+                  step={index + 1}
+                  selected={reading && step.course.course === current.course}
+                  onSelect={() => onPickCourse(step.course.course)}
+                />
+              </li>
+            ) : (
+              <li key="applied">
+                <AppliedRow
+                  step={index + 1}
+                  title={step.title}
+                  modules={modules}
+                  active={courses.some((c) => c.active && topics.has(c.course))}
+                  open={open.applied}
+                  onToggle={() => toggle("applied")}
+                />
+                <div id="course-group-applied" hidden={!open.applied} className="pl-4">
+                  {pending ? (
+                    <Skeleton className="h-24 w-full" />
+                  ) : error ? (
+                    <div role="alert" className="px-2 py-1 text-xs text-destructive">
+                      <p className="break-words">Could not load the modules: {error}</p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-1"
+                        onClick={onRetry}
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  ) : !modules.length ? (
+                    <p className="px-2 py-1 text-xs text-muted-foreground">
+                      The curriculum file is not in the repo yet.
+                    </p>
+                  ) : (
+                    byLayer(modules).map(([layer, group]) => (
+                      <section key={layer} aria-label={layer} className="mt-1.5">
+                        <h4 className="px-2 text-[11px] font-medium text-muted-foreground">
+                          {layer}
+                        </h4>
+                        <ol className="space-y-0.5">
+                          {group.map((module) => (
+                            <li key={module.number}>
+                              <ModuleRow
+                                module={module}
+                                active={courses.some(
+                                  (c) => c.active && c.course === module.topic,
+                                )}
+                                selected={
+                                  module.number === openModule?.number ||
+                                  (reading &&
+                                    Boolean(module.topic) &&
+                                    module.topic === current.course)
+                                }
+                                onSelect={() =>
+                                  module.topic
+                                    ? onPickCourse(module.topic)
+                                    : onOpenModule(module)
+                                }
+                              />
+                            </li>
+                          ))}
+                        </ol>
+                      </section>
+                    ))
+                  )}
+                </div>
+              </li>
+            ),
+          )}
         </ol>
-      </Group>
-
-      <Group
-        name="curriculum"
-        title="Applied-AI curriculum"
-        count={modules.length}
-        open={open.curriculum}
-        onToggle={toggle}
-      >
-        {pending ? (
-          <Skeleton className="h-24 w-full" />
-        ) : error ? (
-          <div role="alert" className="px-2 py-1 text-xs text-destructive">
-            <p className="break-words">Could not load the curriculum: {error}</p>
-            <Button
-              size="sm"
-              variant="outline"
-              className="mt-1"
-              onClick={onRetry}
-            >
-              Retry
-            </Button>
-          </div>
-        ) : !modules.length ? (
-          <p className="px-2 py-1 text-xs text-muted-foreground">
-            The curriculum file is not in the repo yet.
-          </p>
-        ) : (
-          <>
-            {curriculum ? <Counts curriculum={curriculum} /> : null}
-            {byLayer(modules).map(([layer, group]) => (
-              <section key={layer} aria-label={layer} className="mt-1.5">
-                <h4 className="px-2 text-[11px] font-medium text-muted-foreground">
-                  {layer}
-                </h4>
-                <ol className="space-y-0.5">
-                  {group.map((module) => (
-                    <li key={module.number}>
-                      <ModuleRow
-                        module={module}
-                        selected={
-                          module.number === openModule?.number ||
-                          (reading &&
-                            Boolean(module.topic) &&
-                            module.topic === current.course)
-                        }
-                        onSelect={() =>
-                          module.topic
-                            ? onPickCourse(module.topic)
-                            : onOpenModule(module)
-                        }
-                      />
-                    </li>
-                  ))}
-                </ol>
-              </section>
-            ))}
-          </>
-        )}
       </Group>
 
       {others.length ? (
         <Group
-          name="platform"
-          title="Platform courses"
+          name="others"
+          title="Other courses"
           count={others.length}
-          open={open.platform}
+          open={open.others}
           onToggle={toggle}
         >
           <ol className="space-y-0.5">
@@ -206,7 +236,14 @@ export function CourseNav({
   );
 }
 
-type GroupName = "path" | "curriculum" | "platform";
+type GroupName = "path" | "applied" | "others";
+
+/** The path course whose place the curriculum modules take. */
+const APPLIED_AI_COURSE = "elite-applied-ai";
+
+type PathStep =
+  | { kind: "course"; course: Course }
+  | { kind: "applied"; title: string };
 
 /** A heading that opens and closes its list, with how many rows are in it. */
 function Group({
@@ -253,16 +290,71 @@ function Group({
   );
 }
 
-/** How many modules stand at each status, as one line. */
-function Counts({ curriculum }: { curriculum: Curriculum }) {
-  const counts = curriculum.counts;
-  const parts = (
-    ["complete", "ready", "partial", "not started"] as const
-  ).map((status) => `${counts[status] ?? 0} ${status}`);
+/**
+ * Step 2 of the path: one row for the 21 modules, with how far through them
+ * he is. It opens and closes the modules under it; each module opens its own
+ * course.
+ */
+function AppliedRow({
+  step,
+  title,
+  modules,
+  active,
+  open,
+  onToggle,
+}: {
+  step: number;
+  title: string;
+  modules: CurriculumModule[];
+  active: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const built = modules.filter((m) => m.topic);
+  const phases = built.reduce((sum, m) => sum + (m.phases ?? 0), 0);
+  const taught = built.reduce((sum, m) => sum + (m.taught ?? 0), 0);
+  const pct = phases ? Math.round((taught / phases) * 100) : 0;
   return (
-    <p className="px-2 pb-1 text-[11px] text-muted-foreground">
-      {parts.join(" · ")}
-    </p>
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-controls="course-group-applied"
+      className="flex w-full cursor-pointer gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted"
+    >
+      <span className="mt-0.5 w-4 shrink-0 text-[11px] tabular-nums text-muted-foreground">
+        {step}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-start gap-2">
+          <span className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug break-words">
+            {title}
+          </span>
+          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+            {taught}/{phases}
+          </span>
+          {open ? (
+            <ChevronDown aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+          ) : (
+            <ChevronRight aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+          )}
+        </span>
+        <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span>{built.length} modules</span>
+          {active ? (
+            <span className="flex items-center gap-1 font-medium text-primary">
+              <span aria-hidden className="size-1.5 rounded-full bg-primary" />
+              active
+            </span>
+          ) : null}
+        </span>
+        <Progress
+          value={pct}
+          className="mt-1 h-0.5"
+          aria-label={`${pct}% of the module phases taught`}
+        />
+      </span>
+    </button>
   );
 }
 
@@ -328,10 +420,13 @@ function CourseRow({
  * he can go and read what is missing. */
 function ModuleRow({
   module,
+  active,
   selected,
   onSelect,
 }: {
   module: CurriculumModule;
+  /** Its course is the one the evening run is working on. */
+  active: boolean;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -350,32 +445,46 @@ function ModuleRow({
         {module.number}
       </span>
       <span className="min-w-0 flex-1">
-        <span
-          className={cn(
-            "line-clamp-2 text-sm leading-snug break-words",
-            !built && "text-muted-foreground",
-          )}
-        >
-          {module.title}
-        </span>
-        <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
-          <Badge
-            variant="secondary"
-            tone={statusTone(module.status)}
-            className="h-4 px-1.5"
+        <span className="flex items-start gap-2">
+          <span
+            className={cn(
+              "line-clamp-2 min-w-0 flex-1 text-sm leading-snug break-words",
+              !built && "text-muted-foreground",
+            )}
           >
-            {module.status}
-          </Badge>
-          {module.core_order ? <span>core {module.core_order} of 8</span> : null}
-          {/* A module whose course exists carries its progress as well as the
-              plan, so the two readings of "where is this" sit together. */}
+            {module.title}
+          </span>
           {built && module.phases ? (
-            <span className="tabular-nums">
-              {module.taught ?? 0}/{module.phases} taught
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+              {module.taught ?? 0}/{module.phases}
             </span>
           ) : null}
-          <span>{plannedPhasesText(module)}</span>
         </span>
+        {/* A built module reads like a course row. The plan details are only
+            worth a line while the module has no course behind it. */}
+        {active || module.core_order || !built ? (
+          <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
+            {active ? (
+              <span className="flex items-center gap-1 font-medium text-primary">
+                <span aria-hidden className="size-1.5 rounded-full bg-primary" />
+                active
+              </span>
+            ) : null}
+            {built ? null : (
+              <>
+                <Badge
+                  variant="secondary"
+                  tone={statusTone(module.status)}
+                  className="h-4 px-1.5"
+                >
+                  {module.status}
+                </Badge>
+                <span>{plannedPhasesText(module)}</span>
+              </>
+            )}
+            {module.core_order ? <span>core {module.core_order} of 8</span> : null}
+          </span>
+        ) : null}
       </span>
     </button>
   );

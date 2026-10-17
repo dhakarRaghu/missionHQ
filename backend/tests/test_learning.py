@@ -1965,16 +1965,19 @@ def test_the_curriculum_is_read_from_the_repo_not_invented() -> None:
         "Model", "Knowledge", "Agents", "Evals", "Infrastructure", "Security", "Product",
     ]
     assert all(m.status in STATUSES for m in modules)
-    # Module 1 is the published inference course; it is course 3 of the path.
+    # Module 1 is the published inference course.
     first = modules[0]
     assert first.number == 1 and first.status == "complete"
     assert first.topic == "inference-internals" and first.core_order == 1
     # The core path is the eight he does first, in order.
     core = sorted((m.core_order, m.number) for m in modules if m.core_order)
     assert [n for _, n in core] == [1, 2, 11, 6, 7, 9, 16, 15]
-    # A module with no course carries no topic, and says where its research is.
+    # A complete module links to the course its dossier is named after; the
+    # 21 are the Applied AI course. A planned one carries no topic.
     later = next(m for m in modules if m.number == 11)
-    assert later.topic == "" and later.research.endswith(".md")
+    assert later.topic == "eval-engineering" and later.research.endswith(".md")
+    assert len({m.topic for m in modules if m.topic}) == 21
+    assert modules[-1].topic == "" and modules[-1].status == "not started"
 
 
 def test_a_missing_curriculum_file_is_not_an_error() -> None:
@@ -1984,6 +1987,10 @@ def test_a_missing_curriculum_file_is_not_an_error() -> None:
 
     assert curriculum._parse("# nothing here\n", 0.0) == ()
     assert curriculum._parse("| 1 | Model | X | unknown | a.md | 7 |\n", 1.0) == ()
+    # A dossier alone is a plan: only a complete module links to a course.
+    assert curriculum._topic(5, "ready", "module-05-document-ingestion.md") == ""
+    assert curriculum._topic(5, "complete", "module-05-document-ingestion.md") == "document-ingestion"
+    assert curriculum._topic(4, "complete", "raw-research/module-04-*.md") == ""
 
 
 def test_an_agents_own_memory_block_is_trimmed_instead_of_refused() -> None:

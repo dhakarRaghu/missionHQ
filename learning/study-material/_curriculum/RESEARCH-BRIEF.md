@@ -2,15 +2,14 @@
 
 You are writing the research dossier for ONE module of an advanced applied-AI curriculum. The dossier is the reference that a later session uses to generate the module's course with the `/study` skill. If the chat history is lost, this file must be enough.
 
-Use today's real date as the research date. Facts change fast in this field. Research what is true now, and never carry over a date from an earlier dossier.
+Today is 2026-09-17. Facts change fast in this field. Research what is true now.
 
 ## Read first
 
 1. `~/.claude/skills/study/references/research-method.md` — the research method. Follow every rule. Fetch every URL. Every number carries its conditions. Report what you could not verify.
 2. `~/.claude/skills/study/references/writing-style.md` — the writing style. Short sentences, plain words, no metaphors, no em-dashes in prose.
 3. `~/.claude/skills/study/references/curriculum-planning.md` — how modules are sized.
-4. `module-01-coverage.md`, in this folder — what Module 1 already teaches. Do not plan to repeat it. Link to its sections instead.
-5. `README.md`, in this folder — the module's own block. For a module with no dossier, that block is the starting brief: the questions to answer, the named starting points to fetch, and the overlap to check.
+4. `/Users/raghvendra.dhakar/Desktop/project/code/study-material/_curriculum/module-01-coverage.md` — what Module 1 already teaches. Do not plan to repeat it. Link to its sections instead.
 
 ## The learner
 
@@ -27,7 +26,7 @@ Write exactly one file: the path given in your task. Use this structure and thes
 ```
 # Module NN — <title>
 
-Research date: <today>. Status: research dossier, not course material.
+Research date: 2026-09-17. Status: research dossier, not course material.
 
 ## 1. What this module is for
 <3 to 6 sentences. The problem, why an applied-AI engineer needs it now, what breaks without it.>
@@ -56,7 +55,7 @@ Each fact: the claim, its conditions, its source name, and a label: verified / i
 <real, sourced incidents and postmortems with numbers and conditions.>
 
 ## 8. Primary sources
-<grouped by theme. Each: **Title, venue or org, year** — URL, fetched <date>, HTTP status.
+<grouped by theme. Each: **Title, venue or org, year** — URL, fetched 2026-09-17, HTTP status.
 Then: focus on (sections, figures, timestamps), and why this source.>
 
 ## 9. Tools and versions to pin

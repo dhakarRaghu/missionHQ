@@ -344,7 +344,13 @@ async def list_courses() -> list[dict[str, Any]]:
         " ORDER BY coalesce(c.course_order, 999), p.course",
         (),
     )
-    return [{**r, "active": r["course"] == active} for r in rows]
+    # A platform course has no row in hq.courses, so no title. The 21 that are
+    # curriculum modules take the module's name from the curriculum table.
+    from hq.curriculum import load_modules
+
+    names = {m.topic: m.title for m in load_modules() if m.topic}
+    return [{**r, "title": r["title"] or names.get(r["course"], ""),
+             "active": r["course"] == active} for r in rows]
 
 
 @router.get("/curriculum", operation_id="getCurriculum")

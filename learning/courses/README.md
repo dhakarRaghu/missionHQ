@@ -26,7 +26,7 @@ the cuts is in `../path.md`.
 learning/courses/
   README.md                     this file
   01-performance/course.md      Performance, concurrency and the machine
-  02-applied-ai/course.md       Applied AI systems at scale
+  02-applied-ai/course.md       Applied AI systems at scale (superseded: see below)
   03-inference/course.md        Inference and AI platform (maps the existing platform course)
   04-storage/course.md          Storage and database internals
   05-distributed/course.md      Distributed systems and verification
@@ -35,6 +35,19 @@ learning/courses/
   08-production-infra/course.md Production infrastructure: change, supply chain and proof
   08-production-infra/notes.md  out-of-scope list and corrections to commonly-repeated facts
 ```
+
+## Applied AI is the 21-module curriculum
+
+Since 2026-10-17 the Courses page shows path step 2 as the 21 modules of
+the applied-AI curriculum. The modules are listed in
+`../study-material/_curriculum/README.md`. Each complete module links to
+the platform course named in its dossier file, `module-NN-<topic>.md`. Module 1
+is `inference-internals`, so it is no longer a separate path step. The
+five-phase spec in `02-applied-ai/course.md` stays in git as a reference.
+The page does not list it.
+
+The curriculum folder is a copy of `study-material/_curriculum/`. When a
+research run changes it there, copy it here again.
 
 ## The format, which code reads
 

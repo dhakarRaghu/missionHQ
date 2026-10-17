@@ -1,6 +1,6 @@
 # Module 1 — LLM Inference Internals for Application Engineers
 
-Status: COMPLETE. Course folder: `learning/study-material/inference-internals/`. Code: `learning/study-material/inference-internals/code/`.
+Status: COMPLETE. Course folder: `study-material/inference-internals/`. Code: `study-material/inference-internals/code/`.
 
 This file lists what Module 1 teaches, section by section, so later modules link to it instead of repeating it.
 

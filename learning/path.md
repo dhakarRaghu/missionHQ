@@ -66,12 +66,19 @@ highest chose the day's subject. On 2026-09-14 the direction moved into seven
 courses under `learning/courses/`, in this order:
 
 1. Performance, concurrency and the machine
-2. Applied AI systems at scale
-3. Inference and AI platform — my `inference-internals` course (unit 1 is read before course 2)
-4. Storage and database internals
-5. Distributed systems and verification
-6. Reliability, security and change
-7. System design and architecture
+2. Applied AI — the 21 modules of the applied-AI curriculum
+   (`learning/study-material/_curriculum/README.md`), each a course on the
+   study platform. Module 1 is my `inference-internals` course.
+3. Storage and database internals
+4. Distributed systems and verification
+5. Reliability, security and change
+6. System design and architecture
+7. Production infrastructure: change, supply chain and proof
+
+On 2026-10-17 the Courses page changed to this order. The 21 modules
+replaced the five-phase `02-applied-ai/course.md` plan, and inference
+internals moved inside Applied AI as module 1. The `course.md` files keep
+their old numbers. The page numbers the path by position.
 
 **One course at a time**, marked active on the Courses page. Its phases run in
 order, and the next one does not start while the last is unread. Change the

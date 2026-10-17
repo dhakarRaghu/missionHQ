@@ -24,8 +24,12 @@ CURRICULUM_DIR = "study-material/_curriculum"
 README = "README.md"
 # The statuses the README defines, weakest first.
 STATUSES = ("not started", "partial", "ready", "complete")
-# Module 1 is course 3 of the path: the same published course.
+# Module 1's research is a coverage file, not a dossier, so its name carries
+# no topic. It is the published inference course.
 KNOWN_TOPICS = {1: "inference-internals"}
+# Every other module's dossier is `module-NN-<topic>.md`, and <topic> is the
+# slug its course is published under (study-material/<topic>/course.json).
+_DOSSIER_RE = re.compile(r"^module-\d+-([a-z0-9-]+)\.md$")
 
 _ROW_RE = re.compile(
     r"^\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|"
@@ -70,6 +74,18 @@ def _clean(cell: str) -> str:
     return re.sub(r"\*\*|`", "", cell).strip()
 
 
+def _topic(number: int, status: str, research: str) -> str:
+    """The published course behind a module, or "" while it has none.
+
+    Only a complete module has a course: a ready one has a dossier and no
+    phases yet, so its name is a plan, not a link.
+    """
+    if number in KNOWN_TOPICS:
+        return KNOWN_TOPICS[number]
+    match = _DOSSIER_RE.match(research)
+    return match.group(1) if match and status == "complete" else ""
+
+
 @lru_cache(maxsize=1)
 def _parse(text: str, mtime: float) -> tuple[Module, ...]:
     # mtime is not read: it is in the signature so a changed file misses the cache.
@@ -91,7 +107,7 @@ def _parse(text: str, mtime: float) -> tuple[Module, ...]:
             research=_clean(match.group(5)),
             planned_phases=_clean(match.group(6)),
             core_order=core.index(number) + 1 if number in core else 0,
-            topic=KNOWN_TOPICS.get(number, ""),
+            topic=_topic(number, _clean(match.group(4)).lower(), _clean(match.group(5))),
         ))
     return tuple(sorted(modules, key=lambda m: m.number))
 

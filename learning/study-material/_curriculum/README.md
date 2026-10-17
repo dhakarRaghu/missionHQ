@@ -2,7 +2,7 @@
 
 This folder is the durable record of the curriculum. If the chat history is lost, start here.
 
-Last updated: 2026-09-18.
+Last updated: 2026-09-25.
 
 ## How to use this folder, from any session
 
@@ -13,7 +13,7 @@ You do not need this chat. Everything needed to generate a module is on disk.
 1. Read this file for the plan and the module's block below.
 2. Read the module's dossier, `module-NN-<slug>.md`. Section 5 of every dossier is the proposed phase outline. That is the approved plan.
 3. Read `module-01-coverage.md` so the new module links to Module 1 instead of repeating it.
-4. Generate with the study skill: `/study <topic>`. In this repo the skill is at `.claude/skills/study/`, and `references/mission-hq.md` sets the base directory and the publish path.
+4. Generate with the study skill: `/study <topic>`. The skill lives at `~/.claude/skills/study/`. A portable copy is in `Desktop/project/code/skills/study-skill-v2/`.
 5. Re-check anything the dossier marks as fast-changing. Versions and provider defaults move fastest.
 6. After the module is finished, add a `module-NN-coverage.md` like the Module 1 one, and update the status table.
 
@@ -26,10 +26,6 @@ You do not need this chat. Everything needed to generate a module is on disk.
 
 The dossiers are research, not course material. They will change while the course is written.
 
-## Where this sits
-
-This curriculum is the applied-AI track. It is separate from the eight path courses specified in `learning/courses/NN-<name>/course.md`, which cover performance, storage, distributed systems, reliability, design and production infrastructure. Module 1 of this curriculum and course 3 of that path are the same published course, `inference-internals`.
-
 ## Who this is for
 
 - An advanced engineer who builds AI products.
@@ -40,30 +36,30 @@ This curriculum is the applied-AI track. It is separate from the eight path cour
 
 ## The plan: 22 modules in 7 layers
 
-| # | Layer | Module | Status | Research lives in | Planned phases |
+| # | Layer | Module | Status | Research lives in | Phases |
 |---|---|---|---|---|---|
 | 1 | Model | LLM inference internals for application engineers | **complete** | `module-01-coverage.md` | 7 (12 documents) |
-| 2 | Model | Context engineering and long-horizon reliability | **ready** | `module-02-context-engineering.md` | 4 |
-| 3 | Knowledge | Retrieval engineering internals | **ready** | `module-03-retrieval-internals.md` | 7 |
-| 4 | Knowledge | Advanced retrieval architectures | partial | `raw-research/module-04-*.md` | to be sized |
-| 5 | Knowledge | Document and multimodal ingestion | not started | brief below | to be sized |
-| 6 | Agents | The tool layer and MCP internals | **ready** | `module-06-tools-mcp.md` | 6 |
-| 7 | Agents | Agent harness engineering | **ready** | `module-07-agent-harness.md` | 6 |
-| 8 | Agents | Agent protocols and agent identity | not started | brief below | to be sized |
-| 9 | Agents | Orchestration, state, and durable execution | **ready** | `module-09-orchestration-durable.md` | 7 |
-| 10 | Agents | Memory systems | not started | brief below | to be sized |
-| 11 | Evals | Eval engineering | **ready** | `module-11-eval-engineering.md` | 7 |
-| 12 | Evals | Agent evals, online evals, and the improvement loop | not started | brief below | to be sized |
-| 13 | Infrastructure | Serving and self-hosting at cluster scale | not started | brief below | 3 to 4 |
-| 14 | Infrastructure | Cost, routing, and AI FinOps | not started | brief below | about 3 |
-| 15 | Infrastructure | Observability and reliability operations | partial | `raw-research/module-15-*.md` | 3 to 4 |
-| 16 | Security | Security and threat modelling | **ready** | `module-16-security.md` | 7 |
-| 17 | Security | Guardrails architecture | not started | brief below | to be sized |
-| 18 | Security | Compliance and auditability | not started | brief below | to be sized |
-| 19 | Product | Agent product design and human approval | not started | brief below | to be sized |
-| 20 | Product | Voice agents in production | not started | brief below | to be sized |
-| 21 | Product | Post-training, distillation, and small models | not started | brief below | to be sized |
-| 22 | Product | Electives | not started | brief below | per topic |
+| 2 | Model | Context engineering and long-horizon reliability | **complete** | `module-02-context-engineering.md` | 4 |
+| 3 | Knowledge | Retrieval engineering internals | **complete** | `module-03-retrieval-internals.md` | 7 |
+| 4 | Knowledge | Advanced retrieval architectures | **complete** | `module-04-advanced-retrieval.md` | 7 |
+| 5 | Knowledge | Document and multimodal ingestion | **complete** | `module-05-document-ingestion.md` | 5 |
+| 6 | Agents | The tool layer and MCP internals | **complete** | `module-06-tools-mcp.md` | 5 |
+| 7 | Agents | Agent harness engineering | **complete** | `module-07-agent-harness.md` | 5 |
+| 8 | Agents | Agent protocols and agent identity | **complete** | `module-08-agent-protocols.md` | 5 |
+| 9 | Agents | Orchestration, state, and durable execution | **complete** | `module-09-orchestration-durable.md` | 6 |
+| 10 | Agents | Memory systems | **complete** | `module-10-memory.md` | 6 |
+| 11 | Evals | Eval engineering | **complete** | `module-11-eval-engineering.md` | 6 |
+| 12 | Evals | Agent evals, online evals, and the improvement loop | **complete** | `module-12-agent-evals.md` | 6 |
+| 13 | Infrastructure | Serving and self-hosting at cluster scale | **complete** | `module-13-serving-cluster.md` | 4 |
+| 14 | Infrastructure | Cost, routing, and AI FinOps | **complete** | `module-14-ai-finops.md` | 4 |
+| 15 | Infrastructure | Observability and reliability operations | **complete** | `module-15-observability-ops.md` | 4 |
+| 16 | Security | Security and threat modelling | **complete** | `module-16-security.md` | 6 |
+| 17 | Security | Guardrails architecture | **complete** | `module-17-guardrails.md` | 4 |
+| 18 | Security | Compliance and auditability | **complete** | `module-18-compliance.md` | 4 |
+| 19 | Product | Agent product design and human approval | **complete** | `module-19-agent-product.md` | 4 |
+| 20 | Product | Voice agents in production | **complete** | `module-20-voice-agents.md` | 4 |
+| 21 | Product | Post-training, distillation, and small models | **complete** | `module-21-post-training.md` | 4 |
+| 22 | Product | Electives (planned) | not started | brief below | per topic |
 
 Status meanings:
 
@@ -72,13 +68,13 @@ Status meanings:
 - **partial**: research-helper reports are saved in `raw-research/`, but no dossier was written. Use them as input.
 - **not started**: no research yet. The brief below says how to do it.
 
-Counts today: 1 complete, 7 ready, 2 partial, 12 not started.
+Counts on 2026-09-25: 21 complete, 1 not started. Module 22 is planned and not built. The phase counts above are the built phase counts, from each module's `course.json`.
 
 ## The core path
 
 The full curriculum is about 250 to 400 hours. The core path covers most of the job in about 100 hours. Do these in order:
 
-1. Module 1, inference internals. **Complete.**
+1. Module 1, inference internals.
 2. Module 2, context engineering.
 3. Module 11, eval engineering. It comes early because later modules depend on evals.
 4. Module 6, tool layer and MCP.
@@ -87,15 +83,15 @@ The full curriculum is about 250 to 400 hours. The core path covers most of the 
 7. Module 16, security and threat modelling.
 8. Module 15, observability.
 
-Seven of those eight have research. Only Module 15 needs research first, and it has raw reports to start from.
-
 Then choose by interest: retrieval in Modules 3 to 5, serving and cost in Modules 13 and 14, voice in Module 20.
+
+All eight are built. Module 11 comes third in this order, but its phases use sections of Modules 1 to 6 and Module 9. For example, its Phase 1 links Module 9 section 6.4. Read a linked section when a phase names it.
 
 ---
 
 # The modules
 
-Each block below gives the question the module answers, where its research lives, and what still has to be done. For modules with no dossier, the block is the research brief.
+Each block below gives the question the module answers and where its research lives. All 21 numbered modules are built. The research briefs are kept as the record of what each module was asked to cover. Where a built module changed its question, its block gives the question as built.
 
 **Rule for every brief.** Nothing below is a verified fact. The named tools, papers and specifications are starting points to fetch, not claims. Check every version and date at research time. Follow the evidence labels in `RESEARCH-BRIEF.md`: verified, inferred, or not checked.
 
@@ -108,16 +104,20 @@ Each block below gives the question the module answers, where its research lives
 
 **Question.** Where does the time and the money go in a model call, and which of it can you control?
 
+**As built.** The phases do not state this question, and the last phase has no "The module question, answered" section. Section 6.4, "Defending an architecture in a design review", is the closing checklist.
+
 Read `module-01-coverage.md` before writing any other module. It is section-by-section, and it exists so no other module repeats it. Modules link to its sections in the form `Module 1, 3.2`.
 
 ---
 
 ### Module 2 — Context engineering and long-horizon reliability
-**Status: ready.** Dossier: `module-02-context-engineering.md`. 4 phases.
+**Status: complete.** Dossier: `module-02-context-engineering.md`. 4 phases. Coverage file: `module-02-coverage.md`.
 
 **Question.** Your agent gets worse after two hundred tool calls. Which part of the context caused it, and what does fixing it cost in cache?
 
-The dossier is dense on provider behaviour, which is also what goes stale fastest. Re-check provider compaction defaults and the client library versions before generating.
+**Question as built.** Is long context your problem at all, and if so, which of five causes is it: length, steps, state, cost or a lossy summary? Phase 4, "The module question, step by step", answers it. It gives the cache cost of a fix in one sentence only: compaction pays back in 3 to 12 steps.
+
+The dossier is current to 2026-09-17 and is unusually dense on provider behaviour, which is also what goes stale fastest. Re-check provider compaction defaults and the `openai-python` and Anthropic feature versions before generating.
 
 Its overlap table with Module 1 is already written. Honour it: budget zones and the threshold trigger are Module 1, this module adds the validation method and the measurement labs.
 
@@ -126,7 +126,7 @@ Its overlap table with Module 1 is already written. Honour it: budget zones and 
 ## Layer 2 — Knowledge
 
 ### Module 3 — Retrieval engineering internals
-**Status: ready.** Dossier: `module-03-retrieval-internals.md`. 7 phases.
+**Status: complete.** Dossier: `module-03-retrieval-internals.md`. 7 phases. Coverage file: `module-03-coverage.md`.
 
 **Question.** Your retrieval scores well on average and fails for one customer. Which stage is responsible?
 
@@ -135,7 +135,7 @@ Covers approximate nearest-neighbour index internals, embedding quantization, hy
 ---
 
 ### Module 4 — Advanced retrieval architectures
-**Status: partial.** One raw report in `raw-research/`, no dossier. Size the module after the dossier exists.
+**Status: complete.** Dossier: `module-04-advanced-retrieval.md`. 7 phases.
 
 **Question.** When is a vector index the wrong tool, and what replaces it?
 
@@ -156,9 +156,11 @@ Overlap to check: Module 3 owns index internals and reranking. Module 16 owns te
 ---
 
 ### Module 5 — Document and multimodal ingestion
-**Status: not started.**
+**Status: complete.** Dossier: `module-05-document-ingestion.md`. 5 phases.
 
 **Question.** A customer uploads a 300-page scanned PDF with tables. What does each parsing path cost, and where does each one lose information?
+
+**Covered since 2026-09-25.** VisRAG is now taught in Phase 4, section "4.4 — VisRAG: one vector per page, answers from images". It covers what VisRAG stores and costs per 1,000 pages against a parsed page, and what its paper measured.
 
 **Research brief.**
 
@@ -179,27 +181,35 @@ Overlap: Module 3 owns chunking and embedding. This module stops at the point wh
 ## Layer 3 — Agents
 
 ### Module 6 — The tool layer and MCP internals
-**Status: ready.** Dossier: `module-06-tools-mcp.md`. 6 phases.
+**Status: complete.** Dossier: `module-06-tools-mcp.md`. 5 phases.
 
 **Question.** What does the model actually see when you give it a tool, and what does a bad tool description cost?
+
+**Question as built.** An agent calls 40 tools across three MCP servers. Which tools should the model see on each turn, what does each definition cost, and what can a server change or claim that the client must not trust? Phase 5, "The module question, answered", answers it. The cost of a vague description is measured in Phase 2: section 2.3 prints the search recall with vague descriptions, and section 2.4 covers names, descriptions and errors. The closing does not repeat that number.
 
 Covers tool design, parallel calls, code execution as a tool, the MCP specification, sandbox internals, and Agent Skills. The MCP specification is versioned and moves; re-check the specification revision before generating.
 
 ---
 
 ### Module 7 — Agent harness engineering
-**Status: ready.** Dossier: `module-07-agent-harness.md`. 6 phases.
+**Status: complete.** Dossier: `module-07-agent-harness.md`. 5 phases, published 2026-09-23.
 
 **Question.** The model did not run your tool. The harness did. What else is the harness deciding without telling you?
+
+**Question as built.** You ship a coding agent that runs shell commands on customers' machines. Which controls stop a harmful command, where does each one sit, and what does each one miss? Phase 5, "The module question, answered", answers it.
+
+**Covered since 2026-09-25.** The six parts of a harness: Phase 1 section 1.5, "The six parts of a harness, mapped onto the loop". It uses Sebastian Raschka's six-part list and adds the loop stop and the OS boundary as two rows of the course's own.
 
 Covers the six parts of a harness, the rule that the harness and not the model runs tools, sandbox controls, and plans written as code.
 
 ---
 
 ### Module 8 — Agent protocols and agent identity
-**Status: not started.**
+**Status: complete.** Dossier: `module-08-agent-protocols.md`. 5 phases.
 
 **Question.** Two agents from different vendors need to work together. What can the protocol express, and what does it silently leave to trust?
+
+**Question as built.** Your agent must call another company's agent and a partner's MCP server on behalf of a signed-in user. What does each protocol carry, who is the agent acting as at each hop, and what can you prove afterwards? Phase 5, "The module question, answered", answers it, and it also says what no protocol carries.
 
 **Research brief.**
 
@@ -209,25 +219,31 @@ Starting points to fetch: the MCP specification at its current revision, the A2A
 
 Questions the dossier must answer: what an Agent Card asserts and what verifies it. Whether any of these protocols carries authorization, or only identity. What happens when agent A delegates to agent B on a user's behalf, and where the user's consent is recorded. Whether revocation exists.
 
-This module is where the provenance and short-lived-credential pattern from general infrastructure applies to agents. Check whether any protocol has adopted OIDC-style federation, and say plainly if none has. Course 8 phase 5 in `learning/courses/08-production-infra/` covers that pattern for build systems, and its `sources.md` has the verified references.
+This module is where the provenance and short-lived-credential pattern from general infrastructure applies to agents. Check whether any protocol has adopted OIDC-style federation, and say plainly if none has.
 
 Overlap: Module 6 owns the MCP wire format and tool semantics. This module owns identity, delegation and trust between parties. Module 16 owns the attack; this module owns the protocol.
 
 ---
 
 ### Module 9 — Orchestration, state, and durable execution
-**Status: ready.** Dossier: `module-09-orchestration-durable.md`. 7 phases.
+**Status: complete.** Dossier: `module-09-orchestration-durable.md`. 6 phases.
 
 **Question.** Your agent crashed halfway through a five-step task that already charged a customer. What resumes, and what must not run twice?
+
+**Question as built.** A refund agent runs for hours, calls payment and email tools, and sometimes hands work to other agents. How do you make every side effect happen once, survive a crash or a deploy, and know when more agents make it worse? Phase 6, "The module question, answered", answers it. Its first steps answer the original question.
 
 Covers single-agent against multi-agent trade-offs, checkpointing, Temporal, Inngest and Restate, idempotency and compensating actions, and human-in-the-loop as architecture.
 
 ---
 
 ### Module 10 — Memory systems
-**Status: not started.**
+**Status: complete.** Dossier: `module-10-memory.md`. 6 phases, published 2026-09-25.
 
 **Question.** Your agent remembers something the user corrected last week. Which memory wrote it, and what should have deleted it?
+
+**Question as built.** Your support agent must remember each customer across sessions. What do you store, who writes it, how does a correction or a deletion reach every copy, and how do you prove it helps? Phase 6, "The module question, answered", answers it in nine steps.
+
+**Covered since 2026-09-25.** A taxonomy of memory types: Phase 1 section 1.5, "Memory type names do not match across systems". Time decay: Phase 3 section 3.5, "Time decay hides old facts that are still true". Whether the user can see a contradiction: Phase 3 section 3.6, "Show the customer the change, ask when unsure".
 
 **Research brief.**
 
@@ -246,18 +262,22 @@ Overlap: Module 2 owns the context window within one run. This module owns state
 ## Layer 4 — Evals
 
 ### Module 11 — Eval engineering
-**Status: ready.** Dossier: `module-11-eval-engineering.md`. 7 phases.
+**Status: complete.** Dossier: `module-11-eval-engineering.md`. 6 phases, published 2026-09-25.
 
 **Question.** Your judge says the new prompt is better. Why should anyone believe the judge?
+
+**Question as built.** Your team claims the new RAG pipeline answers better. What would you need to measure, with what labels and statistics, before you believe it, and what would make the number lie? Phase 6, "The module question, answered", answers it. Its steps 2 and 4 answer the original question.
 
 Covers error analysis first, building LLM judges, validating judges against humans, golden datasets, and CI gates. Do this module early. Modules 12, 17 and 21 all assume a calibrated judge.
 
 ---
 
 ### Module 12 — Agent evals, online evals, and the improvement loop
-**Status: not started.**
+**Status: complete.** Dossier: `module-12-agent-evals.md`. 6 phases, published 2026-09-25.
 
 **Question.** A single-turn eval passes and the agent still fails the task. What do you score instead?
+
+**Question as built.** You change the prompt and model of a support agent that takes refunds. How do you know, before and after release, that it got better and did not get worse in ways your tests cannot see? Phase 6, "The module question, answered", answers it. Its steps 1 and 3 answer the original question.
 
 **Research brief.**
 
@@ -274,7 +294,7 @@ Overlap: Module 11 owns judge construction and validation. This module owns what
 ## Layer 5 — Infrastructure
 
 ### Module 13 — Serving and self-hosting at cluster scale
-**Status: not started.** 3 to 4 phases.
+**Status: complete.** Dossier: `module-13-serving-cluster.md`. 4 phases.
 
 **Question.** At what point does self-hosting beat an API, and what do you take on when it does?
 
@@ -293,7 +313,7 @@ Overlap: Module 1 owns single-node serving, batching and the KV cache concept. T
 ---
 
 ### Module 14 — Cost, routing, and AI FinOps
-**Status: not started.** About 3 phases.
+**Status: complete.** Dossier: `module-14-ai-finops.md`. 4 phases.
 
 **Question.** The bill doubled and the traffic did not. Which tenant, which route, and which model change caused it?
 
@@ -310,9 +330,11 @@ Overlap: Module 1 already owns the per-request cost model, the token classes, ca
 ---
 
 ### Module 15 — Observability and reliability operations
-**Status: partial.** Three raw reports in `raw-research/`, no dossier. 3 to 4 phases.
+**Status: complete.** Dossier: `module-15-observability-ops.md`. 4 phases.
 
 **Question.** Quality dropped and no alert fired. What should have been recorded at the time?
+
+**Not covered.** Dashboard design. Phase 4, "The module question, answered", step 15 names it as a gap.
 
 **Research brief.**
 
@@ -331,7 +353,7 @@ Overlap: Module 1 owns the run record, the cost record, and quality SLOs. This m
 ## Layer 6 — Security
 
 ### Module 16 — Security and threat modelling
-**Status: ready.** Dossier: `module-16-security.md`. 7 phases.
+**Status: complete.** Dossier: `module-16-security.md`. 6 phases.
 
 **Question.** A document in the knowledge base tells the model to send another tenant's data. What stops it?
 
@@ -340,7 +362,7 @@ Covers the three-part risk of private data, untrusted content and outbound messa
 ---
 
 ### Module 17 — Guardrails architecture
-**Status: not started.**
+**Status: complete.** Dossier: `module-17-guardrails.md`. 4 phases.
 
 **Question.** Your classifier adds 300 ms to every request and still misses attacks. What belongs inline, and what belongs after?
 
@@ -357,15 +379,15 @@ Overlap: Module 16 owns the threat model and the architectural defences. This mo
 ---
 
 ### Module 18 — Compliance and auditability
-**Status: not started.**
+**Status: complete.** Dossier: `module-18-compliance.md`. 4 phases.
 
 **Question.** A regulator asks you to show why the agent did what it did, nine months ago. What do you hand over?
 
 **Research brief.**
 
-Topics: EU AI Act transparency duties, audit logs a reviewer accepts, retention, deletion across memory and vector indexes, and data residency.
+Topics: EU AI Act Article 50 transparency duties, audit logs a reviewer accepts, retention, deletion across memory and vector indexes, and data residency.
 
-Starting points to fetch: the EU AI Act text itself, not summaries, and confirm which articles apply from which date. An earlier draft of this plan stated that Article 50 applies from 2 August 2026. **That date is not verified. Check it against the regulation before teaching it.**
+Starting points to fetch: the EU AI Act text itself, not summaries, and confirm which articles apply from which date. The README's earlier note that Article 50 applies from 2 August 2026 must be re-verified against the regulation before it is taught.
 
 Questions the dossier must answer: what an audit record must contain to be useful nine months later. How deletion propagates to a vector index and to derived memory, and how it is proven. What data residency means when a model provider is in another region.
 
@@ -376,7 +398,7 @@ Overlap: Module 10 owns the deletion mechanism. Module 15 owns the telemetry. Th
 ## Layer 7 — Product
 
 ### Module 19 — Agent product design and human approval
-**Status: not started.**
+**Status: complete.** Dossier: `module-19-agent-product.md`. 4 phases.
 
 **Question.** Which actions can the agent take alone, and what must the approval screen show for the approval to mean anything?
 
@@ -393,7 +415,7 @@ Overlap: Module 9 owns human-in-the-loop as an architecture and a durable-execut
 ---
 
 ### Module 20 — Voice agents in production
-**Status: not started.**
+**Status: complete.** Dossier: `module-20-voice-agents.md`. 4 phases.
 
 **Question.** Where does the one-second budget go, and what do you give up to stay inside it?
 
@@ -410,9 +432,11 @@ Overlap: Module 1 owns streaming and time-to-first-token. This module owns the a
 ---
 
 ### Module 21 — Post-training, distillation, and small models
-**Status: not started.**
+**Status: complete.** Dossier: `module-21-post-training.md`. 4 phases.
 
 **Question.** You have tried prompting and retrieval. How do you know fine-tuning is the next step, and how do you know it worked?
+
+**Covered since 2026-09-25.** Running a small model on a phone or other device: Phase 3 section 3.6, "On a phone, the app's memory limit decides the fit". It covers the memory fit, the runtimes and their adapter paths, and published on-device speed.
 
 **Research brief.**
 
@@ -429,7 +453,7 @@ Overlap: Module 11 owns the eval gate. This module owns the training decision.
 ---
 
 ### Module 22 — Electives
-**Status: not started.** Sized per topic.
+**Status: not started (planned).** Sized per topic.
 
 **Question.** Varies. Each elective is one to two phases.
 
@@ -446,11 +470,12 @@ Treat each as a separate small research task. Do not write one dossier for all f
 | `README.md` | this index and the per-module briefs |
 | `RESEARCH-BRIEF.md` | the contract every module dossier follows, with the twelve required sections |
 | `module-01-coverage.md` | what Module 1 teaches, section by section. Read before writing any module |
-| `module-NN-<slug>.md` | one research dossier per module, for the eight that have one |
-| `raw-research/` | unreviewed helper reports from stopped research runs, for Modules 4 and 15 |
+| `module-02-coverage.md`, `module-03-coverage.md` | what Modules 2 and 3 teach, section by section |
+| `module-NN-<slug>.md` | one research dossier per module, for Modules 2 to 21 |
+| `raw-research/` | unreviewed helper reports from earlier research runs, for Modules 4 and 15 |
 
 ## What is not decided
 
-- Phase counts for the twelve not-started modules. Size them after research, not before.
-- Topic slugs for `/study`. Module 1 used `inference-internals`. Choose the slug when the course starts and record it in the status table.
+- The phase count for each Module 22 elective. Size it after research, not before.
+- Topic slugs for new electives. Each built module's slug is its folder name in the top-level `README.md`.
 - Whether Module 22's electives stay one module or become numbered modules.
