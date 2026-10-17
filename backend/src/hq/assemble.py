@@ -248,11 +248,12 @@ def _agent_context(spec: loader.AgentSpec) -> list[str]:
     return out
 
 
-def _writer_procedure(kind: str, *, article: bool, page: str) -> list[str]:
+def _writer_procedure(kind: str, *, article: bool, page: str, story: bool = False) -> list[str]:
     files = ["teacher.md"]
     if kind == "writer-outline":
         files.append("outline-page.md" if page
-                     else ("outline-article.md" if article else "outline-course.md"))
+                     else ("outline-story.md" if article and story
+                           else ("outline-article.md" if article else "outline-course.md")))
     elif kind == "writer-section":
         files += ["section.md", "page-kit.md"]
     elif kind == "writer-post":
@@ -261,13 +262,13 @@ def _writer_procedure(kind: str, *, article: bool, page: str) -> list[str]:
 
 
 def assemble(kind: str, spec: loader.AgentSpec, *, skill: str = "",
-             article: bool = False, page: str = "") -> Bundle:
+             article: bool = False, page: str = "", story: bool = False) -> Bundle:
     """Build the bundle a call of this kind is sent. Rebuilt on every call:
     small sync file reads only, so policy edits and memory writes land
     without a restart.
 
     ``skill`` inlines that skill's SKILL.md as the procedure of an ``agent``
-    bundle. ``article`` and ``page`` pick the outline file of a
+    bundle. ``article``, ``page`` and ``story`` pick the outline file of a
     ``writer-outline`` bundle, as the writer's material does.
     """
     if kind not in KINDS:
@@ -282,7 +283,8 @@ def assemble(kind: str, spec: loader.AgentSpec, *, skill: str = "",
         sections["charter"].append(charter())
         sections["identity"].append(card_lead(spec))
         sections["policy"].append(_policy(spec))
-        sections["procedure"] += _writer_procedure(kind, article=article, page=page)
+        sections["procedure"] += _writer_procedure(kind, article=article, page=page,
+                                                   story=story)
     else:
         sections["charter"].append(charter())
         sections["identity"].append(spec.system_prompt)
@@ -303,10 +305,16 @@ def assemble(kind: str, spec: loader.AgentSpec, *, skill: str = "",
 
 
 def run_sha(kind: str, spec: loader.AgentSpec, *, article: bool = False,
-            page: str = "") -> str:
+            page: str = "", story: bool = False) -> str:
     """The sha a run records: its bundle's, or for a lesson run the plan
-    bundle and the section bundle together, since it sends both."""
+    bundle and the section bundle together, since it sends both. A story
+    day's plan bundle carries outline-story.md, and its sections are told
+    section-story.md, so that file is counted too."""
     bundles = [assemble(kind, spec, article=article, page=page)]
     if kind == "writer-section":
-        bundles.insert(0, assemble("writer-outline", spec, article=article, page=page))
+        bundles.insert(0, assemble("writer-outline", spec, article=article, page=page,
+                                   story=story))
+    if story:
+        return sha_of(*bundles, Bundle(kind="story", parts=(
+            ("procedure", _writer_file("section-story.md")),)))
     return sha_of(*bundles)

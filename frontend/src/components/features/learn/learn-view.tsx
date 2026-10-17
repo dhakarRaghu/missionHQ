@@ -50,6 +50,9 @@ const PIECE_LABEL: Record<string, string> = {
   paper: "paper",
   frontier: "new ground",
   revision: "revision",
+  product_build: "product build",
+  design_story: "design story",
+  ai_latest: "AI latest",
 };
 
 function pieceLabel(lesson: Lesson): string {
@@ -98,6 +101,13 @@ export function LearnView() {
     // the Courses page, beside the phase they teach.
     queryFn: () => learningApi.lessons(30, "topic,lab,review"),
   });
+  // Articles their own checks flagged: a sentence the digest does not
+  // support, or a page check the repairs did not clear. They stay off the
+  // list above and wait here, so a flagged page is never today's reading.
+  const held = useQuery({
+    queryKey: [...learningKeys.lessons, "held"],
+    queryFn: () => learningApi.lessons(30, "topic", true),
+  });
   // Selection is by id, not by date. Two lessons a day now — the topic one
   // and a course phase — so the date stopped being unique and every click on
   // the second row silently resolved back to the first.
@@ -105,12 +115,14 @@ export function LearnView() {
   const [mode, setMode] = useState<"page" | "text">("page");
 
   const list = lessons.data ?? [];
+  const heldList = held.data ?? [];
   // The day's reading is the newest article. A lab card or week review is
   // a page he works or recalls from, reached from the drawer; on 2026-09-24
   // a week review written after the article opened by default and read as
   // "today's article", which it is not.
   const current =
     list.find((l) => l.id === selected) ??
+    heldList.find((l) => l.id === selected) ??
     list.find((l) => l.kind === "topic") ??
     list[0];
 
@@ -287,43 +299,75 @@ export function LearnView() {
         <LessonText path={current.md_path} />
       )}
 
-      <footer className="shrink-0">
+      <footer className="flex shrink-0 flex-col gap-1">
         <Drawer label={`Earlier lessons and weekend pages (${list.length})`}>
-          <ul className="space-y-0.5 pt-1">
-            {list.map((lesson) => (
-              <li key={lesson.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelected(lesson.id)}
-                  className={cn(
-                    "flex w-full cursor-pointer items-baseline gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors",
-                    lesson.id === current.id
-                      ? "bg-accent text-accent-foreground"
-                      : "hover:bg-muted",
-                  )}
-                >
-                  <span className="shrink-0 text-muted-foreground">
-                    {lesson.lesson_date}
-                  </span>
-                  {pieceLabel(lesson) ? (
-                    <Badge
-                      variant="outline"
-                      className="shrink-0 px-1 py-0 text-[10px]"
-                    >
-                      {pieceLabel(lesson)}
-                    </Badge>
-                  ) : null}
-                  <span className="truncate">{lesson.title}</span>
-                  {lesson.read_at ? (
-                    <Check aria-label="read" className="ml-auto size-3 shrink-0" />
-                  ) : null}
-                </button>
-              </li>
-            ))}
-          </ul>
+          <LessonList
+            lessons={list}
+            currentId={current.id}
+            onSelect={setSelected}
+          />
         </Drawer>
+        {heldList.length ? (
+          <Drawer label={`Held: the checks flagged these (${heldList.length})`}>
+            <p className="px-2 pt-1 text-xs text-muted-foreground">
+              Each keeps a sentence its source does not support, or a page
+              check the repairs did not clear. Read with care.
+            </p>
+            <LessonList
+              lessons={heldList}
+              currentId={current.id}
+              onSelect={setSelected}
+            />
+          </Drawer>
+        ) : null}
       </footer>
     </div>
+  );
+}
+
+/** The rows of a drawer: one lesson each, the open one marked. */
+function LessonList({
+  lessons,
+  currentId,
+  onSelect,
+}: {
+  lessons: Lesson[];
+  currentId: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <ul className="space-y-0.5 pt-1">
+      {lessons.map((lesson) => (
+        <li key={lesson.id}>
+          <button
+            type="button"
+            onClick={() => onSelect(lesson.id)}
+            className={cn(
+              "flex w-full cursor-pointer items-baseline gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors",
+              lesson.id === currentId
+                ? "bg-accent text-accent-foreground"
+                : "hover:bg-muted",
+            )}
+          >
+            <span className="shrink-0 text-muted-foreground">
+              {lesson.lesson_date}
+            </span>
+            {pieceLabel(lesson) ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 px-1 py-0 text-[10px]"
+              >
+                {pieceLabel(lesson)}
+              </Badge>
+            ) : null}
+            <span className="truncate">{lesson.title}</span>
+            {lesson.read_at ? (
+              <Check aria-label="read" className="ml-auto size-3 shrink-0" />
+            ) : null}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

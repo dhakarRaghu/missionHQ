@@ -2463,28 +2463,31 @@ async def _defer_if_offline_step(task_id: str, run_id: str) -> bool:
             and await _defer_step(task_id, "deferred_offline", OFFLINE_RETRIES))
 
 
-def _run_bundle(spec: AgentSpec, payload: object) -> tuple[str, bool, str]:
+def _run_bundle(spec: AgentSpec, payload: object) -> tuple[str, bool, str, bool]:
     """Which bundle kind this task's run sends, with the flags that pick a
     lesson's outline file: the same choice the writer's material makes."""
     if spec.runtime in EXTERNAL_RUNTIMES:
-        return "external", False, ""
+        return "external", False, "", False
     if not lesson_writer.handles(spec, payload):
-        return "agent", False, ""
+        return "agent", False, "", False
     assert isinstance(payload, dict)
     stage = payload.get("stage")
     if stage == learning.POST_STAGE:
-        return "writer-post", False, ""
+        return "writer-post", False, "", False
     if stage in {learning.LAB_CARD_STAGE, learning.WEEK_REVIEW_STAGE}:
-        return "writer-section", True, "lab" if stage == learning.LAB_CARD_STAGE else "review"
-    return "writer-section", not learning.is_course_written(payload), ""
+        return ("writer-section", True,
+                "lab" if stage == learning.LAB_CARD_STAGE else "review", False)
+    article = not learning.is_course_written(payload)
+    return ("writer-section", article, "",
+            article and payload.get("article_kind") in learning.STORY_KINDS)
 
 
 @DBOS.step()
 async def _start_run(task_id: str | None, spec: AgentSpec, kind: str = "agent",
-                     article: bool = False, page: str = "") -> str:
+                     article: bool = False, page: str = "", story: bool = False) -> str:
     # The sha of the bundle this run really sends, not of the agent's card
     # when the card is not what it reads.
-    bundle = assemble.run_sha(kind, spec, article=article, page=page)
+    bundle = assemble.run_sha(kind, spec, article=article, page=page, story=story)
     row = await db.fetchone(
         "INSERT INTO hq.runs (task_id, wf_id, agent, model, job_hash, bundle_sha)"
         " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id::text",

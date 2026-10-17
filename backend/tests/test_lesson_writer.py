@@ -71,9 +71,7 @@ def _outline_base(**kw: Any) -> dict[str, Any]:
         "sections": [
             {"heading": "What happens to a short request in a static batch", "concept": "c1", "covers": "the wait"},
             {"heading": "How much does rebuilding the batch buy", "concept": "c1", "covers": "the number"},
-            {"heading": "Fifteen minutes today", "kind": "lab", "covers": "one thing to try"},
             {"heading": "A question to test the transfer", "kind": "checkpoint", "covers": "one scenario"},
-            {"heading": "Two things you could post", "kind": "post", "covers": "two angles"},
             {"heading": "Sources", "kind": "sources", "covers": "the urls"},
         ],
     }
@@ -236,7 +234,7 @@ def test_an_article_is_written_in_stages_and_passes_the_real_page_contract(
     _md_path, html_path, lesson_id = result
     page = (tmp_path / html_path).read_text()
     assert '<ol class="concepts">' in page and 'data-concept="c1"' in page
-    assert calls == [1, 2, 3, 4, 5, 6]          # each section written once, in order
+    assert calls == [1, 2, 3, 4]                # each section written once, in order
     assert recorded["kind"] == "topic" and recorded["phase_slug"].endswith("02a-scheduling-memory")
     assert recorded["source_urls"] == "https://ex.dev/orca"
     assert lesson_id == "lesson-1"
@@ -396,23 +394,28 @@ def test_a_requeued_lesson_resumes_from_its_plan_and_finished_parts(
     w = make()
     assert asyncio.run(w.run()) is not None, w.report
     assert log["outline"] == 1                    # the plan was not asked for again
-    assert log["sections"] == [1, 2, 3, 4, 5, 6]  # only the missing parts were written
+    assert log["sections"] == [1, 2, 3, 4]        # only the missing parts were written
     assert any("earlier attempt" in r for r in w.report)
 
 
 def test_every_part_is_cited_and_an_unmapped_sentence_flags_without_blocking(
         tmp_path: Path, monkeypatch) -> None:
-    make, log = _fake_writer(tmp_path, monkeypatch, unsupported={4})
+    make, log = _fake_writer(tmp_path, monkeypatch, unsupported={3})
     w = make()
     assert asyncio.run(w.run()) is not None, w.report
-    # The fake sections carry checkable sentences in sections 2 and 4 only;
-    # both are sent, tagged with their section, in one batch.
-    assert log["cited"][0] == ["p2-c1", "p4-c1"]
-    # The one unsupported sentence is corrected in place; its section is
-    # never rewritten for it.
-    assert len(log["corrected"]) == 1
-    assert log["sections"].count(4) == 1
-    assert "flagged" not in [status for status, _notes in log["reviews"]]
+    # An article sends every sentence of every part, numbers or not, tagged
+    # with its part, in batches.
+    cited = [c for batch in log["cited"][:1] for c in batch]
+    # (The fake sources line is too short to be a sentence.)
+    assert {int(c[1:].split("-")[0]) for c in cited} == {1, 2, 3}
+    # Section 3's unsupported sentences are corrected in place; its section
+    # is never rewritten for them.
+    assert any(c.startswith("p3-") for c in cited) and log["corrected"]
+    assert log["sections"].count(3) == 1
+    # The fake judge still refuses the answer sketch the corrector cannot
+    # reach, so the lesson is written and flagged with it, not lost.
+    status, notes = log["reviews"][-1]
+    assert status == "flagged" and "Sentences the study note does not support" in notes
 
 
 def test_model_text_in_a_heading_is_escaped() -> None:
@@ -858,7 +861,7 @@ def test_each_finding_is_sent_to_the_section_that_causes_it(tmp_path: Path, monk
     assert asyncio.run(w.run()) is not None, w.report
     assert log["finish_calls"] == [False, False]      # refused once, passed after the repair
     assert log["sections"].count(2) == 2              # only section 2 was written again
-    assert all(log["sections"].count(n) == 1 for n in (1, 3, 4, 5, 6))
+    assert all(log["sections"].count(n) == 1 for n in (1, 3, 4))
     assert log["reviews"][-1][0] != "flagged"
 
 
@@ -1142,8 +1145,14 @@ def test_a_page_repair_that_brings_in_a_hard_finding_is_reverted(tmp_path: Path,
 
 
 def test_his_lab_is_not_rewritten_for_a_quality_finding(tmp_path: Path, monkeypatch) -> None:
-    make, log = _fake_writer(tmp_path, monkeypatch)
-    plan = lw.Outline.model_validate(_outline())
+    # His lab lives in a course phase; an article no longer plans one, so the
+    # plan rule is lifted here to reach the page repair's lab branch.
+    monkeypatch.setattr(lw, "ARTICLE_BARRED_KINDS", {})
+    with_lab = _outline()
+    with_lab["sections"].insert(2, {"heading": "Fifteen minutes today", "kind": "lab",
+                                    "covers": "one thing to try"})
+    make, log = _fake_writer(tmp_path, monkeypatch, outline=with_lab)
+    plan = lw.Outline.model_validate(with_lab)
     lab = next(s.heading for s in plan.sections if s.kind == "lab")
     _refusing_finish(monkeypatch, log, [f"these sections run long with nothing to look at: {lab}"],
                      times=1)
@@ -1237,3 +1246,196 @@ def test_the_code_version_changes_with_what_the_checks_read(monkeypatch) -> None
     assert first == dbos_app.code_version()
     monkeypatch.setattr(settings(), "private_employers", ("Example Corp",))
     assert dbos_app.code_version() != first
+
+
+# --- story days: the whole story, no course tie (2026-10-17) -------------------------------
+
+def _story(**kw: Any) -> dict[str, Any]:
+    base = _outline_base(
+        title="Why did Discord voice calls lag in Bucharest after the edge move",
+        subtitle="Discord moved voice to the edge and found three causes",
+        eyebrow="design story · Discord · voice SFU",
+        outcome="Find which branch of your event loop starves the other",
+        running_case="Discord's voice SFU on eight worker threads per host.",
+        opening="In February, users in Bucharest saw pings above half a second.",
+        concepts=[_concept(), _concept(id="c2")],
+        sections=[
+            {"heading": "What did Bucharest see", "concept": "c1", "covers": "the symptom"},
+            {"heading": "Why the send queue waited", "concept": "c2", "covers": "the cause"},
+            {"heading": "Sources", "kind": "sources", "covers": "the urls"},
+        ])
+    base["findings"] = [
+        {"finding": "The flush timer starved behind an always-ready recv", "concept": "c1"},
+        {"finding": "Softirq work shared a vCPU with a worker", "concept": "c2"},
+        {"finding": "The Iceland PoP made mixed calls worse", "left_out": "covered by c1's placement"},
+    ]
+    out = {**base, **kw}
+    out["sections"] = _ledger(out["sections"])
+    return out
+
+
+def test_a_story_plan_teaches_every_finding_or_says_why_not() -> None:
+    ok = lw.Outline.model_validate(_story())
+    assert lw.outline_problems(ok, NOTE, article=True, story=True) == []
+
+    one = lw.Outline.model_validate(_story(concepts=[_concept()], findings=[
+        {"finding": "The flush timer starved", "concept": "c1"}]))
+    assert any("a story teaches two to five" in p
+               for p in lw.outline_problems(one, NOTE, article=True, story=True))
+
+    silent = _story()
+    silent["findings"][2] = {"finding": "The Iceland PoP made mixed calls worse"}
+    probs = lw.outline_problems(lw.Outline.model_validate(silent), NOTE, article=True, story=True)
+    assert any("no concept and no reason" in p for p in probs)
+
+    orphan = _story()
+    orphan["findings"] = [f for f in orphan["findings"] if f.get("concept") != "c2"]
+    probs = lw.outline_problems(lw.Outline.model_validate(orphan), NOTE, article=True, story=True)
+    assert any("c2 teaches no finding" in p for p in probs)
+
+
+def test_a_story_plan_does_not_tie_itself_to_the_course() -> None:
+    tied = lw.Outline.model_validate(_story(
+        opening="In the serving phase you sized your router's replicas from throughput."))
+    probs = lw.outline_problems(tied, NOTE, article=True, story=True)
+    assert any("opening ties the story to his course" in p for p in probs)
+
+
+def test_an_article_plans_no_lab_and_no_post() -> None:
+    plan = _outline()
+    plan["sections"].insert(2, {"heading": "Lab: starve a loop yourself", "kind": "lab",
+                                "covers": "code"})
+    plan["sections"].insert(3, {"heading": "What he could post", "kind": "post", "covers": "two"})
+    probs = lw.outline_problems(lw.Outline.model_validate(plan), NOTE, article=True)
+    assert any("no lab section" in p for p in probs)
+    assert any("no post section" in p for p in probs)
+    # His course phase keeps its lab.
+    assert not any("no lab section" in p
+                   for p in lw.outline_problems(lw.Outline.model_validate(plan), NOTE,
+                                                article=False))
+
+
+@pytest.mark.parametrize("opening", [
+    "In the last phase you could interleave ready tasks with an event loop.",
+    "In the serving phase you sized your router's replicas from throughput and CPU.",
+    "In Phase 3B you learned to route a session back to the replica.",
+    "Across the serving phases you built an inference stack piece by piece.",
+    "In your batching phase you computed the service rate of a queue.",
+    "When you re-read the serving phases, read each optimisation as an act on one phase.",
+])
+def test_the_course_ties_he_read_are_caught(opening: str) -> None:
+    assert lw.course_tie(opening)
+
+
+@pytest.mark.parametrize("text", [
+    "Prefill is the single pass that processes the prompt, and decode is the second phase.",
+    "During the decode phase each token needs its own step.",
+    "Over the course of the migration the team moved 80% of traffic.",
+])
+def test_a_phase_of_the_system_is_not_a_course_tie(text: str) -> None:
+    assert lw.course_tie(text) == ""
+
+
+@pytest.mark.parametrize("text,leaks", [
+    ("Predict starvation in his own select loops.", True),
+    ("What he could post", True),
+    ("Where his own stack hits the same law", True),
+    ("David Chen and his team moved voice to the edge.", False),
+    ("Find one queue-wait metric in a system you run.", False),
+])
+def test_the_writer_calling_the_reader_he_is_caught(text: str, leaks: bool) -> None:
+    assert bool(lw.reader_leak(text)) is leaks
+
+
+def test_a_bridge_that_repeats_the_hand_over_above_is_sent_back() -> None:
+    # Word for word from the Discord article of 2026-10-14, lines 41 and 45.
+    above = ('<h2 data-concept="c1">What did Bucharest see</h2><p>The probe placed the stall'
+             " inside Discord's process but not inside which line of it. The next section"
+             " opens the loop itself and asks why the always-ready branch wins every time.</p>")
+    here = ('<h2 data-concept="c1">Why does the always-ready branch win</h2><p>The probe'
+            " placed the stall inside Discord's process but not inside which line of it. So"
+            " the next step is to open the loop itself.</p><p>Each of the eight workers runs"
+            " one select over two branches, a receive future and a flush timer.</p>")
+    probs = lw.section_problems(here, earlier=above, article=True, kind="design_story",
+                                apparatus=False, total_words=100, story=True)
+    assert any("says again what a part above said" in p for p in probs)
+    # A course phase keeps its own connection rules.
+    assert not any("says again" in p for p in lw.section_problems(
+        here, earlier=above, article=False, kind="", apparatus=False, total_words=100))
+
+
+def test_an_article_keeps_its_receipts_in_the_sources() -> None:
+    html = ('<h2 data-concept="c1">x</h2><p>The send queue waited about a millisecond at'
+            ' quiet hours.</p><details class="evidence"><summary>Evidence</summary><p>Only'
+            " Discord reported it.</p></details>")
+    probs = lw.section_problems(html, earlier="", article=True, kind="design_story",
+                                apparatus=False, total_words=100, story=True)
+    assert any("goes in the Sources list" in p for p in probs)
+    assert not any("Sources list" in p for p in lw.section_problems(
+        html, earlier="", article=False, kind="", apparatus=False, total_words=100))
+
+
+def test_a_story_day_reads_the_story_outline_and_the_course_day_does_not() -> None:
+    story = " ".join(lw.outline_instructions(article=True, story=True).split())
+    article = " ".join(lw.outline_instructions(article=True).split())
+    assert "Plan one story article" in story and "Find every finding first" in story
+    assert "Plan one story article" not in article and "orbits the course phase" in article
+    assert lw.Material(article=True, slug="", kind="design_story", note="n", prompt="p").story
+    assert not lw.Material(article=True, slug="", kind="paper", note="n", prompt="p").story
+    assert not lw.Material(article=True, page="lab", slug="", kind="design_story",
+                           note="n", prompt="p").story
+
+
+def test_an_article_section_is_not_told_to_hand_over() -> None:
+    plan = lw.Outline.model_validate(_story())
+    m = lw.Material(article=True, slug="", kind="design_story", note="n", prompt="p")
+    told = lw._connection(plan, 1, plan.sections[0], m)
+    assert "Do not end on a hand-over sentence" in told and "End by handing over" not in told
+    course = lw.Material(article=False, slug="p", note="n", prompt="p")
+    assert "End by handing over" in lw._connection(plan, 1, plan.sections[0], course)
+    assert "This is a story article" in lw._section_prompt(m, plan, 1, plan.sections[0], "", [])
+
+
+def test_a_story_is_budgeted_by_its_findings() -> None:
+    # Two findings get two sections' worth of words, not a page split two ways.
+    plan = lw.Outline.model_validate(_story())
+    budgets = lw.word_budgets(plan, lw.story_limit(plan))
+    assert all(budgets[i] >= lw.STORY_SECTION_WORDS for i in (1, 2))
+    # Five findings run past the one-idea limit, up to the story ceiling.
+    five = _story(concepts=[_concept(id=f"c{n}") for n in range(1, 6)], sections=[
+        *({"heading": f"Finding {n}", "concept": f"c{n}", "covers": "x"} for n in range(1, 6)),
+        {"heading": "Sources", "kind": "sources", "covers": "the urls"}])
+    limit = lw.story_limit(lw.Outline.model_validate(five))
+    assert lw.lt.ARTICLE_MAX_WORDS < limit <= lw.lt.STORY_MAX_WORDS
+
+
+def test_an_article_opens_without_the_course_lessons_reading_note(tmp_path: Path,
+                                                                   monkeypatch) -> None:
+    make, _log = _fake_writer(tmp_path, monkeypatch)
+    w = make()
+    assert asyncio.run(w.run()) is not None, w.report
+    assert "This lesson teaches one idea" not in w.parts[0]
+    assert '<ol class="concepts">' in w.parts[0]
+
+
+def test_a_story_task_records_the_story_files_in_its_run() -> None:
+    from hq import engine
+    from hq.config import settings
+    from hq.loader import parse_job_md
+
+    tutor = parse_job_md(settings().agents_dir / "tutor")
+    story = {"workflow": "learning_journey", "stage": "lesson_synthesis",
+             "article_kind": "design_story"}
+    assert engine._run_bundle(tutor, story) == ("writer-section", True, "", True)
+    assert engine._run_bundle(tutor, {**story, "article_kind": "paper"})[3] is False
+
+
+def test_an_article_sends_a_sentence_with_no_number_to_the_judge() -> None:
+    # Credited Discord with the note writer's advice, and had no digit, so
+    # the judge never saw it (2026-10-17).
+    page = ('<h2 data-concept="c1">Placement</h2><p>After the test, the team replaced one'
+            " region at a time. The team judged each move by the worst-off participant"
+            " instead of the local median.</p>")
+    assert not any("worst-off" in c["claim"] for c in lt.new_claims("", page))
+    assert any("worst-off" in c["claim"] for c in lt.new_claims("", page, every=True))
+    assert "never a sentence that credits it to the people in the story" in lw.CREDIT_RULE

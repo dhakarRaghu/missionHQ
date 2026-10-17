@@ -93,19 +93,29 @@ def _lesson_file(path: str, suffix: str) -> Path:
     return full
 
 
+# A weekday article its own checks flagged: a sentence its digest does not
+# support after two rounds of repair, a doubted concept, or a page check the
+# repairs did not clear. Since 2026-10-08, 17 of 18 lessons reached him so.
+# It is held off the reading list, not deleted: `held=true` lists them.
+HELD_SQL = "(kind = 'topic' AND review_status = 'flagged')"
+
+
 @router.get("/lessons", operation_id="listLessons")
-async def list_lessons(limit: int = 30, kind: str = "") -> list[dict[str, Any]]:
+async def list_lessons(limit: int = 30, kind: str = "",
+                       held: bool = False) -> list[dict[str, Any]]:
     """Lessons, newest first: what he was taught and what it was built from.
 
     `kind` filters, and takes several separated by commas: "topic" for a
     weekday article, "lab" for Saturday's lab card, "review" for Sunday's week
     review, "course" for a phase of his own material. The Learn page asks for
     the first three; course lessons belong on the Courses page, beside the
-    phase they teach.
+    phase they teach. A held article (HELD_SQL) is left out, and `held`
+    lists only those.
     """
     await lesson_index.sync_quietly()   # rows another laptop wrote (git)
     limit = max(1, min(int(limit), 120))
     kinds = [k.strip() for k in kind.split(",") if k.strip()]
+    hold = HELD_SQL if held else f"NOT {HELD_SQL}"
     if kinds:
         return await db.fetch(
             "SELECT id::text, to_char(lesson_date, 'YYYY-MM-DD') AS lesson_date,"
@@ -114,8 +124,8 @@ async def list_lessons(limit: int = 30, kind: str = "") -> list[dict[str, Any]]:
             " (SELECT p.title FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_title,"
             " (SELECT p.course FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_course,"
             " review_status, review_score"
-            " FROM hq.lessons WHERE kind = ANY(%s) ORDER BY lesson_date DESC, created_at DESC"
-            " LIMIT %s",
+            f" FROM hq.lessons WHERE kind = ANY(%s) AND {hold}"
+            " ORDER BY lesson_date DESC, created_at DESC LIMIT %s",
             (kinds, limit),
         )
     return await db.fetch(
@@ -125,7 +135,7 @@ async def list_lessons(limit: int = 30, kind: str = "") -> list[dict[str, Any]]:
             " (SELECT p.title FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_title,"
             " (SELECT p.course FROM hq.course_phases p WHERE p.slug = hq.lessons.phase_slug) AS phase_course,"
         " review_status, review_score"
-        " FROM hq.lessons ORDER BY lesson_date DESC LIMIT %s",
+        f" FROM hq.lessons WHERE {hold} ORDER BY lesson_date DESC LIMIT %s",
         (limit,),
     )
 

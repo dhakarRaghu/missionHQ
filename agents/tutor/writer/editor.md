@@ -110,6 +110,21 @@ command, a number to look for.
   with no matching line in the owner-state block is an invented memory.
   Score transfer 1 and say which sentence to remove.
 
+## A story article
+
+When the sections tell a real team's story (the plan's concepts are
+findings from one system), three things change.
+
+- There is no key-point box and no hand-over sentence at the end of a
+  section. Do not ask for them. `connected` is judged by the first
+  sentence, which starts from what the section above found, and by the
+  running case: the company's system.
+- `transfer` asks for an action only in the last teaching section. In the
+  others, score it on whether the section says what the team checked or
+  measured, so he knows what to check in a system of his own.
+- The section must not mention a course, a phase or a lesson. If one does,
+  score `connected` 2 and say which sentence to replace.
+
 ## Scoring
 
 Score every section you are given, using its number exactly as given. Be

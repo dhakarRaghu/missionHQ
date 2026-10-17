@@ -42,6 +42,7 @@ from hq.learning_pipeline import (
     REVISION,
     REVISION_AGE_DAYS,
     SPINE_INCIDENT,
+    STORY_KINDS,
     WEEK_REVIEW,
     course_payload,
     course_study_brief,
@@ -748,7 +749,8 @@ async def _task_article_kind(task_id: str | None) -> str:
 
 
 def part_notes(html: str, *, earlier_html: str = "", article: bool = False,
-               evidence_share: float | None = None, total_words: int = 0) -> list[str]:
+               evidence_share: float | None = None, total_words: int = 0,
+               max_words: int = 0) -> list[str]:
     """What `write_lesson` would send back about this one section, said now.
 
     The page checks used to run only when every part was saved. Their findings
@@ -784,9 +786,10 @@ def part_notes(html: str, *, earlier_html: str = "", article: bool = False,
     bare = sections_without_a_visual(html)
     if bare:
         notes.append("nothing to look at in: " + _listed(bare))
-    if article and total_words > ARTICLE_MAX_WORDS:
+    limit = max_words or ARTICLE_MAX_WORDS
+    if article and total_words > limit:
         notes.append(f"the article is already {total_words} words, past the"
-                     f" {ARTICLE_MAX_WORDS} limit: cut here, not after the last part")
+                     f" {limit} limit: cut here, not after the last part")
     return notes
 
 
@@ -982,15 +985,19 @@ async def finish_lesson(
         # The review detector (sentences about a source) keeps its ceiling.
         kind = article_kind if article_kind is not None else await _task_article_kind(task_id)
         what = "article"
+        story = kind in STORY_KINDS
+        least, most = (STORY_CONCEPTS_MIN, STORY_CONCEPTS_MAX) if story else (1, 1)
         found.add(page_findings(
-            "", html, "", least=1, most=1, dated_share=ARTICLE_DATED_SHARE,
+            "", html, "", least=least, most=most, dated_share=ARTICLE_DATED_SHARE,
             evidence_share=PAPER_EVIDENCE_SHARE if kind == PAPER else EVIDENCE_SHARE))
         words = reading_words(html)
-        if words > ARTICLE_MAX_WORDS:
+        limit = STORY_MAX_WORDS if story else ARTICLE_MAX_WORDS
+        if words > limit:
             found.hard.append(
                 f"the article is {words} words, which is about {words // 200} minutes;"
-                f" past {ARTICLE_MAX_WORDS} it is carrying a second idea or a survey."
-                " Find which and cut it, not the evidence"
+                f" past {limit} it is " + ("telling more than one story or retelling a"
+                " finding" if story else "carrying a second idea or a survey")
+                + ". Find which and cut it, not the evidence"
             )
     if shortfall:
         if from_parts:
@@ -1580,6 +1587,12 @@ def page_script_problems(page_html: str) -> str:
 # words, seventeen minutes, for one routing decision.
 ARTICLE_MIN_WORDS = 1_800
 ARTICLE_MAX_WORDS = 2_600
+# A story day (product build, design story, AI latest) tells a real system's
+# whole story: two to five findings, each taught, so it may run longer. One
+# idea stretched to 3,100 words was what he could not learn from; five
+# findings at 650 words each is not a stretch.
+STORY_CONCEPTS_MIN, STORY_CONCEPTS_MAX = 2, 5
+STORY_MAX_WORDS = 4_200
 # No floor and no ceiling on length. "This should be according to value it
 # gives", and he meant both directions: a page may be shorter than the phase it
 # grew from when what it left out was not worth his time. What is measured is
@@ -1707,10 +1720,19 @@ def _restatement_words(page_html: str) -> int:
 _CLAIMY_RE = re.compile(r"\d|`[^`]+`|https?://")
 _HREF_RE = re.compile(r"""href=["'](https?://[^"']+)["']""")
 MAX_CLAIMS = 30
+# A part of an article checks every sentence; its longest part measured 35.
+ARTICLE_MAX_CLAIMS = 80
 
 
-def new_claims(source: str, page_html: str) -> list[dict[str, Any]]:
-    """Sentences the lesson adds that carry a checkable fact, with their links."""
+def new_claims(source: str, page_html: str, *, every: bool = False,
+               limit: int = MAX_CLAIMS) -> list[dict[str, Any]]:
+    """Sentences the lesson adds that carry a checkable fact, with their links.
+
+    `every`: every sentence, not only those with a number, code or a link.
+    An article has no phase of his behind it, and a sentence with no digit
+    can still be wrong: "The team judged each move by the worst-off
+    participant" credited Discord with the note writer's advice, and on
+    2026-10-17 only 54 of that article's 264 sentences reached the judge."""
     original = [_shingles(s) for s in _sentences(source)]
     out: list[dict[str, Any]] = []
     # The hero and the contents rail are not claims, and a box drawing is not
@@ -1723,13 +1745,13 @@ def new_claims(source: str, page_html: str) -> list[dict[str, Any]]:
         links = sorted(set(_HREF_RE.findall(block)))
         for sentence in _sentences(_page_text(block)):
             marks = _shingles(sentence)
-            if not marks or not _CLAIMY_RE.search(sentence):
+            if not marks or not (every or _CLAIMY_RE.search(sentence)):
                 continue
             if any(len(marks & o) / len(marks) > 0.5 for o in original):
                 continue  # his own sentence, reviewed where it came from
             out.append({"id": f"c{len(out) + 1}", "section": where,
                         "claim": sentence[:400], "urls": links[:6]})
-            if len(out) >= MAX_CLAIMS:
+            if len(out) >= limit:
                 return out
     return out
 

@@ -226,6 +226,13 @@ PRODUCT_BUILD = "product_build"
 DESIGN_STORY = "design_story"
 AI_LATEST = "ai_latest"
 OPEN_KINDS = (FRONTIER, PRODUCT_BUILD, DESIGN_STORY, AI_LATEST)
+# The open days that tell a real system's story, decided with him on
+# 2026-10-17. Planned as one idea that orbits his course, the Discord voice
+# article kept one of the six findings its digest carried and opened on "In
+# the last phase"; he said they did not have "system design or ai or
+# anything properly". These are planned from outline-story.md: the whole
+# story, every cause, no course tie.
+STORY_KINDS = (PRODUCT_BUILD, DESIGN_STORY, AI_LATEST)
 
 # Monday to Sunday. Tuesday is the course day ("" here): one article on every
 # phase he read that week, its kind rotating by week. The lab card is no

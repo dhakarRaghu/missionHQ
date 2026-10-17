@@ -35,7 +35,9 @@ this section connects to the rest.
    sizes, the code. Draw it with the kit piece that fits.
 6. The one number or the one failure, with its conditions. Say what breaks,
    what he would see in the logs or the metrics, and why. The receipt (who
-   measured it, where) goes in `<details class="evidence">` under it.
+   measured it, where) goes in `<details class="evidence">` under it. In an
+   article it goes in the Sources list instead, and the section has no
+   evidence box.
 7. Use it: the exercise from his lab that exercises this idea, or the file
    in Mission HQ where the same mechanism lives, with a question that
    reading it answers. What he has done comes only from the "What he has

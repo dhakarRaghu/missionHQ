@@ -69,10 +69,13 @@ them, the situation that phase used and the terms it defined.
 
 ## The sections
 
-Two or three sections for the idea, then apparatus: `lab` (fifteen minutes
-he could spend today, one concrete thing), `checkpoint` (one scenario
-question that makes him use the phase's model on the article's system),
-`post` (two things he could post), `sources`. An `orientation` section
+Two or three sections for the idea, then apparatus: `checkpoint` (one
+scenario question that makes him use the phase's model on the article's
+system) and `sources` (one line per source: what it gave and how sure it
+is). No `lab` and no `post` section: nothing here can run code written for
+the page, so the evidence is the source's own code, traces and numbers,
+shown inside the teaching sections. The page speaks to him as "you", never
+as "he" or "his". An `orientation` section
 titled "What this changes in the course" only when the article shows the
 phase is wrong, stale or incomplete. Past about 2,600 words an article is
 carrying a second idea; plan less.

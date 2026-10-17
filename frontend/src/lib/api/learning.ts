@@ -255,8 +255,12 @@ export interface LessonSignals {
 }
 
 export const learningApi = {
-  lessons: (limit = 30, kind = "") =>
-    getJson<Lesson[]>(`/learning/lessons${queryString({ limit, kind })}`),
+  /** `held`: only the articles their own checks flagged, which the
+   * reading list leaves out. */
+  lessons: (limit = 30, kind = "", held = false) =>
+    getJson<Lesson[]>(
+      `/learning/lessons${queryString({ limit, kind, held: held ? "true" : undefined })}`,
+    ),
   page: (path: string) =>
     getJson<LessonPage>(`/learning/page${queryString({ path })}`),
   note: (path: string) =>

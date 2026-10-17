@@ -374,6 +374,7 @@ def test_a_run_records_the_sha_of_what_it_sends() -> None:
     lesson = assemble.run_sha("writer-section", tutor, article=True)
     assert lesson == assemble.sha_of(outline, section)
     assert lesson not in {outline.sha, section.sha}
+    assert lesson != assemble.run_sha("writer-section", tutor, article=True, story=True)
     assert lesson != assemble.run_sha("writer-section", tutor, article=False)
     assert assemble.run_sha("writer-post", tutor) == assemble.assemble("writer-post", tutor).sha
     assert assemble.run_sha("agent", specs["sage"]) == assemble.assemble("agent", specs["sage"]).sha

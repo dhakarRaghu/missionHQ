@@ -920,8 +920,9 @@ def test_the_bar_travels_with_the_brief() -> None:
 
 def test_building_lives_in_the_course_lab() -> None:
     # "Reading must not outrun building." The build used to be a paragraph
-    # the article pointed at; it is now a runnable lab on every local phase,
-    # and the article ends with something to do today.
+    # the article pointed at; it is now a runnable lab on every local phase.
+    # An article carries no lab of its own since 2026-10-17: its lab was
+    # code nothing ran ("no lab, an article itself", 2026-10-06).
     import pathlib
 
     from hq.courses import load_courses
@@ -930,7 +931,7 @@ def test_building_lives_in_the_course_lab() -> None:
         for phase in course.phases:
             assert phase.lab.strip(), f"{course.slug} phase {phase.order} has no lab"
     craft = (pathlib.Path(__file__).resolve().parents[2] / "agents" / "tutor" / "writer" / "outline-article.md").read_text()
-    assert "fifteen minutes he could spend today" in " ".join(craft.split())
+    assert "No `lab` and no `post` section" in " ".join(craft.split())
 
 
 def test_his_list_is_reference_not_a_queue() -> None:

@@ -14,6 +14,10 @@ changed:
 - When the note says something narrower, say the narrower thing: "most of
   the drop", not "all of it"; "in one simulation", not "each time".
 - When a phase or source is named wrongly, name the right one from the note.
+- When the sentence credits the people in the story with something the note
+  gives only as its writer's own advice or prediction, say it as advice to
+  the reader ("judge a placement change by your worst-off user"), or remove
+  it.
 - When the sentence tells an event that did not happen as if it did, say it
   as what could happen: "a long run could end on the same 400".
 - When nothing in the note can support the sentence, remove it, and keep the
