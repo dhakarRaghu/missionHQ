@@ -841,16 +841,27 @@ def test_the_codex_browser_tool_gets_the_chatgpt_token_while_models_stay_on_grid
 
     from hq.runtimes import codex_cli
 
+    real = tmp_path / "codex"
+    real.write_text("#!/bin/sh\n")
     plugin = tmp_path / "plugins/cache/openai-bundled/unified-computer-use/26.1/.mcp.json"
     plugin.parent.mkdir(parents=True)
-    plugin.write_text(json.dumps({"mcpServers": {"cua_repl": {
-        "command": "/node", "args": ["/cua-repl.mjs"], "startup_timeout_sec": 120,
-        "env": {"CODEX_CLI_PATH": "/Applications/ChatGPT.app/codex", "CODEX_HOME": "/h"},
-    }}}))
+
+    def write_plugin(cli: str) -> None:
+        plugin.write_text(json.dumps({"mcpServers": {"cua_repl": {
+            "command": "/node", "args": ["/cua-repl.mjs"], "startup_timeout_sec": 120,
+            "env": {"CODEX_CLI_PATH": cli, "CODEX_HOME": "/h"},
+        }}}))
+
+    write_plugin(str(real))
     args = codex_cli.browser_auth_override(tmp_path)
     assert args[0] == "-c" and args[1].startswith("mcp_servers.cua_repl={command=")
     assert f'CODEX_CLI_PATH="{codex_cli.AUTH_WRAPPER}"' in args[1]
-    assert 'CODEX_REAL_CLI_PATH="/Applications/ChatGPT.app/codex"' in args[1]
+    assert f'CODEX_REAL_CLI_PATH="{real}"' in args[1]
+    # 2026-10-14: the ChatGPT app moved its CLI and the plugin cache kept the
+    # old path, so the wrapper exec'd nothing and the browser tool died with
+    # "trusted Node process exited unexpectedly". A dead path is not passed on.
+    write_plugin(str(tmp_path / "moved/codex"))
+    assert "CODEX_REAL_CLI_PATH" not in codex_cli.browser_auth_override(tmp_path)[1]
     wrapper = codex_cli.AUTH_WRAPPER.read_text()
     assert "model_provider=openai" in wrapper and "CODEX_REAL_CLI_PATH" in wrapper
     # No plugin installed: run without the fix rather than fail.

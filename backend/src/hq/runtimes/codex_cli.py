@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 # Codex ships inside the ChatGPT desktop app as well as standalone, and the
 # app's copy is not on PATH. A machine with either one can run this.
 _CLI_FALLBACKS = (
+    Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"),
     Path("/Applications/ChatGPT.app/Contents/Resources/codex"),
     Path.home() / ".local/bin/codex",
     Path("/opt/homebrew/bin/codex"),
@@ -114,7 +115,9 @@ def browser_auth_override(codex_home: Path | None = None) -> list[str]:
         log.warning("browser tool definition unreadable, running without the auth fix: %s", exc)
         return []
     real = env.get("CODEX_CLI_PATH")
-    if real:
+    # A plugin cache outlives the app update that moved the CLI, so a stale
+    # path is dropped and the wrapper searches instead.
+    if real and Path(real).exists():
         env["CODEX_REAL_CLI_PATH"] = real
     env["CODEX_CLI_PATH"] = str(AUTH_WRAPPER)
     dump = json.dumps
