@@ -37,6 +37,35 @@ function shortDate(ms: number): string {
   });
 }
 
+/** The local calendar day of a timestamp as "2026-10-18", for grouping rows by day. */
+export function dayKey(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : localDay(date);
+}
+
+function localDay(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** A day group's heading: "Today", "Yesterday", then "Thu, 16 Oct". */
+export function dayHeading(key: string): string {
+  if (!key) return "Undated";
+  const today = new Date();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (key === localDay(today)) return "Today";
+  if (key === localDay(yesterday)) return "Yesterday";
+  const [y, m, d] = key.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(y === today.getFullYear() ? {} : { year: "numeric" }),
+  });
+}
+
 /** Full local date and time. Used for `title` tooltips on relative labels. */
 export function exactTime(iso: string | null | undefined): string | undefined {
   if (!iso) return undefined;

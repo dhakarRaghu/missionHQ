@@ -20,7 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, qk } from "@/lib/api/client";
 import { JOB_STATUSES, type Job, type JobStatus, type PipelineDue } from "@/lib/api/types";
-import { timeAgo } from "@/lib/time";
+import { dayHeading, dayKey, timeAgo } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 /**
@@ -195,16 +195,43 @@ function FoundView({ rows: found }: { rows: Job[] }) {
           No role this week has that fit.
         </p>
       ) : (
-        <ul className="job-grid">
-          {rows.map((job) => (
-            <li key={job.id}>
-              <JobCard job={job} />
-            </li>
-          ))}
-        </ul>
+        byDay(rows).map(([day, jobs]) => (
+          <section key={day || "undated"} className="flex flex-col gap-2" aria-label={dayHeading(day)}>
+            <h2 className="flex items-baseline gap-2 border-b pb-1 text-sm font-medium">
+              {dayHeading(day)}
+              <span className="text-muted-foreground text-xs font-normal tabular-nums">
+                {jobs.length} role{jobs.length === 1 ? "" : "s"}
+              </span>
+            </h2>
+            <ul className="job-grid">
+              {jobs.map((job) => (
+                <li key={job.id}>
+                  <JobCard job={job} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
       )}
     </div>
   );
+}
+
+/**
+ * Found roles as one row per day hunter found them (first_seen, local time),
+ * newest day first and the best fit first within a day.
+ */
+function byDay(rows: Job[]): [string, Job[]][] {
+  const days = new Map<string, Job[]>();
+  for (const job of rows) {
+    const key = dayKey(job.first_seen);
+    const day = days.get(key);
+    if (day) day.push(job);
+    else days.set(key, [job]);
+  }
+  return [...days.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([key, jobs]) => [key, jobs.sort((a, b) => b.fit_score - a.fit_score)]);
 }
 
 const EMPTY_VIEW: Record<string, string> = {
