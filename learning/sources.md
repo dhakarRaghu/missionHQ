@@ -200,8 +200,6 @@ Thin here: capacity and multi-tenancy. Only Llumnix, and its full text was not r
   failures, pools, large tables. "The dangers of Postgres subtransactions".
 - **Percona** — percona.com/blog · 2026-09-17 · MySQL and Postgres
   operations, measured.
-- **Small Datum (Mark Callaghan)** — smalldatum.blogspot.com · 2026-06-19 ·
-  benchmarks with hardware and settings stated.
 - **Depesz** — depesz.com · 2026-08-25 · new Postgres features, one at a time.
 - **Crunchy Data** — crunchydata.com/blog · 2026-09-02 · practical Postgres,
   migrations.
@@ -684,6 +682,7 @@ not technical enough, or too much overlap with Latent Space.
 - **Shreya Shankar** — sh-reya.com/blog · newest post 2026-05-31 (moved by the source hunt 2026-09-28)
 - **Cloudflare postmortems (tag page)** — blog.cloudflare.com/tag/post-mortem · newest post 2026-05-01 (moved by the source hunt 2026-09-28)
 - **Anthropic engineering** — anthropic.com/engineering · newest post 2026-04-23 (moved by the source hunt 2026-10-03)
+- **Small Datum (Mark Callaghan)** — smalldatum.blogspot.com · newest post 2026-06-19 (moved by the source hunt 2026-10-18)
 
 ## Could not verify — worth a manual look in the browser
 
