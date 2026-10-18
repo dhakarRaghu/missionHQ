@@ -87,7 +87,7 @@ In PostgreSQL, one miss has two prices. It reads files through the kernel, so a 
 
 The failure is a pool too small for the hot data. Nothing errors. The hit rate falls, and the average read gets several times slower.
 
-**GitHub** saw a related failure in September 2012. Its pool was cold, so it did not yet hold the hot pages. A schema migration loaded its main MySQL database so much that health checks failed. The failover tool then made another server the active database. That server's InnoDB buffer pool was cold, and the server performed poorly. The site's load on the cold pool made its health checks fail too, so the role moved back. The team then turned off the health checks and automatic failover. Performance came back slowly as the pool filled. GitHub reported 1 hour 46 minutes of downtime that week, across this outage and a second one the next day.
+**GitHub** saw a related failure in September 2012, on a server with a cold pool. A cold pool does not yet hold the hot pages. A schema migration loaded its main MySQL database so much that health checks failed. The failover tool then made another server the active database. That server's InnoDB buffer pool was cold, and the server performed poorly. The site's load on the cold pool made its health checks fail too, so the role moved back. The team then turned off the health checks and automatic failover. Performance came back slowly, as the pool filled with the hot pages again. GitHub reported 1 hour 46 minutes of downtime that week. That total covers this outage and a second one on the next day.
 
 <details>
 
@@ -247,7 +247,7 @@ With two random-key indexes, the model gives 35,949 bytes per insert, 30 bytes p
 
 The key type decides c. In one test, a table with only a primary key took 5,000 inserts per second for an hour. A sequence key wrote about 2 GB of WAL. A random UUID key wrote over 40 GB, mostly page images.
 
-**Buildkite** used integer primary keys, and random UUIDv4 values as a second key for external use. The post says random keys spread recent rows over many index pages and lower the cache hit rate. Around 2022, the team started to put a timestamp in the first 48 bits of each new UUID. With this and other changes over 6 weeks, the WAL rate of the primary database fell by 50%. Write I/O fell by about the same amount. The post does not say how much of the 50% came from the UUID change. In 2023 the team chose UUIDv7, a time-ordered UUID, as the primary key for all new tables.
+**Buildkite** used integer primary keys, and random UUIDv4 values as a second key for external use. The post says random keys spread recent rows over many index pages and lower the cache hit rate. Around 2022, the team started to put a timestamp in the first 48 bits of each new UUID. With this and other changes over 6 weeks, the WAL rate of the primary database fell by 50%. Write I/O to the disks fell by about the same amount. The post does not say how much of the 50% came from the UUID change. In 2023 the team chose UUIDv7, a time-ordered UUID, as the primary key for all new tables.
 
 <details>
 
@@ -1204,7 +1204,7 @@ Each fix adds a second rule that protects pages used often.
 | PostgreSQL | a clock with usage counts up to 5, and a small ring for large sequential scans | index and bitmap heap scans get no ring |
 | InnoDB | a new page enters the old 3/8 of the list, and moves up only if used again after 1,000 ms | a window of 0 promotes every scan page |
 
-**MySQL** bug 45015, filed by Harrison Fisk in May 2009, reported this failure in InnoDB. It says that large full table scans can push a large share of the useful pages out of the buffer pool. He named `mysqldump`, the backup tool, as very bad at this, because it runs many full table scans. His steps to repeat it run `mysqldump` on a large, busy database. They expect the hit rate to fall a great deal and disk I/O to rise. The report gives no measured numbers for the hit rate or the I/O. The changelog note on the bug explains the cause. A scan reads several rows from each page, so each scan page was used again at once and moved to the head of the list. The InnoDB Plugin in MySQL 5.1.41 added `innodb_old_blocks_time` in late 2009, with a default of 0. MySQL 5.6 raised the default to 1,000 ms.
+**MySQL** bug 45015, filed by Harrison Fisk in May 2009, reported this failure in InnoDB. It says that large full table scans can push many useful pages out of the buffer pool. He named `mysqldump`, the backup tool, as very bad at this, because it runs many full table scans. His steps to repeat it run `mysqldump` on a large, busy database. They expect the hit rate to fall a great deal and disk I/O to rise. The report gives no measured numbers for the hit rate or the I/O. The changelog note on the bug explains why scan pages pushed out the hot ones. A scan reads several rows from each page, so it uses each page again at once. That second use moved every scan page to the head of the list. The InnoDB Plugin in MySQL 5.1.41 added `innodb_old_blocks_time` in late 2009. MySQL 5.6 later raised its default from 0 to 1,000 ms.
 
 <details>
 

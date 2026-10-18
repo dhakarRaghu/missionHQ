@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caching patterns: the miss path and the fill path</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Redis · Phase 2</div><h1>Caching patterns: the miss path and the fill path</h1><p class="subtitle">When Redis sits in front of a slow source, what breaks when the cache misses or fills, and how do you stop it?</p></header>
+<p>Your agent platform runs on 40 pods. Every agent run first reads its tenant's settings: the model, the tools the tenant allows, and its rate limits. The settings live in Postgres, and Redis sits in front of Postgres as a cache. Each cached key has a one-hour <dfn>TTL</dfn>, the time to live after which Redis deletes the key by itself.</p>
+
+<p>Together the pods read settings about 5,000 times per second. The <dfn>hit rate</dfn>, written h, is the share of reads that Redis answers. At h = 0.98 only about 100 reads per second reach Postgres, so Postgres was sized for that load. This lesson follows the settings cache through four failures, and each one is a real class of production incident. The agent platform is this lesson's own example, not the grading service of Phase 0. The real cases about "the platform" come from the shared platform of Phase 0.</p>
+
+<ul>
+  <li>One Redis node restarts empty, and Postgres falls over although nothing returned an error.</li>
+  <li>One key that every request reads expires, and 40 pods rebuild it at the same moment.</li>
+  <li>An admin removes a tool from a tenant, and agents keep using that tool for an hour.</li>
+  <li>A broken client asks for tenants that do not exist, thousands of times per second.</li>
+</ul>
+
+<p>All four happen in the same two places of a cache that readers fill. On the <dfn>miss path</dfn>, a reader finds nothing and goes to the source. On the <dfn>fill path</dfn>, that reader writes what it found back into Redis.</p>
+
+<h3>What you must know</h3>
+<ol class="concepts">
+<li id="c1"><b>The source serves only the misses. When caching stops, its load jumps 1/(1 − h) times, with no error.</b><span>Size the source for a cache outage, and make failing open cheap.</span></li>
+<li id="c2"><b>Each reader that misses during a rebuild starts its own rebuild, so coalescing must span every process that reads.</b><span>Pick singleflight, a lease, routing by key or early refresh, and predict the source calls.</span></li>
+<li id="c3"><b>Delete-on-write is not race-free. A slow reader can write the old value back after the delete.</b><span>Make a fill prove that nothing changed, with a lease and <code>SET IFEQ</code>.</span></li>
+<li id="c4"><b>A cached "not found" is a cache entry too. The create path must delete it, like any update.</b><span>Stop floods of missing IDs without hiding new rows.</span></li>
+</ol>
+<p>The cheatsheet tags these four ideas c1 to c4, in the order of this list.</p>
+
+<h2 data-kind="orientation">What you bring from Phases 0 to 1</h2>
+
+<div class="cards" data-cols="3">
+  <div class="card"><h4>One command thread, and the round trip</h4><p>Redis runs each command to the end before it starts the next one. Phase 0 showed that a small command costs about one network round trip. So every extra cache call on the miss path or the fill path adds a round trip to the request.</p></div>
+  <div class="card"><h4>SET with NX and EX is one atomic claim</h4><p><code>SET key val NX EX n</code> writes the key only if it does not exist yet, and gives it a TTL of n seconds. Redis runs it as one command, so two clients can never both succeed. Phase 1 used it to claim work, and this lesson uses it to claim a cache fill.</p></div>
+  <div class="card"><h4>Keys carry a prefix and a version</h4><p>Phase 1 named keys by the kind of object and its ID, joined by colons, such as <code>tenant:42:settings</code>. This phase adds a version part such as <code>v1</code>, which lets you change the value format later. The running case uses <code>tenant:42:settings:v1</code>.</p></div>
+</div>
+
+<p>This phase needs all three ideas. Each fill costs a round trip. A fill that must not overwrite newer data needs a conditional <code>SET</code>. A key version lets you retire an old value format at once. The first question is how much load the source sees when the cache stops answering.</p>
+
+<h2 data-concept="c1">How much load reaches the source when the hit rate drops?</h2>
+
+<p>The settings cache answers 98% of reads, so Postgres sees about 100 reads per second. That number depends on how the cache is filled. <dfn>Cache-aside</dfn>, also called lazy loading, is the read strategy where your application owns the cache. On a read, the application asks Redis first. On a miss it reads Postgres, and then it writes the value into Redis with a TTL.</p>
+
+<ol class="flow" id="s2-read">
+  <li><b>GET tenant:42:settings:v1</b><span>One round trip to Redis.</span></li>
+  <li class="hot"><b>miss</b><span>Redis returns nil, because the key is absent or expired.</span></li>
+  <li><b>read Postgres</b><span>The slow call, and the only one that knows the truth.</span></li>
+  <li class="ok"><b>SET … EX 3600</b><span>The reader fills the cache for the next hour.</span></li>
+  <li class="ok"><b>next GET hits</b><span>Later reads of this key never touch Postgres.</span></li>
+</ol>
+
+<p>Redis never talks to Postgres in this design. So the cache holds only <dfn>derived data</dfn>, a copy that you can rebuild from the source at any time. Losing the cache costs speed but never data, and that is why cache-aside is the default design. The same property also means the source carries every read the cache does not answer.</p>
+
+<details class="predict"><summary>Predict: the settings cache has h = 0.98, and Postgres can take 3 times its normal miss load. One of four Redis nodes, holding a quarter of the keys, is replaced by an empty node. Is Postgres safe?</summary>
+<p>No. The miss share goes from 0.02 to 0.75 × 0.02 + 0.25 = 0.265. That is about 13 times the normal miss load, far past the 3 times that Postgres can take. Most people expect about a quarter more load, because a quarter of the keys moved. But the normal load is only the 2% that misses, so a small loss of hits becomes a large gain in misses.</p>
+</details>
+
+<p>The arithmetic has four steps, and the last one is the reason a cache outage can last longer than the event that started it.</p>
+
+<ol>
+  <li>The source sees (1 − h) × traffic. At 5,000 reads per second and h = 0.98, that is 100 reads per second.</li>
+  <li>If caching stops completely, the source sees all 5,000 reads. The multiplier is 1/(1 − h), so h = 0.98 gives 50 times the load and h = 0.99 gives 100 times.</li>
+  <li>No read returns an error, because each one still succeeds from the source. The first signal you see is source latency, and then timeouts.</li>
+  <li>The cache refills only through source reads that succeed. If those reads time out, the misses never become hits, so the hit rate stays low and the overload holds itself in place.</li>
+</ol>
+
+<div class="calc" id="s2-amp">
+  <h4>Load on Postgres from the settings cache</h4>
+  <label>Hit rate, % <input type="range" name="hit" min="80" max="99.9" step="0.1" value="98"><span class="val" data-val="hit"></span></label>
+  <label>Reads per second <input type="range" name="rate" min="1000" max="20000" step="500" value="5000"><span class="val" data-val="rate"></span></label>
+  <div class="result">Normal load on Postgres <b data-out="miss"></b><br>Load if caching stops <b data-out="all"></b><br>Multiplier, 1/(1 − h) <b data-out="mult"></b></div>
+  <p class="note">Arithmetic from the formula above. Illustration, not measured.</p>
+  <script>kit.calc('#s2-amp', function(v){ var h=(+v.hit)/100; return {miss: kit.fmt(v.rate*(1-h),0)+' reads/s', all: kit.fmt(v.rate,0)+' reads/s', mult: kit.fmt(1/(1-h),1)+' times'}; });</script>
+</div>
+
+<p>Caching can stop for several reasons, and none of them looks like an error in the cache itself.</p>
+
+<ul>
+  <li>A flag or a bug marks responses as not cacheable, so every read goes to the source.</li>
+  <li>A cache node restarts empty, or a new empty node replaces a failed one.</li>
+  <li>A new region or a fresh deploy starts with a cold cache.</li>
+  <li>Redis is down, and the client "fails open" by reading the source on every cache error.</li>
+</ul>
+
+<p><b>Slack</b> saw the second reason as a wave of users who could not connect. An upgrade of the Consul agent restarted agents on a quarter of the fleet. Each restart removed a memcached node, and an empty spare node took its place. A miss on group DM membership became a query to every database shard. Slack wrote that the read load grew "superlinearly" with the share of misses. The queries timed out, so the cache could not be filled, and the overload continued. The first fix was a throttle on client boot. Then the query was changed to read only the missing data, and to read from replicas too. Later Slack added a table sharded by channel.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Slack, "Slack's Incident on 2-22-22", by Laura Nolan, published 2022-04-26. The post gives no hit-rate numbers. The quotes "superlinearly" and "the cache could not be filled" are from the post. The 0.265 arithmetic is the study note's worked question, not a measurement.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: a silent bypass flag, a repair loop at Facebook, and two more cases</summary>
+<p><b>A bypass flag on the platform.</b> A content service cached API responses in Redis through a shared client library. The library checked a <code>cacheable</code> flag on each response before it stored it. A serializer marked media items in one processing state as not cacheable. A callback that should move items out of that state had been commented out in an earlier refactor, so the items stayed there. As a result, every call to one hot endpoint skipped the cache.</p>
+<p>The source saw about 30,000 calls per minute instead of about 300, which is 100 times. Nothing errored and no related deploy appeared. The symptom was "everything is slow" in the content service and in the services behind it. A one-file fix marked that state as cacheable again. The team reported these results: endpoint calls 30,000 to 300 per minute, source traffic down 80%, a read service down 50%, endpoint p90 from 100 ms to 20 ms, and peak database read units from 35,000 to 7,000 per minute. These numbers come from the platform's own records and are not checked. The formula explains the size. At h = 0.99 the flag multiplied source load by 1/(1 − 0.99) = 100.</p>
+<p>The same platform had two defensive patterns that show the right instinct. One request flag stopped a cache purge from running on every poll of a long media job, and purged the stale entry once when the job succeeded. A settings reader wrapped the parsing of cached JSON in a try and catch, so a corrupt entry was logged and the code read the database instead.</p>
+<p><b>Facebook</b> had a site outage of about 2.5 hours from a cache repair loop. A system replaced invalid cache values with values from the persistent store. Then it met an invalid value in the store itself. Every client that saw the value tried to repair it, and clients that got a database error deleted the cache key. The database cluster received "hundreds of thousands of queries a second". The fix was to stop all traffic to that cluster, which meant turning off the site, then to let users back slowly, and to turn off the repair system.</p>
+<p><b>Stack Overflow</b> keeps an in-process L1 cache in front of Redis. A TTL bug stopped about 95% or more of keys from filling the local cache, by the author's estimate. So all those reads went to Redis. Nobody noticed for a few hours. This is the same silent bypass one layer up.</p>
+<p><b>Hotstar</b> shows the opposite cost. A read-through cache with a short TTL on its subscription API made p99 latency 20% worse. Free users far outnumbered paid users, and each call added a cache write. Caching only the IDs of paid users fixed it, because a miss could then mean "free user". The general point is inferred from this case: a cache that saves few source reads still adds a round trip and a write.</p>
+<p><b>Gutter</b> is how Facebook's memcache absorbs a failed server without the multiplier. A small pool of spare servers, the gutter pool, takes over the keys of a failed server for a short time. Facebook reported that gutter "converts 10%-25% of failures into hits each day".</p>
+</details>
+
+<details class="evidence"><summary>Evidence for the extra cases</summary>
+<p>The bypass case is from the phase's own section 2.6 and cannot be checked. Facebook, "More details on today's outage", Robert Johnson, 2010-09-23. Stack Overflow, "How We Do App Caching - 2019 Edition", Nick Craver, 2019-08-06. Hotstar, "Scaling Subscriptions — Cache for Cash!", Prakash Shanbhag, 2020-06-19. The post does not name the cache product. Gutter: "Scaling Memcache at Facebook", NSDI 2013, section 3.3.</p>
+<ul class="sources">
+  <li><a href="https://engineering.fb.com/2010/09/23/uncategorized/more-details-on-today-s-outage/">Facebook, More details on today's outage</a></li>
+  <li><a href="https://nickcraver.com/blog/2019/08/06/stack-overflow-how-we-do-app-caching/">Stack Overflow, How We Do App Caching</a></li>
+  <li><a href="https://blog.hotstar.com/scaling-subscriptions-cache-for-cash-4c5836bd6a6f">Hotstar, Scaling Subscriptions</a></li>
+  <li><a href="https://slack.engineering/slacks-incident-on-2-22-22/">Slack's Incident on 2-22-22</a></li>
+</ul>
+</details>
+
+<p>The formula says the source must survive the misses. It does not yet say which part of your code fills the cache, or what each design can lose on a write. The next section answers that.</p>
+
+<h2 data-concept="c1">Which strategy fills the cache, and what can each one lose?</h2>
+
+<p>Cache-aside left the source carrying every miss, and it fills the cache only on reads. A cache design answers two separate questions. Who fills the cache on a miss? And what happens to the cache when someone writes to the source?</p>
+
+<div class="callout warn">The phase said there are "exactly three write policies", and then it defined four. They sit on two axes. Cache-aside and read-through are read strategies. Write-through and write-behind are write strategies, and a design picks one from each axis.</div>
+
+<p>On the read axis, the two strategies differ only in where the miss code lives.</p>
+
+<ul>
+  <li><b>Cache-aside</b>: your application reads Redis, reads the source on a miss, and fills Redis.</li>
+  <li><b>Read-through</b>: a cache library or a proxy does the source read on a miss, so your code calls only <code>cache.get(key)</code>. It is cache-aside with the miss code moved behind an interface, and it has the same failure modes.</li>
+</ul>
+
+<p>On the write axis there are three choices, and each one decides what the cache can lose.</p>
+
+<ul>
+  <li><b>Write-around with delete</b>: the writer updates only the source and then deletes the cache key. The next reader fills it again. This is the usual partner of cache-aside, and the invalidation sections below look at it closely.</li>
+  <li><b>Write-through</b>: the writer updates the source and the cache in the same request, before it returns. Every write pays the cache's latency, and you must decide what to do when the cache write fails.</li>
+  <li><b>Write-behind</b>, also called write-back: the writer updates the cache now and queues the source write for a background flush, often in batches. Writes are fast and absorb bursts. But a crash before the flush loses those writes.</li>
+</ul>
+
+<table>
+  <tr><th></th><th>Cache-aside, delete on write</th><th>Write-through</th><th>Write-behind</th></tr>
+  <tr><td>Who fills the cache</td><td>the reader, on a miss</td><td>the writer</td><td>the writer</td></tr>
+  <tr><td>Freshness</td><td>stale until the TTL ends or a delete runs</td><td>fresh, unless the cache write fails or two writers interleave</td><td>cache fresh, source behind</td></tr>
+  <tr><td>Write latency</td><td>source only</td><td>source plus cache</td><td class="ok">cache only</td></tr>
+  <tr><td>Read latency</td><td>fast after the first fill</td><td>fast</td><td>fast</td></tr>
+  <tr><td>Data-loss risk</td><td class="ok">none, the cache is derived</td><td>no data lost, but a failed cache write leaves it stale</td><td class="bad">a crash before the flush loses writes</td></tr>
+  <tr><td>Complexity</td><td class="ok">low</td><td>medium</td><td class="bad">high: flush, retry, order, recovery</td></tr>
+  <tr><td>Use when</td><td>reads dominate and a stale window is acceptable</td><td>a read right after a write must be fresh</td><td>writes dominate, some loss is acceptable, and the source cannot keep up</td></tr>
+</table>
+
+<p>Write-through ties your write latency to the cache. Write-behind ties your durability to the cache. Both give up the property that makes cache-aside safe, which is that the cache can vanish and no data is lost. Write-through is also not "always fresh", as the phase's table said. If the Postgres write succeeds and the Redis write fails, the cache keeps the old value until its TTL ends.</p>
+
+<p>In the running case, settings are read thousands of times per second and changed by an admin a few times per day. So the settings cache uses cache-aside with delete on write. A per-tenant usage counter, written on every agent run, would be a write-behind candidate, but only if losing a few seconds of counts is acceptable.</p>
+
+<p>Exercise E9 measures this trade, and the Go deeper block below gives its numbers and what a write-behind queue can lose.</p>
+
+<details class="answer deeper"><summary>Go deeper: the E9 numbers, a write-behind queue that loses events, and what persistence does to it</summary>
+<p>Exercise E9 shows the trade in numbers. Five write-through writes take about 269 ms, because each one waits for the slow source. Five write-behind writes take about 4 ms, and the lab prints <code>source.puts=0</code> until the flush runs. Those writes exist only in memory until then. Write-behind stays fast until the pod is killed for using too much memory with 500 writes not yet flushed.</p>
+<p>The second lab folder, <code>phase02_caching_patterns/write_behind</code>, keeps its queue in a Redis list. Its flusher takes an event with <code>LPOP</code> and then writes it to the source, at line 172. A crash between those two steps loses the event, so delivery is at most once. The program also prints "batched by flusher" at line 141, although it writes one row at a time.</p>
+<p>An at-least-once flush keeps the event until the write succeeds. One way is <code>LMOVE</code> from the queue to a processing list, then a delete from the processing list after the source write. A restart then finds unfinished events in the processing list. Another way is a Redis Stream with a consumer group, where the flusher sends <code>XACK</code> only after the source write. Phase 1 taught both lists and Streams. At least once means the source may see an event twice, so the source write must be idempotent.</p>
+<p>The queue also lives only as long as Redis keeps it. The lab's <code>docker-compose.yml</code> starts Redis with <code>--appendonly no</code> and <code>--save ""</code>, so persistence is off. A Redis restart then empties the queue, and every write in it is lost. A write-behind queue in Redis needs persistence that matches the loss you can accept. Phase 4 covers persistence and failover.</p>
+<p>A safer pattern for "write to the database and also tell another system" is the outbox. The writer stores the event in a database table in the same transaction as the data, and a relay publishes it later. The elite-storage course teaches the outbox in its transactions phase.</p>
+<p>Caching LLM answers by meaning, called semantic caching, is a different problem with its own failure modes. It is not part of this phase.</p>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Read and write strategies: AWS ElastiCache "Caching strategies" and the Microsoft Azure cache-aside pattern page. The E9 numbers are the phase's expected output. A study run on one Mac measured 260 ms and 1.8 ms. It used an x86_64 Homebrew build of Redis 8.10.1 under Rosetta 2, outside Docker. The write-behind lab lines were read in the source, not run.</p>
+</details>
+
+<p>Cache-aside is the right default for settings. The toy version of it fails the request when Redis fails, and the next section shows what a production read does instead.</p>
+
+<h2 data-concept="c1">What should a cache-aside read do when Redis fails, and what does that cost?</h2>
+
+<p>The toy cache-aside read is three lines: <code>GET</code>, and on nil read the source and <code>SET</code>. In production it breaks in three ways. Redis can be down, a cached value can be corrupt, and the value format can change between deploys. The lab program <code>phase02_caching/cache_aside/main.go</code> handles all three with five properties.</p>
+
+<ol>
+  <li><b>A versioned key.</b> The key is <code>course:v1:&lt;id&gt;</code>. When the shape of the cached value changes, you change <code>v1</code> to <code>v2</code>. New code never reads the old keys, and their TTL removes them. You need no migration, and old bytes cannot crash new code.</li>
+  <li><b>Fail open on a cache error.</b> If <code>GET</code> returns an error that is not <code>redis.Nil</code>, the code logs a warning and reads the source. A Redis outage makes the request slower, but the request still succeeds.</li>
+  <li><b>Tolerate corruption.</b> If the cached bytes do not unmarshal, because of format drift, a partial write or a bad value, the code reads the source. The next fill replaces the bad value.</li>
+  <li><b>A deliberate TTL on every fill.</b> The lab uses 10 minutes. A list that rarely changes can take an hour, and a permission may need less.</li>
+  <li><b>Fill errors do not fail the request.</b> A failed marshal or <code>SET</code> is a warning, because the caller already has correct data from the source.</li>
+</ol>
+
+<div class="compare">
+<div class="wrong"><p>The cache is a hard dependency and a format risk.</p>
+<pre><code data-lang="go">raw, err := cache.Get(ctx, "voices")   // key not versioned
+if err != nil { return nil, err }      // cache down = request FAILS
+json.Unmarshal([]byte(raw), &amp;out)      // corrupt value = garbage, no fallback
+return out                             // never fills, no TTL</code></pre></div>
+<div class="right"><p>The lab's read, shortened: a miss, an error and a corrupt value all lead to the source.</p>
+<pre><code data-lang="go">raw, err := rdb.Get(ctx, key).Result()
+switch {
+case err == redis.Nil:
+    // miss: read the source below
+case err != nil:
+    log.Printf("cache GET failed (%v), failing open", err)
+default:
+    if json.Unmarshal([]byte(raw), &amp;c) == nil {
+        return c, "HIT"
+    } // corrupt: read the source below
+}
+c := slowSourceOfTruth(id)
+if b, e := json.Marshal(c); e == nil {
+    if e := rdb.Set(ctx, key, b, 10*time.Minute).Err(); e != nil {
+        log.Printf("cache SET failed: %v", e) // a warning only
+    }
+}</code></pre></div>
+</div>
+
+<p>Returning the cache's error to the caller is the trap here. A Redis blip then becomes a user-facing 500, and the cache has made the service less available than having no cache. Failing open fixes that, but it does not make an outage harmless. It has two costs, and the first one is the multiplier from the first section. During the outage every read reaches Postgres, so Postgres sees 5,000 reads per second instead of 100.</p>
+
+<p>The second cost is time. A client that fails open first waits for its read timeout, and it may retry. If Redis is hung, for example paused or stuck in a long command, each request waits for those timeouts before it falls back. One <code>GET</code> against a paused Redis took these times with go-redis v9.5.1, the version the labs pin.</p>
+
+<table>
+  <tr><th>Client options</th><th>Time until the GET fails</th></tr>
+  <tr><td>defaults: <code>ReadTimeout</code> 3 s, <code>MaxRetries</code> 3</td><td class="bad">6.042 s</td></tr>
+  <tr><td><code>MaxRetries: -1</code></td><td>3.001 s</td></tr>
+  <tr><td><code>ReadTimeout: 100ms</code></td><td>242 ms</td></tr>
+  <tr><td><code>ReadTimeout: 100ms</code>, <code>MaxRetries: -1</code></td><td class="ok">101 ms</td></tr>
+</table>
+
+<p>The current go-redis release defaults <code>ReadTimeout</code> to 5 s and keeps <code>MaxRetries</code> at 3. With those defaults a hung Redis can add about 10 s to each request, which is inferred from the two measured rows. Exercise E2 does not show this cost, because it stops Redis, and a refused connection fails at once. A safe fail-open path has four parts.</p>
+
+<ul>
+  <li>A short client timeout, set from the cache latency you measure. <b>Uber</b> sets CacheFront's timeouts adaptively to the P99.99 of cache latency.</li>
+  <li>No retry on a cache read, or at most one, because the source is the fallback.</li>
+  <li>A circuit breaker per Redis node, which stops calling a failing node for a while and goes straight to the source. Uber uses a sliding-window breaker per node.</li>
+  <li>A limit on how many misses may reach the source at once. Requests above the limit wait or get a fast error, so the source keeps serving the rest.</li>
+</ul>
+
+<p>Some caches must fail closed instead. A rate limiter keeps its counters in Redis, so Redis is the source of truth and there is nothing to fall back to. If it fails open, every tenant runs with no limit during the outage. Fail closed when the cache holds a decision that is unsafe to skip. You then accept that the feature stops whenever Redis is down.</p>
+
+<div class="keypoints">
+<p class="remember">The source must survive every miss, and an outage turns every read into one.</p>
+<p class="trap">Failing open still sends full load to the source and waits a timeout per request.</p>
+<p class="try">Find ReadTimeout and MaxRetries in your Redis client, and multiply them.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: a tuned circuit breaker, why 6 s and not 12 s, key versions, per-field TTLs, and measuring the hit rate</summary>
+<p><b>Shopify</b> showed why the breaker needs tuning. It modelled circuit breakers for 42 Redis instances, each with its own circuit. With the first configuration, a worker needed 263% extra utilization while all of Redis was down. After tuning, it needed 4%. The tuning cut the half-open timeout to 50 ms, because 99% of their Redis requests answer in under 50 ms. It also raised the error timeout to 30 s.</p>
+<p><b>Why the default costs about two timeouts.</b> In go-redis v9.5.1, <code>_process</code> marks a read timeout as retryable, at <code>redis.go</code> lines 426 to 431. The retry opens a new connection. A paused server still accepts the TCP connection, but the <code>HELLO</code> handshake in <code>initConn</code>, at line 303, then times out. That error comes from <code>getConn</code>, outside the retry flag, so the client does not retry again. So the default cost is two read timeouts, about 6 s. This chain is inferred from the source code. Nobody traced it step by step with a debugger.</p>
+<p>The lab's <code>cache_aside</code> program passes <code>ReadTimeout: time.Second</code> when it creates the client, so it does not use the 3 s default. The other <code>phase02_caching</code> programs use the defaults. At v9.23.0, <code>options.go</code> lines 735 to 768 set the 5 s read timeout default.</p>
+<p><b>Key versions in practice.</b> Exercise E11 writes a <code>v1</code> and a <code>v2</code> key and lists both with <code>KEYS</code>. Use <code>KEYS</code> only on a sandbox, because it scans the whole keyspace on the one command thread and blocks every other client. A version bump also causes a cold start for that key family. Every key misses once after the deploy, so the multiplier from the first section applies to that family. Roll a bump out to a share of pods first if the family is hot. That rollout advice is inferred from the multiplier, not from a measured case.</p>
+<p><b>A TTL on every key.</b> A key with no TTL stays until something deletes it. On the platform, keys with no TTL filled a shared cluster to 100% of memory, and a shared upload service was down for 4 hours 37 minutes. That figure is from the platform and not checked. <b>Pendo</b> published the same failure. Two code paths created cache keys with no expiry, so Redis ran near its memory limit and evicted keys. CPU spikes then caused slow replies and connection failures, with an error rate near 60% for 90 minutes on its guides service. They flushed all Redis instances, then fixed the two code paths. <code>TTL key</code> returns -1 for a key with no expiry and -2 for a key that does not exist. <code>SET k v KEEPTTL</code> changes the value and keeps the current expiry. Phase 5 covers eviction.</p>
+<p><b>A TTL per hash field.</b> A tenant's settings can be one hash with one field per setting. Since Redis 7.4.0, <code>HEXPIRE</code> gives each field its own TTL. Since Redis 8.0.0, <code>HGETEX</code> and <code>HSETEX</code> read or write a field and set its TTL in one command. Valkey added <code>HEXPIRE</code> in 9.0.0.</p>
+<p><b>Measuring the hit rate.</b> <code>INFO stats</code> reports <code>keyspace_hits</code> and <code>keyspace_misses</code>, and E12 computes hits / (hits + misses). Those counters cover every read on the server, including lock reads and reads by other services. So the server number can hide one cache whose hit rate fell. Keep a hit counter and a miss counter for each cache in your application. That advice is inferred, not taken from a measured case.</p>
+<p><b>A fail-closed exception.</b> On the same platform, almost every cache read failed open. One profile read wrapped Redis errors in an exception and threw it again, so a Redis blip failed those requests. When you review cache code, look for the path that differs from the rest.</p>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Timing table: measured by the study note on 2026-10-18, one Mac, an x86_64 Homebrew build of Redis 8.10.1 under Rosetta 2 outside Docker, paused with <code>SIGSTOP</code>, go1.27.1, go-redis v9.5.1. Do not treat these as general numbers. Defaults: go-redis <code>options.go</code> at v9.5.1 and at v9.23.0. Uber: "How Uber Serves Over 40 Million Reads Per Second from Online Storage Using an Integrated Cache", 2024-02-15. Shopify: "Your Circuit Breaker is Misconfigured", Damian Polan, 2020-02-18. The post is a model, not an incident. Pendo: status page incident, 2020-02-21. <code>HEXPIRE</code> and <code>HGETEX</code>: redis.io command pages, "Available since". Valkey <code>HEXPIRE</code>: <code>src/commands/hexpire.json</code> at Valkey 9.1.2.</p>
+<ul class="sources">
+  <li><a href="https://raw.githubusercontent.com/redis/go-redis/v9.23.0/options.go">go-redis v9.23.0 options.go</a></li>
+  <li><a href="https://www.uber.com/en-GB/blog/how-uber-serves-over-40-million-reads-per-second-using-an-integrated-cache/">Uber CacheFront</a></li>
+  <li><a href="https://shopify.engineering/circuit-breaker-misconfigured">Shopify, Your Circuit Breaker is Misconfigured</a></li>
+  <li><a href="https://status.pendo.io/incidents/g8nfbs1vdn69">Pendo incident</a></li>
+  <li><a href="https://redis.io/docs/latest/commands/hexpire/">HEXPIRE</a></li>
+  <li><a href="https://redis.io/docs/latest/commands/hgetex/">HGETEX</a></li>
+</ul>
+</details>
+
+<p>So far the misses were spread over many keys. One key that every request reads behaves differently when it expires, and the next section shows how.</p>
+
+<h2 data-concept="c2">What happens when a hot key expires?</h2>
+
+<p>The first concept treated misses as spread over many keys. A <dfn>hot key</dfn> is one key that a large share of requests read, so its misses arrive together. In the running case it is <code>agent:config:v1</code>, the routing table that every agent run reads. It gets all 5,000 reads per second, and rebuilding it takes a 200 ms query that joins several tables.</p>
+
+<p>A <dfn>cache stampede</dfn>, also called a thundering herd, starts when a hot key is missing. Every request that arrives before the first rebuild finishes also misses, and each one starts its own rebuild. They all do the same expensive work to get the same answer. Go's <dfn>singleflight</dfn> package is the common first fix. It merges concurrent calls that use the same key inside one process. Only the first caller runs the rebuild, and the others wait for its result.</p>
+
+<details class="predict"><summary>Predict: all 40 pods wrap the rebuild in singleflight. The key gets 5,000 reads per second, and the rebuild takes 200 ms. How many Postgres queries run when the key expires?</summary>
+<p>Up to 40, one per pod. Without singleflight it would be about 1,000, because 5,000 × 0.2 s of requests arrive during one rebuild. Most people answer 1, because they picture singleflight as a lock for the whole fleet. Its map of in-flight calls lives in one process, so each pod coalesces only its own requests.</p>
+</details>
+
+<p>Here is the expiry as it happens, without any protection.</p>
+
+<ol class="timeline" id="s5-herd">
+  <li><time>t = 0 s</time> The key is cached, and all 5,000 reads per second hit Redis. Postgres is nearly idle.</li>
+  <li><time>t = 3,600 s</time> The TTL ends, and every read of the key now misses.</li>
+  <li><time>next 200 ms</time> About 1,000 requests miss, and each one sends the same join to Postgres.</li>
+  <li><time>after that</time> Postgres was sized for about 100 queries per second, so its CPU and connection pool run out. Each rebuild now takes longer than 200 ms, so even more requests arrive during it and miss.</li>
+</ol>
+
+<p>The size of a stampede follows from that timeline. Each independent filler that misses during the rebuild time starts one rebuild. So the count is about 1 + rate × rebuild time, counted in the scope where fillers can see each other. When Postgres slows down, the rebuild time grows, and the stampede grows with it. That feedback is why a stampede can turn a slow query into an outage.</p>
+
+<p>singleflight works with one map per process. <code>singleflight.Group.Do</code> keeps a map from each key to its call in progress. A second caller with the same key adds one to the call's <code>dups</code> count. It waits on the call's <code>WaitGroup</code>, and then it receives the same value and error.</p>
+
+<pre><code data-lang="go">// Instead of 1,000 goroutines each calling the source:
+v, _, _ := g.Do(key, func() (interface{}, error) {
+    val, err := loadFromSource()        // only the FIRST caller runs this
+    if err == nil { rdb.Set(ctx, key, val, ttl) }
+    return val, err                     // the other callers wait here and get this
+})</code></pre>
+
+<div class="bars" id="s5-bars">
+  <div class="bar" style="--v:100" data-label="no protection" data-value="~1,000"></div>
+  <div class="bar" style="--v:4" data-label="singleflight" data-value="up to 40"></div>
+  <div class="bar" style="--v:0.4" data-label="shared lease" data-value="1"></div>
+</div>
+<p class="note">Postgres queries for one expiry of <code>agent:config:v1</code>, from the arithmetic above. Illustration, not measured.</p>
+
+<p>Exercises E3 and E4 show the single-process result. 200 concurrent misses make 200 source calls without singleflight and 1 with it, and 1,000 misses still make 1. One process is the easy case, and 40 pods make 40 calls. The cross-pod version is the subject of the next section.</p>
+
+<p>The strongest public number comes from <b>Facebook</b>'s memcache fleet. For a set of keys that were "particularly susceptible to thundering herds", measured over one week, the peak database query rate was 17K/s without leases. With leases, a shared marker that the next section explains, it was 1.3K/s.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>singleflight: <code>golang.org/x/sync</code> v0.22.0, <code>singleflight/singleflight.go</code>, lines 91 to 113, read in the module cache. That the map is per process is inferred from that code. Leases: "Scaling Memcache at Facebook", NSDI 2013, section 3.2.1. The paper does not give the key count or the traffic for that set of keys. E3 and E4: three runs each by the study note, 200 to 1 and 1,000 to 1.</p>
+<ul class="sources">
+  <li><a href="https://pkg.go.dev/golang.org/x/sync/singleflight">singleflight package docs</a></li>
+  <li><a href="https://www.usenix.org/system/files/conference/nsdi13/nsdi13-final170_update.pdf">Scaling Memcache at Facebook</a></li>
+</ul>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: singleflight's edges, and a platform with no stampede protection</summary>
+<p><b>A second call can still slip in.</b> The lab's goroutine runs <code>GET</code> first and calls <code>Do</code> only on a miss. A goroutine whose <code>GET</code> misses just before the winner's <code>SET</code>, and that calls <code>Do</code> just after the winner's call ends, starts a second rebuild. The window is small, so the lab usually prints 1. This edge is inferred from the code, not measured.</p>
+<p><b>Errors are shared too.</b> Every waiting caller receives the winner's error. If the rebuild times out, all of them fail together. <code>DoChan</code> returns a channel, so a caller can stop waiting at its own deadline. <code>Forget</code> removes a key from the map, so the next caller starts a fresh call instead of joining a stuck one.</p>
+<p><b>A platform with no stampede protection.</b> On the platform, the Redis path had no request coalescing, no lock around cache fills, no early refresh and no TTL jitter. Every TTL was a fixed constant. The only coalescing was in in-process loading caches, such as Guava's <code>LoadingCache</code>, which merge concurrent loads inside one JVM. So the shared Redis caches for settings and for the hot endpoint were exposed to exactly this stampede. It also explains why the bypass flag multiplied load at once. With no coalescing, every concurrent request went straight to the source. These findings come from a code review of that platform and are not checked here.</p>
+<p><b>Hot keys at larger scale.</b> When one key's reads are too many for one Redis node, coalescing is not enough. The fixes are a local copy of the value in each process, or several copies of the key on different nodes. Phase 5 covers hot keys.</p>
+</details>
+
+<p>singleflight leaves one rebuild per pod. To get one rebuild for the whole fleet, the pods need a marker that they all can see.</p>
+
+<h2 data-concept="c2">How do 40 pods share one rebuild?</h2>
+
+<p>singleflight cut the stampede to one rebuild per pod, which is still 40 queries per expiry. A fix for the whole fleet has two options. It can put the coalescing where every filler can see it. Or it can send every request for one key to the same process. There are four common designs.</p>
+
+<div class="cards" data-cols="2">
+  <div class="card"><h4>A lease in the cache</h4><p>The first reader that misses claims a short-lived marker in the cache, and only that reader rebuilds. Facebook's memcache returns a lease token "only once every 10 seconds per key". Other clients get a notification "telling the client to wait a short amount of time", and then they read again.</p></div>
+  <div class="card"><h4>Serve the old value</h4><p>The cache keeps the old value while one caller rebuilds it. Memcache can return a recently deleted value marked as stale. In its words, "Applications that can continue to make forward progress with stale data do not need to wait".</p></div>
+  <div class="card"><h4>Route by key</h4><p>Every request for one key goes to the same process, so in-process coalescing works for the whole fleet. <b>Discord</b> built data services in Rust that coalesce requests, and routes requests by channel ID with consistent hashing. So one instance coalesces each channel.</p></div>
+  <div class="card"><h4>Refresh before expiry</h4><p>Each reader may refresh the key a little before its TTL ends, with a chance that rises as expiry gets closer. One reader refreshes early while the key is still valid for everyone else. This is called XFetch, or probabilistic early expiry.</p></div>
+</div>
+
+<p>In Redis the lease uses the command from Phase 1. The reader that misses runs <code>SET agent:config:v1:lease &lt;random&gt; NX PX 5000</code>. If it gets OK, it rebuilds the key. Then it deletes the lease only if the lease still holds its own token. A plain <code>DEL</code> could remove a newer lease that another pod took after this one expired. Phase 3 teaches this safe release. If it gets nil, another pod is already rebuilding. The pod that lost either waits a short time and reads again, or it serves an old copy. The Redis blog post "Caches, Promises and Locks" builds the waiting with Pub/Sub. The winner publishes when the value is ready, so waiting pods do not poll. The lease's <code>PX 5000</code> limits the damage if the winner dies, because the lease expires and another reader can try.</p>
+
+<div class="callout warn">The phase said XFetch means "there's never a moment where the key is absent". That holds only for a key that is read often near its expiry. A cold key still expires before anyone refreshes it. A simulation of the XFetch rule used a 0.1 s rebuild and a 60 s TTL. At 0.5 requests per second, 94.5% of cycles still had a hard miss.</div>
+
+<p>The XFetch rule itself, with its <code>delta</code> and <code>beta</code>, is in the Go deeper block below. For a hot key, XFetch works well. With <code>beta = 1</code> on a real request trace, most stampedes had a size of 1 or 2, and "no stampede is larger than 8". The same simulation found about 2.7 recomputes per expiry at any rate from 100 to 1,000 requests per second. So XFetch fits hot keys, and a lease fits every key.</p>
+
+<ul class="tree" id="s6-tree">
+  <li><b>Can a reader use a value that is a few seconds old?</b>
+    <ul><li class="ok"><em>yes</em><span>Serve the old value, and let one lease winner rebuild it.</span></li>
+        <li><em>no</em><span>Is the key read many times during one rebuild?</span>
+          <ul><li class="ok"><em>yes</em><span>Use XFetch, or a lease with waiting readers.</span></li>
+              <li class="ok"><em>no</em><span>Use a lease. XFetch rarely fires on a cold key.</span></li></ul></li></ul></li>
+</ul>
+
+<p>The routing table in the running case may be a few seconds old, because a new route can wait one more rebuild. So <code>agent:config:v1</code> gets a long Redis TTL and a lease for the rebuild. It also stores a five-minute expiry time inside the value. After that time a reader still returns the old value, and it tries to take the lease. Postgres then sees one query per refresh instead of 40.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Leases and stale values: "Scaling Memcache at Facebook", NSDI 2013, section 3.2.1. Promises: Redis blog, "Caches, Promises and Locks", 2019-05-29. It summarises Instagram's "Thundering herds and promises" post, which the study note could not fetch. Discord: "How Discord Stores Trillions of Messages", Bo Ingram, 2023-03-06. The post gives no coalescing numbers in its text, and says hot partitions still happened, "just not quite as frequently". XFetch: Vattani, Chierichetti and Lowenstein, "Optimal Probabilistic Cache Stampede Prevention", PVLDB 8(8), 2015, Figure 3 for the rule and section 6 for the Goodreads results. Conditions of that result: one item with a 10 s recompute and about 0.07 s between requests. The 2.7 and 94.5% figures come from the study note's own Python simulation of the Figure 3 rule, 2,000 cycles per row. It used Poisson arrivals, a 60 s TTL, <code>beta = 1</code>, and a rebuild of 0.1 s or 1 s. The reviewer ran it again on 2026-10-18 and got the same numbers.</p>
+<ul class="sources">
+  <li><a href="https://redis.io/blog/caches-promises-locks/">Caches, Promises and Locks</a></li>
+  <li><a href="https://discord.com/blog/how-discord-stores-trillions-of-messages">How Discord Stores Trillions of Messages</a></li>
+  <li><a href="https://cseweb.ucsd.edu/~avattani/papers/cache_stampede.pdf">Optimal Probabilistic Cache Stampede Prevention</a></li>
+</ul>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: serving the old value, the XFetch rule in code, and the lab that gets it wrong</summary>
+<p>Serving the old value needs two expiry times. The real TTL in Redis stays long, for example one hour. A logical expiry inside the value, for example five minutes, tells a reader that the value is old. A reader that sees an old value returns it at once and tries to take the lease. Only the lease winner reads Postgres. This combination is inferred from the designs above, not taken from one published system.</p>
+<p>XFetch has a precise rule. A reader recomputes when <code>now − delta × beta × ln(rand()) ≥ expiry</code>. Here <code>delta</code> is the time the last rebuild took, stored with the value, and <code>beta</code> is a tuning factor with default 1. <code>ln(rand())</code> is negative, so each reader acts as if the time were a little later than it is. A long rebuild makes the early window wider.</p>
+<p>In Go the rule fits in a few lines. The value carries <code>delta</code> and its logical expiry. This code is an illustration of the Figure 3 rule, and it was not run.</p>
+<pre><code data-lang="go">// XFetch: recompute early with a probability that rises near expiry.
+// delta = how long the last recompute took. beta = 1 by default.
+func shouldRefresh(now, expiry time.Time, delta time.Duration, beta float64) bool {
+    u := 1 - rand.Float64() // in (0, 1], so math.Log never sees 0
+    gap := time.Duration(-float64(delta) * beta * math.Log(u))
+    return !now.Add(gap).Before(expiry) // now + gap >= expiry
+}</code></pre>
+<p>A larger <code>beta</code> refreshes earlier and more often. A value below 1 refreshes later and risks more hard misses. Each early refresh is one extra source read, so the cost is a few extra reads per TTL on a hot key.</p>
+<p>The second lab folder, <code>phase02_caching_patterns/thundering_herd</code>, has an XFetch part that does not implement this rule. Line 108 uses <code>remaining &gt; entry.Delta</code>, so the decision is fixed, not random. All 5 callers inside the window refresh. The program prints "DB calls = 5", and then it prints that "0 goroutines ever see a miss". The comment at line 105 also has the sign wrong. If you run it, expect 5 calls, and read the code above for the real rule. The header of that file calls XFetch "distributed dedup", which it is not. XFetch does not coordinate processes. It only makes their refreshes unlikely to overlap.</p>
+<p>A lock that other pods poll, the phase's original cross-pod answer, is the lease with polling. Phase 3 teaches locks in depth: <code>SET NX PX</code>, a safe release, and what happens when the holder pauses past its TTL.</p>
+</details>
+
+<p>Coalescing handles one hot key. It does not help when thousands of different keys expire in the same second, which is the next problem.</p>
+
+<h2 data-concept="c2">Why do keys warmed together expire together, and what does jitter fix?</h2>
+
+<p>A lease coalesces the rebuilds of one key. A deploy can cause a different stampede, made of many keys that each miss once at the same moment. In the running case, a deploy job warms the settings of all 50,000 tenants, each key with a flat <code>EX 3600</code>. For 59 minutes everything is fine. In minute 60 all 50,000 keys expire within the same second or two, and the next read of each one misses.</p>
+
+<p>That is a spike of up to 50,000 Postgres reads in a few seconds, against a source sized for about 100 per second. The deploy set the timer, so the spike repeats one TTL after every deploy. A canary or a staging test rarely shows it, because few keys are warmed there and the test seldom runs for a full TTL. <dfn>TTL jitter</dfn> is the fix. Each key gets the base TTL plus or minus a random amount, so the expiries spread over a window.</p>
+
+<pre><code data-lang="go">// base 3600 s, jitter 300 s: each key expires between 3300 s and 3900 s.
+ttl := base + time.Duration(rand.Int63n(int64(2*jitter))) - jitter
+rdb.Set(ctx, key, val, ttl)</code></pre>
+<p class="note">Illustration, not run.</p>
+
+<p>Exercise E5 measures the spread for 1,000 keys with a base of 600 s and a jitter of 60 s. With a fixed TTL, all 1,000 keys fall in one expiry second. With jitter, they fall in 121 different seconds, with about 7 to 9 keys in each.</p>
+
+<div class="bars" id="s7-bars">
+  <div class="bar" style="--v:100" data-label="fixed TTL" data-value="1,000 in 1 s"></div>
+  <div class="bar" style="--v:0.9" data-label="600 ± 60 s" data-value="~8 per s"></div>
+</div>
+<p class="note">Keys expiring in the busiest second, out of 1,000, from the E5 output.</p>
+
+<p>Jitter solves the many-keys problem and does nothing for one hot key. A hot key with a jittered TTL still expires once, and all its readers still miss together. So <code>agent:config:v1</code> needs the lease from the section above, and the 50,000 tenant keys need jitter. Most real caches need both.</p>
+
+<p>The spike also costs Redis CPU, because Redis deletes expired keys in a background cycle. In exercise E6, 1,000 keys with the same TTL disappeared in about 0.1 s, before any read touched them. The Go deeper block below shows how that cycle works and when it blocks other clients.</p>
+
+<div class="keypoints">
+<p class="remember">Count the fillers that miss during one rebuild, and coalesce where they all meet.</p>
+<p class="trap">singleflight fixes a stampede inside one pod, and 40 pods still send 40 queries.</p>
+<p class="try">Run E3 and then E5, and compare 1 source call with 121 expiry seconds.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: how Redis expires keys, settings in Redis and Valkey, and expiry storms</summary>
+<p>Redis removes expired keys in two ways. <dfn>Lazy expiry</dfn> deletes a key when a command touches it after its TTL. <dfn>Active expiry</dfn> is a background cycle that samples keys with a TTL and deletes the expired ones. In exercise E6, <code>INFO</code> reported <code>expired_keys_active:1000</code>, which counts the keys that this cycle removed.</p>
+
+<ol>
+  <li>The cycle samples 20 keys with a TTL in each loop.</li>
+  <li>It repeats while more than 10% of the sampled keys were already expired, so a mass expiry keeps it looping.</li>
+  <li>The slow cycle may use up to 25% of CPU per tick, which is 25 ms at the default <code>hz 10</code>. A fast cycle of up to 1 ms can also run before the event loop waits for input, at most once every 2 ms.</li>
+  <li>Each delete of a large value runs on the main thread when <code>lazyfree-lazy-expire</code> is <code>no</code>, the Redis default. So a mass expiry of large values adds latency to every client.</li>
+</ol>
+<p>The Redis latency documentation lists many keys expiring in the same second as one cause of latency. The active cycle is the reason. While more than 10% of sampled keys are expired, it keeps sampling, up to its time limit.</p>
+<p><code>active-expire-effort</code> goes from 1 to 10, and the default is 1. Each step adds 25% more keys per loop and 25% more fast-cycle time, adds about 2% CPU, and lowers the stale target by 1%. Raise it only if <code>INFO</code> shows many expired keys still in memory.</p>
+<p>Valkey 9.1.2 sets all <code>lazyfree-lazy-*</code> options to <code>yes</code> by default, so its deletes of large values run in a background thread. Redis 8.10.2 sets them to <code>no</code>. Asynchronous free happens only when a value's free effort is above 64. For a set, sorted set or hash in its large encoding, the effort is its element count. For a list, it is the number of internal list nodes. A small value in a compact encoding counts as 1, so Redis always frees it at once. If you run Redis and cache large hashes or lists, set <code>lazyfree-lazy-expire yes</code>.</p>
+<p>A key can stay in memory after its TTL until a lookup or a sample finds it. On a replica, an expired key looks missing to readers but still holds its memory until the primary sends the delete. So <code>DBSIZE</code> and memory can lag behind the TTLs you set.</p>
+<p>Jitter has a price too. Some keys now live up to one jitter period longer, so the longest stale window grows by that amount. With a base of 3,600 s and a jitter of 300 s, a missed delete can leave a value stale for up to 3,900 s.</p>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>E5 and E6: study note runs on the same x86_64 build under Rosetta 2. E6 used <code>EX 5</code> instead of the phase's <code>EX 30</code>. Active expiry constants: <code>src/expire.c</code> lines 96 to 100 and 292 to 300, and <code>src/server.c</code> line 1315, at Redis tag 8.10.2. Lazyfree defaults: <code>src/config.c</code> at Redis 8.10.2 and Valkey 9.1.2, and <code>src/lazyfree.c</code> lines 168 to 235. The canary sentence and the 3,900 s figure are inferred from the mechanism.</p>
+<ul class="sources">
+  <li><a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/">Redis docs, Diagnosing latency issues</a></li>
+</ul>
+</details>
+
+<p>Both stampede problems are about many fills at once. The next concept is about one fill that arrives too late, and it breaks the rule that the phase called race-free.</p>
+
+<h2 data-concept="c3">Is delete-on-write race-free?</h2>
+
+<p>The stampede sections counted fills that arrive together. Here the problem is a single late fill. In the running case an admin removes the <code>web_search</code> tool from tenant 42. The settings service updates Postgres, and then it deletes <code>tenant:42:settings:v1</code> so that the next read fills fresh data.</p>
+
+<p>That rule is called <dfn>delete-on-write</dfn>: on every write to the source, delete the cache key instead of updating it. The TTL stays as a backstop. The phase gives two good reasons to delete rather than update.</p>
+
+<ul>
+  <li>A delete is cheap. The writer does not rebuild the cached value, which may need an expensive join, and the next reader rebuilds it lazily.</li>
+  <li>Updates from two writers can interleave. Writer A reads its data, writer B reads, B writes the cache, and A writes the cache last. The cache now holds A's value, although B's write was newer. Two deletes cannot leave a wrong value behind.</li>
+</ul>
+
+<p>The TTL backstop is still needed, because a delete is best effort. The delete can fail during a Redis blip, a new code path can forget it, or someone can write a key directly. The TTL bounds how long any of those bugs can serve stale data.</p>
+
+<details class="predict"><summary>Predict: the settings service updates Postgres, then deletes the key. The TTL is one hour. Can an agent still see web_search as allowed for an hour after the admin's change?</summary>
+<p>Yes. It happens if a reader missed before the write and filled after the delete. The reader read the old row, the writer changed the row and deleted the key, and then the reader wrote the old row into Redis with a fresh one-hour TTL. Nothing deletes it again. Most people answer no, because the delete runs after the database write, so they expect the next read to see new data.</p>
+</details>
+
+<div class="lanes" id="s8-race" data-play>
+  <h4>A reader's fill lands after the writer's delete</h4>
+  <div class="lane" data-label="reader">
+    <i class="wait" style="--w:1" data-t="GET: nil"></i><i class="prefill" style="--w:1" data-t="read old row"></i><i class="idle" style="--w:1"></i><i class="idle" style="--w:1"></i><i class="frozen" style="--w:1" data-t="SET old EX 3600"></i></div>
+  <div class="lane" data-label="writer">
+    <i class="idle" style="--w:1"></i><i class="idle" style="--w:1"></i><i class="prefill" style="--w:1" data-t="UPDATE row"></i><i class="decode" style="--w:1" data-t="DEL: 0"></i><i class="idle" style="--w:1"></i></div>
+  <div class="lane" data-label="Redis key">
+    <i class="idle" style="--w:1" data-t="empty"></i><i class="idle" style="--w:1" data-t="empty"></i><i class="idle" style="--w:1" data-t="empty"></i><i class="idle" style="--w:1" data-t="empty"></i><i class="frozen" style="--w:1" data-t="old, 1 h"></i></div>
+  <p class="at" data-step="1">Step 1: the reader misses, because the key had expired.</p>
+  <p class="at" data-step="2">Step 2: the reader reads the row from Postgres, and web_search is still allowed.</p>
+  <p class="at" data-step="3">Step 3: the admin's change updates the row in Postgres.</p>
+  <p class="at" data-step="4">Step 4: the writer deletes the key, and DEL returns 0 because the key is absent.</p>
+  <p class="at" data-step="5">Step 5: the reader writes the old row, so Redis serves it for the next hour.</p>
+  <p class="at" data-step="all">The order of events from the stale-set race. Steps are not to scale.</p>
+</div>
+
+<div class="callout warn">The phase said delete-on-write is "cheaper and race-free" and that "the next read always pulls the current source truth". It is cheaper, and it removes the race between two writers. It does not remove the race between a reader's fill and a writer's delete. This holds for every Redis and Valkey version. The fix in the next section needs Redis 8.4.0 or later, Valkey 8.1.0 or later, or a Lua script.</div>
+
+<p>The cost in production is a wrong value for a full TTL, with no error anywhere. With a one-hour TTL, that is up to one hour of a wrong price, permission or setting. For an agent platform the removed tool keeps running, which is a security problem and not only a freshness problem. The race needs a reader whose fill is slow. So it is rare on a quiet key, and more common on a key that is busy and changes often.</p>
+
+<p><b>Uber</b> met this race in CacheFront, the Redis cache inside its Docstore database layer. Fills on the read path and invalidations from change data capture, a stream of row changes read from the MySQL binlog, both write the cache. The team wrote that "it is possible that we inadvertently write a stale row to the cache, overwriting the newest value". Their fix is a Lua script that writes a row into the cache only if its timestamp is newer than the cached one. Shadow reads, which compare a share of cached reads with the database, measured 99.99% consistency.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The race: MIT 6.824 memcache FAQ, which ends its eight steps with "Now memcache has a stale version of k, and it may never be updated". It also says the two-writer problem "doesn't arise if C1 and C2 delete() instead of put()". Uber: the CacheFront post from the fail-open section, 2024-02-15. The "rare on a quiet key" sentence is inferred from the timing the race needs, not measured.</p>
+<ul class="sources">
+  <li><a href="https://pdos.csail.mit.edu/6.824/papers/memcache-faq.txt">MIT 6.824 memcache FAQ</a></li>
+</ul>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: the same race at Meta, and what Uber found later</summary>
+<p><b>Meta</b> watches the consistency of its TAO cache with a system called Polaris. One Polaris alarm showed the cache holding "metadata=0 @version 4" while the database held "metadata=1 @version 4". A cache fill had interleaved with a rare transaction. Then <code>drop_cache(key, version)</code> did nothing, because the cached item already carried the latest version number. The team found the cause in under 30 minutes with consistency tracing. With this work, TAO went from 99.9999% to 99.99999999% of cache writes consistent within five minutes. A version check is only as good as the version: two different values with the same version defeat it.</p>
+<p><b>Uber</b> later published what still went wrong at over 150 million reads per second. Change data capture is asynchronous, so a read right after a write could return the old value. A slow Redis node could make an invalidation fail, and the stale value then stayed until its TTL ended. A fill from a database follower that lagged behind could store old data. And the explicit invalidation API used generated clock values instead of row timestamps, so later fills failed the timestamp check.</p>
+<p>Uber changed four things. The write path now returns the changed row keys and the commit timestamp, and the query layer invalidates those rows at once. Invalidation writes a marker value instead of deleting the key, so a late fill cannot replace it. TTL expiry, change data capture and the write path all invalidate now. A tool called Cache Inspector measures staleness, and one table reached over 99.9% hit rate after its TTL rose to 24 hours. The post also says that even a short TTL can still show high staleness. A shorter TTL lowers the hit rate and only shortens the stale window. It does not remove the race.</p>
+</details>
+
+<details class="evidence"><summary>Evidence for the extra cases</summary>
+<p>Meta: "Cache made consistent", Lu Pan, 2022-06-08. Uber: "How Uber Serves over 150 Million Reads per Second from Integrated Cache with Stronger Consistency Guarantees", 2025-08-26. The short-TTL point is from that post. The hit-rate cost is inferred.</p>
+<ul class="sources">
+  <li><a href="https://engineering.fb.com/2022/06/08/core-infra/cache-made-consistent/">Meta, Cache made consistent</a></li>
+  <li><a href="https://www.uber.com/us/en/blog/how-uber-serves-over-150-million-reads/">Uber, 150 million reads per second</a></li>
+</ul>
+</details>
+
+<p>Deleting at the right time is not enough, because the reader's fill comes later. The fix is to make the fill itself conditional, which the next section builds from two Redis commands.</p>
+
+<h2 data-concept="c3">How does a fill prove that nothing changed since its miss?</h2>
+
+<p>The race needs two things: a read of the source that started before the write, and a fill that lands after the delete. So the fix is a <dfn>conditional fill</dfn>, a cache write that succeeds only if no invalidation happened since the reader's miss. Facebook's memcache does this with a <dfn>lease</dfn>, "a 64-bit token bound to the specific key". A delete of the key cancels the token, and a fill that carries a cancelled token is refused.</p>
+
+<p>Redis can do the same with two plain commands since version 8.4.0. <code>SET</code> there has an <code>IFEQ</code> option, which sets the key "only if its current value is equal to ifeq-value". If the key does not exist, <code>SET ... IFEQ</code> does not create it. The lease then takes three steps.</p>
+
+<ol class="steps">
+  <li><b>The reader claims the fill.</b> On a miss it runs <code>SET tenant:42:settings:v1 lease:&lt;random&gt; NX PX 5000</code>. OK means this reader may fill. Nil means another reader holds the lease, so this one waits briefly or reads Postgres without filling.</li>
+  <li><b>The writer invalidates.</b> It updates Postgres first and then runs <code>DEL tenant:42:settings:v1</code>. The delete removes the lease too.</li>
+  <li><b>The reader fills only if its lease is still there.</b> It runs <code>SET tenant:42:settings:v1 &lt;value&gt; IFEQ lease:&lt;random&gt; EX 3600</code>. If a writer deleted the lease, the command returns nil and writes nothing. The key stays empty, so the next read fills fresh data.</li>
+</ol>
+
+<p>Readers must treat a value that starts with <code>lease:</code> as a miss, and wait or read the source. The order in step 2 matters as well. Suppose the writer deletes first and updates Postgres second. Then a reader can miss and fill the old row in between, and no lease protects that gap.</p>
+
+<p>The race and the fix were run step by step with <code>redis-cli</code>. The plain fill writes the old value back. The lease fill is refused, and the cache stays empty.</p>
+
+<table>
+  <tr><th>Step</th><th>Plain cache-aside</th><th>Lease with <code>SET IFEQ</code></th></tr>
+  <tr><td>Reader misses</td><td><code>GET</code> returns nil</td><td><code>SET NX PX 5000</code> returns OK</td></tr>
+  <tr><td>Writer deletes</td><td><code>DEL</code> returns 0</td><td><code>DEL</code> returns 1</td></tr>
+  <tr><td>Reader fills the old value</td><td><code>SET ... EX 3600</code> returns OK</td><td><code>SET ... IFEQ</code> returns nil</td></tr>
+  <tr><td>Cache after the race</td><td class="bad"><code>v1</code>, TTL 3600</td><td class="ok">empty, so the next read fills fresh data</td></tr>
+</table>
+
+<p>With no writer, the same lease fill returned OK, and a second reader's <code>SET NX</code> returned nil. That second result matters for the stampede sections too. Only one reader per key wins the lease, so the lease also coalesces fills across all 40 pods.</p>
+
+<p>The TTL now has a smaller job. It no longer hides the race. It only bounds the damage from a delete that never ran, such as a failed <code>DEL</code> or a code path that forgot to invalidate. Other systems use the same idea with a different token. Uber's Lua script compares row timestamps, and Meta's TAO compares version numbers. In each design, the fill must carry proof that it is not older than what the cache already knows.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Lease: "Scaling Memcache at Facebook", NSDI 2013, section 3.2.1, which also says "Verification can fail if memcached has invalidated the lease token due to receiving a delete request for that item". <code>SET IFEQ</code>: the redis.io SET page and <code>src/commands/set.json</code> at Redis tag 8.10.2. Table: run by the study note with <code>redis-cli</code> against an x86_64 Homebrew build of Redis 8.10.1 under Rosetta 2, outside Docker, on 2026-10-18, by hand, one step at a time. It was not tested with concurrent Go clients. The order rule is from the study note. Its reason is inferred from the race.</p>
+<ul class="sources">
+  <li><a href="https://redis.io/docs/latest/commands/set/">Redis SET command</a></li>
+  <li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/commands/set.json">set.json at Redis 8.10.2</a></li>
+</ul>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: Redis and Valkey versions, generation keys, and layered TTLs</summary>
+<p><b>Which version has which command.</b> Redis has <code>IFEQ</code>, <code>IFNE</code>, <code>IFDEQ</code> and <code>IFDNE</code> on <code>SET</code> since 8.4.0. The two <code>D</code> forms compare a hash digest of the value instead of the value itself. The digest is an XXH3 hash, and the <code>DIGEST</code> command returns it. Redis 8.4.0 also added <code>DELEX key IFEQ value</code>, a delete that runs only if the value matches. Valkey has <code>SET ... IFEQ</code> since 8.1.0, and its 9.1.2 release has no <code>IFNE</code>. Valkey's matching delete is <code>DELIFEQ</code>, since Valkey 9.0.0. So lease code that uses only <code>SET IFEQ</code> runs on both. The lab's <code>docker-compose.yml</code> pins <code>redis:7.2</code>, which has none of these, so on 7.2 the conditional fill needs a short Lua script.</p>
+<p><b>TTL-only invalidation.</b> The simplest design deletes nothing and accepts staleness up to one TTL. It fits values that change rarely or where old data is harmless, such as a vendor's list of voices. A settings change then becomes visible within one TTL, not at once.</p>
+<p><b>Write-through as invalidation.</b> The writer updates the cache instead of deleting the key. The cache is fresh by construction when only one writer runs. But it pays the write latency, and it has the two-writer race from the section above, which is why delete is the usual choice.</p>
+<p><b>Generation keys.</b> One version key per scope, such as <code>scope:tenant:42</code>, holds a generation number. Every cache key for that tenant includes the number, so a write that changes the number makes all of the tenant's keys unreachable at once. Their TTLs remove them later. The lab <code>phase02_caching_patterns/invalidation_scope</code> builds this. Each read costs two round trips, one for the version and one for the value. The lab's first access sets the version with <code>Set</code> and no <code>NX</code>, at line 41, so two first callers can create two versions. Use <code>SET NX</code> there. The version key has no TTL in that lab. If it expired, the next read would create a new version, which would invalidate the whole scope at once.</p>
+<p><b>Layered caches with different windows.</b> The platform kept company settings in three layers. The service that owned the settings deleted a Redis scope marker on every settings write, which invalidated every key under it. A shared client library, used by every Java service, cached responses with a one-hour TTL as the backstop. A serverless consumer kept its own copy with a pure 10-minute TTL and no invalidation at all. There was no pub/sub or event-based invalidation in the chain.</p>
+<table>
+  <tr><th>Layer</th><th>TTL</th><th>Kind</th></tr>
+  <tr><td>in-process map in the owning service</td><td>5 min</td><td>in-process</td></tr>
+  <tr><td>in-process loading cache in another service</td><td>10 min</td><td>in-process</td></tr>
+  <tr><td>serverless consumer's own copy</td><td>10 min</td><td>Redis, TTL only</td></tr>
+  <tr><td>shared client library</td><td>1 hour</td><td>Redis, with delete</td></tr>
+  <tr><td>shared cluster default</td><td>30 min to 1 hour</td><td>Redis, TTL only</td></tr>
+</table>
+<p>An admin's change was visible at once through the shared library, because the delete ran. Through the serverless consumer it took up to 10 minutes. If the delete failed, the one-hour TTL bounded the staleness. Every TTL was a fixed constant with no jitter, so the expiry spike from the section on jitter applied too. These details come from the platform's code and are not checked here. Ask the same questions of your own design. Which layer catches a missed delete, and how long is the worst case?</p>
+</details>
+
+<details class="evidence"><summary>Evidence for versions</summary>
+<p>Valkey: <code>src/commands/set.json</code> at tag 9.1.2, and the Valkey docs for <code>SET</code> and <code>DELIFEQ</code>. valkey.io says <code>IFNE</code> arrives in 9.2.0. On 2026-10-18 the GitHub releases list showed only 9.2.0-rc1, a release candidate, so no stable Valkey has <code>IFNE</code> yet. The <code>D</code> forms: the redis.io <code>SET</code> and <code>DELEX</code> pages. <code>DELIFEQ</code> since 9.0.0: <code>src/commands/delifeq.json</code> at Valkey 9.1.2. <code>DELEX</code>: the redis.io command page. Generation-key lab: lines read in the source, not run.</p>
+<ul class="sources">
+  <li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/commands/set.json">set.json at Valkey 9.1.2</a></li>
+  <li><a href="https://valkey.io/commands/set/">Valkey SET</a></li>
+  <li><a href="https://valkey.io/commands/delifeq/">Valkey DELIFEQ</a></li>
+  <li><a href="https://redis.io/docs/latest/commands/delex/">Redis DELEX</a></li>
+</ul>
+</details>
+
+<p>The lease fixes the race for fills that go through Redis. Two other channels also tell caches about changes, and each one has the same race or a weaker promise.</p>
+
+<h2 data-concept="c3">Do client-side caching and keyspace notifications avoid the race?</h2>
+
+<p>The lease protects fills that go through Redis. Many services also keep a second copy in process memory, and they need a way to learn that the Redis copy changed. Redis offers two channels for that, and neither one removes this kind of race.</p>
+
+<p><dfn>Client-side caching</dfn> in Redis, turned on with <code>CLIENT TRACKING</code>, lets a client keep values in its own memory. Redis remembers which keys each client read, and it sends that client an invalidation message when one of those keys changes. When the client uses one connection for data and a second one for invalidation messages, the two can arrive out of order. The invalidation for a key can arrive before the reply that carries the old value. The client then stores the old value after it already threw away the invalidation.</p>
+
+<p>The Redis documentation fixes this with a placeholder, which is the lease idea again. Before it sends the read, the client sets "the local copy of 'foo' to 'caching-in-progress'". If an invalidation arrives, it removes the placeholder. When the reply arrives, the client stores the value only if the placeholder is still there.</p>
+
+<p><dfn>Keyspace notifications</dfn> are Pub/Sub messages that Redis publishes when keys change or expire. The documentation calls Pub/Sub "fire and forget", so a subscriber that is disconnected for one second loses that second's messages. It also gives "no guarantees" that an <code>expired</code> event fires when the TTL reaches zero. The event fires when Redis actually deletes the key, which can be later.</p>
+
+<div class="callout warn">The phase linked keyspace notifications as "an alternative to delete-on-write". They cannot carry invalidations safely. Use them for hints and metrics, never as the only invalidation path.</div>
+
+<table>
+  <tr><th>Channel</th><th>How a change reaches the cache</th><th>What it promises</th><th>Its race or gap</th></tr>
+  <tr><td>Delete on write</td><td>the writer's <code>DEL</code></td><td>best effort: it can fail or be forgotten</td><td>a reader's late fill, fixed by a lease</td></tr>
+  <tr><td>TTL</td><td>Redis expiry</td><td class="ok">always ends the stale value, after up to one TTL</td><td>stale for up to one TTL</td></tr>
+  <tr><td>Change data capture</td><td>a consumer reads the database log and updates the cache</td><td>as reliable as the consumer and its position in the log</td><td>a fill against a log write, fixed by a timestamp check</td></tr>
+  <tr><td><code>CLIENT TRACKING</code></td><td>Redis pushes a message to the client</td><td>lost while the client is disconnected</td><td>invalidation before reply, fixed by a placeholder</td></tr>
+  <tr><td>Keyspace notifications</td><td>Pub/Sub</td><td class="bad">fire and forget</td><td>lost events, and late expired events</td></tr>
+</table>
+
+<p>The pattern is the same in every row that has a race. A channel can change the cache after a read has started. So the read must carry a marker, a version or a timestamp, and a late write must lose. In the running case the settings service keeps delete-on-write with a lease. It keeps the one-hour TTL as the backstop, and it does not rely on keyspace notifications. A tool removal is then visible on the next read after the delete.</p>
+
+<div class="keypoints">
+<p class="remember">A fill must prove that no invalidation ran since its miss.</p>
+<p class="trap">Delete-on-write plus a TTL can still serve a removed permission for the whole TTL.</p>
+<p class="try">Run E10, then repeat it with the lease commands from the table above.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: tracking modes, reconnects, and change data capture</summary>
+<p><code>CLIENT TRACKING</code> exists since Redis 6.0. In the default mode, Redis keeps a table of which client read which key, and that table costs server memory. In broadcasting mode, a client subscribes to key prefixes instead, and Redis sends every change under those prefixes. Broadcasting costs no per-key table on the server, but the client receives messages for keys it never read. The optional OPTIN and OPTOUT modes let a client choose which reads are tracked.</p>
+<p>A local cache must assume it missed messages whenever its invalidation connection drops. The Redis documentation gives the safe reaction. Flush the local cache when the connection is lost. Also ping the invalidation connection, and close it and flush if no reply comes back in time. A maximum local TTL is a second guard, so a missed message cannot keep a value forever. That last rule is inferred, not taken from the documentation.</p>
+<p>Change data capture moves invalidation out of the application. Uber's Flux reads MySQL binlogs and updates the cache within seconds. CacheFront's default TTL is 5 minutes. The application no longer has to remember to delete, so a forgotten code path cannot leave a stale value. But the stream is asynchronous, so a read right after a write can still see the old value. Uber added invalidation on the write path for that reason, as the section on the race showed.</p>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Client-side caching: the redis.io client-side caching reference, including the "caching-in-progress" fix. Tracking since 6.0.0: the <code>CLIENT TRACKING</code> command page, "Available since", and <code>src/commands/client-tracking.json</code> at Redis 8.10.2. Keyspace notifications: the redis.io keyspace notifications page, for "fire and forget" and "no guarantees". Flux and the 5-minute TTL: Uber's CacheFront post. The default mode, broadcasting, OPTIN, OPTOUT and the flush on a lost connection: the client-side caching reference and the <code>CLIENT TRACKING</code> page, both read by the reviewer on 2026-10-18.</p>
+<ul class="sources">
+  <li><a href="https://redis.io/docs/latest/develop/reference/client-side-caching/">Redis client-side caching</a></li>
+  <li><a href="https://redis.io/docs/latest/develop/pubsub/keyspace-notifications/">Redis keyspace notifications</a></li>
+</ul>
+</details>
+
+<p>All the cache entries so far held rows that exist. The last concept is about requests for rows that do not exist, and the entry you store for them.</p>
+
+<h2 data-concept="c4">What should the cache store for a row that does not exist?</h2>
+
+<p>Every concept so far was about rows that exist. Cache-aside fills the cache only when the source returns a row. So a request for a tenant ID that does not exist misses Redis, misses Postgres, and leaves nothing behind. The next request for the same ID repeats all of it. A flood of such requests passes through the cache to the source, which is called <dfn>cache penetration</dfn>. In the running case a broken integration calls the agent API with IDs of tenants that never existed.</p>
+
+<ol class="flow" id="s11-pen">
+  <li><b>GET tenant:ghost-999:settings:v1</b><span>Nil, because cache-aside caches only rows that exist.</span></li>
+  <li class="hot"><b>read Postgres</b><span>The query returns no row.</span></li>
+  <li class="bad"><b>nothing is cached</b><span>The reader has no value to store.</span></li>
+  <li class="bad"><b>next request</b><span>The same two steps again: 10,000 requests per second become 10,000 queries.</span></li>
+</ol>
+
+<p>The fix is <dfn>negative caching</dfn>: the reader stores the absence too, as a sentinel value with a short TTL. A <dfn>sentinel</dfn> is a value that no real row can have, so readers can tell "not found" from data.</p>
+
+<details class="predict"><summary>Predict: a tenant is created 5 s after a request for it returned "not found". The negative entry's TTL is 30 s, and the create path does not touch the cache. How long can the new tenant stay invisible?</summary>
+<p>Up to 25 more seconds. Readers keep getting the sentinel until its TTL ends, although the row now exists. Most people answer "until the next read", because the create path wrote Postgres. But the cache never learned about the create, so the negative entry is a stale entry like any other.</p>
+</details>
+
+<pre><code data-lang="go">val, err := rdb.Get(ctx, key).Result()
+if err == redis.Nil {                       // cache miss
+    if exists := source.Lookup(id); exists {
+        rdb.Set(ctx, key, realValue, 10*time.Minute)
+    } else {
+        rdb.Set(ctx, key, tombstone, 30*time.Second)  // cache the "not found", SHORT ttl
+    }
+} else if val == tombstone {
+    return NotFound                          // served from negative cache, no DB hit
+}</code></pre>
+
+<p>Exercise E7 shows the effect. Five requests for one absent ID cause five source lookups without the negative cache, and one with it. Negative caching helps only when the same absent IDs repeat. If a client enumerates new random IDs, every ID is a first miss, so the negative cache never hits. That case needs a filter in front of the source or a rate limit on the client, which is inferred from the mechanism.</p>
+
+<p>So a negative entry needs the same care as a positive one. The create path must delete it, the same way an update deletes a stale value. Then its TTL only bounds two cases: a delete that never ran, and the late-fill race from the invalidation sections. The TTL choice is a trade. A long TTL turns "create, then read at once" into a confusing 404. Those bugs are hard to find, because the row is there when you look. A short TTL blunts a flood for less time.</p>
+
+<div class="callout warn">The phase gave 30 to 60 seconds as "a common sweet spot" for the negative TTL. No source supports that range. Choose the TTL from how long a new row may stay hidden in your product, and make the create path delete the key.</div>
+
+<p>A <b>lagging replica</b> makes this worse. If the reader fills from a replica, it can read "not found" after the create has committed on the primary. It can also store that sentinel after the create path's delete. That is the stale-set race again, with the replica as the slow reader. Facebook's memcache rule is direct: "A cache refill from a replica's database should only be allowed after the replication stream has caught up". Facebook sends such reads to the primary region with a remote marker. A simpler rule for one region is to keep the negative TTL close to your usual replication lag. Phase 4 covers replication lag.</p>
+
+<p><b>Uber</b> caches absent rows in CacheFront: "These non-existent rows are written to the cache with a special flag".</p>
+
+<p>A <b>Bloom filter</b>, a compact bit array that can answer "certainly absent" for an ID, is the other answer for IDs that never repeat. The Go deeper block below explains its limits.</p>
+
+<div class="keypoints">
+<p class="remember">A negative entry is a stale entry once the row exists, so the create path deletes it.</p>
+<p class="trap">A long negative TTL hides new rows, and the bug looks impossible because the row exists.</p>
+<p class="try">Request one missing ID from a read you own twice, and count the source queries.</p>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Replica rule: "Scaling Memcache at Facebook", NSDI 2013, section 5. Uber: the CacheFront post, 2024-02-15. E7: study note run, 5 lookups to 1. Bloom filter type: the redis.io Bloom filter page. The elite-storage course teaches Bloom filter sizing in its structures phase, section 2.5. The reviewer found that heading in the elite-storage phase 2 file.</p>
+<ul class="sources">
+  <li><a href="https://redis.io/docs/latest/develop/data-types/probabilistic/bloom-filter/">Redis Bloom filter</a></li>
+</ul>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: a login lookup with no negative cache, and a TTL tied to replication</summary>
+<p><b>A live penetration path.</b> On the platform, no Redis cache stored "not found". A login service's OAuth client lookup read Redis, and on a miss it loaded the client from an internal entity store. It wrote Redis only if it found a record. So every repeated lookup for an unknown client ID reached the entity store.</p>
+<p><b>The same platform did it right in memory.</b> An edge service used a null sentinel in an in-process cache, with a negative TTL of 5 s against a positive TTL of 10 s. Its comment said the short value bounds how long a freshly created token could 404 while a request raced ahead of cross-region replication. That is the replication rule above, applied to a TTL. Another service on the platform read from a replica pool and wrote to a primary pool, which is exactly the setup where a fill can read old data. None of these platform details could be checked.</p>
+<p><b>Designing a full flow.</b> For <code>GET /entity/{id}</code> with many requests for absent IDs, the pieces are: a versioned key such as <code>entity:v1:&lt;id&gt;</code>, a positive TTL with jitter, a sentinel with a short TTL, a delete of the key on create and on update, and fail-open reads with a short client timeout. Checkpoint question Q5 asks you to defend the negative TTL against both directions.</p>
+<p>A Bloom filter is a compact bit array that answers "certainly absent" or "maybe present" for an ID. It has no stale entry per ID, but it has false positives, and every create must add the new ID to it. Redis has a Bloom filter data type.</p>
+<p><b>Bloom filter details.</b> A Bloom filter cannot delete an ID unless it is a counting variant. So deleted rows stay "maybe present", and requests for them still reach the source. Size it from the expected number of IDs and the false positive rate you accept. The elite-storage course derives the arithmetic.</p>
+</details>
+
+<p>That completes the four failures of the settings cache. The next section lists what you can now predict, and the question that Phase 3 answers.</p>
+
+<h2 data-kind="recall">What you can do now, and what comes next</h2>
+
+<p>You can now predict four failures of a cache that readers fill, and choose the fix for each one.</p>
+
+<ul>
+  <li><b>The source serves only the misses.</b> When caching stops, for a flag, an empty node or an outage, source load jumps 1/(1 − h) times with no error. Failing open needs short timeouts, a breaker and a limit on misses. The first three teaching sections showed this.</li>
+  <li><b>A stampede has one rebuild per filler that misses during the rebuild.</b> singleflight coalesces inside one pod. A lease, routing by key or serving the old value coalesces across pods. XFetch fits hot keys, and jitter fits many keys that expire together.</li>
+  <li><b>Delete-on-write is not race-free.</b> A reader that missed before a write can fill the old value after the delete. A lease with <code>SET NX PX</code> and <code>SET IFEQ</code> makes the fill prove that nothing changed. The TTL only bounds a missed delete.</li>
+  <li><b>A cached "not found" is an entry like any other.</b> The create path deletes it, and its TTL is the longest a new row can stay hidden.</li>
+</ul>
+
+<p>The lease in this phase is a token that a write must still match when it lands. Phase 3 asks the same question about locks. When is a Redis lock safe, and what happens when its holder pauses past the TTL? It builds on <code>SET NX PX</code>, a release that checks the token, and fencing tokens.</p>
+
+<h2 data-kind="lab">Lab: the exercises that teach Phase 2</h2>
+
+<p>The lab below is copied from the phase. The author of this lesson did not run it. A separate study run used an x86_64 Homebrew build of Redis 8.10.1 under Rosetta 2, outside Docker, on one Mac, and its results appear in the notes under some exercises. Notes say where a step is out of date or teaches less than it claims.</p>
+
+<details class="answer deeper"><summary>Practice: where it runs, and how long it takes</summary>
+<p>Everything runs on your laptop with Docker, Go and the module versions in <code>code/go.mod</code>: go-redis v9.5.1 and <code>golang.org/x/sync</code> v0.22.0. The phase plans 4 to 6 days for the reading and the lab. The stampede and invalidation exercises matter most.</p>
+<div class="callout note">The setup path in the phase is out of date. The folder is <code>/Users/raghvendra.dhakar/Desktop/project/code/study-material/redis/code</code>. The compose file pins <code>image: redis:7.2</code>. Pin an 8.x image, so that <code>SET ... IFEQ</code> from the invalidation sections works. Persistence is also off in compose, so a restart empties Redis.</div>
+</details>
+
+<details class="answer deeper"><summary>Practice: open the lab, E1 to E12</summary>
+<p>Setup:</p>
+<pre><code data-lang="bash">cd /Users/raghvendradhakar/Desktop/code/verly/study-material/redis/code
+docker-compose up -d &amp;&amp; docker exec redis-study redis-cli PING   # → PONG</code></pre>
+
+<ul class="exercises">
+  <li><label><input type="checkbox"> <b>E1. Cache-aside: miss then hit.</b></label>
+    <ul><li>Run: <code>go run ./phase02_caching/cache_aside -id c101</code> twice.</li>
+    <li>Expected: first ~311ms (MISS, hits slow source), second ~6ms (HIT).</li>
+    <li>Teaches: the whole read-cache/populate loop and the latency payoff.</li></ul>
+    <p class="note">Note: the program itself prints "~0.3ms" for a hit, so both numbers are guesses. The study run measured a 307 ms miss and a 3.7 ms hit in a fresh process, which includes the first connection.</p></li>
+
+  <li><label><input type="checkbox"> <b>E2. (Break it) Fail open when Redis is down.</b></label>
+    <ul><li>Run: <code>docker stop redis-study; go run ./phase02_caching/cache_aside -id c9; docker start redis-study</code></li>
+    <li>Expected: the request still returns (from source), with a <code>[warn] cache GET failed … failing open</code> line — NOT a crash.</li>
+    <li>Teaches: the single most important cache-aside property — a cache outage is slower, not broken.</li></ul>
+    <p class="note">Note: a stopped container refuses the connection, which fails fast. The study run saw two warnings and a 450 ms miss. To see the timeout cost from the fail-open section, pause a Redis process with <code>kill -STOP</code> instead of stopping it.</p></li>
+
+  <li><label><input type="checkbox"> <b>E3. Thundering herd, then singleflight.</b></label>
+    <ul><li>Run: <code>go run ./phase02_caching/thundering_herd -conc 200</code></li>
+    <li>Expected: <code>WITHOUT: 200 source calls</code>, <code>WITH: 1 source call</code>.</li>
+    <li>Teaches: request coalescing collapses N concurrent misses of one key into one source call.</li></ul>
+    <p class="note">Note: the program prints longer lines than the phase shows, such as "WITHOUT singleflight: 200 concurrent misses → 200 source calls". To see one call per process, start four copies at the same time.</p></li>
+
+  <li><label><input type="checkbox"> <b>E4. Scale the herd.</b></label>
+    <ul><li>Run: <code>go run ./phase02_caching/thundering_herd -conc 1000</code></li>
+    <li>Expected: still exactly 1 source call with singleflight; ~1000 without.</li>
+    <li>Teaches: coalescing is O(1) source calls regardless of concurrency (per process).</li></ul></li>
+
+  <li><label><input type="checkbox"> <b>E5. TTL jitter distribution.</b></label>
+    <ul><li>Run: <code>go run ./phase02_caching/ttl_jitter -keys 1000 -base 600 -jitter 60</code></li>
+    <li>Expected: fixed → 1 expiry bucket (spike); jittered → ~121 buckets over 120s (smear).</li>
+    <li>Teaches: synchronized TTLs self-inflict stampedes; jitter smears expiry.</li></ul>
+    <p class="note">Note: this program does not use Redis, although its header says to start Docker. The study run printed 121 seconds with 7 to 9 keys each.</p></li>
+
+  <li><label><input type="checkbox"> <b>E6. Prove synchronized expiry in Redis directly.</b></label>
+    <ul><li>Run: warm 1000 keys with the same TTL: <code>for i in $(seq 1 1000); do echo "SET warm:$i v EX 30"; done | docker exec -i redis-study redis-cli --pipe</code>. Wait ~28s, then <code>docker exec redis-study redis-cli DBSIZE</code> repeatedly around t=30s.</li>
+    <li>Expected: DBSIZE drops from ~1000 to ~0 in one ~1s window — the synchronized-expiry cliff.</li>
+    <li>Teaches: what a fixed-TTL bulk warm looks like from the keyspace's side.</li></ul>
+    <p class="note">Note: with <code>EX 5</code>, the study run saw 1,000 keys drop to 0 in about 0.1 s, and <code>INFO</code> showed <code>expired_keys_active:1000</code>. The active expire cycle removed them, not reads.</p></li>
+
+  <li><label><input type="checkbox"> <b>E7. Negative caching.</b></label>
+    <ul><li>Run: <code>go run ./phase02_caching/negative_cache -id ghost-999 -n 5</code></li>
+    <li>Expected: without → 5 source lookups; with → 1.</li>
+    <li>Teaches: caching the "not found" stops penetration.</li></ul></li>
+
+  <li><label><input type="checkbox"> <b>E8. (Break it) Negative-cache staleness.</b></label>
+    <ul><li>Reason about it: with a 30s negative TTL, an entity created 5s after its first (404) lookup is invisible for how long? Now change the sentinel TTL to 10 minutes in <code>negative_cache/main.go</code> and argue why that's dangerous.</li>
+    <li>Teaches: the negative-TTL freshness trade-off directly.</li></ul>
+    <p class="note">Note: add one more step in your head. Make the create path delete the key, and the hidden window drops to the time between the create and the delete.</p></li>
+
+  <li><label><input type="checkbox"> <b>E9. Write-through vs write-behind.</b></label>
+    <ul><li>Run: <code>go run ./phase02_caching/write_through_behind</code></li>
+    <li>Expected: write-through ~269ms and <code>source.puts=5</code>; write-behind ~4ms and <code>source.puts=0</code> until the flush.</li>
+    <li>Teaches: the durability-vs-latency trade and the write-behind loss window.</li></ul></li>
+
+  <li><label><input type="checkbox"> <b>E10. Delete-on-write by hand.</b></label>
+    <ul><li>Run: <code>docker exec redis-study redis-cli SET settings:c7 '{"v":1}' EX 3600</code> (cache). Then simulate a write: <code>docker exec redis-study redis-cli DEL settings:c7</code>. Then read: <code>docker exec redis-study redis-cli GET settings:c7</code> → nil → (your app repopulates).</li>
+    <li>Expected: the DEL forces the next read to repopulate from source.</li>
+    <li>Teaches: why invalidation deletes (not updates) the key.</li></ul>
+    <p class="note">Note: this shows the delete, not the race. Extend it with the four steps of the table in the section on conditional fills: a reader's <code>SET NX PX 5000</code>, the writer's <code>DEL</code>, then the reader's <code>SET ... IFEQ</code>. That needs Redis 8.4.0 or later.</p></li>
+
+  <li><label><input type="checkbox"> <b>E11. See the versioned-key kill switch.</b></label>
+    <ul><li>Run: <code>docker exec redis-study redis-cli SET "ccs:list_voices:v1:x" old; docker exec redis-study redis-cli SET "ccs:list_voices:v2:x" new; docker exec redis-study redis-cli KEYS "ccs:list_voices:v*"</code> (sandbox only — never KEYS in prod).</li>
+    <li>Expected: both versions coexist; bumping v1→v2 orphans all v1 keys (TTL reaps them).</li>
+    <li>Teaches: how a version segment in the key gives you instant format migration.</li></ul>
+    <p class="note">Note: these two keys have no TTL, so nothing reaps them in this exercise. Add <code>EX</code> to see the old version expire.</p></li>
+
+  <li><label><input type="checkbox"> <b>E12. Measure hit rate.</b></label>
+    <ul><li>Run: <code>docker exec redis-study redis-cli INFO stats | grep keyspace</code> (<code>keyspace_hits</code>, <code>keyspace_misses</code>).</li>
+    <li>Compute: hit rate = hits/(hits+misses). Then compute the amplification <code>1/(1-h)</code> for h=0.99.</li>
+    <li>Teaches: the cache-bypass incident math — hit rate is the load multiplier.</li></ul>
+    <p class="note">Note: the server counters mix all caches, as the fail-open section explains. In the Teaches line, the phase named the former employer's service. Only that word was changed.</p></li>
+</ul>
+</details>
+
+<details class="answer deeper"><summary>Practice: the second lab folder and other files</summary>
+<p>The code folder has a second set of programs in <code>phase02_caching_patterns/</code> that the phase text does not use. Read them with these notes.</p>
+<ul>
+  <li><code>cache_aside</code> fails closed on a Redis error and on a corrupt value, at lines 52 to 59. That is the opposite of the fail-open section, so do not copy it.</li>
+  <li><code>thundering_herd</code> has an XFetch part that is fixed, not random. It prints "DB calls = 5". The XFetch section gives the real rule.</li>
+  <li><code>invalidation_scope</code> builds generation keys, but its first access uses <code>Set</code> without <code>NX</code>, so two callers can create two versions.</li>
+  <li><code>write_behind</code> uses <code>LPOP</code> and then writes, so a crash between the two loses an event.</li>
+  <li>Four compiled binaries sit at the top of <code>code/</code>: <code>cache_aside</code>, <code>thundering_herd</code>, <code>invalidation_scope</code> and <code>write_behind</code>. They are not source, and you can delete them.</li>
+</ul>
+</details>
+
+<h2 data-kind="checkpoint">Checkpoint questions</h2>
+
+<details class="answer deeper"><summary>Practice: seven questions, answer each in your own words first</summary>
+
+<p><b>Q1.</b> A hot endpoint had a 99% hit rate, and its source normally saw 300 calls per minute. A release marks every response as not cacheable. Compute the calls per minute after the release, and state the general formula as a function of the hit rate h. Then explain why the release produced no error, and why it looked like "everything is slow, nothing deployed".</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>The source saw 1% of the traffic, so the total was 30,000 calls per minute. After the release it sees all of them: 30,000 per minute, 100 times more. The multiplier is 1/(1 − h). No error appears because every call still succeeds from the source. The first symptom is latency in the source and in the services that call it, and the release looks unrelated because it changed one flag.</p>
+</details>
+
+<p><b>Q2.</b> Your service reads tenant settings 5,000 times per second across 40 pods, all from one hot Redis key with a one-hour TTL. The key expires, and the rebuild takes 100 ms. Describe what hits Postgres in the next 100 ms with (a) no protection, (b) per-pod singleflight, and (c) singleflight plus a shared lease. Give the approximate query count for each. Why can singleflight alone not get you to 1 query across 40 pods?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) About 500 queries, because 5,000 × 0.1 s of requests miss during the rebuild. (b) Up to 40, one per pod, because the singleflight map lives in one process. (c) 1, because only the pod that wins <code>SET ... NX PX</code> rebuilds, and the others wait or serve an old value. singleflight cannot see other processes, so the coalescing scope is one pod.</p>
+</details>
+
+<p><b>Q3.</b> A colleague proposes write-through for the settings cache: "update the cache whenever settings change, so it is never stale, which is cleaner than delete-on-write." Give two reasons to delete instead of update, one a race and one a cost. Then name the race that delete-on-write still has, and the one scenario where write-through is the better choice.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>Race: two writers that update the cache can interleave, and the older value can land last. Cost: an update rebuilds the cached value on the write path, which may be an expensive join, while a delete costs one command. Delete-on-write still has the late-fill race, where a reader that missed before the write fills the old value after the delete. A lease with <code>SET IFEQ</code> fixes it. Write-through is better when a read right after a write must be fresh and there is a single writer per key.</p>
+</details>
+
+<p><b>Q4.</b> You warm 50,000 tenant keys at deploy time, each with a flat <code>EX 3600</code>. Everything is fine for 59 minutes. Predict minute 60, quantify it, and give the one-line fix. Then explain why the bug repeats on every deploy, and why a canary or a staging test rarely shows it.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>In minute 60 all 50,000 keys expire within a second or two, and up to 50,000 reads miss and reach Postgres at once. Redis's active expire cycle also works at its CPU limit. The fix is jitter: <code>EX 3600 ± rand(300)</code>, for example. The deploy sets the same timer each time, so the spike comes one TTL after every deploy. Staging warms few keys and rarely runs a full hour under load, so the spike is small or never happens there.</p>
+</details>
+
+<p><b>Q5.</b> Design <code>GET /entity/{id}</code>, where about 5% of traffic asks for IDs that do not exist, from an integration that enumerates IDs. Give the key format, the positive TTL, the negative sentinel and its TTL, the create path, and the fail-open behaviour. Then defend your negative TTL against "too long" and "too short".</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>Key <code>entity:v1:&lt;id&gt;</code>. Positive TTL of, say, 10 minutes with jitter. Sentinel with a short TTL, chosen from how long a new entity may stay hidden. The create path and the update path delete the key, after the database write. Reads fail open with a short client timeout and a breaker. Too long: a created entity returns 404 until the sentinel expires, if a delete is missed. Too short: repeated lookups of the same absent ID reach the source more often. If the integration enumerates new random IDs, the negative cache never hits, so add a Bloom filter or a rate limit for that client.</p>
+</details>
+
+<p><b>Q6.</b> The lab's cache-aside read treats the cache as an optimization: it fails open and tolerates corruption. Give a scenario where you would deliberately fail closed, so that a Redis error fails the request. Say what you buy and what you risk.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>A rate limiter whose counters live in Redis, or a cache of authorization decisions that must not be skipped. Failing closed buys safety: no tenant runs without limits, and no request skips a check. The risk is availability, because a Redis outage becomes an outage of that feature. Fail open there would multiply load or remove a protection.</p>
+</details>
+
+<p><b>Q7.</b> An admin's settings change is visible at once in one service but takes up to 10 minutes in another. The first service reads through a shared cache that the owning service invalidates with a delete, with a one-hour TTL as the backstop. The second keeps its own Redis copy with a 10-minute TTL and no invalidation. Explain the difference. Is the 10-minute delay a bug or a trade-off? What single change makes the slow one instant, and what does it cost?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>The first service gets a delete on every write, so the next read fills fresh data. The second learns of a change only when its TTL ends, so the worst case is 10 minutes. That is a trade-off if the team chose it, and a bug if nobody knew. To make it instant, the second service must receive the invalidation, for example by reading through the shared cache or by subscribing to change data capture. That costs a dependency on the invalidation path and the late-fill race, which then needs a lease or a version check.</p>
+</details>
+</details>
+
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+
+<details class="answer deeper"><summary>Practice: the one-screen cheatsheet</summary>
+<pre class="cheatsheet">READ AND WRITE STRATEGIES (two axes, pick one of each)
+  read : cache-aside   app fills on a miss. Cache is DERIVED and DISPOSABLE.
+         read-through  a library fills on a miss. Same failure modes.
+  write: delete-on-write  write source, then DEL key. Usual partner of cache-aside.
+         write-through    write source + cache. Fresh unless the cache write fails.
+         write-behind     write cache, flush later. Fast. LOSS WINDOW before flush.
+
+PRODUCTION CACHE-ASIDE (5 properties, lab cache_aside/main.go)
+  1 versioned key  course:v1:&lt;id&gt;   bump v1 -&gt; v2 on a format change
+  2 fail open      GET error -&gt; log, read source, never return the error
+  3 corruption ok  unmarshal error -&gt; read source
+  4 fill with a deliberate TTL
+  5 SET or marshal error = warning only
+
+c1  LOAD ON THE SOURCE
+  source load = (1 - h) x traffic        caching stops -&gt; x 1/(1 - h)
+  h=0.98 -&gt; 50x   h=0.99 -&gt; 100x   one empty node of 4 at h=0.98 -&gt; ~13x misses
+  fail-open cost: up to ReadTimeout x attempts. v9.5.1 defaults measured 6.042 s = 2 timeouts
+  fixes: short timeout, MaxRetries -1, breaker per node, cap on concurrent misses
+  fail CLOSED when Redis holds the truth: rate limits, decisions you cannot skip
+
+c2  STAMPEDES
+  size ~ 1 + rate x rebuild_time, per coalescing scope
+  singleflight   one call per PROCESS (40 pods -&gt; up to 40)
+  lease          SET k:lease &lt;rand&gt; NX PX 5000 -&gt; one call per KEY
+  serve stale    logical expiry in the value, long real TTL, one refresher
+  route by key   all requests for a key -&gt; one process
+  XFetch         now - delta*beta*ln(rand()) &gt;= expiry   beta=1   hot keys only
+  jitter         many keys warmed together: EX base +/- rand(j). No help for one key.
+
+c3  INVALIDATION
+  delete, not update  (two writers cannot leave the older value)
+  late-fill race: reader misses, writer UPDATE + DEL, reader SETs old value
+  lease fix (Redis &gt;= 8.4.0, Valkey &gt;= 8.1.0):
+    miss : SET k lease:&lt;r&gt; NX PX 5000
+    write: UPDATE db, then DEL k
+    fill : SET k &lt;v&gt; IFEQ lease:&lt;r&gt; EX 3600   (nil = invalidated, do not fill)
+  TTL = backstop for a missed DEL, not a fix for the race
+  CLIENT TRACKING: placeholder 'caching-in-progress' before the read
+  keyspace notifications: fire and forget, not an invalidation channel
+
+c4  NEGATIVE CACHING
+  store a sentinel with a short TTL; the CREATE path deletes it
+  hidden window = negative TTL if the delete is missed
+  fill from a replica only after replication caught up
+  random IDs never repeat -&gt; Bloom filter or rate limit
+
+INVESTIGATE
+  INFO stats | grep keyspace   keyspace_hits / keyspace_misses, whole server
+  INFO stats                   expired_keys_active after a mass expiry
+  TTL &lt;key&gt;                    -1 no expiry, -2 no key, n seconds left
+  SET k v EX n                 always a TTL; KEEPTTL keeps the current one
+  KEYS pattern                 sandbox only, it blocks the server</pre>
+</details>
+
+<h2 data-kind="sources">Sources</h2>
+
+<details class="answer deeper"><summary>Practice: every source this lesson used</summary>
+<p>Must-read, in this order.</p>
+<ul class="sources">
+  <li><a href="https://learn.microsoft.com/en-us/azure/architecture/patterns/cache-aside">Cache-Aside pattern, Microsoft Azure Architecture</a>: a clear definition of cache-aside and its failure modes. Read before the strategies section.</li>
+  <li><a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Strategies.html">Caching strategies, AWS ElastiCache</a>: lazy loading, write-through and TTLs. The old <code>red-ug</code> link now redirects here.</li>
+  <li><a href="https://pdos.csail.mit.edu/6.824/papers/memcache-faq.txt">MIT 6.824 memcache FAQ</a>: the late-fill race in eight steps, and why delete beats update.</li>
+  <li><a href="https://www.usenix.org/system/files/conference/nsdi13/nsdi13-final170_update.pdf">Scaling Memcache at Facebook, NSDI 2013</a>: leases, stale values, gutter and the replica rule. Read sections 3.2.1, 3.3 and 5.</li>
+  <li><a href="https://cseweb.ucsd.edu/~avattani/papers/cache_stampede.pdf">Optimal Probabilistic Cache Stampede Prevention</a>: the XFetch rule in Figure 3 and the trace results in section 6.</li>
+  <li><a href="https://pkg.go.dev/golang.org/x/sync/singleflight">singleflight package docs</a>: <code>Do</code>, <code>DoChan</code> and <code>Forget</code>.</li>
+</ul>
+<p>Production cases.</p>
+<ul class="sources">
+  <li><a href="https://slack.engineering/slacks-incident-on-2-22-22/">Slack's Incident on 2-22-22</a>: empty cache nodes, superlinear database load, and a cache that could not refill.</li>
+  <li><a href="https://engineering.fb.com/2010/09/23/uncategorized/more-details-on-today-s-outage/">Facebook, More details on today's outage</a>: a cache repair loop and 2.5 hours down.</li>
+  <li><a href="https://www.uber.com/en-GB/blog/how-uber-serves-over-40-million-reads-per-second-using-an-integrated-cache/">Uber, CacheFront at 40 million reads per second</a>: timestamp checks, change data capture, negative entries, breakers and adaptive timeouts.</li>
+  <li><a href="https://www.uber.com/us/en/blog/how-uber-serves-over-150-million-reads/">Uber, CacheFront at 150 million reads per second</a>: the stale cases found later, and invalidation markers.</li>
+  <li><a href="https://engineering.fb.com/2022/06/08/core-infra/cache-made-consistent/">Meta, Cache made consistent</a>: a fill against a rare transaction, found by consistency tracing.</li>
+  <li><a href="https://discord.com/blog/how-discord-stores-trillions-of-messages">Discord, How Discord Stores Trillions of Messages</a>: request coalescing with routing by channel.</li>
+  <li><a href="https://shopify.engineering/circuit-breaker-misconfigured">Shopify, Your Circuit Breaker is Misconfigured</a>: 263% against 4% extra capacity.</li>
+  <li><a href="https://nickcraver.com/blog/2019/08/06/stack-overflow-how-we-do-app-caching/">Stack Overflow, How We Do App Caching</a>: a TTL bug that sent 95% of local reads to Redis.</li>
+  <li><a href="https://blog.hotstar.com/scaling-subscriptions-cache-for-cash-4c5836bd6a6f">Hotstar, Scaling Subscriptions</a>: a low hit rate that made p99 worse.</li>
+  <li><a href="https://status.pendo.io/incidents/g8nfbs1vdn69">Pendo status incident</a>: keys with no TTL filled memory.</li>
+  <li><a href="https://redis.io/blog/caches-promises-locks/">Redis blog, Caches, Promises and Locks</a>: a lease with Pub/Sub waiting.</li>
+</ul>
+<p>Redis and Valkey reference.</p>
+<ul class="sources">
+  <li><a href="https://redis.io/docs/latest/commands/set/">Redis SET</a>: <code>EX</code>, <code>PX</code>, <code>NX</code>, <code>XX</code>, <code>KEEPTTL</code> and <code>IFEQ</code>.</li>
+  <li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/commands/set.json">set.json at Redis 8.10.2</a> and <a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/commands/set.json">set.json at Valkey 9.1.2</a>: which conditions each server has.</li>
+  <li><a href="https://redis.io/docs/latest/commands/delex/">Redis DELEX</a>, <a href="https://valkey.io/commands/set/">Valkey SET</a> and <a href="https://valkey.io/commands/delifeq/">Valkey DELIFEQ</a>.</li>
+  <li><a href="https://redis.io/docs/latest/commands/hexpire/">HEXPIRE</a> and <a href="https://redis.io/docs/latest/commands/hgetex/">HGETEX</a>: TTLs per hash field.</li>
+  <li><a href="https://redis.io/docs/latest/develop/use-cases/cache-aside/">Redis cache-aside use case</a>: replaces the phase's dead <code>use-cases/caching/</code> link.</li>
+  <li><a href="https://redis.io/docs/latest/develop/reference/client-side-caching/">Redis client-side caching</a>: tracking and the placeholder fix.</li>
+  <li><a href="https://redis.io/docs/latest/develop/pubsub/keyspace-notifications/">Redis keyspace notifications</a>: replaces the phase's dead link, and says why they are not an invalidation channel.</li>
+  <li><a href="https://redis.io/docs/latest/develop/data-types/probabilistic/bloom-filter/">Redis Bloom filter</a>.</li>
+  <li><a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/">Redis docs, Diagnosing latency issues</a>: many keys expiring in the same second.</li>
+  <li><a href="https://raw.githubusercontent.com/redis/go-redis/v9.23.0/options.go">go-redis v9.23.0 options.go</a>: the current timeout defaults.</li>
+  <li><a href="https://www.confluent.io/blog/turning-the-database-inside-out-with-apache-samza/">Turning the database inside out</a>: a talk about stream processing and derived data, background for change data capture. The phase called it a survey of cache invalidation, which it is not.</li>
+</ul>
+</details>
+
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>
