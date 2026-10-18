@@ -1108,7 +1108,11 @@ async def sync_courses(ctx: RunContext[HQDeps]) -> str:
     """
     url = f"{settings().study_api_base.rstrip('/')}/api/study"
     async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(url, headers={"User-Agent": "MissionHQ/1.0"})
+        # lite=1 leaves out each document's text. Since the platform stopped
+        # capping the list at 100 (monitoring 724810e), the full list is about
+        # 13 MB and took longer than the timeout; this needs titles only.
+        resp = await client.get(url, params={"lite": "1"},
+                                headers={"User-Agent": "MissionHQ/1.0"})
         resp.raise_for_status()
         catalogue = resp.json()
     if not isinstance(catalogue, list):
