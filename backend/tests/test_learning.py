@@ -1705,6 +1705,20 @@ def test_pages_are_wrapped_in_one_kit_and_whole_documents_are_left_alone() -> No
         "## Why it breaks\n\nA & B\n\n- one")
 
 
+def test_the_course_lane_builds_several_lessons_at_once() -> None:
+    """One lane built one lesson at a time, and four phases took most of a day
+    (2026-10-18). The lane size is a setting; the gateway slots still cap calls."""
+    import inspect
+
+    from hq import engine
+    from hq.config import Settings
+
+    assert Settings().course_lanes > 1
+    src = inspect.getsource(engine.bootstrap_post_launch)
+    assert "settings().course_lanes" in src
+    assert '"courses", worker_concurrency=1' not in src
+
+
 def test_course_work_has_its_own_lane_and_queued_work_survives_a_code_change() -> None:
     import inspect
 

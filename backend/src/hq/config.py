@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # call waits for one of these before it is sent, so the backend never
     # overfills the key's slot table and has to wait out 429s instead.
     gateway_parallel: int = 5
+    # Course lessons built at once (the "courses" lane). Each lesson is a long
+    # chain of model calls, one after another, so one lane builds one lesson
+    # at a time: four phases took most of a day on 2026-10-18. More lanes do
+    # not overfill the key: every call still waits for a gateway_parallel slot.
+    course_lanes: int = 3
     openai_api_key: str = ""
     grid_api_key: str = ""
 

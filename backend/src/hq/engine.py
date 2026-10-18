@@ -355,12 +355,15 @@ async def bootstrap_post_launch() -> None:
     await DBOS.set_latest_application_version_async(DBOS.application_version)
     _queues["tasks"] = await DBOS.register_queue_async("tasks", worker_concurrency=3)
     _queues["browser"] = await DBOS.register_queue_async("browser", worker_concurrency=1)
-    # Course work gets its own lane, one at a time. On 2026-09-17 two course
-    # builds the owner started waited behind a job sweep, which has run for
-    # four hours. Two agent runs plus a chat turn, each one request at a
-    # time, stay inside the key's five parallel requests; a full slot table
-    # is a 429 that the model-step retry already waits out.
-    _queues["courses"] = await DBOS.register_queue_async("courses", worker_concurrency=1)
+    # Course work gets its own lane. On 2026-09-17 two course builds the owner
+    # started waited behind a job sweep, which has run for four hours. The lane
+    # builds settings().course_lanes lessons at once: one lesson is a chain of
+    # slow calls, so one at a time left a phase's lesson queued behind another
+    # for hours. Extra lanes cannot overfill the key's five parallel requests,
+    # because every model call waits for a gateway_parallel slot first
+    # (llm._slot_limit); a busy evening only makes each call wait its turn.
+    _queues["courses"] = await DBOS.register_queue_async(
+        "courses", worker_concurrency=max(1, settings().course_lanes))
     _queues["chat"] = await DBOS.register_queue_async("chat", worker_concurrency=1)
     # Narrated videos: a render keeps the CPU about 97% busy (measured on the
     # 4K episode renders), so a second one at once only halves both.
