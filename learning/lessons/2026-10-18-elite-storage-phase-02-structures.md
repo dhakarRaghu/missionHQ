@@ -87,6 +87,16 @@ In PostgreSQL, one miss has two prices. It reads files through the kernel, so a 
 
 The failure is a pool too small for the hot data. Nothing errors. The hit rate falls, and the average read gets several times slower.
 
+**GitHub** saw a related failure in September 2012. Its pool was cold, so it did not yet hold the hot pages. A schema migration loaded its main MySQL database so much that health checks failed. The failover tool then made another server the active database. That server's InnoDB buffer pool was cold, and the server performed poorly. The site's load on the cold pool made its health checks fail too, so the role moved back. The team then turned off the health checks and automatic failover. Performance came back slowly as the pool filled. GitHub reported 1 hour 46 minutes of downtime that week, across this outage and a second one the next day.
+
+<details>
+
+**Evidence**
+
+Jesse Newland, "GitHub availability this week", GitHub blog, 2012-09-14, https://github.blog/news-insights/the-library/github-availability-this-week/, verified from the post.
+
+</details>
+
 **Remember:** The miss rate decides the average read, and 1% to 10% misses is about 4 times slower.
 
 **Trap:** Reading `read` as disk reads sizes `shared_buffers` for the wrong cache.
@@ -237,11 +247,13 @@ With two random-key indexes, the model gives 35,949 bytes per insert, 30 bytes p
 
 The key type decides c. In one test, a table with only a primary key took 5,000 inserts per second for an hour. A sequence key wrote about 2 GB of WAL. A random UUID key wrote over 40 GB, mostly page images.
 
+**Buildkite** used integer primary keys, and random UUIDv4 values as a second key for external use. The post says random keys spread recent rows over many index pages and lower the cache hit rate. Around 2022, the team started to put a timestamp in the first 48 bits of each new UUID. With this and other changes over 6 weeks, the WAL rate of the primary database fell by 50%. Write I/O fell by about the same amount. The post does not say how much of the 50% came from the UUID change. In 2023 the team chose UUIDv7, a time-ordered UUID, as the primary key for all new tables.
+
 <details>
 
 **Evidence**
 
-Tomas Vondra, "On the impact of full-page writes", EDB blog, 2016: "a 1h benchmark, throttled to 5000 inserts per second". "With BIGSERIAL primary key this produces ~2GB of WAL, while with UUID it’s more than 40GB." And: "Clearly, vast majority of the records are full-page images". Verified from the post. The factor of about 20 is this course's arithmetic from his two numbers. The post does not give the PostgreSQL version, the hardware or the checkpoint settings.
+Tomas Vondra, "On the impact of full-page writes", EDB blog, 2016: "a 1h benchmark, throttled to 5000 inserts per second". "With BIGSERIAL primary key this produces ~2GB of WAL, while with UUID it’s more than 40GB." And: "Clearly, vast majority of the records are full-page images". Verified from the post. The factor of about 20 is this course's arithmetic from his two numbers. The post does not give the PostgreSQL version, the hardware or the checkpoint settings. Gordon Chan, "Goodbye integers. Hello UUIDv7!", Buildkite, 2023-09-25, https://buildkite.engineering/goodbye-integers-hello-uuids/, verified from the post.
 
 </details>
 
@@ -1192,6 +1204,16 @@ Each fix adds a second rule that protects pages used often.
 | PostgreSQL | a clock with usage counts up to 5, and a small ring for large sequential scans | index and bitmap heap scans get no ring |
 | InnoDB | a new page enters the old 3/8 of the list, and moves up only if used again after 1,000 ms | a window of 0 promotes every scan page |
 
+**MySQL** bug 45015, filed by Harrison Fisk in May 2009, reported this failure in InnoDB. It says that large full table scans can push a large share of the useful pages out of the buffer pool. He named `mysqldump`, the backup tool, as very bad at this, because it runs many full table scans. His steps to repeat it run `mysqldump` on a large, busy database. They expect the hit rate to fall a great deal and disk I/O to rise. The report gives no measured numbers for the hit rate or the I/O. The changelog note on the bug explains the cause. A scan reads several rows from each page, so each scan page was used again at once and moved to the head of the list. The InnoDB Plugin in MySQL 5.1.41 added `innodb_old_blocks_time` in late 2009, with a default of 0. MySQL 5.6 raised the default to 1,000 ms.
+
+<details>
+
+**Evidence**
+
+The report and its 5.1.41 changelog note are verified from the bug page, filed on 2009-05-21, https://bugs.mysql.com/bug.php?id=45015. The two defaults are verified from a table in Peter Zaitsev's Percona post of 2013-02-21 that compares 5.5.30 with 5.6.10, https://www.percona.com/blog/2013/02/21/mysql-5-5-and-mysql-5-6-default-variable-values-differences/.
+
+</details>
+
 In PostgreSQL, a sequential scan of a table over a quarter of `shared_buffers` reuses a small ring, 256 kB in versions 14, 16 and 17. Its pages get a usage count of at most 1, so they leave before pages used often.
 
 The failure is the scan the protection leaves out. A **bitmap heap scan** collects matching rows from an index, then reads their table pages in physical order. Neither it nor an Index Scan asks for a ring. A nightly report with a date filter often runs as one, so it can flood the pool. That is inferred from which scans get a ring.
@@ -1801,6 +1823,10 @@ This course's research fetched every URL below on 2026-10-17. The depth revision
 - **Open-sourcing a 10x reduction in Apache Cassandra tail latency, Dikang Gu, Instagram, 2018**. https://web.archive.org/web/20221221164348/https://instagram-engineering.com/open-sourcing-a-10x-reduction-in-apache-cassandra-tail-latency-d64f86b43589 Focus on: which number the "10x" is, and the production p99. An archived copy, because the live site refused the connection.
 - **Why Uber Engineering Switched from Postgres to MySQL, Evan Klitzke, Uber, 2016**. https://www.uber.com/blog/postgres-to-mysql-migration/ Focus on: the write amplification argument. No measured byte counts, and the example changes an indexed column.
 - **MyRocks: A space- and write-optimized MySQL database, Yoshinori Matsunobu, Facebook, 2016**. https://engineering.fb.com/2016/08/31/core-infra/myrocks-a-space-and-write-optimized-mysql-database/ Focus on: the LinkBench size results. The write results are only in a chart image.
+- **GitHub availability this week, Jesse Newland, GitHub, 2012**. https://github.blog/news-insights/the-library/github-availability-this-week/ Focus on: the Monday failover to a server with a cold InnoDB buffer pool, and the downtime total for the week.
+- **Goodbye integers. Hello UUIDv7!, Gordon Chan, Buildkite, 2023**. https://buildkite.engineering/goodbye-integers-hello-uuids/ Focus on: the time-ordered UUID experiment and the 50% drop in WAL rate. Other changes went out in the same 6 weeks.
+- **MySQL bug 45015: InnoDB buffer pool can be severely affected by table scans, Harrison Fisk, 2009**. https://bugs.mysql.com/bug.php?id=45015 Focus on: the report on `mysqldump`, and the changelog note that explains why a scan page moved to the head of the list.
+- **MySQL 5.5 and MySQL 5.6 default variable values differences, Peter Zaitsev, Percona, 2013**. https://www.percona.com/blog/2013/02/21/mysql-5-5-and-mysql-5-6-default-variable-values-differences/ Focus on: the `innodb_old_blocks_time` row, 0 in 5.5.30 and 1000 in 5.6.10.
 
 ### Lectures and notes
 

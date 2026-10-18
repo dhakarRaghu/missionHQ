@@ -204,9 +204,11 @@ These are medians per run of one 4 KiB write and a sync, from the earlier course
 
 Even `F_FULLFSYNC` only asks the drive to flush. A test cut the power to 15 SSDs while flushes were issued, and 13 of them failed in some way. So only a power-cut test of your own device shows what its flush does.
 
+**LiveJournal** lost power to every machine in its data center, as its post-mortem of January 2005 reports. Another customer there had pressed the emergency power-off button by accident. After the restart, the team restored a couple of database machines from backup, because their data was damaged. Their disk controller cards had write caches with battery backup. But the drives behind those cards still had their own drive caches on. The post links the damage to those drive caches and calls them a mistake. The team had also not turned on the option to sync MySQL's binary log, a second log, to disk. So the restored clusters lost a few transactions from just before the power loss. The team then planned to turn off the drive caches. It also planned to cut power during heavy writes on all its hardware, and then check the disks.
+
 **Evidence**
 
-Apple `fsync(2)` and `fcntl(2)` man pages in the xnu source at tag `xnu-12377.121.6`, and in the macOS 26.5 SDK. The `fcntl.2` lines are 207 to 245. The page also warns: "This is not a theoretical edge case." CPython and Go call sites: verified from the source at the tags in the table below by this course's research. M2 costs: the earlier course, elite-performance section 5.6, 2026-09-25. SSD power cuts: Zheng, Qin, Tucek and Lillibridge, USENIX FAST 2013, abstract and section 1. PostgreSQL on the M4 Pro: `pg_test_fsync -s 3` from PostgreSQL 14.24, run by this course's research on 2026-10-17. Linux barriers: PostgreSQL 18 docs, section 28.1.
+Apple `fsync(2)` and `fcntl(2)` man pages in the xnu source at tag `xnu-12377.121.6`, and in the macOS 26.5 SDK. The `fcntl.2` lines are 207 to 245. The page also warns: "This is not a theoretical edge case." CPython and Go call sites: verified from the source at the tags in the table below by this course's research. M2 costs: the earlier course, elite-performance section 5.6, 2026-09-25. SSD power cuts: Zheng, Qin, Tucek and Lillibridge, USENIX FAST 2013, abstract and section 1. PostgreSQL on the M4 Pro: `pg_test_fsync -s 3` from PostgreSQL 14.24, run by this course's research on 2026-10-17. Linux barriers: PostgreSQL 18 docs, section 28.1. LiveJournal: Brad Fitzpatrick, "Power-loss post-mortem", LiveJournal lj_dev, 2005-01-20. The post gives no date for the power cut itself, so the lesson gives the month of the post.
 
 **Go deeper: each runtime's call, the lab's sync, the M4 Pro numbers, PostgreSQL's sync methods, drives that report early, and how to check a Linux server**
 
@@ -509,6 +511,8 @@ A torn write has two shapes, and each needs its own check:
 
 A *checksum* is a short value computed from a block of bytes and stored next to it. A reader computes it again and compares, so a changed byte gives a different value. The parser checks the lengths first, so a damaged length cannot make it read gigabytes, and then the CRC.
 
+**Amazon S3** went down in July 2008, with problems in the messages between its servers. A few of those messages each had one wrong bit, but the servers could still read each one. S3 checked customer data with MD5 checksums. These internal state messages had no such check, so the wrong state went unnoticed and spread through the whole system. Amazon stopped all traffic between S3 servers and cleared the system state. By 2:20 pm PDT, the servers talked to each other again, and request processing began to restart. The fix added checksums to the state messages, and monitoring with an alarm for that state. A flipped bit leaves every length correct, so a length check alone would miss it too.
+
 Recovery stops at the first entry that fails any check, including a sequence number that is not the next one. It treats that point as the end of the log, cuts the file there and syncs the cut. The put in flight was never acknowledged, so dropping it breaks no promise.
 
 The rule fails for a bit flip in the middle of data that was already synced. Recovery stops there and drops every later entry, acknowledged ones too, because the scan cannot tell that damage from a torn tail. So the store's promise says that damage to synced data is not covered.
@@ -523,7 +527,7 @@ PostgreSQL also repairs a torn 8 kB data page, which a checksum can only detect.
 
 **Evidence**
 
-Sectors of 512 bytes and PostgreSQL's 8,192-byte writes: PostgreSQL 18 docs, section 28.1. The entry layout follows the Bitcask paper's figure on page 2. `full_page_writes`: the PostgreSQL 14 and 18 docs, `runtime-config-wal`. PostgreSQL 14's final release is on 2026-11-12, per the PostgreSQL versioning page. The offsets of the hole come from `fsim.py`, and the demo output was worked out from them, not run.
+Sectors of 512 bytes and PostgreSQL's 8,192-byte writes: PostgreSQL 18 docs, section 28.1. The entry layout follows the Bitcask paper's figure on page 2. `full_page_writes`: the PostgreSQL 14 and 18 docs, `runtime-config-wal`. PostgreSQL 14's final release is on 2026-11-12, per the PostgreSQL versioning page. The offsets of the hole come from `fsim.py`, and the demo output was worked out from them, not run. Amazon S3: Rich Miller, "S3 Downtime: More Missing Bites", Data Center Knowledge, 2008-07-26, which quotes Amazon's postmortem.
 
 **Go deeper: where the hole falls, the parser code, real drives, the LazyFS test, InnoDB and cloud devices, data checksums, and the PostgreSQL WAL record**
 
@@ -637,6 +641,8 @@ The lab's checkpoint is one file, `keydir.ckpt`, holding the keydir, the in-memo
 
 So a restart reads 4,980 of 9,900 bytes, or 50.3%. Without a checkpoint it reads all of them.
 
+**Tarsnap**, a backup service, lost its central server in July 2023, most likely to a hardware fault. After a restart, the server's logs showed a damaged file system. Tarsnap stores its data in Amazon S3 as a log. Each stored object starts with a header that holds the metadata of its log entries. Colin Percival, who runs Tarsnap, chose to build a new server instead of repairing the old one. So the new server first read all the metadata headers from S3. Then it replayed all of those operations locally. The postmortem says that both steps were slower than they could be. The read used only 250 parallel requests to S3, and disk throughput limited the replay. The replay also failed twice, and he fixed the recovery code each time. The service came back about 26 hours after it went down.
+
 A crash can come at any step of writing that file, so `checkpoint()` runs five steps in a fixed order:
 
 1. Sync the log, so the log is durable before the file that depends on it.
@@ -649,7 +655,7 @@ Skip step 3 or step 5, and a crash leaves a broken or an old checkpoint, which c
 
 **Evidence**
 
-The steps and offsets come from `checkpoint()` at `kvlog.py:511`, `Store.open` at `kvlog.py:331` and `_recover` at `kvlog.py:356`. The self-test of `kvlog.py` removes step 1 with `sync="none"` and checks that the power image fails to open. The redo time in the predict answer is Christophe Pettus's measurement on PostgreSQL 18.6, in the next part.
+The steps and offsets come from `checkpoint()` at `kvlog.py:511`, `Store.open` at `kvlog.py:331` and `_recover` at `kvlog.py:356`. The self-test of `kvlog.py` removes step 1 with `sync="none"` and checks that the power image fails to open. The redo time in the predict answer is Christophe Pettus's measurement on PostgreSQL 18.6, in the next part. Tarsnap: Colin Percival, "2023-07-02 -- 2023-07-03 Tarsnap outage post-mortem", tarsnap-announce, 2023-07-26.
 
 **Go deeper: the lab's restart steps, the three passes of ARIES, what a power loss leaves after each checkpoint step, and why recovery must cut the tail**
 
@@ -1422,6 +1428,12 @@ This course's research fetched every URL below on 2026-10-17. The depth revision
     Focus on: the root cause and the line about `/tmp` on a normal disk. A first-party postmortem with dates.
 - **Postmortem of database outage of January 31, GitLab, 2017**: https://about.gitlab.com/blog/postmortem-of-database-outage-of-january-31/
     Focus on: the timeline. It is an operator deletion and failed backups, not a sync failure.
+- **Power-loss post-mortem, Brad Fitzpatrick, LiveJournal lj_dev, 2005**: https://lj-dev.livejournal.com/670215.html
+    Focus on: the list of what failed after the power cut, and the plan to turn off the drive caches and test power cuts. A first-party post. Fetched on 2026-10-18.
+- **S3 Downtime: More Missing Bites, Rich Miller, Data Center Knowledge, 2008**: https://www.datacenterknowledge.com/outages/s3-downtime-more-missing-bites
+    Focus on: Amazon's quoted account of the single-bit errors and the missing checksum. Amazon's own page, status.aws.amazon.com/s3-20080720.html, returned 404 on 2026-10-18, so this is a second-hand report.
+- **2023-07-02 -- 2023-07-03 Tarsnap outage post-mortem, Colin Percival, Tarsnap, 2023**: https://mail.tarsnap.com/tarsnap-announce/msg00050.html
+    Focus on: the two recovery steps, and the two things that slowed the replay. A first-party post. Fetched on 2026-10-18.
 
 #### Measurements of group commit and recovery
 

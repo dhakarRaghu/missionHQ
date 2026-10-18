@@ -798,6 +798,8 @@ SELECT pg_try_advisory_lock(hashtext('scheduler:acme'));   -- session level: tru
 
 The docs give three rules. Session-level locks "do not honor transaction semantics", so a lock taken in a transaction that rolls back is still held. All advisory locks use the shared lock table sized by max_locks_per_transaction and max_connections, so leaked locks can stop the server from granting any lock. And pg_advisory_lock(id) in a query with LIMIT is marked "danger!", because the LIMIT may apply after the function ran. Prefer the transaction-level form, which ends with the transaction. A session-level lock belongs to the server session, and a pooler in transaction mode hands that session to the next client. So the lock can stay on a server connection that another client gets next, while the xact form cannot. That is inferred, because this course did not read the PgBouncer docs.
 
+Mattermost hit this problem with PostgreSQL behind PgBouncer, a pooler, in transaction mode. During load tests, some new workspaces failed to start, because their database migrations failed. Their migration library took pg_advisory_lock, so that two servers never ran one migration at once. That lock is session-level, and the library then lost the session that held it. So the library could not release the lock. The application hung and restarted, and each restart added more locks. As a midterm fix, the team set the PgBouncer option server_reset_query_always. For the long term, it chose to move to another migration library. The post confirms that the lock could not be released behind the pooler. It does not say which client got that server connection next, so that part above stays inferred.
+
 A version column, in code.
 
 # from phase03_transactions/contention.py:116, make_body(), the "version" strategy. Copied
@@ -871,7 +873,7 @@ The two short transactions, in SQL. The core split the 20-second model call into
 The E9 command is uv run python phase03_transactions/contention.py --workers 8 --increments 200 --hot-rows 1,64. The phase's quick version adds the strategies: uv run python phase03_transactions/contention.py --workers 8 --increments 200 --hot-rows 1,64 --strategies naive,for-update,version. Read the lost and retries columns for each hot-row count. The two short transactions leave one hole, a worker that dies between them, and the next section closes it with a lease.
 
 Evidence
-NOWAIT and SKIP LOCKED: PostgreSQL 14 docs, SELECT, "The Locking Clause", and errcodes.txt line 419 and heapam.c line 4941 at REL_14_24. Advisory locks: docs 13.3.5 and 9.27.10, Table 9.98, and Rogov page 234. The pooler mechanism: the study note, inferred. Declarative fixes: Rogov page 47. The constraint principle and the dummy row: Ports and Grittner 2012, section 2.2, from the study note. Partial unique indexes: docs 11.8, Example 11.3. The unique-insert wait: nbtinsert.c lines 224, 636 and 665 at REL_14_24. The serializable unique violation: docs 13.2.3, from the study note. Upserts: docs, INSERT, and nodeModifyTable.c line 232. The contention formulas are checked by contention.py --self-test.
+NOWAIT and SKIP LOCKED: PostgreSQL 14 docs, SELECT, "The Locking Clause", and errcodes.txt line 419 and heapam.c line 4941 at REL_14_24. Advisory locks: docs 13.3.5 and 9.27.10, Table 9.98, and Rogov page 234. The pooler mechanism: the study note, inferred. The lock lost behind the pooler: a Mattermost blog post by Angelos Kyratzakos, 2022-01-11, its migrations part. Declarative fixes: Rogov page 47. The constraint principle and the dummy row: Ports and Grittner 2012, section 2.2, from the study note. Partial unique indexes: docs 11.8, Example 11.3. The unique-insert wait: nbtinsert.c lines 224, 636 and 665 at REL_14_24. The serializable unique violation: docs 13.2.3, from the study note. Upserts: docs, INSERT, and nodeModifyTable.c line 232. The contention formulas are checked by contention.py --self-test.
 
 ## What happens to a claimed task when its worker dies?
 
@@ -973,6 +975,8 @@ The fix stops tracking ids. Each pass selects WHERE sent_at IS NULL ORDER BY id 
 
 Only a test that commits the higher id first, while the lower is open, shows this skip.
 
+Precision Nutrition had this skip in production, with readers that polled an events table by id. After a few weeks, many errors appeared, because some earlier events had never been processed. The logs showed that a reader processed events 185, 186 and 189. A later query found events 187 and 188 in the table. The team first suspected that one event processor made a wrong assumption about event state. In fact, the transaction that wrote 187 and 188 started before the one that wrote 189. But it committed after that one, so the reader passed 187 and 188 while they were invisible. Waiting for each next id would stop the reader, because about 0.6% of the ids in that table were never used. The fix took ids from a counter row that every writer updates, so the ids follow commit order.
+
 A relay polls unsent rows, because events appear in commit order, not id order.
 
 A relay that keeps the highest id skips a slow transaction's event for ever.
@@ -1047,7 +1051,7 @@ Try the whole audit. Run uv run python phase03_transactions/taskqueue.py --check
 Expected outputs. --check outbox --variant naive --relay-level serializable: FAIL outbox: committed events [1, 2], published [2], never published [1]. --check outbox --variant fixed --crash-before-mark: delivered twice: [2], then PASS outbox: committed events [1, 2], published [2, 1, 2], never published []. Neither was run by the author yet.
 
 Evidence
-The pattern: Chris Richardson, "Pattern: Transactional outbox", microservices.io. Sequences: PostgreSQL 14 docs 13.2 and CREATE SEQUENCE. The relay code: phase03_transactions/taskqueue.py line 173. The event id header: Debezium 3.7 documentation, Outbox Event Router. The cursor: Oskar Dudycz, "How Postgres sequences issues can impact your messaging guarantees", 2022-10-28, and xid8funcs.c line 411 at REL_14_24, with Rogov page 77 for savepoints. The other relays: SeatGeek, 2025-02-07, and Shopify, 2021-03-12.
+The pattern: Chris Richardson, "Pattern: Transactional outbox", microservices.io. Sequences: PostgreSQL 14 docs 13.2 and CREATE SEQUENCE. The relay code: phase03_transactions/taskqueue.py line 173. The event id header: Debezium 3.7 documentation, Outbox Event Router. The cursor: Oskar Dudycz, "How Postgres sequences issues can impact your messaging guarantees", 2022-10-28, and xid8funcs.c line 411 at REL_14_24, with Rogov page 77 for savepoints. The other relays: SeatGeek, 2025-02-07, and Shopify, 2021-03-12. The skipped events in production: Justin Giancola, PN Tech blog, "Fun with Multiversion Concurrency Control", part 1 of 2020-03-06 and part 2 of 2020-05-15, dates from the page addresses.
 
 ## What you can do now, and what comes next
 
@@ -1533,6 +1537,8 @@ This course's research fetched the papers, analyses and outbox sources below on 
 - Why we spent the last month eliminating PostgreSQL subtransactions, GitLab, 2021-09-29. Focus on: "What is SubtransControlLock?" and "Reproducing the problem with replicas", for the drop from about 360,000 to 50,000 transactions per second. Replicas only, with a long transaction on the primary.
 - How Postgres sequences issues can impact your messaging guarantees, Oskar Dudycz, 2022-10-28. Focus on: the xid8 column and pg_snapshot_xmin(pg_current_snapshot()), and the final query that orders by transaction ID. A design post, with no measurements.
 - pgsql-bugs #12990, multixact member files, PostgreSQL 9.3.5, 2015. Focus on: the workload of SELECT ... FOR SHARE from 26 connections, and the table of members files over one day. An old version, so read it for the mechanism only.
+- Optimizing database connection loads with PgBouncer and Testwick, Mattermost, 2022-01-11. https://mattermost.com/blog/optimizing-database-connection-loads-with-pgbouncer-and-testwick/ Focus on: the part on migrations, where a session-level advisory lock could not be released through PgBouncer in transaction mode.
+- Fun with Multiversion Concurrency Control, Precision Nutrition, 2020, with part 2. Part 1: https://tech.precisionnutrition.com/postgres/databases/2020/03/06/fun-with-mvcc Part 2: https://tech.precisionnutrition.com/postgres/databases/2020/05/15/fun-with-mvcc-2 Focus on: events 187 and 188 that a reader passed, and the rejected fixes in part 1. Then the counter row of part 2, which gives no numbers.
 
 ### PostgreSQL 14 documentation
 
