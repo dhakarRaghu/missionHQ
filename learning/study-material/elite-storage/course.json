@@ -1,0 +1,160 @@
+{
+ "topic": "elite-storage",
+ "title": "Storage and database internals",
+ "module": 4,
+ "spec": "missionHQ/learning/courses/04-storage/course.md",
+ "language": "go",
+ "languageNote": "Spec: Go for the KV-store lab, SQL against real Postgres. Go 1.24.1, psql and docker are installed on the laptop (checked 2026-10-17). Pending the owner's answer: Go as the spec says, or Python as elite-performance was adapted.",
+ "pythonTool": "uv",
+ "totalPhases": 4,
+ "currentPhase": 0,
+ "anchors": [],
+ "anchorDecision": "pending: the owner has not yet said whether Mission HQ is the anchor. Default is learning-only. Sections 3.7, the phase 3 lab and the phase 4 lab name Mission HQ, so they change with this answer.",
+ "sizeReason": "Four phases, as the spec sets: the course covers the mechanisms that change what he builds and no more. Page cache and fsync latency are already measured in elite-performance 5.6, so phase 1 teaches what fsync promises, not what it costs.",
+ "buildsOn": [
+  "elite-performance 5.6 (syscalls, buffers and the page cache: page-cache hit 1.5 µs against SSD read about 89 µs, os.fsync 95 to 110 µs against F_FULLFSYNC about 2.9 ms on the Mac). The spec calls this 1.5. Its deferred commitment, what fsync promises beyond its latency, is due in phase 1 here.",
+  "elite-performance 1.1 to 1.4 (honest measurement: distributions, open-loop load, repeat runs). The spec calls this 1.1.",
+  "elite-performance 4.1 to 4.4 (concurrency correctness in one process: logical races, ownership, locks). The spec calls this 1.4.",
+  "elite-performance 5.5 (connection pools sized from Little's law)"
+ ],
+ "outline": [
+  {
+   "phase": 1,
+   "title": "Durability and the write path",
+   "subtitle": "When the database says \"committed\", what exactly has happened on disk, and what can a crash one millisecond later still lose?",
+   "minutes": 150,
+   "status": "pending",
+   "file": null,
+   "sections": [
+    "1.1 — Memory, page cache, disk",
+    "1.2 — The write-ahead log",
+    "1.3 — fsync",
+    "1.4 — Torn writes and checksums",
+    "1.5 — Checkpoints and recovery",
+    "1.6 — Group commit and the durability–throughput trade",
+    "1.7 — Stating the durability boundary"
+   ],
+   "concepts": [
+    "\"Committed\" means the commit record reached the write-ahead log and the device said it is stable. The table pages may still be only in memory. Recovery rebuilds them from the log.",
+    "fsync is a request with conditions. A drive that acknowledges from its own cache, a Mac fsync that does not flush the drive, or an fsync error that the kernel reports once and then forgets, each loses a committed write with no error at commit time.",
+    "A page write is not atomic on the device. A crash can leave a page half old and half new. So every log record carries a checksum, and recovery treats a bad checksum at the log tail as the end of the log, never as data.",
+    "Restart time is bounded by the log written since the last checkpoint. The checkpoint interval trades steady background writes against how long recovery takes.",
+    "One fsync costs milliseconds, so a writer that waits for its own fsync is capped near one commit per fsync. Group commit shares one fsync among all waiting commits and keeps the same guarantee."
+   ],
+   "decides": "for a store he owns, write the durability boundary in one sentence and back it with a crash matrix that kills it at every write step.",
+   "codeDir": "code/phase01_durability",
+   "hardware": "Runs on the laptop. A process kill keeps the page cache, so it cannot show power loss. The crash wrapper therefore simulates power loss in-process: it drops every write since the last fsync and can tear the last one.",
+   "verifyBeforeWriting": [
+    "the Jepsen analysis the spec's opening refers to, and its exact finding and configuration",
+    "Linux fsync error semantics after the 2018 Postgres fsync incident, and Postgres data_sync_retry",
+    "Postgres full_page_writes and WAL record CRC, at the current release tag",
+    "macOS fsync versus F_FULLFSYNC, already measured in elite-performance 5.6"
+   ]
+  },
+  {
+   "phase": 2,
+   "title": "Storage structures",
+   "subtitle": "Why does the same workload run ten times faster on one storage structure than another, and how do you tell which one you need before you have built the wrong one?",
+   "minutes": 120,
+   "status": "pending",
+   "file": null,
+   "sections": [
+    "2.1 — Pages and the buffer pool",
+    "2.2 — B-trees",
+    "2.3 — LSM trees",
+    "2.4 — Compaction",
+    "2.5 — Bloom filters",
+    "2.6 — Read, write and space amplification",
+    "2.7 — Matching structure to workload",
+    "2.8 — Eviction"
+   ],
+   "concepts": [
+    "A B-tree updates a page in place, so a random write costs a page read and a page write. An LSM tree writes to memory and later writes sorted files, so writes are sequential, but a point read may check every level.",
+    "Every structure pays in read, write or space amplification. You choose which one by estimating the three numbers for your workload before you choose the engine.",
+    "Compaction is write work moved to later. When it falls behind, it stalls writes or raises p99, and it needs extra disk space while it runs.",
+    "A Bloom filter with about 10 bits per key answers \"not in this run\" correctly about 99% of the time with one memory read. So a point read for a missing key is cheap on an LSM tree. A range scan gets no help.",
+    "One large scan pushes the hot pages out of an LRU cache. A policy that admits a page only on its second use, such as 2Q, keeps the hot set. A real buffer pool also protects itself from large scans."
+   ],
+   "decides": "for a described workload, estimate read, write and space amplification for a B-tree and an LSM tree, and pick one with numbers.",
+   "codeDir": "code/phase02_structures",
+   "hardware": "Runs on the laptop.",
+   "verifyBeforeWriting": [
+    "Postgres clock-sweep buffer replacement and the ring buffer for large scans, in src/backend/storage/buffer at the current tag",
+    "RocksDB leveled compaction amplification figures, from RocksDB's own wiki with conditions",
+    "Bloom filter false-positive formula, checked against the lab's measured rate"
+   ]
+  },
+  {
+   "phase": 3,
+   "title": "Transactions and concurrency control",
+   "subtitle": "Two transactions both read, both write, both commit without error, and the result is one neither of them would have produced alone. Which isolation level allowed that, and which would have stopped it?",
+   "minutes": 180,
+   "status": "pending",
+   "file": null,
+   "sections": [
+    "3.1 — Atomicity and isolation",
+    "3.2 — MVCC",
+    "3.3 — The anomalies",
+    "3.4 — Locks and deadlocks",
+    "3.5 — Snapshot isolation versus serializable",
+    "3.6 — Optimistic versus pessimistic",
+    "3.7 — Isolation in Mission HQ"
+   ],
+   "concepts": [
+    "Atomicity is all or nothing when a transaction fails. Isolation is what concurrent transactions see of each other. A transaction can be fully atomic and still produce a wrong result under concurrency.",
+    "MVCC gives each transaction a snapshot, so readers never block writers. A snapshot cannot see a concurrent write that changes the facts it read. That blind spot is write skew.",
+    "The same level name means different things in different databases. Postgres REPEATABLE READ is snapshot isolation and stops a lost update with an error. MySQL InnoDB REPEATABLE READ lets a plain read-then-write lose an update.",
+    "Postgres SERIALIZABLE finds dangerous read-write dependencies and aborts one transaction with SQLSTATE 40001. Without retry code, SERIALIZABLE turns a wrong result into a failed request.",
+    "SELECT FOR UPDATE waits and can deadlock. A version column never waits and retries instead. Choose by how often two transactions touch the same row."
+   ],
+   "decides": "for a described pair of transactions and an isolation level, say whether they can produce a wrong result, and pick the cheapest mechanism that stops it.",
+   "codeDir": "code/phase03_isolation",
+   "hardware": "Runs on the laptop against Postgres in docker, plus MySQL in docker for the InnoDB comparison.",
+   "verifyBeforeWriting": [
+    "InnoDB REPEATABLE READ and lost update, by running it, and against the Hermitage test suite",
+    "the Jepsen analysis of a managed Postgres offering that the spec's opening refers to",
+    "Postgres deadlock_timeout default and deadlock report format, at the current tag",
+    "the Mission HQ transactions named in 3.7, by reading the code, if Mission HQ is the anchor"
+   ]
+  },
+  {
+   "phase": 4,
+   "title": "Query planning and production evolution",
+   "subtitle": "Why did the planner choose a sequential scan over your index, and what will your migration do to the table while it runs?",
+   "minutes": 150,
+   "status": "pending",
+   "file": null,
+   "sections": [
+    "4.1 — Reading EXPLAIN",
+    "4.2 — Cardinality and statistics",
+    "4.3 — Access paths",
+    "4.4 — Joins",
+    "4.5 — Vacuum and bloat",
+    "4.6 — Partitioning",
+    "4.7 — Migrations under load",
+    "4.8 — Rollback"
+   ],
+   "concepts": [
+    "The planner picks the plan with the lowest estimated cost, and the cost follows the row estimate. When estimated and actual rows differ by ten times or more, the statistics are wrong, not the planner.",
+    "An index wins only when the query returns a small part of the table. Past a few percent of rows, a sequential scan reads fewer pages for each row it returns.",
+    "Dead row versions stay in the table until vacuum removes them. If vacuum falls behind, the table grows. If it cannot freeze old rows, transaction ID wraparound stops all writes.",
+    "Every DDL statement takes a lock, and a waiting ACCESS EXCLUSIVE lock blocks every query queued behind it. lock_timeout, expand/contract and batched backfills turn one dangerous migration into small steps that can be retried.",
+    "A contract step that drops data cannot be undone. A migration can be rolled back only if old and new code both work during the compatibility window."
+   ],
+   "decides": "read a bad plan, name the wrong estimate, fix it, and run a schema change under load with lock waits bounded and no failed request.",
+   "codeDir": "code/phase04_planning",
+   "hardware": "Runs on the laptop against Postgres in docker, with a generated table large enough for the planner to change its mind.",
+   "verifyBeforeWriting": [
+    "lock levels per DDL statement, from the Postgres docs for the current release",
+    "the wraparound limits and the current autovacuum defaults",
+    "which ALTER TABLE forms rewrite the table in the current release"
+   ]
+  }
+ ],
+ "commitments": [
+  {"madeIn": "elite-performance 5", "dueIn": 1, "text": "What fsync promises about durability, beyond its latency. Deferred from elite-performance 5.6.", "status": "open"}
+ ],
+ "reviewLog": [],
+ "createdAt": "2026-10-17",
+ "lastActive": "2026-10-17"
+}
