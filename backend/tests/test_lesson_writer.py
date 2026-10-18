@@ -1439,3 +1439,12 @@ def test_an_article_sends_a_sentence_with_no_number_to_the_judge() -> None:
     assert not any("worst-off" in c["claim"] for c in lt.new_claims("", page))
     assert any("worst-off" in c["claim"] for c in lt.new_claims("", page, every=True))
     assert "never a sentence that credits it to the people in the story" in lw.CREDIT_RULE
+
+
+def test_a_then_run_command_copied_from_his_lab_is_his() -> None:
+    """The page check reads "Run:" in any case; the lab's own commands must be
+    read the same way, or "Then run: `cmd`" copied exactly is refused."""
+    source = "- [ ] **E1 (offline).** Build it.\n  - Run: `uv run python a.py`\n  - Then run: `uv run python b.py --check`\n"
+    page = ("<p>Run: <code>uv run python a.py</code></p>"
+            "<p>Then run: <code>uv run python b.py --check</code></p>")
+    assert not [p for p in lt.lab_fidelity_problems(page, source) if "not in his lab" in p]

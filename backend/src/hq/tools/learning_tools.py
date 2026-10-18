@@ -1508,7 +1508,10 @@ async def read_course_source(
 
 
 _EXERCISE_ID_RE = re.compile(r"\*\*(E\d+)\b")
-_RUN_CMD_RE = re.compile(r"Run:\s*`([^`]{4,})`")
+# Any case, as the page check reads it (_PAGE_RUN_RE). His lab writes "Then run:"
+# for a second step; matched case-sensitively, that command was never counted as
+# his, and an exact copy of it was refused as "not in his lab" (2026-10-18).
+_RUN_CMD_RE = re.compile(r"Run:\s*`([^`]{4,})`", re.IGNORECASE)
 _PAGE_URL_RE = re.compile(r"https?://[^\s<>\"'`)\]]+")
 MAX_LISTED = 8
 
