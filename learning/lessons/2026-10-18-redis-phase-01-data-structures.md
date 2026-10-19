@@ -148,14 +148,14 @@ Measured for this lesson on 2026-10-18 with p1lab/race/main.go, against a fresh 
 
 Correction. The phase said a field update costs "String = 4 ops, Hash = 1". The String path is 2 round trips, a GET and a SET, plus work in the client. The larger cost is the lost update between those two commands, which the count of operations does not show.
 
-Production code follows this rule. One service on the platform limits requests with INCR and EXPIRE inside one Lua script, and another counts fan-out jobs with HINCRBY. When no single command does the change you need, MULTI with WATCH or a script gives the same safety. MULTI starts a transaction, and EXEC runs the queued commands in one step with nothing in between. WATCH, sent before MULTI, makes EXEC abort if another client changed a watched key. EXEC has no rollback, so if one queued command fails at run time, the other commands still run.
+Production code follows this rule. One service on the platform limits requests with INCR and EXPIRE inside one Lua script, and another counts fan-out jobs with HINCRBY. When no single command does the change you need, a transaction or a script can do it. The next section shows what a transaction promises.
 
 Try E3 from the lab now. It runs LPUSH on a String key and shows the WRONGTYPE error, which proves the keyspace is typed.
 
 Go deeper: where the rule stops, key names on a shared cluster, and the string size limit
 Why loopback loses the most. The loss is highest on loopback, because the clients run in lock step there. Across a real network, the gap between GET and SET is longer, so each race window is wider. The clients also collide less often per operation. The network effect is inferred, not measured.
 
-Where the rule stops. If a key has only one writer, GET then SET is safe, because no other write can land in the gap. If no single command does the change you need, use MULTI and EXEC with WATCH. A Lua script or a Function also works, because Redis runs each one without interruption. Both points are inferred from the single-thread model.
+Where the rule stops. If a key has only one writer, GET then SET is safe, because no other write can land in the gap. That point is inferred from the single-thread model.
 
 Why names matter here. Keys from dozens of services live in one keyspace on a shared cluster. Without a convention, two services can write the same key, and nobody can say which service owns a key or its memory.
 
@@ -173,7 +173,237 @@ Size limit. A String value can hold up to 512 MB, set by proto-max-bulk-len 512m
 
 Check it in your services. Search one service for the code that builds Redis keys. Check three things. Is there a type prefix? Is the tenant ID in the key? Could two services build the same key?
 
-The next section shows what a String can do inside one command, and where the JSON-in-a-String habit starts to cost you.
+One command is safe, and some changes need several. The next section asks what a transaction promises when one command is not enough.
+
+## What does a transaction promise, and what does it not?
+
+EXEC runs a queue with nothing in between, and it never undoes a command.
+
+INCR made one change safe in one command. The coach also charges each scoring job to its company's LLM budget. It reads the budget, checks that the job fits, then lowers the budget and logs the charge. No single command does all three steps, so the race from the section above comes back.
+
+A transaction is a queue of commands on one connection. MULTI starts the queue, and each later command replies QUEUED and waits. EXEC runs the whole queue in order, and no other client's command runs in the middle. WATCH, sent before MULTI, makes EXEC run only if no watched key changed after the WATCH. This is optimistic locking: the client takes no lock, checks at the end, and tries again if another client wrote first.
+
+The coach charges a budget with WATCH, and another worker writes first
+
+Step 1: coach A watches the budget key. Redis adds A to the list of clients that watch it.
+
+Step 2: A reads 100 and decides that a job of 30 fits.
+
+Step 3: worker B writes 90. Redis marks every watcher of the key dirty, so A is now dirty.
+
+Step 4: A sends MULTI and SET budget 70. The SET only joins the queue.
+
+Step 5: EXEC sees that A is dirty, replies a null array and runs nothing, so B's 90 stays.
+
+An example order, made up to show the shape of the race. Without WATCH, step 5 would write 70 over B's 90.
+
+A WATCH turns the lost update into an aborted EXEC, which the client sees and can retry.
+
+Predict: the coach queues INCR on a counter, then LPOP on a key that holds a String by mistake, then SET on a log key. EXEC runs. Which of the three writes are still there afterwards?
+The INCR and the SET. LPOP fails with WRONGTYPE inside the EXEC reply, and the other two commands still run. In a measured run, EXEC returned [1 | WRONGTYPE ... | OK], and afterwards tx:n was 1 and tx:b was done. Redis has no rollback.
+
+The reasonable guess is "none of them, because the transaction failed". A SQL transaction works that way. Redis checks each command only when it is queued, and an error found later stays inside that one command's reply.
+
+An error can happen at two times, and the time decides what EXEC does.
+
+The error is found | Examples | Reply while queueing | What EXEC does
+
+While queueing | Unknown command, wrong number of arguments, ACL denied, MOVED, out of memory | The error, not QUEUED | Replies EXECABORT and runs nothing
+
+While EXEC runs | WRONGTYPE, a value that is not an integer | QUEUED | Runs every command, and this one replies its error
+
+The two error times. E13 part b measured row one with a wrong number of arguments, and part a measured row two with WRONGTYPE. The other examples are from the source.
+
+- While a client is in MULTI, Redis checks each command before it replies QUEUED. It checks the name, the arguments, ACL, the cluster slot and the memory limit.
+
+- A failed check sets CLIENT_DIRTY_EXEC on the client. Redis then stops storing the rest of the queue, to save memory.
+
+- EXEC on a dirty transaction replies EXECABORT Transaction discarded because of previous errors. and runs nothing.
+
+- A command that passed the checks can still fail on the data. Its error becomes its own entry in the EXEC reply, and the next command runs.
+
+The reason for no rollback is design, not a missing feature. The docs say rollback would hurt "the simplicity and performance of Redis". The cost lands in client code that treats an error as "nothing happened".
+
+Retry on any error. go-redis TxPipelined returns the error of the first failed command. In the measured run it returned WRONGTYPE, yet tx:n went from 1 to 2 and tx:b became again. A loop that retries on that error adds 1 again on every pass.
+
+Retry only on TxFailedErr. That error means a watched key changed and nothing ran. An EXECABORT also means nothing ran, but a retry fails the same way. Any other error from Redis means EXEC ran, so read each command's error and do not send the queue again.
+
+A network error after the client sent EXEC is a third case, because the client cannot know whether it ran. Make the change idempotent, or read the state before you retry.
+
+A watch reacts to any change of the key, not only to a new value. Every command that changes a watched key marks each client that watches it dirty, even a SET of the same value. A command that changes nothing, such as SADD of a member that is already there, does not. EXEC also checks whether a watched key expired. E13 part c ran one row for each kind of change.
+
+Between WATCH and EXEC | EXEC
+
+Nothing changes | commits
+
+B reads the key with GET | commits
+
+B writes another key | commits
+
+B writes the same value | aborts
+
+B sets a TTL with EXPIRE 100 | aborts
+
+The key expires before EXEC | aborts
+
+B runs FLUSHDB | aborts
+
+B runs SWAPDB 14 15 | aborts
+
+Measured with E13 part c on the Homebrew build named under the race table, port 6581. Every row matched the rule in the source.
+
+This surprises most people: a write of the same value aborts the watcher, and so does an EXPIRE. EXEC also drops every watch before it runs, whether it commits or not. So each retry must send WATCH again.
+
+Under contention the WATCH loop stays correct, and it pays for every aborted attempt. E13 part d starts N clients, and each adds 1 to one key 200 times.
+
+- 4,166.5 ms: WATCH loop, 32 clients, 6,400 increments
+
+- 73.5 ms: plain INCR, the same work
+
+- 0 of 100: commits against a plain INCR writer
+
+Measured with E13 part d on the same Homebrew build, port 6581, go-redis v9.5.1, one connection per client, 3 round trips per attempt.
+
+Evidence
+Run on 2026-10-19 with code/phase01_data_structures/tx_watch, on the Homebrew 8.10.1 server that E13 names, over loopback. Over five runs, the aborts per commit at 8 clients were 4.00 to 4.87, and at 32 clients 17.48 to 17.81.
+
+- No increment was lost, because the final value equalled the commits in every run.
+
+- When every writer uses the loop, an abort needs another client's commit, so the group always moves forward. That is inferred from the rule that only a write aborts a watch.
+
+- One client can still wait a long time. At 2 clients, one increment needed 201 attempts, because the other client won every round until it finished.
+
+- A writer that does not use WATCH can stop the loop. Against a plain INCR loop, 0 of 100 increments committed. This is livelock: the client keeps working and makes no progress.
+
+The arithmetic for the livelock, inferred from the run:
+
+writer: 3,299 INCR in 472 ms           → one write every 143 µs
+one round trip: 71.9 ms / (200 × 3)     → about 120 µs
+from WATCH to EXEC: 2 round trips       → about 240 µs
+240 µs gap, one write every 143 µs      → a write lands in almost every gap
+
+A retry cap turns the wait into an error. With a cap of 10 at 32 clients, 3,491 of 6,400 increments gave up. redis-py's transaction() retries with no limit, and go-redis leaves the loop to you. So choose a limit and a random wait between attempts, and fail the request when it reaches the limit.
+
+An open-source file system, SwordFS, met this limit in its tests. Writers of unrelated names all watched one parent key, and its default allowed 3 attempts. One create in 40 failed with "Redis transaction retry limit exceeded". The fix raised the default to 8 attempts, with the same random backoff.
+
+Evidence
+SwordFS issue #454, closed 2026-10-10, read with its comments. A small open-source project, not a company postmortem. redis-py redis/client.py:628-638 at v8.1.0: while True on WatchError. The cap run used -max-retries 10 on the same server.
+
+In a cluster, every key of one transaction must sit in one hash slot, or EXEC replies CROSSSLOT. The hash tags from the key-naming notes above fix it. {c7}:budget and {c7}:log hash only c7, so they share a slot.
+
+So pick the smallest tool that does the change on the server in one step.
+
+- Does one command do the change?
+
+- yes: Use it: INCR, SET ... NX, or SET k new IFEQ old on Redis 8.4 and later.
+
+- no: Ask the next question.
+
+- Do the writes depend on values you read first?
+
+- no: MULTI and EXEC, sent in one round trip.
+
+- yes: Ask the next question.
+
+- Do many clients write the key, or do some write without WATCH?
+
+- no: WATCH with capped retries and a random backoff.
+
+- yes: A Lua script or a Function, which runs once with no abort. Phase 3, section 3.8, teaches both.
+
+Choosing between a command, a transaction and a script. Each step down costs more round trips or more code on the server.
+
+Try E13 from the lab now. Part a ends with tx:n=2 after a call that returned an error, and part c prints one row per kind of change.
+
+EXEC isolates the queue, but it never undoes a command.
+
+Retrying a transaction on any error runs its finished writes again.
+
+Run E13 part c and see which changes abort a WATCH.
+
+Go deeper: the AOF and replicas, pipelining, the 8.10.2 ACL fix, cluster clients, and Valkey
+Isolation, not atomicity. elite-storage 3.1 separates two promises. Atomicity is about what a failure leaves behind, and isolation is about other clients. EXEC gives isolation. It gives all or nothing only before it starts, because a client that disconnects before EXEC runs nothing. elite-storage 3.6 shows optimistic locking with a version column in PostgreSQL, and WATCH is the same idea with the version kept by the server.
+
+What else invalidates a watch. FLUSHALL and the end of a diskless replica sync also mark watchers dirty, but only for keys that existed. Before Redis 6.0.9, a key that expired did not abort the transaction. A key that was already expired at WATCH time is ignored. Eviction counts as a change too. The eviction code calls keyModified(), which touches the watch, in src/evict.c:686 and src/db.c:2877. A run on the lab server confirmed it. With volatile-lru, evicted_keys went from 0 to 1, and EXEC replied a null array.
+
+The AOF and the replicas. The AOF, the append-only file, is the log of writes that Redis replays at start, and Phase 4 covers it.
+
+- One command, one EXEC or one script is one execution unit. When a unit makes more than one write, Redis wraps those writes in MULTI and EXEC for the AOF and the replicas.
+
+- Only the writes that happened are sent, so the failed LPOP of part a is not in the file.
+
+- A single write is sent alone, with no wrapper.
+
+- A crash can cut the file inside a transaction. With aof-load-truncated yes, the default, Redis cuts the file and starts. Where it cuts depends on where the crash cut, as shown below.
+
+*2 $6 SELECT $1 0
+*3 $3 SET $4 tx:a $3 abc
+*1 $5 MULTI
+*2 $4 INCR $4 tx:n
+*3 $3 SET $4 tx:b $4 done
+*1 $4 EXEC
+*2 $4 INCR $9 tx:single
+
+That is the AOF after part a and one plain INCR, with appendonly yes set on the lab server for this check.
+
+If the file ends after a whole command, Redis goes back to the offset before the open MULTI. If it ends in the middle of a command, Redis 8.10.2 cuts it after the last whole command, and the open MULTI stays in the file. The data is right after that start. But Redis appends new writes after the open MULTI, and the next start removes them with it.
+
+cut at byte 111 (midcmd)
+start 1: tx:a=1 tx:n= tx:b=
+!!! Truncating the AOF appendonly.aof.1.incr.aof at offset 92 !!!
+file after start 1:
+*2 $6 SELECT $1 0
+*3 $3 SET $4 tx:a $1 1
+*1 $5 MULTI
+*2 $4 INCR $4 tx:n
+start 2: tx:after=, written after start 1
+Revert incomplete MULTI/EXEC transaction in AOF file appendonly.aof.1.incr.aof
+
+That is the output of tx_watch/aof_cut.sh midcmd, with its last log line left out. The Homebrew 8.10.1 build and a Redis 8.10.2 compiled from source printed the same lines. With boundary, it printed start 2: tx:after=1. The first draft of this lesson said that Redis always goes back to the MULTI, and this run corrected it. After a short-read warning in the log, run BGREWRITEAOF before the next restart. In the same test, a rewrite after start 1 kept the later write. With aof-load-truncated no, Redis stops at the cut and asks for redis-check-aof, which is what the docs describe.
+
+Pipelining. A pipeline sends many commands before it reads the replies. A pipeline alone is not a transaction, because other clients' commands can run between its commands.
+
+- Clients send MULTI, the queue and EXEC in one write. go-redis does this in TxPipelined, and redis-py pipeline() does it by default, with transaction=True.
+
+- The WATCH and the read cannot go into that same write, because the client needs the value before it builds the queue. So a WATCH loop costs at least 2 round trips per attempt, and E13 uses 3.
+
+- MULTI and WATCH are allowed while a slow script holds the server, and EXEC is not. Redis accepts a pipelined MULTI and rejects the next commands with BUSY, which marks the transaction dirty. If Redis refused the MULTI too, the commands sent after the script ended would run alone.
+
+- A watch belongs to one connection, so a reconnect loses it. node-redis fixed a bug where exec() after a reconnect committed over another client's write. Check how your client handles a reconnect between WATCH and EXEC.
+
+The 8.10.2 ACL fix. ACL, the access control list, decides which commands and keys each user may use. Redis checks it when it queues a command and again at EXEC, so a removed permission applies to a queued transaction too.
+
+- From Redis 8.4.0 to 8.10.1, the check at EXEC read the keys of the current command, which is EXEC itself and has no keys. So key permissions were not checked again, and command permissions still were.
+
+- Redis 8.10.2 passes each queued command to the check. Its release note is security fix #15673, and the bug came with the lookahead pre-fetching commit.
+
+- Valkey 9.1.2 checks with ACLCheckAllPerm(c, &acl_errpos) and has no such key cache, so the bug likely does not apply there. That is inferred from the source and was not run.
+
+e. ACL AT EXEC on redis_version 8.10.1: access removed after GET was queued
+   MULTI                      → OK
+   GET tx:acl:secret          → QUEUED
+   (admin) ACL SETUSER p1tx resetkeys ~other:*
+   EXEC                       → [s3cret]
+   GET tx:acl:secret          → (error) NOPERM No permissions to access a key
+
+That is E13 part e on this machine's 8.10.1 build. With Redis 8.10.2, compiled from its source tag on the same Mac, the same EXEC refused the queued GET:
+
+e. ACL AT EXEC on redis_version 8.10.2: access removed after GET was queued
+   EXEC                       → [(error) NOPERM ACLs rules changed between the moment the transaction was accumulated and the EXEC call. This command is no longer allowed for the following reason: no permission to touch the specified keys]
+   EXEC re-checked the key: the queued GET was refused.
+
+Until you upgrade, also close a user's connections after a revoke, with CLIENT KILL USER <name>.
+
+Cluster details. Each queued command is checked for its own key as it arrives. A key whose slot lives on another node gets MOVED, which marks the transaction dirty, so EXEC replies EXECABORT. At EXEC, Redis checks all queued keys together and replies CROSSSLOT Keys in request don't hash to the same slot for two slots. WATCH has the same one-slot rule. The client can hide this: go-redis v9.5.1 ClusterClient splits a TxPipeline by slot and sends one MULTI and EXEC per slot. Keys in two slots then become two transactions with no error. Its Watch checks the slots first and returns redis: Watch requires all keys to be in the same slot. Both were read in the source and not run, because the lab server is one node.
+
+Valkey. Valkey 9.1.2 keeps the same transaction rules, read from its source and not run. It stores watched keys per database in a hash table, for an O(1) check of a duplicate WATCH. It also goes back to the MULTI when the AOF is cut inside a command, from PR #4342, so it does not lose the later writes. Valkey has SET ... IFEQ since 8.1.0 and DELIFEQ since 9.0.0. Redis has IFEQ, IFNE, IFDEQ, IFDNE and DELEX since 8.4.0.
+
+Scripts. A Lua script or a Function runs whole on the server, with nothing in between, so it needs no WATCH and no retry. Phase 3, section 3.8 "Lua scripts and Functions in production", covers the script cache, the time limit and how each is replicated.
+
+Evidence
+Redis 8.10.2 source: src/multi.c:139-246 for EXEC, 389-428 for touchWatchedKey, 430-486 for flushes and SWAPDB, 192-223 for the ACL re-check. src/server.c:3848-3891 for propagatePendingCommands, 4277-4287 for rejectCommand, 4793-4811 for the BUSY rule, which names PR #7022. src/aof.c:1970, 2016-2026 and 2041-2056, default at src/config.c:3422. src/evict.c:686, src/db.c:2877 and 1190-1196 for eviction and keyModified(). src/cluster.c:1261-1300 and 1366-1372. Release notes at 8.10.2, lines 24-31, and PR #15673, which names commit 235e688b0. Valkey 9.1.2 src/multi.c:250-271, release notes for PRs #3360 and #4342. go-redis v9.5.1 tx.go:124, osscluster.go:1424-1425 and 1599-1605. node-redis PR #3506, merged 2026-10-13. set.json at Redis 8.10.2 and Valkey 9.1.2, delifeq.json at Valkey 9.1.2. The AOF and ACL outputs were run on 2026-10-19 on port 6581. The cut-AOF runs, the eviction run and the 8.10.2 ACL run were made on 2026-10-19 on port 6591.
+
+A transaction joins several commands into one step. The next section shows what a String can do inside one command, and where the JSON-in-a-String habit starts to cost you.
 
 ## What can a String do in one command?
 
@@ -1026,7 +1256,7 @@ That completes the five ideas. The next section collects them, and says what the
 
 The coach now has a Redis type for each of its six needs. Each choice has a cost you can state in commands and bytes.
 
-- Atomic work follows the type. INCR, HINCRBY, SADD and SET ... NX read and change a value in one command, while GET then SET lost 79.8% of updates at 8 clients. The sections on lost updates, Strings, Hashes and Sets taught it.
+- Atomic work follows the type. INCR, HINCRBY, SADD and SET ... NX read and change a value in one command, while GET then SET lost 79.8% of updates at 8 clients. When no command fits, EXEC runs a queue with nothing in between, but it never undoes a command. The sections on lost updates, transactions, Strings, Hashes and Sets taught it.
 
 - Memory follows the encoding. A Hash stays a listpack up to 512 fields and 64-byte values, and one more field made it 3.9 times larger. The two encoding sections taught it.
 
@@ -1044,7 +1274,7 @@ One question is still open. The persona sits in Redis as a copy of data that liv
 
 The lab proves each idea with commands you run on a local Redis. It was not run for this lesson, so the Expected lines are the phase's own. Where a step is known to be wrong, a note under it says what to expect instead.
 
-Open the lab: setup and E1 to E12
+Open the lab: setup and E1 to E13
 Setup:
 
 cd /Users/raghvendradhakar/Desktop/code/verly/study-material/redis/code
@@ -1160,11 +1390,37 @@ Note for this lesson. STRLEN should print exactly 125001, which is 1,000,000 / 8
 
 - Teaches: the automatic, one-way encoding upgrade and its memory jump.
 
+-  E13 c1, break-it Transactions: no rollback, EXECABORT, WATCH, and retries under contention.
+
+- Every command in E13 was run on 2026-10-19 against Homebrew Redis 8.10.1 on port 6581, with no persistence. It was an x86_64 build under Rosetta 2 on an Apple M4 Pro. The course container runs redis:7.2 instead.
+
+- Warning: part c empties databases 14 and 15, and part e creates and deletes the ACL user p1tx. Run it on a server you own.
+
+- Run: go run ./phase01_data_structures/tx_watch -self-test
+
+- Expected: seven ok lines and self-test passed, with no server. The lock-step check prints aborts=18 want 18.
+
+- Then run: go run ./phase01_data_structures/tx_watch
+
+- Expected: part a prints tx:n=1 tx:b=done → no rollback: true and then yet tx:n=2 tx:b=again. Part b prints EXECABORT and EXISTS tx:c=0. Part c prints every row matches the rule: true. Part d prints the table from 1.9, with 0 aborts at 1 client and 17.48 aborts per commit at 32 clients. Against the plain INCR writer it prints commits=0 gave up=100. Part e prints EXEC → [s3cret] on Redis 8.4.0 to 8.10.1.
+
+- On Redis 8.10.2, part e printed a NOPERM entry instead. That was run on a native arm64 build of the 8.10.2 tag, as 1.9 shows. On redis:7.2 it should also print NOPERM, because the bug arrived in 8.4.0. That is inferred from the release note and was not run.
+
+- Optional, for the AOF part of 1.9: ./phase01_data_structures/tx_watch/aof_cut.sh <free port> midcmd. It starts its own server with the AOF on, and it refuses port 6379. Expected: start 2: tx:after=, because the write made after the first start is lost. With boundary instead of midcmd, it prints start 2: tx:after=1.
+
+- Break it: delete the s.Watch(c.key) call in step, then run -self-test again. Expected: FAIL d no lost update under contention: final=3 commits=12 want 12.
+
+- If it fails: cannot reach Redis means the container is down, so run docker compose up -d. An error from SWAPDB means the server has fewer than 16 databases.
+
+- Teaches: what EXEC promises, the two times an error can happen, what invalidates a watch, and what retries cost.
+
+Note for this lesson. Unlike E1 to E12, E13 was run, so its Expected lines are measured output. "The table from 1.9" is the retry table in the transactions section above.
+
 ## Checkpoint questions
 
 Answer each one in your own words before you open its sketch. Every answer uses only this lesson.
 
-Open the seven questions
+Open the eight questions
 Q1. A teammate stores "modules assigned to a user" as a JSON array in a String. Every assignment runs GET, unmarshal, append, marshal and SET. Two assignments race. Walk the exact order that loses one, name the structure that fixes it in one atomic command, and write that command.
 
 Answer sketch
@@ -1199,6 +1455,11 @@ Q7. Design a "trending scenarios" feature: the top 10 per company, weighted towa
 
 Answer sketch
 A sorted set per company, with the scenario as member. A view runs ZINCRBY trend:c7 1 s42, and the board reads ZRANGE trend:c7 0 9 REV WITHSCORES. For decay, push each view onto a List capped at N. When the List grows past N, LPOP the oldest view and run ZINCRBY with -1 for its scenario. Another design scales all scores down on a schedule. Compare which one is simpler to reason about when a view is counted twice.
+
+Q8. A wallet service moves credits between wallet:{u42}:main and wallet:{u42}:bonus with a WATCH loop. It watches both keys, reads both, then sends MULTI, DECRBY main 30, INCRBY bonus 30 and EXEC. (a) In a load test, 16 workers move credits for the same user, and the loop retries forever. p99 rises from 1 ms to 400 ms with no errors. Use E13 part d to explain why, and give two fixes. (b) A teammate wraps the call in "if err != nil, retry". The bonus key once held a Hash by mistake, so INCRBY failed with WRONGTYPE. What did the retry do to main? (c) The keys move to a cluster, and someone drops the hash tag from one key name. What does the client see?
+
+Answer sketch
+(a) All 16 workers read, and in each round only one EXEC commits. E13 measured 4.59 aborts per commit at 8 clients and 17.48 at 32. The worst increment at 8 clients needed 316 to 664 attempts. Each attempt is 3 round trips, so p99 grows with the attempts, and no error appears because the loop never gives up. Fix 1: one Lua script or Function that checks the balance and moves the credits on the server, with no retry. Fix 2: cap the retries with a random backoff and return an error at the cap. (b) No rollback: DECRBY main 30 ran, and INCRBY replied WRONGTYPE inside the EXEC array. go-redis then returns that error. Each retry ran DECRBY again, and INCRBY failed again, so the loop never stopped. main lost 30 on every attempt, and bonus gained nothing. Only TxFailedErr means nothing ran. (c) WATCH on keys in two slots fails with CROSSSLOT. Without the watch, EXEC checks all queued keys and replies CROSSSLOT, and Redis discards the transaction. A key whose slot is on another node gets MOVED at queue time, so EXEC replies EXECABORT. With go-redis v9.5.1, ClusterClient.Watch refuses keys in two slots before it sends anything. A TxPipeline with no watch instead splits the commands by slot into two transactions. No error appears, and the move is no longer one unit.
 
 ## Cheatsheet
 
@@ -1250,6 +1511,23 @@ DEPRECATED → CURRENT
   SETNX → SET NX      HMSET → HSET      RPOPLPUSH / BRPOPLPUSH → LMOVE / BLMOVE
   ZREVRANGE → ZRANGE ... REV      ZRANGEBYSCORE → ZRANGE ... BYSCORE
 
+TRANSACTIONS
+  MULTI ... EXEC    queue on one connection; no other client runs in between
+  no rollback       a run-time error (WRONGTYPE) is one reply; the rest still apply
+  queue-time error  wrong arity, unknown cmd, ACL, MOVED, OOM → EXECABORT, none run
+  WATCH k           EXEC → null if k is written (same value too), EXPIREd, expires,
+                    evicted, or hit by FLUSHDB / FLUSHALL / SWAPDB
+                    reads and no-op writes (SADD of a member that exists) do not count
+                    EXEC unwatches every key → WATCH again on every retry
+  go-redis          TxPipelined err != nil does NOT mean nothing ran; TxFailedErr does
+  retry cost        measured: 17.48 aborts/commit at 32 clients; 0/100 vs a plain writer
+  retry policy      redis-py loops forever; cap it and add random backoff
+  cluster           every key in one slot, else CROSSSLOT → {tag} keys, see KEY NAMES
+  AOF / replicas    writes of one EXEC are wrapped in MULTI/EXEC; failed cmds absent
+  AOF cut in a cmd  8.10.2 keeps the open MULTI → later writes lost → BGREWRITEAOF
+  ACL               8.4.0-8.10.1 skip the key re-check at EXEC → upgrade to 8.10.2
+  pick              one command > SET IFEQ (8.4+) > MULTI > WATCH (capped) > script
+
 KEY NAMES
   type:sub:id, tenant ID value inside the key, one prefix per service
   {tenant} hash tag puts a tenant's keys on one cluster slot (Phase 4)
@@ -1300,6 +1578,34 @@ Redis source and docs
 - Sorted sets guide: leaderboards and ranges, from the phase.
 
 - Data types overview and command reference: every command with its cost, from the phase.
+
+Transactions
+
+- Redis 8.10.2 multi.c: EXEC, the dirty flags, what touches a watched key, the ACL re-check, verified.
+
+- Redis 8.10.2 server.c: queue-time rejection, the MULTI wrapper for the AOF and replicas, the BUSY rule, verified.
+
+- Redis 8.10.2 aof.c: a cut MULTI block at load, verified.
+
+- Redis 8.10.2 release notes: security fix #15673, verified.
+
+- Redis PR #15673: why queued commands kept key access, verified.
+
+- Valkey 9.1.2 multi.c: the same rules, the ACL re-check, verified.
+
+- Valkey 9.1.2 release notes: PR #4342, the AOF fix for a cut inside a MULTI block, verified.
+
+- Multi-key operations docs: one slot for MULTI, WATCH and scripts in a cluster, verified.
+
+- Redis blog, no rollbacks: the argument against rollback, a vendor source.
+
+- redis-py v8.1.0 client.py: transaction() retries with no limit, verified.
+
+- redis-py issue #566: a request to cap WATCH retries, closed, verified.
+
+- node-redis PR #3506: a reconnect lost the WATCH, verified.
+
+- SwordFS issue #454: retry limit exceeded under WATCH contention, a small open-source project, verified.
 
 Production cases
 

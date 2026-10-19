@@ -922,13 +922,193 @@ return 0</code></pre>
 </ul>
 </details>
 
-<p>That audit closes the teaching sections, and the next section collects what you can now do.</p>
+<p>Every release and extend in that audit is a Lua script, so the next section asks what happens to those scripts at a failover.</p>
+
+<h2 data-concept="c2">What happens to the lock's scripts at a failover, or when one runs long?</h2>
+<p class="why">Every lock here runs a Lua script, and a failover empties the script cache.</p>
+
+<p>The audited locks trust the server to keep their scripts. Pod A releases <code>lock:summary:42</code> with the compare-and-delete script. The team sends it with <code>EVALSHA</code>, so each call carries a hash instead of the source. Then the primary fails over.</p>
+
+<p>Redis keeps two kinds of server-side code in two different places. A <dfn>script cache</dfn> is a table in the memory of one Redis process that maps the SHA1 hash of a script to its source. It is not part of the data set, so it is not saved to disk and not sent to replicas. A <dfn>function</dfn> is Lua code in a named library that you load once with <code>FUNCTION LOAD</code>. Libraries belong to the data set, like keys, so they survive a restart and a failover.</p>
+
+<figure class="diagram"><svg viewBox="0 0 640 250" role="img" aria-label="The script cache stays on one process, and the data set with its libraries is copied to the replica">
+<defs><marker id="p11-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+<text x="140" y="20" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor">primary</text>
+<text x="500" y="20" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor">replica, then promoted</text>
+<rect x="20" y="32" width="240" height="92" rx="8" fill="none" stroke="currentColor"/>
+<text x="36" y="58" font-size="14" font-weight="600" fill="currentColor">script cache</text>
+<text x="36" y="82" font-size="13" fill="currentColor">SHA1 hash to unlock source</text>
+<text x="36" y="104" font-size="13" fill="currentColor">memory of this process only</text>
+<rect x="20" y="140" width="240" height="92" rx="8" fill="none" stroke="currentColor"/>
+<text x="36" y="166" font-size="14" font-weight="600" fill="currentColor">data set</text>
+<text x="36" y="190" font-size="13" fill="currentColor">lock:summary:42, libraries</text>
+<text x="36" y="212" font-size="13" fill="currentColor">saved in RDB and AOF</text>
+<rect x="380" y="32" width="240" height="92" rx="8" fill="none" stroke="currentColor"/>
+<text x="396" y="58" font-size="14" font-weight="600" fill="currentColor">script cache</text>
+<text x="396" y="82" font-size="13" fill="currentColor">empty</text>
+<text x="396" y="104" font-size="13" fill="currentColor">EVALSHA gets NOSCRIPT</text>
+<rect x="380" y="140" width="240" height="92" rx="8" fill="none" stroke="currentColor"/>
+<text x="396" y="166" font-size="14" font-weight="600" fill="currentColor">data set</text>
+<text x="396" y="190" font-size="13" fill="currentColor">the same keys and libraries</text>
+<text x="396" y="212" font-size="13" fill="currentColor">FCALL works at once</text>
+<line x1="264" y1="78" x2="374" y2="78" stroke="currentColor" stroke-width="1.5" marker-end="url(#p11-arrow)"/>
+<text x="319" y="68" text-anchor="middle" font-size="12" fill="currentColor">not copied</text>
+<text x="319" y="98" text-anchor="middle" font-size="18" fill="currentColor">✗</text>
+<line x1="264" y1="186" x2="374" y2="186" stroke="currentColor" stroke-width="1.5" marker-end="url(#p11-arrow)"/>
+<text x="319" y="176" text-anchor="middle" font-size="12" fill="currentColor">replicated</text>
+</svg><figcaption>Where each kind of server-side code lives. The labels come from the Redis 8.10.2 source and the E13 and E15 runs.</figcaption></figure>
+
+<details class="predict"><summary>Predict: each pod ran <code>SCRIPT LOAD</code> once at start and releases with <code>EVALSHA</code>. The primary fails over, and the lock key reached the replica. What does pod A's next release return, and when does <code>lock:summary:42</code> free itself?</summary>
+<p>The release returns an error, <code>NOSCRIPT No matching script. Please use EVAL.</code>, and deletes nothing. The promoted replica never received the script, so its cache is empty. The key then stays until its TTL ends, up to 10 seconds after the last acquire or extend. The guess "the release works" is reasonable, because the key and its token both survived. But the script is not data, so it did not travel with them.</p>
+</details>
+
+<p>Three commands put a script into the cache or run it from there:</p>
+<ol>
+<li><code>EVAL source numkeys key... arg...</code> sends the full source. Redis hashes it, caches it and runs it.</li>
+<li><code>EVALSHA sha1 numkeys key... arg...</code> sends only the 40-character hash, so a long script costs fewer bytes per call.</li>
+<li><code>SCRIPT LOAD source</code> caches a script without running it and returns its hash.</li>
+</ol>
+<p>Because the cache lives in one process, five events change it. E13 and E15 measured four of them on Redis 8.10.1.</p>
+<table>
+<thead><tr><th>Event</th><th>The script cache after it</th></tr></thead>
+<tbody>
+<tr><td>A restart of the process</td><td class="bad">Empty</td></tr>
+<tr><td>A failover to a replica</td><td class="bad">Empty, because <code>SCRIPT LOAD</code> is not replicated since Redis 7.0</td></tr>
+<tr><td><code>SCRIPT FLUSH</code></td><td class="bad">Empty</td></tr>
+<tr><td>500 newer <code>EVAL</code> scripts, since Redis 7.4</td><td class="bad">The least recently used script that came through <code>EVAL</code> is evicted</td></tr>
+<tr><td><code>DEBUG RELOAD</code></td><td class="ok">Unchanged, because it reloads only the data set</td></tr>
+</tbody>
+</table>
+<p>The eviction rule surprises most people. Redis keeps at most 500 scripts that arrived through <code>EVAL</code>, and INFO stats counts each eviction as <code>evicted_scripts</code>. Scripts from <code>SCRIPT LOAD</code> are never evicted. But on Redis 8.10, <code>SCRIPT LOAD</code> does not protect a script that <code>EVAL</code> cached first, because Redis finds it cached and returns early.</p>
+
+<p>A client must therefore handle <code>NOSCRIPT</code> on every call, and the two common clients do it in different ways.</p>
+<div class="compare">
+<div class="wrong"><p><b>Load once, then EVALSHA forever</b></p>
+<pre><code data-lang="go">sha := rdb.ScriptLoad(ctx, unlockSrc).Val()
+// ... a failover empties the script cache ...
+err := rdb.EvalSha(ctx, sha, []string{key}, token).Err()
+// err: NOSCRIPT No matching script. Please use EVAL.</code></pre></div>
+<div class="right"><p><b>Fall back on NOSCRIPT</b></p>
+<pre><code data-lang="go">var unlock = redis.NewScript(unlockSrc)
+// EVALSHA first, and EVAL with the source on NOSCRIPT
+n, err := unlock.Run(ctx, rdb, []string{key}, token).Int()
+// n == 1: released, n == 0: another holder has the lock</code></pre></div>
+</div>
+<table>
+<thead><tr><th>Client</th><th>On NOSCRIPT it sends</th><th>Effect on the cache</th></tr></thead>
+<tbody>
+<tr><td>go-redis <code>Script.Run</code>, and redsync on go-redis</td><td><code>EVAL</code> with the source</td><td>The script came through <code>EVAL</code>, so it can be evicted again</td></tr>
+<tr class="pick"><td>redis-py <code>Script.__call__</code></td><td><code>SCRIPT LOAD</code>, then <code>EVALSHA</code></td><td class="ok">Never evicted</td></tr>
+<tr><td>Code that calls only <code>EVALSHA</code></td><td>Nothing, the error reaches the caller</td><td class="bad">The unlock fails</td></tr>
+</tbody>
+</table>
+<p>Two more rules keep scripts working in a cluster and on replicas. Pass every key a script touches in its key arguments, never in <code>ARGV</code>, because the client routes the call by those keys. In cluster mode the server also refuses a key that lives on another node. And a replica never runs your script: the primary sends it only the writes the script made. When there is more than one write, it wraps them in <code>MULTI</code> and <code>EXEC</code>. So the replica's empty cache matters only on the day it becomes the primary.</p>
+
+<p>While one script runs, the server serves nobody else. After <code>busy-reply-threshold</code>, 5000 ms by default, Redis does not stop the script. It answers every other client with <code>BUSY</code> instead. <code>SCRIPT KILL</code> stops the script only if it has not written yet, because stopping it after a write would leave half its writes behind. E14 lowered the threshold to 200 ms on its own server and measured both cases.</p>
+<ol class="timeline">
+<li><time>t=50 ms</time> Client 2 sends <code>PING</code> while a read-only script spins. It gets no reply, because the server is inside the script.</li>
+<li><time>t=200 ms</time> The threshold passes, and the <code>PING</code> gets <code>BUSY</code> after waiting 150 ms. <code>SCRIPT KILL</code> returns <code>OK</code>.</li>
+<li><time>t=310 ms</time> A second script wrote one key and then spins. <code>SCRIPT KILL</code> gets <code>UNKILLABLE</code>, and <code>PING</code> still gets <code>BUSY</code>.</li>
+<li><time>t=1.51 s</time> The second script ends by itself, and <code>PING</code> works again.</li>
+</ol>
+<p>After a write, the only ways out are to wait or to run <code>SHUTDOWN NOSAVE</code>, which stops the server and loses every write since its last save. The lock scripts are two commands on one key, so they finish far below 5000 ms. The danger is a long script that another team runs on the same primary.</p>
+
+<p>Functions remove the empty-cache problem. The library below holds the release, the extend and a read-only owner check. Pod A calls <code>FCALL p3sc_unlock 1 lock:summary:42 tokA</code> by name, so there is no hash to miss.</p>
+<pre><code data-lang="lua">#!lua name=p3sc_lockkit
+redis.register_function('p3sc_unlock', function(keys, args)
+  if redis.call('GET', keys[1]) == args[1] then
+    return redis.call('DEL', keys[1])
+  end
+  return 0
+end)
+redis.register_function('p3sc_extend', function(keys, args)
+  if redis.call('GET', keys[1]) == args[1] then
+    return redis.call('PEXPIRE', keys[1], args[2])
+  end
+  return 0
+end)
+redis.register_function{
+  function_name = 'p3sc_owner',
+  callback = function(keys) return redis.call('GET', keys[1]) end,
+  flags = {'no-writes'},
+}</code></pre>
+<p><code>FUNCTION LOAD</code> is a write command, so the library goes to the replicas and the AOF, and <code>SAVE</code> puts it in the RDB file. The cost is a deploy step. In a cluster, Redis does not copy libraries between shards, so you load the library on every primary yourself. Keep <code>EVAL</code> with a fallback for a short script that one app owns, and choose Functions when several services share the code.</p>
+
+<p>An open issue report describes this failure in a real library. async-job-processor-redis, an open-source Ruby job library, loads its scripts when the process starts and then calls only <code>EVALSHA</code>. The report says that after a restart or <code>SCRIPT FLUSH</code>, the first <code>NOSCRIPT</code> ends its heartbeat and delayed-job loops. They never start again. Workers still take jobs, because that path uses no script, so the server looks healthy. In the running case, the same mistake leaves every summary lock held until its TTL ends, and every watchdog extend fails.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Run with <code>script_cache</code> on the lab's own Redis 8.10.1 server, the build that the lab section names. E13: after <code>SCRIPT FLUSH</code>, <code>EVALSHA</code> returned <code>NOSCRIPT No matching script. Please use EVAL.</code>, and go-redis <code>Script.Run</code> released the lock with 1. Then 500 other <code>EVAL</code> scripts evicted it, and <code>evicted_scripts</code> rose by 1. E14 printed the timeline above. E15: the library and the script were both present after <code>DEBUG RELOAD</code>, and after a real restart the library was present and the script was gone. Source at Redis 8.10.2: the 500 limit is <code>LRU_LIST_LENGTH</code> in <code>src/eval.c:534</code>, and the early return is in <code>src/eval.c:445-447</code>. The <code>NOSCRIPT</code> and <code>BUSY</code> texts are in <code>src/server.c:2231-2238</code>. The default of 5000 is in <code>src/config.c:3573</code>. Release notes 7.0.0 list PR #9812, which ended script replication and the propagation of <code>SCRIPT LOAD</code>. Clients: go-redis v9.5.1 <code>script.go:68-74</code>, redsync v4.18.0 <code>redis/goredis/v9/goredis.go:62-64</code>, redis-py v8.1.0 <code>redis/commands/core.py:10937</code>. The Ruby case is socketry/async-job-processor-redis issue #15, an open issue against version 0.3.1.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: BUSY and Sentinel, read-only calls, Functions in a cluster, the choice, and Valkey</summary>
+<p><b>The busy limit in detail.</b> The config is <code>busy-reply-threshold</code>, with the old name <code>lua-time-limit</code>, and the lab server returned 5000 for both.</p>
+<ul>
+<li>Before the threshold, other clients only wait. After it, Redis logs "Slow script detected" and replies with the <code>BUSY</code> error that E14 prints.</li>
+<li>The full refusal from E14 is <code>UNKILLABLE Sorry the script already executed write commands against the dataset. You can either wait the script termination or kill the server in a hard way using the SHUTDOWN NOSAVE command.</code></li>
+<li>Redis checks the limit from a Lua hook every 100,000 Lua instructions, in <code>src/script_lua.c:1669-1671</code>. One long <code>redis.call</code>, such as <code>KEYS *</code> on a large database, cannot be stopped while it runs. This is inferred from the hook and was not measured.</li>
+<li>A threshold of 0 removes the limit, so the script can never be killed. The lab server refused <code>CONFIG SET busy-reply-threshold -1</code> with "argument must be between 0 and 9223372036854775807 inclusive".</li>
+<li><code>SCRIPT KILL</code> cannot stop a function, and <code>FUNCTION KILL</code> cannot stop a script.</li>
+</ul>
+<p><b>Sentinel and a busy primary.</b> Sentinel does not count <code>BUSY</code> as a valid reply to its <code>PING</code>. When it already sees the primary as down and the reply is <code>BUSY</code>, it sends <code>SCRIPT KILL</code> once, in <code>src/sentinel.c:2813-2831</code>. Its default <code>down-after-milliseconds</code> is 30,000, in <code>src/sentinel.c:69</code>. ScaleGrid, a Redis hosting vendor, showed the next step in a demo with <code>lua-time-limit</code> 500 ms and <code>down-after-milliseconds</code> 5 s. An endless script that wrote keys made Sentinel promote the replica. When the old primary was brought back online, Sentinel made it a replica. It synced from the new primary, so the script's writes were lost. The post does not say how the endless script was stopped. This is a vendor demo, not an incident report.</p>
+<p><b>A long script in a real library.</b> Rails' <code>RedisCacheStore#delete_matched</code> deleted keys by pattern inside one Lua script. With enough keys, other clients got <code>BUSY</code> errors. The fix replaced the script with a <code>SCAN</code> and <code>DEL</code> loop.</p>
+<p><b>Read-only calls.</b> <code>EVAL_RO</code>, <code>EVALSHA_RO</code> and <code>FCALL_RO</code>, since Redis 7.0, run code that must not write. They can run on a read-only replica, and an ACL rule can allow them for a user who may not write. On the lab server, a write inside <code>EVAL_RO</code> failed with "ERR Write commands are not allowed from read-only scripts." In E15, <code>FCALL_RO p3sc_owner</code> returned <code>tokA</code>, and <code>FCALL_RO p3sc_unlock</code> failed with the write-flag error that the lab shows.</p>
+<p><b>Keys in a cluster.</b> A key on another node fails with "Script attempted to access a non local key in a cluster node", in <code>src/script.c:496-539</code>. A script that starts with a <code>#!lua</code> line also refuses undeclared keys in another slot, unless it sets the flag <code>allow-cross-slot-keys</code>. So a lock key and its fence counter need one hash tag, such as <code>{summary:42}:lock</code> and <code>{summary:42}:fence</code>. The lab server is not a cluster, so these rules come from the source only.</p>
+<p><b>Functions in detail.</b></p>
+<ol>
+<li><code>FUNCTION LOAD</code> loads a whole library. Without <code>REPLACE</code>, a name that exists fails, and the lab server replied "ERR Library 'lockkit' already exists". Function names are unique across libraries.</li>
+<li>A function gets its keys as the first argument of its callback and its other arguments as the second. The <code>KEYS</code> and <code>ARGV</code> globals do not exist in functions.</li>
+<li>The documentation gives <code>redis-cli --cluster-only-masters --cluster call host:port FUNCTION LOAD ...</code> to load on every primary. <code>redis-cli --cluster add-node</code> copies the libraries to a new node.</li>
+<li><code>FUNCTION DUMP</code> returns every library in the RDB format, with a version and a checksum. <code>FUNCTION RESTORE payload</code> takes a policy: <code>APPEND</code> is the default and fails when a library exists, <code>REPLACE</code> replaces it, and <code>FLUSH</code> deletes all libraries first. E15 got "ERR Library p3sc_lockkit already exists" with the default, and <code>OK</code> with <code>REPLACE</code>.</li>
+<li>Library code runs once at load time, with a limit of 500 ms.</li>
+</ol>
+<table>
+<thead><tr><th>Flag</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td>no flags, on a <code>#!lua</code> script or a function</td><td>May write. Refused on a stale replica and when memory is over <code>maxmemory</code>. Keys in one slot</td></tr>
+<tr><td><code>no-writes</code></td><td>Allowed under <code>FCALL_RO</code> and <code>EVAL_RO</code>, and on read-only replicas</td></tr>
+<tr><td><code>allow-oom</code></td><td>Allowed when used memory is over <code>maxmemory</code></td></tr>
+<tr><td><code>allow-stale</code></td><td>Allowed on a stale replica with <code>replica-serve-stale-data no</code></td></tr>
+<tr><td><code>no-cluster</code></td><td>Refused in cluster mode</td></tr>
+<tr><td><code>allow-cross-slot-keys</code></td><td>May touch undeclared keys in other slots</td></tr>
+</tbody>
+</table>
+<p><b>When to choose Functions over EVAL.</b></p>
+<table>
+<thead><tr><th>Question</th><th>EVAL and EVALSHA</th><th>Functions</th></tr></thead>
+<tbody>
+<tr><td>Survives restart and failover</td><td class="bad">No. Each client must handle NOSCRIPT</td><td class="ok">Yes. Saved in RDB and AOF, and replicated</td></tr>
+<tr><td>Deploy step</td><td class="ok">None. The app carries the source</td><td class="bad">Load on every primary, and again on a new cluster</td></tr>
+<tr><td>Name in SLOWLOG and MONITOR</td><td><code>EVALSHA</code> shows a SHA1 hash, and <code>EVAL</code> shows the whole source</td><td>A function name</td></tr>
+<tr><td>Changing the code</td><td>New source gives a new hash, and old and new run side by side</td><td><code>FUNCTION LOAD REPLACE</code> changes it for every caller at once</td></tr>
+<tr><td>Inside a pipeline</td><td class="bad"><code>EVALSHA</code> can fail with NOSCRIPT</td><td class="ok">No cache to miss</td></tr>
+</tbody>
+</table>
+<p>The Redis design issue that proposed Functions, #8693, lists the same problems: scripts can disappear, <code>EVALSHA</code> in a transaction is risky, and SHA names are hard to debug. No first-hand report of a production move from <code>EVAL</code> to Functions was found. For a pipeline, the Redis page Scripting with Lua says to use <code>EVAL</code>, and redis-py runs <code>SCRIPT EXISTS</code> and <code>SCRIPT LOAD</code> before it sends one.</p>
+<p><b>Valkey 9.1.2.</b> The commands are the same, with these differences:</p>
+<ul>
+<li>Lua is a module in <code>src/modules/lua</code> since Valkey 9.1.0. The build option <code>BUILD_LUA</code> is <code>static</code> by default, <code>module</code> for a loadable <code>libvalkeylua.so</code>, or <code>no</code> for a server without Lua, in <code>src/Makefile:261-293</code>.</li>
+<li>On a <code>BUILD_LUA=no</code> server, <code>EVAL</code> and <code>FCALL</code> with Lua code fail, because no Lua engine is registered. This is inferred from the engine lookup, and no such build was made. Ask your managed Valkey service which build it runs.</li>
+<li>The Lua global table is <code>server</code>, and <code>redis</code> is an alias for it, so code that calls <code>redis.call</code> runs on both servers.</li>
+<li><code>SCRIPT SHOW sha1</code> returns the source of a cached script, since Valkey 8.0.0. Redis 8.10.2 has no <code>SCRIPT SHOW</code>.</li>
+<li><code>SCRIPT LOAD</code> of a script that <code>EVAL</code> cached first takes it off the eviction list, in <code>src/eval.c:366-388</code>. So on Valkey, <code>SCRIPT LOAD</code> protects the script, and on Redis 8.10 it does not.</li>
+<li><code>busy-reply-threshold</code> has the same names and the same default of 5000 ms.</li>
+</ul>
+<p><b>A first draft that was wrong.</b> The first version of E15 expected <code>DEBUG RELOAD</code> to empty the script cache. The run showed the script still cached. <code>DEBUG RELOAD</code> calls <code>emptyData</code> and <code>rdbLoad</code> in <code>src/debug.c:648-651</code>, and <code>emptyData</code> clears the keys and the libraries, not the script cache. <code>rdbLoad</code> skips the old <code>lua</code> field of the file, in <code>src/rdb.c:4822-4823</code>. So E15 also restarts the server, which is the real test.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">The script cache is lost at restart and failover, so EVALSHA needs a fallback.</p>
+<p class="trap">SCRIPT LOAD once at start: after a failover, every unlock fails with NOSCRIPT.</p>
+<p class="try">Run E13 and find NOSCRIPT, then the fallback's reply of 1.</p>
+</div>
+
+<p>That closes the teaching sections, and the next section collects what you can now do.</p>
 
 <h2 data-kind="recall">What you can do now, and what comes next</h2>
 <p>c1 to c5 below are the five ideas of "What you must know", in the same order.</p>
 <ul>
 <li><b>c1.</b> A double run that only wastes work needs one Redis node. A double run that corrupts data needs a check at the resource, and the lock then only saves work. Taught in "Is this lock about wasted work or about wrong data?" and "Where does the guarantee live when a lock is not enough?".</li>
-<li><b>c2.</b> The acquire is <code>SET key token NX PX ttl</code> with a random token. Release and extend compare that token and act in one step on the server, with <code>DELEX</code>, <code>SET IFEQ</code> or a Lua script. Taught in the two sections on <code>SET NX PX</code> and on plain <code>DEL</code>.</li>
+<li><b>c2.</b> The acquire is <code>SET key token NX PX ttl</code> with a random token. Release and extend compare that token and act in one step on the server, with <code>DELEX</code>, <code>SET IFEQ</code> or a Lua script. A script needs a <code>NOSCRIPT</code> fallback, because only a Function survives a failover. Taught in the two sections on <code>SET NX PX</code> and on plain <code>DEL</code>, and in the section on the lock's scripts.</li>
 <li><b>c3.</b> A pause longer than the TTL gives two acting holders. A longer TTL, a watchdog and a deadline in the work make it rarer, and only an idempotent write or a fence removes the harm. Taught in the two lease sections.</li>
 <li><b>c4.</b> A lock on a primary with a replica can vanish at failover, and expiry follows the wall clock. A Redlock library on one endpoint is a single-node lock. Taught in "How can the lock vanish when no client paused?".</li>
 <li><b>c5.</b> A fencing token works only if it never repeats and the resource checks it inside the write. One Redis counter can repeat after failover. Taught in the two fencing sections.</li>
@@ -936,9 +1116,9 @@ return 0</code></pre>
 <p>You can now read any lock, say what it protects and what it does not, and choose where its guarantee must live. You saw that a lock key can disappear when a primary fails before its replica has the write. Phase 4 answers how large that window is: how replication works, how much data a failover can lose, and how long the failover takes.</p>
 
 <h2 data-kind="lab">Lab: the exercises that teach Phase 3</h2>
-<details class="answer practice"><summary>Open the lab: E1 to E12, copied from the phase, not run for this lesson</summary>
-<p>The lab below is copied from the phase. The only change is that the former employer's service names are replaced with what each service did. This lesson's author ran none of it. Where the study note or the earlier audit found a problem, a note under the exercise says what is wrong and what to expect instead.</p>
-<p><b>What each exercise proves.</b> E1 to E4 prove the acquire and the compare-and-delete release. E5, E6, E9 and E12 are about the lease. E7 and E8 are about fencing. E10 builds a lock with retries by hand, and E11 shows a read-modify-write that needs one atomic step.</p>
+<details class="answer practice"><summary>Open the lab: E1 to E15, copied from the phase. E13 to E15 were run, and E1 to E12 were not run for this lesson</summary>
+<p>The lab below is copied from the phase. The only change is that the former employer's service names are replaced with what each service did. This lesson's author ran none of E1 to E12. Where the study note or the earlier audit found a problem, a note under the exercise says what is wrong and what to expect instead.</p>
+<p><b>What each exercise proves.</b> E1 to E4 prove the acquire and the compare-and-delete release. E5, E6, E9 and E12 are about the lease. E7 and E8 are about fencing. E10 builds a lock with retries by hand, and E11 shows a read-modify-write that needs one atomic step. E13 to E15 show what happens to the lock's scripts when the cache is emptied, when a script runs long, and across a reload and a restart.</p>
 
 <p>Setup:</p>
 <pre><code data-lang="bash">cd /Users/raghvendradhakar/Desktop/code/verly/study-material/redis/code
@@ -1037,10 +1217,38 @@ docker-compose up -d &amp;&amp; docker exec redis-study redis-cli PING   # → P
 </ul>
 <p class="note"><i>Lab note:</i> not run, because it needs Docker as written. Run the same two commands with <code>redis-cli</code> directly.</p></li>
 </ul>
+<p class="note">E13 to E15 were run on 2026-10-19 against a throwaway server. It was an x86_64 Homebrew Redis 8.10.1 under Rosetta 2 on an Apple M4 Pro. It was started with <code>redis-server --port 6582 --dir &lt;tmpdir&gt; --save '' --appendonly no --enable-debug-command local --daemonize yes</code>. The program flushes the script cache and changes a config value. So it refuses to run when the server holds a key that is not its own, in any database. A small model of the server rules runs next to the server and gives the expected value of each step. Its offline check is <code>go run ./phase03_locking/script_cache -self-test</code>.</p>
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E13 (live).</b> EVALSHA after the script cache is emptied, and how each client recovers.</label>
+<ul>
+<li>Run: <code>go run ./phase03_locking/script_cache -addr localhost:6582 -part noscript</code></li>
+<li>Expected: <code>after SCRIPT FLUSH, EVALSHA -&gt; NOSCRIPT No matching script. Please use EVAL.</code> Then <code>go-redis Script.Run falls back to EVAL, released</code> with <code>got 1</code>. After 500 other <code>EVAL</code> scripts the unlock script is gone, and <code>evicted_scripts went up by</code> shows <code>got 1</code>. The <code>SCRIPT LOAD</code> way keeps the script. Every line ends with <code>matches the model</code>.</li>
+<li>If it fails: <code>refusing to run</code> means the server holds keys that are not the lab's. Start a throwaway server on its own port.</li>
+<li>Teaches: the script cache is memory only, and every <code>EVALSHA</code> needs a <code>NOSCRIPT</code> fallback.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E14 (break-it, live).</b> A slow script gives other clients BUSY, and SCRIPT KILL fails after a write.</label>
+<ul>
+<li>Run: <code>go run ./phase03_locking/script_cache -addr localhost:6582 -part busy</code></li>
+<li>Expected: <code>PING sent at 50ms waited 150ms -&gt; BUSY Redis is busy running a script. You can only call SCRIPT KILL or SHUTDOWN NOSAVE.</code> Then <code>SCRIPT KILL before any write</code> gets <code>OK</code>. For the script that wrote: <code>SCRIPT KILL at 310ms -&gt; UNKILLABLE Sorry the script already executed write commands against the dataset.</code> and later <code>script reply after 1.51s: write-spin done</code>. The times move by about 10 ms between runs: a second run printed <code>300ms</code> and <code>1.5s</code>.</li>
+<li>If it fails: the program lowers <code>busy-reply-threshold</code> to 200 ms with <code>CONFIG SET</code>. It puts the old value back at the end. On a slow machine, raise <code>-spin</code> so the scripts run past the threshold.</li>
+<li>Teaches: the busy limit does not stop a script. After the first write, only waiting or <code>SHUTDOWN NOSAVE</code> ends it.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E15 (break-it, live).</b> A Function survives a reload and a restart. The script cache survives only DEBUG RELOAD.</label>
+<ul>
+<li>Run: <code>go run ./phase03_locking/script_cache -addr localhost:6582 -part reload</code></li>
+<li>Expected: <code>library p3sc_lockkit loaded after DEBUG RELOAD</code> and <code>unlock script cached after DEBUG RELOAD</code> both match. After <code>FUNCTION DELETE</code>, <code>DEBUG RELOAD NOSAVE</code> loads the library back from the file. <code>FCALL_RO p3sc_unlock -&gt; ERR Can not execute a script with write flag using *_ro command.</code> <code>FUNCTION RESTORE (APPEND) -&gt; ERR Library p3sc_lockkit already exists</code>, and <code>REPLACE</code> gets <code>OK</code>.</li>
+<li>Then run: <code>go run ./phase03_locking/script_cache -addr localhost:6582 -part restart-prep</code>, then <code>redis-cli -p 6582 SHUTDOWN NOSAVE</code>, start the server again with the same <code>--dir</code>, and run <code>go run ./phase03_locking/script_cache -addr localhost:6582 -part restart-check</code>.</li>
+<li>Expected: <code>uptime_in_seconds:1</code>, <code>unlock script cached after the restart</code> with <code>got false</code>, and <code>library p3sc_lockkit loaded after the restart</code> with <code>got 1</code>.</li>
+<li>If it fails: if <code>DEBUG RELOAD</code> returns an error that DEBUG is not allowed, start the server with <code>--enable-debug-command local</code>.</li>
+<li>Teaches: a library is part of the data set and comes back from the RDB file. The script cache is part of the process.</li>
+</ul></li>
+</ul>
 </details>
 
 <h2 data-kind="checkpoint">Checkpoint questions</h2>
-<details class="answer practice"><summary>Open the checkpoint: seven questions, each with an answer sketch</summary>
+<details class="answer practice"><summary>Open the checkpoint: eight questions, each with an answer sketch</summary>
 <p>The phase's questions used the former employer's services. They are rewritten here around general jobs, and each keeps its mechanism.</p>
 
 <p><b>Q1.</b> Say "efficiency" or "correctness" for each lock, and whether <code>SETNX</code> plus a plain <code>DEL</code> is adequate. (a) Deduplicating invitation emails. (b) Charging a subscription exactly once. (c) Preventing a duplicate chat session. (d) Decrementing a ledger balance once.</p>
@@ -1076,6 +1284,11 @@ docker-compose up -d &amp;&amp; docker exec redis-study redis-cli PING   # → P
 <p><b>Q7.</b> A code review adds a <code>SETNX</code> plus plain <code>DEL</code> lock, copied from an email-dedup helper. The lock guards a flow that decrements a customer's remaining AI credits and calls a paid third-party API. Write the review comment: what is wrong, the risk in concrete terms, and three changes you require, in order of importance.</p>
 <details class="answer"><summary>Answer sketch</summary>
 <p>What is wrong: an efficiency-lock pattern now guards a correctness job, with a constant value, a plain <code>DEL</code> and no check at the resource. The risk: one stall past the TTL deducts the customer's credits twice and bills the provider twice, and no error is logged. Required changes, in order. First, make the credit decrement conditional and idempotent in the database, with a unique key per request. Second, record the paid call in a row before sending, and send the provider an idempotency key if it accepts one. Third, fix the lock itself, with a random token, a <code>DELEX</code> or Lua release, a TTL above the call's p99, and a count of <code>ErrLockAlreadyExpired</code>.</p>
+</details>
+
+<p><b>Q8.</b> Your summary service calls the compare-and-delete script with <code>EVALSHA</code> only. Each pod runs <code>SCRIPT LOAD</code> once at start. The lock TTL is 10 s, and Sentinel's <code>down-after-milliseconds</code> is 30,000. (a) Sentinel fails over the primary at 02:00. Walk through what each pod sees on its next unlock and extend, and how long each lock stays. (b) A teammate adds a reporting script with <code>EVAL</code> on the same primary. It writes a key first and then runs for about 7 s. With the default <code>busy-reply-threshold</code>, what do the lock clients see, for how long, and can <code>SCRIPT KILL</code> help? (c) What would you move into a Function, and what deploy step does that add on a cluster with 3 primaries?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) The promoted replica has an empty script cache, because <code>SCRIPT LOAD</code> is not replicated since Redis 7.0. Every pod's next <code>EVALSHA</code> gets <code>NOSCRIPT</code>, so no unlock and no extend succeeds. A lock whose key reached the replica stays until its TTL ends. That is at most 10 s after its last acquire or extend. A watchdog's extend also fails, so long jobs lose their lease and overrun. The fix is go-redis <code>Script.Run</code>, which sends <code>EVAL</code> on <code>NOSCRIPT</code>. (b) For the first 5,000 ms every lock command waits, and at 5,000 ms the waiting commands get <code>BUSY</code>. For the last 7,000 - 5,000 = 2,000 ms every new command gets <code>BUSY</code> at once. The script wrote first, so <code>SCRIPT KILL</code> gets <code>UNKILLABLE</code>. Sentinel sends one <code>SCRIPT KILL</code> only when it already sees the primary as down. That takes 30,000 ms here, so no failover happens. Rewrite the report as a <code>SCAN</code> loop, as Rails did. (c) Move the unlock and extend into one library, such as <code>p3sc_lockkit</code>. It then survives restarts and failovers. The new step is <code>FUNCTION LOAD REPLACE</code> on all 3 primaries, for example with <code>redis-cli --cluster-only-masters --cluster call host:port FUNCTION LOAD REPLACE ...</code>, on every release of the library. The reporting job stays a client-side loop, because a function blocks the server exactly as a script does.</p>
 </details>
 </details>
 
@@ -1134,6 +1347,27 @@ AUDIT ANY LOCK
   4 TTL &gt; p99 with margin?   5 can ttl be 0?     6 unlock error counted?
   7 fence or idempotent write at the resource?   8 primary that can fail over?
 
+LUA SCRIPTS AND FUNCTIONS
+  EVAL src n k.. a..      -&gt; cache by SHA1, then run     EVALSHA sha n k.. a.. -&gt; hash only
+  NOSCRIPT No matching script. Please use EVAL.        -&gt; the cache was emptied
+  emptied by: restart | failover (SCRIPT LOAD not replicated since 7.0) | SCRIPT FLUSH
+  evicted:    500 EVAL scripts, LRU, since 7.4. SCRIPT LOAD ones never. INFO evicted_scripts
+  kept by:    DEBUG RELOAD (it reloads the data set only)
+  fallback:   go-redis Script.Run, redsync -&gt; EVAL   | redis-py -&gt; SCRIPT LOAD + EVALSHA
+  pipelines:  EVAL, or load the scripts before sending
+  keys:       every key in KEYS. One hash tag: {summary:42}:lock {summary:42}:fence
+  replication since 7.0: the script's writes, in MULTI/EXEC if more than one, never the script
+  busy-reply-threshold (alias lua-time-limit) 5000 ms -&gt; then BUSY for everyone else
+    SCRIPT KILL: OK before the first write | UNKILLABLE after -&gt; wait, or SHUTDOWN NOSAVE (loses data)
+    Sentinel: BUSY to PING while down -&gt; one SCRIPT KILL -&gt; failover -&gt; the script's writes lost
+  read-only: EVAL_RO EVALSHA_RO FCALL_RO, flag no-writes
+  FUNCTIONS: FUNCTION LOAD [REPLACE] "#!lua name=lib ..."    FCALL fn n k.. a..
+    in RDB + AOF + replicated | cluster: load on EVERY primary yourself
+    FUNCTION DUMP -&gt; FUNCTION RESTORE payload APPEND (default) | REPLACE | FLUSH
+    flags: no-writes allow-oom allow-stale no-cluster allow-cross-slot-keys
+  VALKEY 9.1: Lua is a module, BUILD_LUA=static (default) | module | no
+              global "server", alias "redis" | SCRIPT SHOW sha | SCRIPT LOAD protects from eviction
+
 INVESTIGATE
   PTTL &lt;lockkey&gt;   -> ms left on the lease
   GET &lt;lockkey&gt;    -> whose token holds it now
@@ -1146,7 +1380,7 @@ INVESTIGATE
 <p>Read Kleppmann first and antirez right after him, because the two posts answer each other. The phase's old link to the Redis lock page now returns 404, so the current page is listed instead.</p>
 <ul class="sources">
 <li><a href="https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html">Martin Kleppmann, How to do distributed locking</a>: efficiency versus correctness, the pause problem, fencing tokens, why one Redis counter is not enough. About 25 minutes.</li>
-<li><a href="http://antirez.com/news/101">antirez, Is Redlock safe?</a>: the check-and-set answer, the timing model, the monotonic-clock promise. About 20 minutes.</li>
+<li><a href="https://antirez.com/news/101">antirez, Is Redlock safe?</a>: the check-and-set answer, the timing model, the monotonic-clock promise. About 20 minutes.</li>
 <li><a href="https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/">Redis docs, Distributed Locks with Redis</a>: the single-node recipe with DELEX, the failover race, the wall-clock warning, and Redlock.</li>
 <li><a href="https://redis.io/docs/latest/commands/delex/">DELEX</a>, <a href="https://redis.io/docs/latest/commands/set/">SET</a> and <a href="https://redis.io/docs/latest/commands/setnx/">SETNX</a> command pages: IFEQ since 8.4.0, SETNX deprecated.</li>
 <li><a href="https://redis.io/docs/latest/develop/interact/programmability/eval-intro/">Redis docs, scripting with EVAL</a>: the atomic compare-and-delete in Lua.</li>
@@ -1164,9 +1398,35 @@ INVESTIGATE
 <li><a href="https://brandur.org/idempotency-keys">Brandur Leach, Implementing Stripe-like Idempotency Keys in Postgres</a>: the idempotency-key row with atomic phases and recovery points.</li>
 <li><a href="https://shopify.engineering/scaling-inventory-reservations">Shopify Engineering, We replaced Redis with MySQL for inventory reservations</a>: moving the guarantee into the store that holds the data.</li>
 <li><a href="https://blog.flipkart.tech/when-good-locks-go-bad-diagnosing-a-system-meltdown-under-load-0b168c363143">Flipkart Tech, When Good Locks Go Bad</a>: unbounded lock waiting took Redis to 100% CPU, and a gate sized from the time spent in the locked section fixed it.</li>
-<li><a href="https://research.google/pubs/pub27897/">Google, The Chubby lock service</a>: the lock service design that calls its fencing tokens sequencers. About 45 minutes.</li>
+<li><a href="https://research.google/pubs/the-chubby-lock-service-for-loosely-coupled-distributed-systems/">Google, The Chubby lock service</a>: the lock service design that calls its fencing tokens sequencers. About 45 minutes.</li>
 <li><a href="https://www.youtube.com/playlist?list=PLeKd45zvjcDFUEv_ohr_HdUFe97RItdiB">Martin Kleppmann, Distributed systems lecture series</a>: the consistency and consensus lectures under the debate. About 50 minutes each.</li>
 <li>Designing Data-Intensive Applications, Martin Kleppmann, chapter 8 on process pauses and fencing, and chapter 9 on consensus. No link.</li>
+<li><a href="https://redis.io/docs/latest/develop/programmability/eval-intro/">Redis docs, Scripting with Lua</a>: the script cache, cache volatility, EVALSHA in a pipeline, and script replication.</li>
+<li><a href="https://redis.io/docs/latest/commands/eval/">EVAL command page</a>: scripts from EVAL are evicted since Redis 7.4.</li>
+<li><a href="https://redis.io/docs/latest/develop/programmability/">Redis docs, Redis programmability</a>: maximum execution time, SCRIPT KILL, SHUTDOWN NOSAVE and read-only scripts.</li>
+<li><a href="https://redis.io/docs/latest/develop/programmability/functions-intro/">Redis docs, Redis functions</a>: what is wrong with EVAL scripts, Functions in a cluster, and function flags.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/eval.c">Redis 8.10.2 source, eval.c</a>: the 500-entry LRU for EVAL scripts and the early return in SCRIPT LOAD.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/script.c">Redis 8.10.2 source, script.c</a>: the slow-script log, when SCRIPT KILL refuses, and the cluster key checks.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/script_lua.c">Redis 8.10.2 source, script_lua.c</a>: the hook that checks the busy limit every 100,000 instructions.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/server.c">Redis 8.10.2 source, server.c</a>: the NOSCRIPT and BUSY reply texts.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/config.c">Redis 8.10.2 source, config.c</a>: busy-reply-threshold, alias lua-time-limit, default 5000.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/sentinel.c">Redis 8.10.2 source, sentinel.c</a>: Sentinel&#x27;s one SCRIPT KILL to a busy primary, and the 30,000 ms down-after default.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/debug.c">Redis 8.10.2 source, debug.c</a>: why DEBUG RELOAD keeps the script cache.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/7.0.0/00-RELEASENOTES">Redis 7.0.0 release notes</a>: PR #9812, the end of script replication and of SCRIPT LOAD propagation.</li>
+<li><a href="https://github.com/redis/redis/issues/8693">Redis issue #8693</a>: the design of Functions and the problems with EVAL scripts it lists.</li>
+<li><a href="https://raw.githubusercontent.com/redis/go-redis/v9.5.1/script.go">go-redis v9.5.1, script.go</a>: Script.Run and its EVAL fallback.</li>
+<li><a href="https://raw.githubusercontent.com/go-redsync/redsync/v4.18.0/redis/goredis/v9/goredis.go">redsync v4.18.0, go-redis adapter</a>: the same EVAL fallback inside redsync.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis-py/v8.1.0/redis/commands/core.py">redis-py v8.1.0, commands/core.py</a>: SCRIPT LOAD and EVALSHA on NoScriptError.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis-py/v8.1.0/redis/client.py">redis-py v8.1.0, client.py</a>: SCRIPT EXISTS and SCRIPT LOAD before a pipeline is sent.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/Makefile">Valkey 9.1.2, src/Makefile</a>: the three BUILD_LUA values.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/modules/lua/README.md">Valkey 9.1.2, Lua module README</a>: why Lua became a module.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/modules/lua/script_lua.c">Valkey 9.1.2, script_lua.c</a>: the server global and its redis alias.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/eval.c">Valkey 9.1.2, eval.c</a>: SCRIPT LOAD takes an EVAL script off the eviction list.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/00-RELEASENOTES">Valkey 9.1.2 release notes</a>: Lua moved into a module, and static linking by default.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/commands/script-show.json">Valkey 9.1.2, SCRIPT SHOW</a>: the command that returns a cached script&#x27;s source, since 8.0.0.</li>
+<li><a href="https://github.com/socketry/async-job-processor-redis/issues/15">async-job-processor-redis issue #15</a>: one NOSCRIPT after a restart stopped two background loops while the server looked healthy.</li>
+<li><a href="https://github.com/rails/rails/issues/32610">Rails issue #32610</a>: a Lua delete-by-pattern that caused BUSY errors, replaced with SCAN and DEL.</li>
+<li><a href="https://dev.to/scalegrid/redis-transactions-long-running-lua-scripts-5a6e">ScaleGrid, Redis Transactions and Long-Running Lua Scripts</a>: a vendor demo where a busy write script led to a Sentinel failover and lost writes.</li>
 </ul>
 </details>
 

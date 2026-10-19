@@ -388,13 +388,15 @@ The two P0 rows show the method. The full list of ten fixes, ranked P0 to P3, is
 
 Every item on this platform's list is about how code used Redis. None says that Redis is too slow or the cluster too small. That is a finding about one platform, and it is not a rule. The section above showed a failover losing acknowledged writes when the code was correct.
 
+The list also has no security row and no Kubernetes row. The Go deeper block below adds seven, from ACL users to the liveness probe.
+
 Classify the job, ask what a loss costs, then fix what has already happened first.
 
 Treating every Redis call alike lets a forgotten TTL stop writes for every service on a shared cluster.
 
 Run INFO keyspace on an instance you use, and compare keys= with expires=.
 
-Go deeper: isolating a shared instance, why each rank was chosen, and which engine runs it
+Go deeper: isolating a shared instance, why each rank was chosen, which engine runs it, and the security rows
 One shared instance is one failure for everyone
 
 The platform ran about 34 services on several shared clusters. So one service's keys could stop writes for every service on its cluster. Shopify had the same shape after it split its MySQL into shards. Every shard still shared one Redis, and an outage of that Redis took down all of Shopify. Its fix was pods, where each pod has its own MySQL, Redis and memcached. bsport gave each business domain its own cluster. The Figma case in concept c5 split by use case. A review of a shared instance should ask whether the services on it can afford to fail together.
@@ -431,13 +433,249 @@ Ask which engine runs the instance
 
 A review must first ask whether the instance runs Redis or Valkey, because some defaults differ. Valkey 9.1.2 sets lazyfree-lazy-user-del yes, so a plain DEL frees memory in the background. Redis 8.10.2 keeps it at no. The default repl-backlog-size is 10mb in Valkey 9.1.2 and 1mb in Redis 8.10.2. Evidence: valkey.conf 9.1.2 lines 1458 and 902, and redis.conf 8.10.2 lines 1379 and 779.
 
-The review has now ranked what Redis can lose. It has not measured what the source of truth carries when the cache works less well, and the next concept starts there.
+Security and Kubernetes rows the list missed
+
+Redis 8.10.1 and 8.10.2 are both marked "Update urgency: SECURITY", so a review adds these rows to any fleet. Phase 4, securing Redis, teaches each mechanism.
+
+CheckWhy it is on the listHow to check itRank
+
+One ACL user per service, and the default user off or with a long random password.Both engines create default as +@all ~* &* on nopass, so one shared password gives every service FLUSHALL and CONFIG.ACL LIST shows one user per service, each starting with -@all.P1
+
+No @dangerous for application users, and @scripting only where a service runs scripts.The course research counted 8 Lua engine bugs among 29 Redis advisories it read, and many need a logged-in user.ACL GETUSER, then ACL LOG after a deploy.P1
+
+TLS on client links, and tls-replication yes.tls-port is 0 by default, so AUTH crosses the network as plain text.CONFIG GET tls-*, or encryption in transit on ElastiCache.P1
+
+Only cluster members reach the cluster bus port.The bus port is the data port plus 10000. Without tls-cluster, any host that reaches it can join the cluster.The firewall rule for that port. On Redis 8.10.2, cluster-bus-port-protected-mode yes refuses to start without tls-cluster. Valkey 9.1.2 has no such option.P0 if other hosts reach it
+
+protected-mode yes, and no instance answers another host without a password.With no config file, Redis listens on every interface, and only protected mode stops a remote client.From another host, redis-cli -h <host> PING must fail with NOAUTH or DENIED.P0
+
+An owner applies security releases on a schedule.Redis 8.10.2 fixed #15673. Commands queued in MULTI could still reach keys whose ACL access was revoked before EXEC.redis_version against the release notes. ElastiCache applies only critical updates in the maintenance window.P1
+
+A Kubernetes liveness probe never calls Redis.Harness's probe checked every downstream service, so Kubernetes restarted healthy pods while Redis was slow.Read the probe handler. Redis may sit in the readiness probe, which only removes a pod from traffic.P1
+
+Turning on a password changes the clients as well as the server. GitHub's Container registry enforced Redis authentication, and a connection string hard-coded in its deployment file could not log in. Most GitHub Pages builds and Packages requests failed until the change was reverted, and GitHub's report gives the incident as 35 minutes long. So test authenticated connections from every client before you enforce AUTH. For the last row, the Kubernetes docs say a liveness probe must indicate a failure the app cannot recover from, such as a deadlock.
+
+Evidence
+Redis 8.10.2 release notes, lines 24 to 54: https://raw.githubusercontent.com/redis/redis/8.10.2/00-RELEASENOTES. Defaults: src/config.c lines 3403, 3434, 3620 and 3623 to 3624 at Redis 8.10.2. Default user: src/acl.c lines 1430 to 1438 at Redis 8.10.2, from the course security research. The advisory count is that research's grouping by title of advisories published from 2023. GitHub availability report for February 2023, the incident of 2023-01-30, 21:30 to 22:12 UTC: https://github.blog/news-insights/company-news/github-availability-report-february-2023/. Harness status page, "Why 2" and the probe fix: https://status.harness.io/incidents/j6qd0qmfnchy. Kubernetes probes: https://kubernetes.io/docs/concepts/workloads/pods/probes/. ElastiCache service updates: https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Self-Service-Updates.html.
+
+The review has now ranked what Redis can lose. It has not planned the change most fleets face next, a move to another engine, and the next section answers it.
+
+## How do you move a fleet from Redis to Valkey?
+
+The source's snapshot format, not its commands, decides which move can work.
+
+After the ranking, a review is often asked one more thing: can these clusters move to Valkey? Valkey is the Linux Foundation fork of Redis, and it began as a copy of Redis 7.2.4. Since then, each engine has added its own commands and its own snapshot format. So a move needs two checks: the target must read your data, and the target must run your commands.
+
+one shared code base
+the fork point
+
+-
+
+-
+
+Redis: its own new commands
+and a new snapshot format
+
+Valkey: other new commands
+and a snapshot format of its own
+Two engines from one code base. A move must cross both gaps: the data format and the command set.
+
+Predict: your fleet runs Redis 8.10. The plan adds a Valkey 9.1 replica to each primary, lets it sync, and promotes it. What happens at the first sync, and why?
+The first sync fails. The primary sends a snapshot in a format version that Valkey refuses by default, so the replica never loads it. Most people expect it to work, because Valkey is sold as a drop-in replacement. That was true for Redis 7.2 and older, which write the shared format.
+
+RDB is the snapshot format of Redis, and every snapshot carries a version number. The rule that decides every method is that number:
+
+- A new replica starts with a full sync, where the primary sends it one whole RDB snapshot.
+
+- Redis 7.4 and 8.0 write RDB version 12. Redis 8.10.2 writes version 15.
+
+- Valkey 9.1.2 refuses versions 12 to 79 with rdb-version-check strict, its default. Its source keeps that range for Redis formats.
+
+- The same check runs for a full sync and for RESTORE. So the Valkey replica logs Can't handle RDB format version 15, and the sync stops.
+
+- DUMP also writes the version into the last 10 bytes of its payload. Valkey's RESTORE refuses it with DUMP payload version or checksum are wrong.
+
+- So three paths fail from Redis 7.4 or later: a replica, a copied RDB file, and a DUMP and RESTORE copy. A copy must read each value and write it as an ordinary command.
+
+- The way back is closed too. Valkey 9 writes version 80, and Redis 8.10.2 refuses anything above its own 15.
+
+15RDB version in a Redis 8.10.1 DUMP footer
+
+refusedRESTORE of the same bytes marked version 80
+
+acceptedRESTORE of the same bytes marked version 11
+
+4 of 13sample commands missing on Valkey 9.1.2
+
+Lab E14 measured the first three on Redis 8.10.1. It rewrote the version bytes of one real payload and sent it back to the same server. The refusal on the Valkey side is read from its source, because no Valkey server ran here.
+
+The command gap is the second check. Redis 8.10.2 has 459 commands and subcommands, Valkey 9.1.2 has 425, and they share 407. The 52 that only Redis has include INCREX, DELEX, HOTKEYS and LMOVEM. The 18 that only Valkey has include DELIFEQ, COMMANDLOG and CLUSTERSCAN.
+
+Since RedisCommands Valkey 9.1.2 does not have
+
+8.0 to 8.2SFLUSH, XACKDEL, XDELEX
+
+8.4DELEX, DIGEST, TRIMSLOTS, CLUSTER MIGRATION
+
+8.6HOTKEYS with 5 subcommands, XCFGSET, XIDMPRECORD
+
+8.8INCREX, XNACK, and 18 commands of the new array type
+
+8.10LMOVEM, BLMOVEM, SDIFFCARD, SUNIONCARD, HIMPORT, BACKUP
+
+The target version matters as much as the engine. HEXPIRE, HGETEX and HSETEX reached Valkey only in 9.0, and MSETEX only in 9.1. So a move to Valkey 8.1 loses them as well.
+
+Valkey also answers INFO server with redis_version:7.2.4, then server_name:valkey. It keeps the old field for clients that turn features on by version. So any check that reads only redis_version calls every Valkey "Redis 7.2.4".
+
+// decide the engine from redis_version alone
+return engine{"redis", parseVersion(reportedRedis)}, reportedRedis
+
+A Valkey 9.1.2 server becomes "redis 7.2.4". The lab's self-test fails with this version of the code.
+
+if f["server_name"] == "valkey" || f["valkey_version"] != "" {
+	return engine{"valkey", parseVersion(f["valkey_version"])}, reportedRedis
+}
+return engine{"redis", parseVersion(reportedRedis)}, reportedRedis
+
+The engine comes from server_name, and the version from valkey_version.
+
+The source version then picks the method:
+
+- Does the source run Redis 7.2 or older?
+
+- yesa Valkey replica, an RDB file copy, or the managed engine change can work
+
+- no, 7.4 or lateruse a copy tool that writes plain commands, or dual writes from the client
+
+- Can every application team change its client?
+
+- noa proxy in front of each cluster hides the switch, as at Snap
+
+- yesdual writes are possible, as at Amazon Ads
+
+Published moves show both paths. Amazon Ads serves tens of millions of reads per second at peak. Its client wrote every key to the old and the new clusters, with a 100 ms timeout per write, and moved reads one method at a time. It reports over 45% lower cost and 12% more throughput, with no downtime. That saving includes a move to Graviton nodes. On ElastiCache, the managed engine change keeps the endpoint name but changes the node IPs. From Redis OSS 5.0.6, writes pause for a failover of a few seconds. Older versions can see 30 to 60 seconds of DNS propagation.
+
+The failure to plan for came from Snap. It moved its caches from KeyDB, an older Redis fork, through a proxy, about 30 caches a week. A Valkey 8.2 release candidate crashed at 9 to 10k QPS from new TLS offload code, so Snap went back to 8.0.2. Its high-memory caches also met a full sync that repeats without end when the replication buffer fills first. So a move uses a stable release, tests each class of cache, and starts with the least critical ones.
+
+Redis 7.4 and later need a copy by commands, not a Valkey replica.
+
+A Valkey replica of a Redis 8 primary fails its first sync and spends the window.
+
+Run INFO commandstats on one primary, and list each command Valkey lacks.
+
+Evidence
+Version numbers: src/rdb.h line 21 at Redis 8.10.2 (15), and line 52 at Valkey 9.1.2 (80). Redis 7.4.0 and 8.0.0 write 12, read at those tags by the course research on 2026-10-19. The Valkey check: rdbIsVersionAccepted in src/rdb.c lines 85 to 94, the log line at 3198, and valkey.conf line 614 with its comment "This also applies to replication and the RESTORE command". RESTORE: Valkey src/cluster.c lines 172 and 253 to 254. DUMP footer: Redis src/cluster.c lines 123 to 143 and 174. https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/rdb.h and https://raw.githubusercontent.com/redis/redis/8.10.2/src/cluster.c. Identity: Valkey src/version.h, https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/version.h, and src/server.c lines 6120 to 6122. Command counts: a script read every src/commands/*.json in both source trees on 2026-10-19. The lab ran on 2026-10-19 on an x86_64 Homebrew Redis 8.10.1 under Rosetta 2 on an Apple M4 Pro, port 6584, no persistence. Valkey migration guide: https://valkey.io/topics/migration/. Amazon Ads, AWS Database Blog, 2025-11-25, a vendor source: https://aws.amazon.com/blogs/database/amazon-ads-upgrades-to-amazon-elasticache-for-valkey-to-achieve-12-higher-throughput-and-save-over-45-in-infrastructure-costs. ElastiCache upgrade guide: https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/VersionManagement.HowTo.html. Snap: Momento's summary of a talk by Ovais Khan of Snap, 2026-05-21, written by a company that sells a competing cache: https://www.gomomento.com/blog/why-snap-was-willing-to-fork-and-why-they-still-came-back/.
+
+Go deeper: why teams move, the six methods step by step, client changes, default changes, and the published moves
+Why teams move
+
+ReasonWhat changed
+
+LicenceFrom Redis 7.4 the core moved from BSD-3 to RSALv2 and SSPLv1, which Redis says are not OSI open source. Redis 8 added AGPLv3 as another option. Valkey stays on BSD-3.
+
+GovernanceThe Linux Foundation formed Valkey from Redis 7.2.4. AWS, Google Cloud, Oracle, Ericsson and Snap took part.
+
+PriceOn ElastiCache, Valkey costs 20% less than Redis OSS on node-based clusters and 33% less on Serverless.
+
+SupportElastiCache runs Redis OSS up to 7.1 only. Redis OSS 4 and 5 have left standard support, and Extended Support costs extra.
+
+Method 1: a replica cutover, on servers you run
+
+This works only from Redis 7.2 and older. The Valkey migration guide gives these steps:
+
+- Start a Valkey node.
+
+- Run REPLICAOF <redis-ip> <redis-port> on it.
+
+- Run INFO replication on it. Expected: master_link_status:up.
+
+- Point the applications to the Valkey node.
+
+- Stop the writes to Redis, because SHUTDOWN can lose data while writes are active.
+
+- Shut down Redis.
+
+- Run REPLICAOF NO ONE on the Valkey node.
+
+For a cluster, add Valkey nodes as replicas with redis-cli --cluster add-node ... --cluster-replica. Run CLUSTER FAILOVER on each, then remove the Redis nodes with redis-cli --cluster del-node. Airbnb ran the same cutover from EC2 Redis to ElastiCache, which was not a Valkey move. It paused writes, compared offsets and promoted the replica, with no downtime.
+
+Method 2: an RDB file copy
+
+Disconnect the clients and record INFO keyspace. Run SAVE, copy the file into the Valkey data folder, and start Valkey with AOF off. Then compare the key count. The service is down for the whole copy, and the same format limit applies.
+
+Method 3: the ElastiCache engine change
+
+- Make a single node with cluster mode disabled into a replication group first.
+
+- Copy a custom parameter group into a Valkey parameter group with the same static values.
+
+- Check that the AWS CLI is at least 1.35.2 for v1, or 2.18.2 for v2.
+
+- Run aws elasticache modify-replication-group --replication-group-id myReplGroup --engine valkey --engine-version 9.0, with --cache-parameter-group-name if step 2 applied.
+
+- Wait until the status is available.
+
+Inside, ElastiCache adds Valkey nodes that replicate from the Redis primaries, fails over, updates DNS and deletes the old nodes. Its Redis OSS is 7.1 at most, so this sync never meets the format check. A client that caches resolved IPs must reconnect afterwards, which is inferred because the node IPs change.
+
+Method 4: blue/green with a copy tool
+
+MaiCoin, a cryptocurrency exchange, chose this method because the in-place change gave no live check and no roll back. It created a Valkey cluster, asked AWS to turn on PSYNC, and ran RedisShake: a full copy by SCAN, then live changes from keyspace notifications, with TTLs kept. It compared key counts and sample values, then moved traffic in steps. The price is two clusters during the move. A tool that sends RESTORE meets the same version check as a replica. The RedisShake README lists Redis 2.8 to 8.4 as supported sources, so Redis 8.10 is outside its stated range.
+
+Method 5: dual writes from the client
+
+- write bothreads stay on Redis
+
+- move readsone read method at a time
+
+- write Valkey onlyRedis clusters removed
+
+Dual writes copy no snapshot, so they work from any Redis version. A key written only before the dual writes began stays only in Redis. For a cache, one full TTL of dual writes fills the new cluster. Both points are inferred from the method.
+
+Method 6: a proxy in front of every cluster
+
+Snap put a RESP proxy in front of each cache cluster. RESP is the Redis wire protocol. Applications talked only to the proxy, so no team had to change its code for the switch.
+
+What changes in the clients
+
+- Replace INCREX with the Lua script of INCR and EXPIRE, and DELEX ... IFEQ with DELIFEQ on Valkey 9.0 and later.
+
+- Clients that support Redis OSS 7.2 work with Valkey 7.2 and later, by the Valkey clients page. Valkey also ships its own client family, GLIDE.
+
+- Snap's KeyDB ran MGET across slots. Valkey does not, and Snap found that gap only after the move.
+
+- EVALSHA answers NOSCRIPT until the script is loaded on the new node, because a copy by commands does not carry the script cache. This is inferred.
+
+- Two argument gaps hide in shared commands. Only Redis takes SET ... IFNE, IFDEQ and IFDNE, and XREADGROUP ... CLAIM, MAXCOUNT and MAXSIZE.
+
+Defaults that change with no code change
+
+The fix list above named lazyfree-lazy-user-del and repl-backlog-size. Valkey 8.0 turned on five more background frees: lazyfree-lazy-eviction, lazyfree-lazy-expire, lazyfree-lazy-server-del, lazyfree-lazy-user-flush and replica-lazy-flush. Valkey names itself in logs and in some errors, so a tool that parses the word "Redis" can break. Valkey 8.0 also aborts a transaction on a nested MULTI.
+
+The published moves
+
+Company, sourceMethodResult
+
+Amazon Ads, AWS blog, vendordual writes, reads moved per methodover 45% lower cost, 12% more throughput, no downtime
+
+A travel company, AWS blog, vendorengine change in place, backups taken first20% lower cost, no downtime, a short period of slightly higher latency
+
+MaiCoin, AWS blog with a MaiCoin authorblue/green with RedisShake20% to 33% lower cost stated, two clusters during the move
+
+Aiven, own blog, vendorabout 4,000 moves by one button, about 11,000 in maintenance windowsabout 15,000 Redis services moved
+
+Snap, Momento summary, competitorRESP proxy, about 30 caches a week70% to 80% of workloads moved at the time of the talk
+
+Leboncoin, own blogengine change, waves of 5a little over 100 instances, not checked
+
+At Snap's pace, 100 caches take 100 / 30 = about 3.3 weeks. The Leboncoin numbers come from an earlier read of its feed, because the post blocked every fetch.
+
+This section changed the engine under the cache. It did not measure what the source of truth carries when the cache works less well, and the next concept starts there.
 
 ## Why does a small fall in hit rate overload the source?
 
 A cache hides most of the real load, and a small change uncovers it.
 
-The fix list ranked what Redis can lose. A cache that keeps all its keys can still fail the system, because the system was sized for how well it works. The origin is the database or service behind the cache that answers every miss. The hit rate is the share of reads the cache answers. The origin sees only the misses, so its load is the traffic times one minus the hit rate.
+Two sections back, the fix list ranked what Redis can lose. A cache that keeps all its keys can still fail the system, because the system was sized for how well it works. The origin is the database or service behind the cache that answers every miss. The hit rate is the share of reads the cache answers. The origin sees only the misses, so its load is the traffic times one minus the hit rate.
 
 Predict: a cache in front of a database runs at a 99.5% hit rate. A deploy drops it to 98%. By what factor does the database read load change, and why might the real factor be higher?
 The read load grows four times. The misses go from 0.5% to 2% of the traffic, and 2 divided by 0.5 is 4. The real factor is higher when one miss needs more than one query, such as a query on every shard. Most people read it as a 1.5-point change and expect a small effect, because they look at the hits and not at the misses.
@@ -786,7 +1024,7 @@ You can now review any Redis call with five questions, one for each concept of t
 
 - How long does this call wait when Redis stalls, and does the request deadline reach the socket? A go-redis call waits for its ReadTimeout, 3 or 5 seconds by default, on each attempt, unless ContextTimeoutEnabled is on. A timed-out connection must be closed, or the next request can read the old reply. (Concept c1, the first two teaching sections.)
 
-- What job does this key do, and can Redis remove it? Eviction under volatile-* skips keys with no TTL, so they can stop all writes. A failover can undo an acknowledged INCR or lock. So rank the fixes by what has happened, what a loss costs, and what the fix costs. (Concept c2.)
+- What job does this key do, and can Redis remove it? Eviction under volatile-* skips keys with no TTL, so they can stop all writes. A failover can undo an acknowledged INCR or lock. So rank the fixes by what has happened, what a loss costs, and what the fix costs. Add the security rows, and keep Redis out of the liveness probe. Before a move to Valkey, read the source's RDB version and the commands your services send. (Concept c2.)
 
 - What does the origin carry if this cache gets worse? It carries the misses, so 99% to 98% doubles its load, and a miss that fans out costs more. (Concept c3.)
 
@@ -798,7 +1036,7 @@ The next phase, Phase 7, "Redis for AI agents", is the last phase of the course.
 
 ## Lab: the exercises that teach Phase 6
 
-Open the lab: the phase's exercises E1 to E10, and four extra runs
+Open the lab: the phase's exercises E1 to E14, and four extra runs
 
 This lab was copied from the phase and was not run for this lesson. Do not start it against a shared or production Redis. Where the phase named the former employer, its services or its incidents, the wording is changed to the general terms this lesson uses. The task is the same. References to the phase's own section numbers now point to this lesson's concepts. A short note under an exercise says what is wrong in it and what to expect instead.
 
@@ -809,13 +1047,13 @@ docker-compose up -d && docker exec redis-study redis-cli PING   # → PONG
 
 -  E1. Run the capstone client. c1, c2
 
-- Run, from the code folder: go run ./phase06_*/prodclient
+- Run, from the code folder: go run ./phase06_production/prodclient
 
 - Expected: no-TTL Set rejected; cache-aside miss→hit (1 source load); MGet one round-trip; safe WithLock.
 
 - Teaches: every phase's lesson as one production-grade object.
 
-The phase's folder still carries the former employer's name, so this page uses a glob. It matches because only one folder starts with phase06_. The program's comments and three of its output lines name the employer or its internal incident ID, and need the rename the study note lists. The client does not set ContextTimeoutEnabled, and its Set also refuses redis.KeepTTL. Its cache-aside has no jitter or singleflight. On Redis 8.4 and later its Lua unlock can be one DELEX ... IFEQ, but the lab's container runs redis:7.2. The expected output above still holds, as far as reading the code shows.
+The phase's folder is now phase06_production, and the program's comments and output use general terms. The client does not set ContextTimeoutEnabled, and its Set also refuses redis.KeepTTL. Its cache-aside has no jitter or singleflight. On Redis 8.4 and later its Lua unlock can be one DELEX ... IFEQ, but the lab's container runs redis:7.2. The expected output above still holds, as far as reading the code shows.
 
 -  E2. Prove the no-TTL guardrail. c2
 
@@ -879,6 +1117,62 @@ Start with INFO keyspace and compare keys= with expires=. It answers in one comm
 
 - Teaches: the deliverable — Redis judgment applied to real code.
 
+### Exercises for 6.7: moving to Valkey
+
+E11 to E14 come from the phase's section 6.7, and they were run against a throwaway redis-server 8.10.1 on port 6584. It was an x86_64 Homebrew build under Rosetta 2 on an Apple M4 Pro, with no persistence. These exercises do not use the Docker container above. Start the server first:
+
+mkdir -p /tmp/p6gap
+redis-server --port 6584 --dir /tmp/p6gap --save '' --appendonly no --daemonize yes
+redis-cli -p 6584 PING   # → PONG
+
+-  E11 (offline). Run the self-test of the engine gap tool. c2
+
+- Run: go run ./phase06_production/engine_gap -self-test
+
+- Expected: 20 lines that start with [ok  ], then all checks passed.
+
+- If it fails: the failed line names the rule that broke. Compare the tables at the top of main.go with the two command folders.
+
+- Teaches: the command gap, the engine check and the RDB version gate, as rules a test can hold (6.7).
+
+-  E12 (live). List the commands a target engine lacks. c2
+
+- Run: go run ./phase06_production/engine_gap -addr localhost:6584
+
+- Expected: source: redis 8.10.1 (INFO redis_version:8.10.1), then 4 of 13 commands are missing on valkey 9.1.2. The four are INCREX, DELEX, HOTKEYS GET and LMOVEM. VADD is reported as module vectorset, and SET and XREADGROUP print an argument note.
+
+- Run: go run ./phase06_production/engine_gap -addr localhost:6584 -target valkey-8.1.0
+
+- Expected: 6 of 13 commands are missing on valkey 8.1.0. HEXPIRE and MSETEX join the list, as Valkey added it in 9.0.0 and Valkey added it in 9.1.0.
+
+- If it fails: cannot read INFO server means no server answers on port 6584.
+
+- Teaches: the target version decides the gap as much as the target engine (6.7).
+
+-  E13 (live). Use the commands the server has really seen. c2
+
+- Run: redis-cli -p 6584 CONFIG RESETSTAT, then redis-cli -p 6584 SET p6gap:a 1 EX 60, redis-cli -p 6584 GET p6gap:a, redis-cli -p 6584 INCREX p6gap:n BYINT 1 EX 60, redis-cli -p 6584 HSET p6gap:h f v, redis-cli -p 6584 DELEX p6gap:a IFEQ 1 and redis-cli -p 6584 DEL p6gap:n p6gap:h.
+
+- Run: go run ./phase06_production/engine_gap -commandstats
+
+- Expected: commands seen by INFO commandstats since the last restart or CONFIG RESETSTAT: 10, then 2 of 10 commands are missing on valkey 9.1.2. The two are DELEX and INCREX. The list also holds CONFIG RESETSTAT, which you sent, and CLIENT SETINFO, HELLO and INFO, which the tool itself sent.
+
+- If it fails: a list with only INFO and HELLO means the six commands went to another server.
+
+- Teaches: INFO commandstats is the inventory of what the services send. It resets on restart and on CONFIG RESETSTAT. So read it on a server that has run through a full business cycle (6.7).
+
+-  E14 (break-it, live). Make RESTORE refuse a payload because of its version number. c2
+
+- Run: go run ./phase06_production/engine_gap -part dump
+
+- Expected: DUMP p6gap:src: 17 bytes, footer RDB version 15, then valkey strict accepts version 15: false. Then RESTORE with footer version 80 on this server (own 15): refused: ERR DUMP payload version or checksum are wrong, and RESTORE with footer version 11 on this server (own 15): accepted.
+
+- If it fails: a footer version other than 15 means a different Redis build. Read its src/rdb.h.
+
+- Teaches: every copy path that carries an RDB payload meets the version gate. Redis 8.10 refuses Valkey 9's version 80, measured here. Valkey 9.1.2 refuses Redis 8.10's version 15, read from its source and not run (6.7).
+
+When you finish, stop the server with redis-cli -p 6584 SHUTDOWN NOSAVE.
+
 ### Four extra runs from the study note
 
 These are not in the phase. The first two were run once on an Apple M4 Pro. Redis 8.10.1 there was an x86_64 build under Rosetta 2. The last two were not built.
@@ -895,7 +1189,7 @@ The phase also had a section of checks against the former employer's own reposit
 
 ## Checkpoint questions
 
-Open the questions: nine scenarios, each with an answer sketch
+Open the questions: ten scenarios, each with an answer sketch
 
 Q1. In four sentences, describe the platform's Redis to a new engineer: the platform and topology, the six jobs, the caching style, and the one failure that repeated.
 
@@ -933,6 +1227,10 @@ Q9. A chat server has a 3-second garbage collection pause while 4 MB of messages
 
 Answer sketchIts output buffer passes 8 MB after 2 seconds and reaches 12 MB, below the 32 MB hard limit. The soft limit needs 60 seconds over 8 MB, so this pause alone does not get it disconnected. A longer stall, or more traffic, crosses 32 MB and Redis closes it, losing everything in the buffer and everything after it until it subscribes again. The fix is a log with IDs, such as a Redis Stream or a database table. Pub/sub then only wakes the server, and the server reads the gap on reconnect.
 
+Q10. Your fleet runs 40 Redis 8.10 primaries on servers you run. A teammate plans to add a Valkey 9.1 replica to each primary. It syncs, gets promoted, and DNS moves to it. INFO commandstats on one primary shows INCREX, DELEX, HSET and EVALSHA. (a) Walk through what happens at the first sync. (b) Which of the four commands fail after the switch, and what replaces each? (c) Design a plan that works, and give its length at 30 primaries a week. Name two security checks each new cluster must pass before it takes traffic.
+
+Answer sketch(a) The new replica asks for a whole snapshot and receives format 15. Under its default strict check, Valkey 9.1.2 loads nothing in the range 12 to 79, so the replica never comes up. This is read from the Valkey source and was not run. (b) INCREX arrived in Redis 8.8 and DELEX in Redis 8.4, and Valkey 9.1.2 has neither. Use the INCR plus EXPIRE script for the first and DELIFEQ for the second. HSET works, and EVALSHA works once each script is loaded again on the new node. (c) For caches, write to both engines for one full TTL, then move reads in waves with the least critical first. Keep the Redis primaries until the waves end, for a roll back. For data that must survive, copy by plain commands and compare key counts first. 40 / 30 = about 1.3 weeks of switches. Before traffic, each service needs its own ACL user with default off. In cluster mode, close the bus port to other hosts, because Valkey 9.1.2 has no option that refuses an open bus.
+
 ## Cheatsheet
 
 Open the cheatsheet
@@ -960,6 +1258,29 @@ c2 WHAT REDIS LOSES
   correctness  conditional write / fencing token at the durable store
   unlock     DELEX key IFEQ token (Redis 8.4+), DELIFEQ (Valkey 9.0+)
   rank       happened and can recur? -> cost of loss for the job -> cost of fix
+
+c2 MOVING TO VALKEY
+  fork point     Valkey = Redis 7.2.4, BSD-3; Redis 7.4+ RSALv2/SSPLv1, 8.0+ adds AGPLv3
+  RDB written    Redis 7.2.4 = 11, 7.4 and 8.0 = 12, 8.10.2 = 15; Valkey 8.x = 11, 9.x = 80
+  Valkey strict  refuses 12-79 (rdb-version-check strict, default): sync, file, RESTORE
+  so             Redis <= 7.2: replica cutover / RDB copy / ElastiCache engine change
+                 Redis >= 7.4: copy by plain commands (blue/green) or dual writes
+  Redis only     52 names: INCREX DELEX DIGEST HOTKEYS LMOVEM XACKDEL AR* BACKUP ...
+  Valkey only    18 names: DELIFEQ COMMANDLOG CLUSTERSCAN CLUSTER MIGRATESLOTS ...
+  Valkey later   HEXPIRE HGETEX HSETEX 9.0; HGETDEL MSETEX 9.1
+  defaults       Valkey: 6 lazyfree settings yes; repl-backlog-size 10mb vs 1mb
+  identity       Valkey INFO: redis_version:7.2.4 + server_name:valkey + valkey_version
+  ElastiCache    Valkey 20% cheaper nodes, 33% Serverless; writes pause seconds
+                 (from 5.0.6), 30-60 s DNS before 5.0.6; node IPs change
+  check          go run ./phase06_production/engine_gap -commandstats
+
+c2 SECURITY AND KUBERNETES ROWS
+  ACL user per service, default off; no @dangerous; @scripting only if needed
+  TLS on clients + tls-replication; bus port = port+10000, members only, tls-cluster
+  protected-mode yes; a remote PING with no password must fail
+  SECURITY releases patched by an owner (8.10.1 and 8.10.2 are both SECURITY)
+  turning on AUTH is a client change (GitHub, Container registry)
+  liveness probe never calls Redis (Harness); readiness may
 
 c3 HIT RATE
   origin load = traffic x (1 - h);  change = (1 - h2) / (1 - h1)
@@ -1050,3 +1371,47 @@ Open the sources
 - LinkedIn presence platform: heartbeats, d + ε expiry and the d + 2ε check.
 
 - Redis developer docs and ElastiCache best practices: the phase's capstone reading, to reread with this review in mind. The phase also suggests chapter 1 of Kleppmann's Designing Data-Intensive Applications.
+
+- Valkey migration guide: Redis CE 7.4 and later files are not compatible, and the replica and cluster cutover steps.
+
+- Valkey 9.1.2 rdb.h: RDB version 80 and the range 12 to 79 kept for Redis formats.
+
+- Valkey 9.1.2 version.h: REDIS_VERSION "7.2.4", the number INFO shows on every Valkey.
+
+- Redis 8.10.2 cluster.c: the DUMP footer and the version check on RESTORE.
+
+- Redis 8.10.2 release notes: two SECURITY releases, the bus port fix and the MULTI ACL fix.
+
+- ElastiCache engine upgrades: the CLI command, a few seconds of failover from 5.0.6, and 30 to 60 seconds before it.
+
+- ElastiCache pricing: Valkey 20% lower on nodes and 33% lower on Serverless.
+
+- ElastiCache Extended Support: the support end dates of old Redis OSS versions.
+
+- ElastiCache service updates: critical updates in the maintenance window, the rest self-service.
+
+- Redis licensing change and Redis AGPLv3 option: the licence history, from the vendor.
+
+- Linux Foundation Valkey launch: the fork from Redis 7.2.4 and its founding members.
+
+- Valkey clients: the libraries the project tests, and the rule for all other clients.
+
+- Amazon Ads on Valkey: dual writes with a 100 ms timeout, over 45% lower cost, 12% more throughput.
+
+- ElastiCache Valkey migration story: a travel company's in-place change, 20% lower cost.
+
+- MaiCoin blue/green: why blue/green over in place, and the RedisShake settings.
+
+- Aiven, 15,000 services: a button for about 4,000 and maintenance windows for about 11,000.
+
+- Snap's move, by Momento: the RESP proxy, the 8.2 RC crash and the full-sync loop.
+
+- Airbnb's cutover, by Classmethod: a replica cutover from EC2 Redis to ElastiCache, in Japanese.
+
+- RedisShake: the copy tool MaiCoin used, and the source versions it supports.
+
+- GitHub availability report, February 2023: enforcing Redis AUTH broke a hard-coded client.
+
+- Harness status incident: a liveness probe that checked Redis restarted healthy pods.
+
+- Kubernetes probes: a liveness probe should signal only a failure the app cannot recover from.

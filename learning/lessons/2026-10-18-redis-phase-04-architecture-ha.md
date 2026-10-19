@@ -887,7 +887,127 @@ Stack Overflow ran 2 physical Redis servers per data center, with 256 GB of RAM 
 
   Run E9, then type CLUSTER KEYSLOT foo on any cluster and expect 12182.
 
-This is the last teaching section. The recall below collects the five claims and hands over to Phase 5.
+Cluster mode has a clear price. The next section asks what distance costs you, and the one after it what the network can do to a Redis with no guard.
+
+## What does a region failover lose, and what do cross-AZ reads cost?
+
+A region failover keeps only the writes that crossed the link, and a cross-AZ read is billed in each direction.
+
+You saw that a failover inside one region can lose the acknowledged writes a replica had not received. A whole region can fail the same way, and then the cost is larger and the bill is a second surprise.
+
+Your agent service runs in one region, with a read-only standby in a second region that copies the primary over a wide-area link. An Availability Zone (AZ) is one or more data centers inside one cloud Region, and a Region has several AZs. Traffic inside one AZ is free. Traffic across AZs in one Region is billed, and traffic across Regions is billed more. The link to the standby is asynchronous, like the replication in this phase, so the standby holds only what reached it.
+
+- same AZ$0.00 per GB
+
+- across AZs, one Regionabout $0.01 per GB, in each direction
+
+- across Regionsabout $0.02 per GB out of us-east-1
+
+AWS data transfer, us-east-1 price list. One GB that crosses AZs costs about $0.02, because it is billed when it leaves and when it enters. That rule is from Corey Quinn's 2019 test.
+
+Predict: the primary region dies. In its last second it acknowledged 40 session writes and 1 run lock that the standby had not received. You promote the standby. What do those 40 users see, and what can happen to the run?
+The 40 sessions are not on the standby, so those users are logged out and sign in again. The run lock is also absent, so a second worker in the new region runs SET lock NX, gets it, and runs the same run the first worker still believes it holds. The usual guess is "the standby has everything, so a failover is clean". That is true only for the writes that crossed the link before the region died.
+
+The cost and the loss both follow from asynchronous replication across distance.
+
+1. A read from a replica in another AZ crosses an AZ boundary on every reply. The ElastiCache pricing page says there is no charge for traffic in or out of the cache node itself, so replication between AZs is free. That step is inferred from the page. The charge is on the traffic between your application and the cache. So you read from a replica in the same AZ as the client.
+
+2. AZ-aware reads are a client feature, not a server one. go-redis v9.5.1 has RouteByLatency but no AZ option. Lettuce has ReadFrom.subnet(...). Valkey GLIDE has AZ_AFFINITY and needs a client AZ that matches the AZ the server reports.
+
+3. For the server to report its AZ, Valkey 8.0 added the availability-zone config, shown in INFO and, since Valkey 8.1, in the HELLO reply. Redis 8.10.2 has no such setting.
+
+4. Open-source Redis and Valkey have no multi-primary across Regions. A cross-region replica is an ordinary REPLICAOF over the wide-area link, and you promote it and move clients yourself. This is inferred from the replication docs, and was not checked against every Valkey page.
+
+5. ElastiCache Global Datastore has one writable Region and read-only secondaries. AWS does not fail over across Regions for you. You promote a secondary by hand. The AWS product page, not the docs, says this takes less than 1 minute. Writes not yet replicated are lost, which is inferred from the asynchronous link.
+
+6. At a region failover each kind of data loses its unreplicated window, and each loss is different.
+
+  DataWhat a region failover loses
+
+  Sessionsusers whose session was in the window log in again
+
+  Locksa lock in the window is absent, so two workers can run one run
+
+  Rate-limit countersthe count falls back, so users get extra quota in the window
+
+  Cachesthe window's keys are misses, so the standby's database is read
+
+Each loss follows from the writes the standby had not received when the region died.
+
+Uber chose not to replicate its cache values across Regions. CacheFront serves over 40 million requests a second across Uber's Docstore instances. A cold cache in the other Region would add database load at a failover, and that would stop Uber from shrinking its database. Uber copies the key names, not the values, to the other Region, so the other Region reads each row from its own database and fills its own cache. Cloudflare shows the session case: its dashboard sessions lived in Redis and could not move across the ocean without disruption, so moving traffic to the second data center helped the API and hurt the dashboard.
+
+Evidence
+AWS data transfer prices: the us-east-1 Price List file for AWSDataTransfer, SKU PNUBVW4CPC8XA46W, publication 2026-09-16. The "each direction" wording: Corey Quinn, Last Week in AWS, 2019-10-21, a 10 GB test billed as 20 cents. The Valkey blog "Reducing application latency and lowering Cloud bill", 2025-01-08, priced cross-AZ transfer at $0.01 per GB counted once, for 250 MB/s of reads with half crossing AZs. It measured a same-AZ read at about 300 µs and a cross-AZ read at about 800 µs, and cut a test from $4,373 to $1,088 a month, of which $3,285 was cross-AZ transfer (vendor source). go-redis v9.5.1 osscluster.go has no AZ field. Valkey availability-zone: valkey.conf 9.1.2 line 541. No cross-region autofailover: the AWS Global Datastore prerequisites page. Under a minute: the AWS Global Datastore product page. Uber: the Uber engineering blog, 2024-02-15, a vendor source, "In case of a region failover, another region must be able to serve all requests" and "By replicating keys instead of values, we always ensure that the data in the cache is consistent with the database". Cloudflare: its blog, 2020-11-27, sessions "cannot currently be moved across the ocean without disruption". A local run of the region-failover lab on 2026-10-19 lost 25 of 125 sessions and let a second worker take the lock.
+
+  A region failover keeps only the replicated writes, and a cross-AZ read is billed in each direction.
+
+  Keeping sessions or locks only in one region's Redis. At a failover users log in again, and one lock can be held by two workers.
+
+  Run E15: promote a standby and watch 25 sessions and a lock vanish. Then run E16 for the cross-AZ bill.
+
+Distance costs money and loses writes. The next section asks what you must set up so the network cannot take the whole server.
+
+## What must you secure before Redis faces the network?
+
+Redis trusts the network, so you add per-service ACL users, TLS, bus authentication, and prompt patching.
+
+Cluster mode changed what your client must do for every key. The network changes what any client can do to the whole server, because Redis is built for trusted clients inside a trusted environment.
+
+Your agent service's Redis holds sessions, locks and a tool cache. If the port is reachable with no password, any client runs every command, including one that erases it. The defence is three layers: the shipped defaults, one ACL user per service, and TLS. An ACL, access control list, is a named user with a password, a set of allowed commands, and a set of allowed key and channel patterns.
+
+- networkshipped config binds loopback only
+
+- protected modeno password on the default user, so reject non-loopback
+
+- ACL usera password, a command set, a key set
+
+- TLSencrypt the client link, and map a certificate to a user
+
+- dangerous offDEBUG, MODULE LOAD, CONFIG SET dir refused by default
+
+The layers an unauthorized command must pass. Each one is a separate setting.
+
+Predict: you give the cache service one user: ACL SETUSER cache on >pw resetkeys ~cache:* -@all +@read +@write +@connection. It can read and write only cache:* keys. Can it still erase the whole server?
+Yes. FLUSHALL, FLUSHDB and SWAPDB take no key, so the ~cache:* pattern never applies to them. The user has +@write, and FLUSHALL is a write command, so it is allowed. The usual guess is "a key pattern limits the user to its keys". A key pattern limits keyed commands only. You must remove the dangerous category by command.
+
+The protection comes from the defaults and from how the rules are read.
+
+1. Protected mode is on by default. When the default user has no password, Redis rejects every connection that is not from loopback, and sends a -DENIED error. It turns off as soon as the default user gets a password, even a weak one.
+
+2. A command belongs to one or more categories, such as @read, @write, @dangerous, @admin and @scripting. You grant and remove categories, and the rules apply left to right.
+
+3. The fix for the cache user is -@dangerous placed after the grants. It removes FLUSHALL, FLUSHDB, SWAPDB, KEYS, SORT, MIGRATE, RESTORE and CLIENT KILL, which the plus rules had granted. A minus rule placed before +@write would be undone by the later grant.
+
+4. Add -@scripting too. EVAL is only in @scripting, so -@all already refuses it. But FUNCTION LOAD and FUNCTION FLUSH are also in @write, so +@write grants them, and FUNCTION LOAD runs Lua code. 8 of the 29 Redis advisories from 2023 to 2026 were Lua engine bugs.
+
+5. A key pattern limits access, not visibility. A SCAN as the cache user still lists key names outside cache:*, although a GET on them is refused. ACL LOG records each refusal with its reason, which is command, key, channel, auth or tls-cert.
+
+6. TLS encrypts the client link and can map a certificate to a user. With tls-auth-clients-user CN the certificate's Common Name picks the ACL user. A Common Name with no matching user leaves the client on the default user, and ACL LOG gets a tls-cert entry. If the default user is nopass, that client has every permission.
+
+```bash
+# WRONG: a key pattern, no command limits.
+ACL SETUSER cache on >pw resetkeys ~cache:* \
+    -@all +@read +@write +@connection
+ACL DRYRUN cache FLUSHALL   # -> OK  (wipes the whole server)
+
+# RIGHT: remove the dangerous and scripting categories last.
+ACL SETUSER cache on >pw resetkeys ~cache:* \
+    -@all +@read +@write +@connection -@dangerous -@scripting
+ACL DRYRUN cache FLUSHALL   # -> no permissions to run 'flushall'
+```
+
+The cluster bus is the second TCP port each cluster node opens, at the client port plus 10000. It has no authentication of its own unless tls-cluster yes. A CLUSTER MEET packet from any host that reaches the bus port adds that host as a node, and its gossip is trusted. In a local run a rogue node sent CLUSTER MEET to a two-node cluster, joined it, replicated the data, and then took every slot with CLUSTER FAILOVER TAKEOVER. The only thing that blocked the rogue from reading data was a client password on the primary, which failed its replication AUTH. The password did not stop the takeover. With it set, the rogue still took all 16384 slots, and clients were sent with MOVED to a node that held no keys. Redis 8.10.2 adds cluster-bus-port-protected-mode, default no, which makes a node refuse to start without tls-cluster when set to yes.
+
+Evidence
+Protected mode: src/networking.c:1608-1637 at Redis 8.10.2. Since Redis 7.0 a non-default bind no longer turns it off (7.0.0 release notes #9034). Categories and left-to-right rules: redis.conf:1059-1092; FLUSHALL is in @dangerous and @keyspace (COMMAND INFO on 8.10.1). The cache-user trap and its fix were run on 2026-10-19: ACL DRYRUN returned OK for FLUSHALL on the WRONG user and "no permissions" after adding -@dangerous, on redis-server 8.10.1. Lua CVEs: of 29 Redis advisories read from 2023 to 2026, 8 were Lua bugs, including CVE-2025-49844, scored 10.0, which needs an authenticated user (GitHub advisories API; Wiz blog, 2025-10-06). ACL LOG reasons: src/acl.c:3167-3182. tls-auth-clients-user CN since Redis 8.6; the 8.10.1 release fixed a NUL-byte Common Name bypass. Cluster bus: 8.10.2 release notes #15722; cluster-bus-port-protected-mode default 0 at src/config.c:3434. The rogue MEET run used loopback ports 6583 to 6588 on 2026-10-19. Dangerous commands off since 7.0: src/config.c:3496-3498, release notes #9920.
+
+  Redis trusts the network, so a deployment needs per-service ACL users with -@dangerous -@scripting, TLS, and bus authentication.
+
+  A key pattern with no command limits. The user still runs FLUSHALL, FLUSHDB and SWAPDB, which take no key.
+
+  Run E13: compare the WRONG and RIGHT ACL users, then run it with -break to watch the WRONG user FLUSHALL.
+
+This is the last teaching section. The recall below collects the claims and hands over to Phase 5.
 
 ## What you can do now, and what comes next
 
@@ -903,11 +1023,15 @@ The night at 02:10 now has an answer for each of its lines.
 
 - The route. In cluster mode no node forwards a keyed command, so the client's slot map decides routing. Keyspace events stay on one node, and PUBLISH goes to all of them. From the three cluster sections.
 
+- The distance. A region failover keeps only the replicated writes, so sessions, locks, rate limits and caches lose the lag window. A cross-AZ read is billed in each direction, so read from a same-AZ replica. From the region and AZ section.
+
+- The guard. Redis trusts the network, so you add per-service ACL users with -@dangerous -@scripting, TLS, cluster-bus authentication, and prompt patching. A key pattern alone does not stop FLUSHALL. From the securing-Redis section.
+
 You can now state the loss window of a Redis setup for each kind of failure, and predict how long its writes fail. You can also read a MOVED or CROSSSLOT error and choose one primary or a cluster for a workload. Phase 5 asks why a Redis that is up and replicated still answers slowly. It uses the fork, the replica reads and the hash slots from this phase for memory headroom, hot shards and big keys.
 
 ## Lab: the exercises that teach Phase 4
 
-Eleven of the phase's twelve exercises, under their own ids and copied from the phase. E11 is left out, because it reads a private repository of the former employer. The lab was not run for this lesson, and Docker was not available. The notes under some exercises come from a reading of the lab code and from local runs on Redis 8.10.1 under Rosetta 2.
+Sixteen of the phase's seventeen exercises, under their own ids and copied from the phase. E11 is left out, because it reads a private repository of the former employer. E1 to E12 use Docker, which was not available for this lesson, so their notes come from a reading of the lab code and from local runs on Redis 8.10.1 under Rosetta 2. E13 to E17 are new in this phase, and every one of them was run on 2026-10-19.
 
   IdeaExercises
 
@@ -919,7 +1043,11 @@ Eleven of the phase's twelve exercises, under their own ids and copied from the 
 
   Slots, hash tags and CROSSSLOTE9, E10, E12
 
-Open the lab: setup and E1 to E12
+  Multi-region and AZ cost (4.7)E15, E16
+
+  Securing Redis (4.8)E13, E14, E17
+
+Open the lab: setup and E1 to E17
 Setup (single node for some, multi-node compose for others):
 
 cd /Users/raghvendradhakar/Desktop/code/verly/study-material/redis/code
@@ -1028,6 +1156,61 @@ The demo's main() never prints foo. The value 12182 is right: a local run of CLU
 
 - Teaches: the exact rule for when multi-key ops are legal in cluster mode.
 
+The exercises below are for the region and security sections. They run against a throwaway server on port 6583 and a Unix socket, never on 6379. Every command below was run on 2026-10-19, on redis-server 8.10.1, an x86_64 Homebrew build under Rosetta 2 on an Apple M4 Pro. E16 is a written exercise. Start a server with:
+
+mkdir -p /tmp/p4lab
+redis-server --port 6583 --bind 127.0.0.1 -::1 --dir /tmp/p4lab --save '' --appendonly no --daemonize yes
+
+-  E13 break-it A per-service user that cannot wipe the server.
+
+- Run: go run ./phase04_ha/acl_service_user then go run ./phase04_ha/acl_service_user -break
+
+- Expected: the WRONG user (~session:* with no -@dangerous) runs FLUSHALL, and -break shows DBSIZE before 3 ... FLUSHALL as p4-naive -> OK. DBSIZE after 0. The RIGHT user gets no permissions to run the 'flushall' command. The model agrees with ACL DRYRUN on all 32 checks.
+
+- If it fails: check the server is on 6583 and empty. -break refuses to run if the server holds more than 3 keys.
+
+- Teaches: a key pattern does not limit keyless commands, so you need -@dangerous.
+
+-  E14 offline The ACL rule model self-test.
+
+- Run: go run ./phase04_ha/acl_service_user -self-test
+
+- Expected: all checks passed. Remove -@dangerous from rightRules and re-run: 5 checks fail, because FLUSHALL, FLUSHDB, SWAPDB, KEYS and CLIENT KILL become allowed. Remove -@scripting instead: 2 checks fail, because FUNCTION LOAD and FUNCTION FLUSH become allowed.
+
+- Teaches: the rules apply left to right, and the order of the minus rules decides the result.
+
+-  E15 break-it A region failover loses the unreplicated writes.
+
+- Run: go run ./phase04_ha/region_failover, after starting a second server on a socket.
+
+- Expected: the standby holds 100 of the primary's 125 sessions, so 25 users log in again. The counter falls from 125 to 100. The lock taken after the cut is absent, so SET ... NX by worker-B returns true. The standby matches the model on every row.
+
+- If it fails: check that /tmp/p4b/redis.sock exists and the primary is on 6583. The run takes about 6 seconds, mostly the full sync after the 5-second diskless delay.
+
+- Teaches: asynchronous cross-region replication loses the lag window at a failover, differently for each kind of data.
+
+mkdir -p /tmp/p4b
+redis-server --port 0 --unixsocket /tmp/p4b/redis.sock --dir /tmp/p4b --save '' --appendonly no --daemonize yes
+go run ./phase04_ha/region_failover
+
+-  E16 written The cross-AZ bill.
+
+- Reason: your service makes 2 TB of cross-AZ reads a month at $0.01 per GB in each direction. Compute the monthly transfer cost, and the cost if you pin reads to a same-AZ replica. Compare with the Valkey test's $3,285 against $1,088.
+
+- Expected: 2 TB = 2,048 GB. Each GB is billed $0.01 when it leaves one AZ and $0.01 when it enters the other, so $0.02 a GB. 2,048 × $0.02 = about $41 a month. A same-AZ read costs $0. The Valkey test counted $0.01 once and got $3,285 against a $1,088 cluster. Billed in each direction, its transfer part would be about twice that.
+
+- Teaches: cross-AZ transfer can cost more than the cluster, and AZ affinity removes it.
+
+-  E17 live A certificate mapped to an ACL user, and TLS replication.
+
+- Run: bash ./phase04_ha/tls_lab.sh
+
+- Expected: a plain TCP client is reset. A client certificate with CN=p4-sessions becomes the default user until that ACL user exists, then becomes p4-sessions. CONFIG SET tls-cert-file serves a new certificate without a restart (the served serial changes). A replica reaches the TLS-only primary only after CONFIG SET tls-replication yes.
+
+- If it fails: this needs a redis-server built with TLS. Check redis-cli --help | grep -i tls lists --tls, and otool -L $(which redis-server) lists libssl. This course's build has TLS. A build without it cannot run this exercise.
+
+- Teaches: TLS client-certificate authentication, the CN-to-user mapping and its default-user fallback, certificate rotation, and tls-replication.
+
 One more check, not in the phase
 
 The empty-restart case can be seen on the compose file, whose primary already runs with --save "". This is inferred from the local run and was not run in Docker. Write some keys to the primary, restart it, and read the replica's key count about 6 seconds later. Expect 0.
@@ -1040,7 +1223,7 @@ docker exec redis-replica-1 redis-cli DBSIZE   # expect 0
 
 ## Checkpoint questions
 
-Nine scenario questions with numbers. The phase's seven are rewritten without the former employer's names, and two come from the study note. Each one is answerable from this lesson.
+Eleven scenario questions with numbers. The phase's nine are rewritten without the former employer's names, and two cover the region and security sections. Each one is answerable from this lesson.
 
 Open the questions
 
@@ -1070,6 +1253,12 @@ Answer sketchNothing. The primary came back empty with a new replication ID befo
 
 - A 3-second blip. The primary takes 20 MB/s of writes, and a replica's link drops for 3 seconds. The backlog has its default size. Partial or full resync? What changes on Valkey 9.1.2, and what backlog would make it partial?
 Answer sketchThe gap is 60 MB. The Redis default backlog is 1 MB, so it is a full resync. Valkey's default of 10 MB still gives a full resync. A backlog above 60 MB, with a margin, keeps it partial.
+
+- A region failover. Your platform keeps session state and a lock per run in one region's Redis, with an async read-only standby in a second region. The region fails. In the last second it acknowledged 40 session writes and 1 run lock that had not replicated. (a) What do those 40 users see after you promote the standby? (b) What can now happen to that run? (c) Your cross-AZ read bill is $3,000 a month on a $1,000 cluster. Which client change removes most of it, and why?
+Answer sketch(a) The 40 sessions were not on the standby, so those users are logged out and sign in again. (b) The lock was not replicated, so a second worker in the new region runs SET lock NX, gets it, and runs the same run the first worker still holds. Two workers run one run. (c) Pin reads to a same-AZ replica. Cross-AZ transfer is billed in each direction and same-AZ transfer is free, so a same-AZ read removes the cross-AZ part. The Valkey test cut $4,373 to $1,088 this way.
+
+- One user, one wipe. A teammate creates one cache user: ACL SETUSER cache on >pw resetkeys ~cache:* -@all +@read +@write +@connection. (a) What command still erases every key, and why does ~cache:* not stop it? (b) The one rule you add, and where it must go. (c) A separate cluster runs with no tls-cluster and an attacker can reach the bus port. What single CLUSTER command joins their host, and which Redis 8.10.2 setting would have refused to start the node?
+Answer sketch(a) FLUSHALL (also FLUSHDB, SWAPDB). These take no key, so the ~cache:* pattern never applies, and +@write allows them. (b) Add -@dangerous after the plus rules, because rules apply left to right and a minus placed before +@write would be undone. Add -@scripting too, because +@write also grants FUNCTION LOAD. (c) CLUSTER MEET <host> <port> adds the host as a trusted node. cluster-bus-port-protected-mode yes makes the node refuse to start without tls-cluster.
 
 ## Cheatsheet
 
@@ -1120,12 +1309,41 @@ CLUSTER MODE
   atomic slot migration: Redis 8.4 CLUSTER MIGRATION, Valkey 9.0.
   choose: data, write rate and main-thread CPU fit one node? yes -> 1 primary.
 
+MULTI-REGION & AZ
+  cross-AZ transfer billed EACH direction (~$0.01/GB per direction, us-east-1).
+    same AZ = $0.00. cross-Region out of us-east-1 ~= $0.02/GB.
+  read from a SAME-AZ replica: Valkey test 800us -> 300us, $4,373 -> $1,088.
+    go-redis v9.5.1: RouteByLatency only. Lettuce: ReadFrom.subnet().
+    Valkey GLIDE: AZ_AFFINITY + client AZ. server AZ: Valkey availability-zone (8.0).
+  cross-region: no multi-primary in open source. Global Datastore = 1 writable
+    Region, manual promote, no autofailover. Active-Active (CRDT) = Redis Enterprise.
+  region failover loses the unreplicated window:
+    sessions -> re-login. locks -> two holders. counters -> extra quota. caches -> cold.
+  Uber: copy KEYS not values to warm a standby Region.
+
+SECURITY
+  trust model: Redis trusts the network. protected-mode yes + default nopass
+    -> reject non-loopback. A password on default turns protected mode OFF.
+  one ACL user per service: -@all +@read +@write +@connection -@dangerous -@scripting
+    key pattern ~x:* does NOT limit FLUSHALL/FLUSHDB/SWAPDB (no key) -> need -@dangerous.
+    +@write grants FUNCTION LOAD/FLUSH (Lua) -> -@scripting removes them. EVAL is not in @write.
+    SCAN still LISTS names outside the pattern. ACL LOG logs denials.
+  TLS: off by default. tls-auth-clients-user CN -> ACL user (no match -> stays DEFAULT + ACL LOG tls-cert).
+    tls-replication / tls-cluster separate, default no.
+  cluster bus: no auth without tls-cluster. MEET from any host joins it.
+    a client password stops the rogue's replication, NOT its slot takeover.
+    cluster-bus-port-protected-mode (8.10.2, default NO) -> refuse start without tls-cluster.
+  dangerous OFF by default (7.0+): DEBUG, MODULE LOAD, CONFIG SET dir. rename-command deprecated.
+  8.10.1 and 8.10.2 are SECURITY releases. 8/29 recent CVEs are Lua -> drop @scripting.
+
 INVESTIGATE
   INFO replication / ROLE  -> role, connected_slaves, offset, lag, link status
   INFO persistence         -> rdb_last_save_time, aof_enabled, aof_delayed_fsync
   INFO stats               -> latest_fork_usec
   CLUSTER INFO / CLUSTER SHARDS / CLUSTER KEYSLOT key
   aws elasticache describe-replication-groups
+  ACL LIST / ACL DRYRUN user cmd / ACL LOG   -> what each user may do, and denials
+  CONFIG GET availability-zone (Valkey) / tls-* / cluster-bus-port-protected-mode
 
 ## Sources
 
@@ -1209,3 +1427,27 @@ Production cases
 - https://www.slideshare.net/RedisLabs/redisconf18-2000-instances-and-beyond Lyft: 2,000 instances with no persistence by choice.
 
 - https://github.blog/engineering/infrastructure/moving-persistent-data-out-of-redis/ GitHub: data that existed only in Redis moved to MySQL.
+
+Multi-region and AZ (4.7)
+
+- https://aws.amazon.com/elasticache/pricing/ No charge for traffic in or out of the node itself, and application traffic across an AZ is billed. The Global Datastore example charges $0.02/GiB out of the primary Region.
+
+- https://valkey.io/blog/az-affinity-strategy/ The 300 us vs 800 us read, and the $4,373 to $1,088 cut with AZ affinity (vendor source).
+
+- https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Redis-Global-Datastore.html One writable primary Region, read-only secondaries, asynchronous replication, promotion for disaster recovery.
+
+- https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Redis-Global-Datastores-Getting-Started.html Up to two secondary Regions, and no autofailover across Regions. Read the promotion bullet.
+
+- https://www.uber.com/en-GB/blog/how-uber-serves-over-40-million-reads-per-second-using-an-integrated-cache/ Uber CacheFront: copy keys, not values, across Regions (vendor source).
+
+- https://blog.cloudflare.com/a-byzantine-failure-in-the-real-world/ Cloudflare dashboard sessions in Redis that could not move Regions.
+
+Securing Redis (4.8)
+
+- https://redis.io/docs/latest/operate/oss_and_stack/management/security/ The trust model, protected mode, and the code-security notes on CONFIG and dir.
+
+- https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/ Users, categories, key and channel patterns, selectors, and ACL LOG.
+
+- https://redis.io/docs/latest/operate/oss_and_stack/management/security/encryption/ tls-auth-clients, tls-replication, tls-cluster, and the certificate files.
+
+- https://www.wiz.io/blog/wiz-research-redis-rce-cve-2025-49844 The Lua RCE CVE-2025-49844, why dropping @scripting reduces risk, and exposed-instance counts (vendor source).
