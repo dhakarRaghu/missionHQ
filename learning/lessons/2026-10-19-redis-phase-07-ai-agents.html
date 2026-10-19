@@ -1,0 +1,1619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redis for AI agents</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Redis · Phase 7</div><h1>Redis for AI agents</h1><p class="subtitle">Which agent data can Redis lose, and how do caches, vectors, memory, token streams, limits and tool queues fail when the data is probabilistic, long and paid per token?</p></header>
+<p>Phase 6 reviewed how a shared Redis behaves when a client waits, a key is evicted or a server misses a message. This last phase builds the AI features on top of that knowledge. The running case is a support agent platform with two tenants, acme and globex. API pods take user questions, call a model provider, call paid tools, and stream answers to a web page. Every section and every lab is one part of that platform.</p>
+
+<p>An <dfn>AI agent</dfn> is a program that calls a model in a loop, calls tools and keeps state between the calls. The platform uses Redis for six jobs: an answer cache, an embedding cache, memory, token streams, limits and a tool-call queue. Each job looks like a pattern from Phases 1 to 3, but it breaks in a new way here. The data is probabilistic, because a cache hit depends on a similarity score. It is long, because an answer streams for seconds. And it is paid per token or per call, so a mistake costs money that no log line shows.</p>
+
+<p>Two failures show the size of the problem. With no tenant scope, the lab cache served acme's answer to a globex user at a similarity of 1.000. With a token budget that never corrects its estimates, the lab limiter admitted 6 calls where 15 fit.</p>
+
+<h3>What you must know</h3>
+<ol class="concepts">
+<li id="c1"><b>A semantic cache's threshold sets its hit rate, not its error rate, so correctness comes from scope and measurement.</b><span>Pick a threshold from labelled traffic, and scope every entry by tenant and model.</span></li>
+<li id="c2"><b>A vector costs its bytes plus a graph cost that grows with M, and quantisation sets the recall ceiling.</b><span>Size a vector index from the graph, and tune EF only when the search is the limit.</span></li>
+<li id="c3"><b>A TTL belongs to the value that was written, so an overwrite or a split write can make memory permanent.</b><span>Write agent memory so every value and field keeps its TTL.</span></li>
+<li id="c4"><b>Pub/sub delivers at most once and Streams at least once, so readers keep positions and workers keep idempotency records.</b><span>Build a token stream a client can resume and a tool queue that never pays twice.</span></li>
+<li id="c5"><b>A shared LLM limit must reserve an estimate before the call and correct it after, in the same window.</b><span>Build a token budget, an in-flight cap and a shared 429 pause across pods.</span></li>
+</ol>
+
+<h2 data-kind="orientation">Which earlier ideas does this phase use, and where does Redis sit?</h2>
+
+<p>Six ideas from earlier phases come back here. Each card explains one again in a few sentences, so you do not need to reopen the earlier lesson.</p>
+
+<div class="cards" data-cols="2">
+<div class="card"><h4>Persistence and replication lose recent writes</h4><p>Phase 4 showed that AOF is off by default. So a crash loses everything since the last RDB snapshot. Replication is asynchronous, so a failover can lose writes the old primary had acknowledged, including <code>XADD</code> entries.</p></div>
+<div class="card"><h4>Eviction removes keys under memory pressure</h4><p>Phase 5 showed that the default <code>maxmemory-policy</code> is <code>noeviction</code>. With <code>allkeys-lru</code>, Redis may remove any key, including keys that have no TTL.</p></div>
+<div class="card"><h4>Hash fields can expire one by one</h4><p>Phase 1 showed that <code>HEXPIRE</code> gives one hash field its own TTL. A small hash with field TTLs keeps a compact encoding. This phase uses field TTLs for agent memory.</p></div>
+<div class="card"><h4>A cache fill can return old or wrong data</h4><p>Phase 2 taught cache-aside with its miss path and fill path. It added delete-on-write and TTL jitter. A semantic cache keeps all of that and adds a new way to be wrong.</p></div>
+<div class="card"><h4>Claims, leases and idempotent writes</h4><p>Phase 3 claimed work with a lease, using <code>SET key owner NX PX ms</code>. It also showed that the resource must refuse a repeated effect. A paid tool call needs the same idea.</p></div>
+<div class="card"><h4>Pub/sub keeps no copy</h4><p>Phase 6 showed that a pub/sub message reaches only the subscribers connected at that moment. A server that was away reads the gap from a log, never from pub/sub.</p></div>
+</div>
+
+<p>These ideas decide which of the six jobs can live only in Redis. Four jobs hold data you can rebuild. Two hold data that someone paid for, or that a user expects to see again.</p>
+
+<figure class="diagram"><svg viewBox="0 0 720 300" role="img" aria-label="An API pod between the web page, the model provider, Redis and a durable store">
+<g fill="none" stroke="currentColor" stroke-width="1.5">
+<rect x="20" y="20" width="150" height="56" rx="6"/>
+<rect x="285" y="20" width="150" height="56" rx="6"/>
+<rect x="550" y="20" width="150" height="56" rx="6"/>
+<rect x="20" y="170" width="210" height="110" rx="6"/>
+<rect x="255" y="170" width="210" height="110" rx="6"/>
+<rect x="490" y="170" width="210" height="110" rx="6"/>
+<path d="M170 48 H285"/><path d="M435 48 H550"/>
+<path d="M360 76 V120 H125 V170"/><path d="M360 120 V170"/><path d="M360 120 H595 V170"/>
+</g>
+<g fill="currentColor" font-size="13" text-anchor="middle">
+<text x="95" y="53">Web page</text>
+<text x="360" y="53">API pod (x N)</text>
+<text x="625" y="45">Model provider</text><text x="625" y="63">RPM, TPM, 429s</text>
+<text x="227" y="40">question, tokens</text>
+<text x="492" y="40">prompt, tokens</text>
+<text x="125" y="192">Redis: may lose</text>
+<text x="125" y="215">answer cache</text><text x="125" y="233">embedding cache</text>
+<text x="125" y="251">token streams</text><text x="125" y="269">limit counters</text>
+<text x="360" y="192">Redis: never the only copy</text>
+<text x="360" y="222">working memory</text><text x="360" y="244">tool-call queue</text>
+<text x="595" y="192">Durable store</text>
+<text x="595" y="215">transcripts, runs</text><text x="595" y="233">long-term memory</text>
+<text x="595" y="251">tool results</text><text x="595" y="269">billing</text>
+</g></svg>
+<figcaption>Where each of the six jobs keeps its data. The left box may live only in Redis.</figcaption></figure>
+
+<table>
+<thead><tr><th>Job</th><th>If Redis loses it</th><th>Durable copy needed</th></tr></thead>
+<tbody>
+<tr><td>Answer and embedding cache</td><td>more paid model calls</td><td class="ok">no</td></tr>
+<tr><td>Token stream</td><td>a viewer reloads the answer</td><td>the final answer</td></tr>
+<tr><td>Limit counter</td><td>a short burst over the limit</td><td class="ok">no</td></tr>
+<tr><td>Working memory</td><td>the agent forgets the session</td><td class="bad">yes, if a user can return</td></tr>
+<tr><td>Tool-call queue</td><td>a paid call is lost or runs twice</td><td class="bad">the call and its result</td></tr>
+</tbody></table>
+
+<p>Two published designs follow this split. <b>LangSmith Agent Server</b> keeps a worker wake-up list, cancel signals, the pub/sub stream of output and a retry counter in Redis. Its docs state that no user or run data is stored in Redis, and Postgres holds runs, threads, state and long-term memory. <b>Inngest</b> ran its queue of customer jobs on Valkey. When a Valkey cluster ran out of memory, the whole cluster went down, not only the tenant that filled it. After about two years of patches, Inngest is moving the queue state to FoundationDB.</p>
+
+<div class="callout warn"><p><b>Correction.</b> The phase cited the Inngest post "the queue is the easy part" for why the queue left Valkey. That URL is a post about fairness in a multi-tenant queue. The reasons for leaving Valkey are in "Our Migration to FoundationDB, Part 1".</p></div>
+
+<p>The common mistake with this split is one shared Redis with <code>allkeys-lru</code> for the cache and for working memory. Under memory pressure, Redis then evicts live sessions in the same way as stale cache entries. Put each class of data in its own instance, or give the memory keys TTLs and use <code>volatile-lru</code>. To check a Redis you own, run <code>redis-cli CONFIG GET maxmemory-policy appendonly</code>, and mark each job it holds against the table above.</p>
+
+<details class="answer deeper"><summary>Go deeper: the durability defaults, and the two published designs in detail</summary>
+<ul>
+<li>AOF is off by default. With <code>appendfsync everysec</code>, a crash loses up to about 1 second of writes. With the default rules <code>save 3600 1 300 100 60 10000</code>, RDB alone can lose up to an hour of writes. These are the <code>redis.conf</code> values at 8.10.2.</li>
+<li><code>maxmemory-policy</code> defaults to <code>noeviction</code>. With <code>allkeys-lru</code>, Redis evicts memory keys that have no TTL.</li>
+<li>Replication is asynchronous, so a failover can lose <code>XADD</code> writes as well as plain keys.</li>
+<li>LangSmith limits retries to 3 per run, with the counter in a Redis string that expires. Its output streams over pub/sub, and the next sections show why that is safe only because a durable copy lives elsewhere.</li>
+<li>Inngest's queue ran on one execution thread per cluster, so the queue could only peek at and process a subset of accounts on each pick. Recovery also reloaded on one thread. Inngest splits queue shards by billing tier, and the second part of its migration series gives about 20,000 accounts per logical shard on FoundationDB. Its companion post gives "hundreds of millions of items in flight".</li>
+</ul>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p><code>redis.conf</code> at tag 8.10.2, lines 506, 1266, 1491 and 1550. LangSmith data-plane page, line 34: "No user or run data is stored in Redis." Inngest, "Our Migration to FoundationDB, Part 1", 2026-08-24, and Part 2, 2026-10-14. Vendor sources. The title correction comes from fetching both Inngest pages on 2026-10-19.</p>
+</details>
+
+<p>The cheapest job to lose is the answer cache, and it is also the one that can return a wrong answer with no error. The next section starts there.</p>
+
+<h2 data-concept="c1">Why does an exact cache miss most questions, and what does a semantic cache return instead?</h2>
+
+<p class="why">A cache hit skips a paid model call, and a wrong hit returns a confident wrong answer.</p>
+
+<p>The answer cache sits first in the platform's request path, because a hit there skips the model call, which costs seconds and money. The obvious design keys each answer by a hash of the normalised prompt. In the lab set of 26 user questions, that <dfn>exact-match cache</dfn> hit 2 times, because users rarely type the same sentence twice.</p>
+
+<p>A <dfn>semantic cache</dfn> stores each answer with the embedding of its prompt. An <dfn>embedding</dfn> is a vector that a model computes to represent the meaning of a text. Two paraphrases get vectors that point in similar directions. For a new prompt, the cache finds the nearest stored prompt and returns its answer if the similarity is above a threshold. The similarity is usually <dfn>cosine similarity</dfn>, the cosine of the angle between two vectors, which is 1 when they point the same way.</p>
+
+<ol class="flow">
+<li><b>API pod</b><span>gets the prompt.</span></li>
+<li><b>embedder</b><span>turns it into a vector.</span></li>
+<li class="hot"><b>Redis search</b><span>finds the nearest stored prompt in this tenant and model version.</span></li>
+<li class="ok"><b>cos ≥ threshold</b><span>HIT: return the stored answer.</span></li>
+<li class="bad"><b>cos &lt; threshold</b><span>MISS: call the model, then store vector, answer and TTL.</span></li>
+</ol>
+
+<details class="predict"><summary>Predict: you raise the threshold from 0.90 to 0.99. What happens to the hit rate, and to the share of hits that are wrong?</summary>
+<p>The hit rate falls by about two thirds, from 74.5% to 23.5% in the published AWS test below. The share of hits that are wrong barely moves, from 7.7% to 7.9%. Most people expect a stricter threshold to remove the wrong answers first. That is reasonable, because a higher score sounds like a safer match. But the score measures how close two texts are, not whether the two questions need the same answer, so right and wrong hits sit at about the same scores.</p>
+</details>
+
+
+<p>Libraries pick their threshold for you. RedisVL, Redis's Python library for AI work, defaults to a cosine distance of 0.1, which is about 0.9 similarity, and to entries that never expire. LangCache, Redis's managed semantic cache, defaults to a similarity of 0.85.</p>
+
+<p>The lab <code>semcache</code> stores 16 answers and asks 26 questions, each labelled with its right answer or "none". Its embeddings are a hashed bag of words, so the numbers show the mechanism, not a real model. With Q8 vectors and the tenant filter on, it measured the sweep below.</p>
+
+<div class="bars">
+<div class="bar" style="--v:22" data-label="0.60: hits" data-value="22 hits, 7 wrong, 1 missed"></div>
+<div class="bar" style="--v:18" data-label="0.70: hits" data-value="18 hits, 3 wrong, 1 missed"></div>
+<div class="bar" style="--v:16" data-label="0.78: hits" data-value="16 hits, 2 wrong, 2 missed"></div>
+<div class="bar" style="--v:12" data-label="0.85: hits" data-value="12 hits, 1 wrong, 5 missed"></div>
+<div class="bar" style="--v:10" data-label="0.90: hits" data-value="10 hits, 0 wrong, 6 missed"></div>
+<div class="bar" style="--v:2" data-label="exact match" data-value="2 hits, 0 wrong, 14 missed"></div>
+</div>
+
+<p>Two of the questions show why one threshold cannot separate right from wrong. "Price of the Pro Max plan?" scored 0.866 against the cached "Pro plan" question, and that hit is wrong. "Price of the Pro plan per month" scored 0.775 against the same entry, and that hit is right. So the wrong question is closer than the right paraphrase. Two refund questions both scored 0.800. "Refund within 30 days?" was a wrong hit, and "refund possible after 30 days?" was a right one. No threshold can split two hits with the same score. Both values come from word counts, in closed form.</p>
+
+<pre><code data-lang="text">3 shared words, texts of 4 and 3 words:  3 / sqrt(4 x 3) = 3 / sqrt(12) = 0.866   WRONG
+3 shared words, texts of 5 and 3 words:  3 / sqrt(5 x 3) = 3 / sqrt(15) = 0.775   right
+any threshold &lt;= 0.775 accepts both; any threshold &gt; 0.866 rejects both</code></pre>
+
+<p>At 0.90 this small lab set happened to have no wrong hits, but it also missed 6 right answers. A real model gives other numbers, and the next section shows them.</p>
+
+<details class="answer deeper"><summary>Go deeper: the RedisVL and LangCache defaults in full</summary>
+<p>RedisVL, Redis's Python library for AI work, shows what a typical semantic cache does by default. Its <code>SemanticCache</code> is configured like this at v0.28.0.</p>
+
+<table>
+<thead><tr><th>Setting</th><th>Default</th><th>What it means</th></tr></thead>
+<tbody>
+<tr><td><code>distance_threshold</code></td><td>0.1 cosine distance</td><td>distance is 1 minus similarity, so about 0.9 similarity</td></tr>
+<tr><td><code>num_results</code></td><td>1</td><td>only the single nearest entry is checked</td></tr>
+<tr><td><code>ttl</code></td><td>None</td><td>entries never expire</td></tr>
+<tr><td>TTL on a hit</td><td>refreshed on every matched key</td><td>a hot entry never expires</td></tr>
+<tr><td>index</td><td>FLAT, COSINE</td><td>every lookup compares with every entry</td></tr>
+<tr><td>entry ID</td><td>SHA-256 of prompt and filter values</td><td>the model version is not part of the ID</td></tr>
+</tbody></table>
+
+<p>LangCache, Redis's managed semantic cache, defaults to a similarity threshold of 0.85 and no expiration. Its docs also say that no single value is correct for every use case.</p>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>RedisVL <code>semantic.py</code> at v0.28.0: <code>distance_threshold: float = 0.1</code> at line 64, <code>num_results: int = 1</code> at line 436, TTL refresh on hit at lines 519 to 521. <code>schema.py</code> line 42 for the entry ID. LangCache concepts page, line 45. The sweep was measured by the phase lab on Redis 8.10.1, x86_64 under Rosetta 2, and the 0.866 and 0.775 values are checked by the lab's self-test.</p>
+</details>
+
+<p>A small fake model cannot tell you how often a real cache is wrong. The next section asks what published tests with real embedding models found.</p>
+
+<h2 data-concept="c1">Why does a higher threshold not remove the wrong answers?</h2>
+
+<p>The lab showed one wrong question that scored higher than a right paraphrase. A published test with a real embedding model shows the same effect at scale. <b>AWS</b> ran 63,796 Chatbot Arena queries and their paraphrases through a semantic cache on ElastiCache for Valkey. Amazon Titan Text Embeddings V2 made the vectors, and Claude 3 Haiku wrote the answers. The cache started empty. For each threshold, the post reports an "accuracy", the share of hits whose stored answer fits the question. So the wrong share is 100% minus that accuracy.</p>
+
+<div class="calc" id="s3-aws">
+<h4>The AWS test, one threshold at a time.</h4>
+<label>Threshold row <input type="range" name="row" min="0" max="5" value="2"> <span class="val" data-val="row"></span></label>
+<div class="result">Threshold <b data-out="t"></b>. Hit rate <b data-out="hit"></b>. Wrong share of hits <b data-out="wrong"></b>. Cost per day <b data-out="cost"></b>. Wrong answers per 10,000 questions <b data-out="per"></b>.</div>
+<script>kit.calc('#s3-aws', function(v){ var r=[[0.99,23.5,7.9,41.7],[0.95,56.0,7.4,23.8],[0.90,74.5,7.7,13.6],[0.75,90.3,8.8,6.8],[0.50,94.3,12.5,5.9],[1.0,0,0,49.5]][v.row]; return {t: r[0]===1.0?'none (no cache)':kit.fmt(r[0],2), hit: kit.fmt(r[1],1)+'%', wrong: kit.fmt(r[2],1)+'%', cost: '$'+kit.fmt(r[3],1), per: kit.fmt(10000*r[1]/100*r[2]/100,0)}; });</script>
+<p>Real values from the AWS post. Row 5 is the run with no cache.</p>
+</div>
+
+<p>Move the slider from row 0 to row 3. The hit rate rises almost four times, from 23.5% to 90.3%, while the wrong share moves less than one point, from 7.9% to 8.8%. So in this test a strict threshold mostly removed right hits. The wrong share climbs clearly only below about 0.75, to 12.5% at 0.50.</p>
+
+<p>A research group that built a cache called vCache measured why. On 45,000 entries, right and wrong hits had almost the same mean similarity, 0.84 and 0.85, with a large overlap. The best threshold for each cached entry ranged from 0.71 to 1.0. If the two groups overlap, moving one global threshold removes right and wrong hits in about the same proportion. vCache therefore learns a threshold for each cached entry. On one dataset it reached a 41% hit rate, with wrong answers for 0.5% of all prompts. That is about 1.2% of its hits.</p>
+
+<div class="stats">
+<div class="stat"><b>86.3%</b><span>daily cost saved at 0.75 in the AWS test.</span></div>
+<div class="stat"><b>8.8%</b><span>of those hits wrong.</span></div>
+<div class="stat"><b>7.9%</b><span>wrong at 0.99, with 23.5% hits.</span></div>
+</div>
+
+<p>The cost arithmetic makes the trade clear. Without a cache the AWS run cost $49.5 a day, and at threshold 0.75 it cost $6.8. That is a saving of 1 − 6.8 / 49.5 = 86.3%, with 8.8% of hits wrong and no error in any log. So you trade money for wrong answers. The only way to know the rate is to label a sample of your own prompts and count.</p>
+
+<details class="answer deeper"><summary>Go deeper: how each source counts "wrong", and where these numbers stop holding</summary>
+<ul>
+<li>The AWS post does not say how it judged a correct hit. Its dataset was built from paraphrases, so its hit rates are likely higher than most real traffic. That is inferred from the dataset description.</li>
+<li>vCache counts errors as a share of all prompts, not of hits. A static threshold of 0.99 on SemCacheLMArena with E5-large-v2 and GPT-4o mini gave a 37% hit rate and 2.5% errors. As a share of hits that is 2.5 / 37 = 6.8%, close to the AWS figure.</li>
+<li>The 0.84 and 0.85 means come from the SemCacheClassification set, not from the LMArena row above. vCache is a preprint.</li>
+<li>No named company has published a wrong-hit rate from a production semantic cache. A search for one found vendor guides and stories with no company name.</li>
+</ul>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>AWS Database Blog, 2025-11-26, Table 1, node <code>cache.r7g.large</code>. Vendor benchmark. vCache, arXiv 2502.03771 v5, Table 3 and Appendix F.9: correct and incorrect hits "are nearly indistinguishable in similarity space". The 6.8% value is arithmetic on the published numbers. The 86.3% value matches the table's savings column. The table also has a 0.80 row, with 87.6% hits, 91.8% accuracy and $7.6 a day.</p>
+</details>
+
+<p>The threshold cannot make a hit correct, but one part of correctness does not depend on similarity at all. The next section covers that part, the scope of each entry.</p>
+
+<h2 data-concept="c1">What makes a cache hit wrong at any similarity?</h2>
+
+<p>The threshold decides how many hits you get, and labelled traffic tells you how many are wrong. One class of wrong hit has nothing to do with the score. An entry is valid only for the context that produced it. That context is the tenant, the locale, the model version, the prompt template version and the embedding model. A hit across any of these is wrong even at a similarity of 1.000.</p>
+
+<div class="compare">
+<div class="wrong"><p><b>semcache -scope none</b></p><p>The lab serves acme's CSV-export answer to a globex user at cos 1.000, and globex's password answer to acme. The 0.90 row now has 2 wrong hits instead of 0.</p></div>
+<div class="right"><p><b>semcache -scope filter or -scope key</b></p><p>The tenant is a filter on the search, or part of the key name. Both cross-tenant lookups miss, and the sweep returns to the scoped numbers.</p></div>
+</div>
+
+<p>Put each part of the scope in the key name or in a search filter. The tenant and locale stop one customer's answer reaching another. The model version and template version stop an answer from an old prompt being served after a change. The embedding model needs its own place, in the index name or a tag, for a different reason. A new embedding model puts new query vectors in another vector space, so every stored vector becomes useless at once. RedisVL helps only in part. It refuses to open an existing index whose schema differs, such as another vector dimension, unless you pass <code>overwrite=True</code>. A new model with the same dimension passes that check, so old and new vectors mix in one index. When you pass no vectorizer, RedisVL also logs a warning that its default model changed in version 0.6.0.</p>
+
+
+<p>Expiry has three rules that are special to LLM answers. Phase 2 already taught delete-on-write and TTL jitter, so only the new parts follow.</p>
+<ol>
+<li>RedisVL refreshes the TTL of every matched key on a hit, so a wrong answer that users hit often never expires. Delete it by ID when a user reports it.</li>
+<li>AWS suggests a TTL of around 23 hours plus random jitter for data that changes daily.</li>
+<li>Tag each entry with its source documents, and delete by tag when one of them changes. LangCache deletes entries by attributes in this way.</li>
+</ol>
+
+<p>Provider prompt caching is a different mechanism, and it cannot return a wrong answer. Anthropic and OpenAI cache the processed prompt prefix, and the model still generates a new answer. Anthropic's docs say prompt caching has no effect on output token generation.</p>
+
+<table>
+<thead><tr><th></th><th>Semantic cache in Redis</th><th>Provider prompt caching</th></tr></thead>
+<tbody>
+<tr><td>What is reused</td><td>the whole answer</td><td>the processed prompt prefix</td></tr>
+<tr><td>Can return a wrong answer</td><td class="bad">yes</td><td class="ok">no</td></tr>
+<tr><td>Saves output tokens</td><td class="ok">yes</td><td class="bad">no</td></tr>
+<tr><td>Lifetime</td><td>your TTL</td><td>Anthropic: 5 minutes by default, refreshed on use</td></tr>
+</tbody></table>
+
+<p>So use prompt caching for a long fixed system prompt, and a semantic cache for questions that repeat. In the running case, the platform's long support instructions belong in the provider cache. The repeated "how do I export to CSV" question belongs in Redis, scoped by tenant.</p>
+
+<div class="keypoints">
+<p class="remember">The threshold sets the hit rate, and scope and labelled samples decide correctness.</p>
+<p class="trap">A threshold of 0.99 "looks safe", yet the AWS test still served 7.9% wrong hits.</p>
+<p class="try">Run <code>go run ./phase07_ai_agents/semcache -scope none</code> and find the <code>WRONG answer served</code> line.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: where one library checks the model version</summary>
+<p>Libraries differ in where they check the scope, and the place matters. langchain-redis <code>RedisSemanticCache</code> stores the model string in metadata and checks it after the vector search. It asks for one result, so if the nearest entry came from another model, the lookup misses even when the second-nearest entry is valid. The effect on the hit rate is inferred from the code and was not measured.</p>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Scope runs measured by the phase lab, and the 2 wrong hits at 0.90 come from the review run. langchain-redis <code>libs/redis/langchain_redis/cache.py</code>, lines 494 to 499. RedisVL <code>semantic.py</code> at v0.28.0, lines 44 to 50 for the warning and 198 to 211 for the schema check, re-opened for this review. The schema compares the vector dimension and type, not the model name, in <code>schema.py</code> lines 116 to 135. AWS "around 23 hours", vendor. Anthropic prompt caching page, lines 212 and 769.</p>
+</details>
+
+<p>Every semantic cache lookup is a nearest-neighbour search over stored vectors. The next concept asks what that search costs in memory, and what limits its accuracy.</p>
+
+<h2 data-concept="c2">How much memory does one stored vector really take?</h2>
+
+<p class="why">A vector index costs more than its vectors, and the graph decides by how much.</p>
+
+<p>The semantic cache, the platform's long-term memory and any RAG retrieval all run the same nearest-neighbour search. <dfn>RAG</dfn>, retrieval-augmented generation, adds documents found by that search to the prompt. Before the platform stores a million support articles as vectors, you have to size the Redis node, and the obvious sizing is wrong.</p>
+
+<p>Redis 8 has two vector engines. <dfn>Vector sets</dfn> are a data type, and one key holds the vectors and an HNSW graph. <dfn>HNSW</dfn>, Hierarchical Navigable Small World, is a layered graph that finds near neighbours by walking from node to node along links. Each node keeps up to 2 × M links to its neighbours at the lowest layer, and up to M at each higher layer. So M sets the size of the graph. The Query Engine instead indexes many hash or JSON keys with <code>FT.CREATE</code>, and adds filters, full text and automatic sharding across a cluster.</p>
+
+<div class="tabs">
+<div data-tab="Vector sets: VADD / VSIM"><ul>
+<li>One key holds the vectors and the HNSW graph, with no schema.</li>
+<li>Q8 int8 quantisation by default.</li>
+<li>Filters on JSON attributes set with <code>SETATTR</code>.</li>
+<li>One key lives on one shard, so you split it yourself.</li>
+<li>Ran on the lab build.</li>
+</ul></div>
+<div data-tab="Query Engine: FT.CREATE / FT.SEARCH"><ul>
+<li>One index over many hash or JSON keys.</li>
+<li>A schema with <code>TYPE</code>, <code>DIM</code> and <code>DISTANCE_METRIC</code>. <code>TYPE</code> is required, such as <code>FLOAT32</code>.</li>
+<li>TAG, NUMERIC, TEXT and GEO filters.</li>
+<li>Shards across a cluster for you.</li>
+<li>Not on the lab's Homebrew build, so <code>FT.*</code> is an unknown command there.</li>
+</ul></div>
+</div>
+
+<details class="predict"><summary>Predict: you plan 2 million 128-dimension vectors in one vector set with Q8. Your sizing sheet says 2 M × 128 bytes = 256 MB. What is the real figure, and which setting changes it most?</summary>
+<p>About 2 M × 819 bytes, which is 1.6 GB, more than six times the sheet. M changes it most, at about 19 bytes per unit of M. The sheet counts only the vector, which is reasonable because the vector is the data you think of. But at 128 dimensions with Q8, the graph links, the node and the element name cost 5.4 times the vector itself.</p>
+</details>
+
+<p>The commands and defaults of vector sets below were read from the module at 8.10.2.</p>
+<ul>
+<li><code>VADD key FP32 &lt;blob&gt; &lt;element&gt; [Q8|NOQUANT|BIN] [M n] [EF n] [SETATTR json]</code> adds one vector. Q8 is the default.</li>
+<li>Q8 scales each vector to signed int8, one byte per dimension. NOQUANT keeps 4-byte floats. BIN keeps one bit per dimension.</li>
+<li>Defaults are M 16, build EF 200, search EF 100 and COUNT 10. EF is the size of the candidate list the search keeps, and the search raises it to COUNT when COUNT is larger.</li>
+<li><code>VSIM</code> returns (cos + 1) / 2, not the cosine. Convert it back before you compare it with a cosine threshold.</li>
+</ul>
+
+<p>The lab <code>vectorsets</code> loaded 20,000 clustered synthetic vectors of 128 dimensions and divided <code>MEMORY USAGE</code> by the element count.</p>
+
+<div class="stack">
+<h4>One Q8 element at 128 dimensions, M 16: 819 bytes.</h4>
+<div class="whole">
+<i style="--w:128;--c:var(--accent)" data-label="vector" data-value="128 B" data-note="int8, one byte per dimension"></i>
+<i style="--w:691;--c:var(--warn)" data-label="everything else" data-value="691 B" data-note="graph links, node, element name"></i>
+</div>
+</div>
+
+<p>The 691 bytes stayed the same at 128 and 384 dimensions, and for every quantisation. NOQUANT measured 1,203 bytes and BIN 707, which is 512 and 16 bytes of vector plus the same 691. The vector-sets README explains most of it. A node has on average 2.33 × M pointers of 8 bytes, which is 298 bytes at M 16. A sweep of M on 16-dimension vectors gave a straight line. So the overhead per element on this build is about 393 + 18.7 × M bytes.</p>
+
+<div class="calc" id="s5-size">
+<h4>Memory of one vector set.</h4>
+<label>Vectors, millions <input type="range" name="n" min="1" max="50" value="2"> <span class="val" data-val="n"></span></label>
+<label>Dimensions <input type="range" name="d" min="64" max="3072" step="64" value="768"> <span class="val" data-val="d"></span></label>
+<label>M <input type="range" name="m" min="4" max="64" step="4" value="16"> <span class="val" data-val="m"></span></label>
+<div class="result">Per element overhead <b data-out="over"></b>. NOQUANT <b data-out="noq"></b>. Q8 <b data-out="q8"></b>. BIN <b data-out="bin"></b>.</div>
+<script>kit.calc('#s5-size', function(v){ var o=393+18.7*v.m, gb=function(b){ return kit.fmt(v.n*1e6*(b+o)/1e9,1)+' GB'; }; return {over: kit.fmt(o,0)+' B', noq: gb(4*v.d), q8: gb(v.d), bin: gb(v.d/8)}; });</script>
+<p>The formula is a fit to five measured points, M 4 to 64, on one x86_64 libc build. Check it on your own build before you buy a node.</p>
+</div>
+
+<p>At real dimensions the measurement holds. At 1,536 dimensions with 10,000 elements and M 16, the lab gave 6,835 bytes for NOQUANT, 2,227 for Q8 and 883 for BIN. Each is the vector, 6,144, 1,536 or 192 bytes, plus the same 691. So 1 million vectors of 1,536 dimensions take about 6.8 GB with NOQUANT and 2.2 GB with Q8.</p>
+
+<div class="callout warn"><p><b>Correction.</b> The phase gave 6.8 GB and 2.2 GB for 1 million 1,536-dimension vectors. It inferred them from 128 and 384 dimensions, and asked you to check. A run at 1,536 dimensions measured it: 6,835, 2,227 and 883 bytes per element, with the same 691-byte overhead.</p></div>
+
+<p>The mistake is to size memory from the vector bytes alone. At 128 dimensions with Q8, the vector is 128 bytes and the element is 819 bytes. So a plan built on 128 bytes is 6.4 times too small.</p>
+
+<details class="answer deeper"><summary>Go deeper: the M sweep, and the status of vector sets</summary>
+<table>
+<thead><tr><th>M</th><th>bytes per element, 16 dims NOQUANT</th><th>minus the 64-byte vector</th><th>README links, 2.33 × M × 8</th></tr></thead>
+<tbody>
+<tr><td>4</td><td>531</td><td>467</td><td>75</td></tr>
+<tr><td>8</td><td>605</td><td>541</td><td>149</td></tr>
+<tr><td>16</td><td>755</td><td>691</td><td>298</td></tr>
+<tr><td>32</td><td>1,053</td><td>989</td><td>596</td></tr>
+<tr><td>64</td><td>1,651</td><td>1,587</td><td>1,193</td></tr>
+</tbody></table>
+<ul>
+<li>Each extra unit of M costs 18.7 bytes, which is exactly 2.33 × 8. The fixed part, about 393 bytes, is the node and the element name. The element names were 6 bytes long, so longer names add to it.</li>
+<li>At 1,536 dimensions, recall@10 was 1.000 for NOQUANT, 0.983 for Q8 and 0.233 for BIN.</li>
+<li>The top-level <code>README.md</code> of Redis 8.10.2 still lists "Vector set (beta)". The docs page and the module README have no such label, so expect that the API may still change.</li>
+<li>This build reports <code>mem_allocator:libc</code>, not jemalloc. A native jemalloc build on Linux can give other byte counts.</li>
+</ul>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Defaults: <code>vset.c</code> lines 130, 133, 136, 600 and 832 to 836, and <code>hnsw.h</code> line 20, at 8.10.2. README lines 65 and 639 for the links. Measured with the phase lab and with a <code>redis-cli</code> M sweep, Redis 8.10.1 x86_64 under Rosetta 2. The 1,536-dimension command was <code>vectorsets -dim 1536 -n 10000 -queries 100 -shards 1 -efs 100</code>.</p>
+</details>
+
+<p>Memory is one half of the choice of quantisation. The next section shows the other half, what each choice does to recall.</p>
+
+<h2 data-concept="c2">What limits recall: the search or the rounding?</h2>
+
+<p>The last section sized the graph, and showed that Q8 saves less memory than the vector bytes suggest. The other cost of quantisation is recall. <dfn>Recall</dfn> is the share of the true nearest neighbours that a search returns. A recall@10 of 0.97 means 9.7 of the true top 10 on average. The lab found the true neighbours by a brute-force search in Go on the float32 originals. It ran 200 queries with k = 10 and three seeds.</p>
+
+<table>
+<thead><tr><th>Quantisation, 128 dims</th><th>bytes per element</th><th>recall@10</th></tr></thead>
+<tbody>
+<tr><td>NOQUANT</td><td>1,203</td><td class="ok">1.000</td></tr>
+<tr class="pick"><td>Q8, the default</td><td>819</td><td>0.971</td></tr>
+<tr><td>BIN</td><td>707</td><td class="bad">0.15 to 0.18</td></tr>
+</tbody></table>
+
+<p>EF is the knob most people turn when recall is low. It trades latency for recall, but only up to a point. These runs used Q8 at 128 dimensions with seed 1. The p50 and p99 are the median and the 99th percentile of the client round trip.</p>
+
+<table>
+<thead><tr><th>search EF</th><th>recall@10</th><th>p50 µs</th><th>p99 µs</th></tr></thead>
+<tbody>
+<tr><td>10</td><td>0.870</td><td>238</td><td>378</td></tr>
+<tr class="pick"><td>100, the default</td><td>0.975</td><td>269</td><td>414</td></tr>
+<tr><td>500</td><td>0.975</td><td class="bad">476</td><td class="bad">759</td></tr>
+</tbody></table>
+
+<p>Recall stopped at 0.975 for Q8, while NOQUANT reached 1.000 on the same data. So at the default EF the int8 rounding set the limit, not the search, and more EF only added latency. Check which limit you have before you tune EF. If NOQUANT on a sample also stays low, the search is the limit. If NOQUANT reaches 1.000, the rounding is the limit and EF cannot help.</p>
+
+<p>BIN fails badly on sparse vectors, such as the lab's hashed bag of words. With <code>semcache -quant BIN</code>, all 26 questions hit at every threshold and 11 hits were wrong. One bit per dimension cannot tell most of these texts apart. BIN suits dense vectors only, and only where recall can be checked.</p>
+
+<p>A vector set is one key, so it lives on one shard. The README says to split a large set into N keys, query each and merge the results by score on the client. Writes then scale with N, but reads do not, because every query goes to every key. In the lab, 4 keys kept recall at 0.975. The p50 rose from about 270 µs to between 1,033 and 1,173 µs with 4 sequential calls over five runs. Parallel calls would cut that, which is inferred and was not measured.</p>
+
+
+<p>The Query Engine did not run on the lab build, because the Homebrew formula builds Redis without the bundled modules. Its index and query commands are in the Go deeper block below.</p>
+
+<div class="callout warn"><p><b>Correction.</b> The phase said "That build has no Query Engine". That is true for the Homebrew build only. Redis 8.10.2 ships the Search and Query Engine as a bundled module, so say "this Homebrew build", not "Redis 8.10".</p></div>
+
+<p>The two engines also use the same word with different defaults. The Query Engine's HNSW searches with <code>EF_RUNTIME</code> 10 by default, while vector sets search with EF 100. Code moved from <code>VSIM</code> to <code>FT.SEARCH</code> keeps the word "EF" and loses most of the search effort, so set <code>EF_RUNTIME</code> on purpose.</p>
+
+<ul class="tree">
+<li><b>Is Redis already in the stack, with up to a few million vectors and simple filters?</b>
+<ul><li class="ok"><em>yes</em><span>Redis is a reasonable vector store. Price the RAM first.</span></li>
+<li class="bad"><em>no, tens of millions</em><span>Price the RAM first: 50M × 768 × 4 bytes is 153.6 GB before the graph.</span></li></ul></li>
+<li><b>Do you need text, number or geo filters, or automatic sharding?</b>
+<ul><li class="ok"><em>yes</em><span>Use the Query Engine.</span></li>
+<li class="ok"><em>no, similarity only, and you can split keys</em><span>Use vector sets.</span></li></ul></li>
+</ul>
+
+<div class="keypoints">
+<p class="remember">An element costs 691 bytes plus its vector at M 16, and Q8 caps recall.</p>
+<p class="trap">Sizing from vector bytes alone makes a Q8 128-dimension plan 6.4 times too small.</p>
+<p class="try">Run E4's <code>vectorsets</code> and compare the <code>B/elem</code> and <code>vector B</code> columns.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: Query Engine commands and index types, Valkey, the README recall test, and the 8.10.2 fix</summary>
+<ul>
+<li>FLAT compares with every vector and suits indexes under 1 million vectors or exact results. HNSW defaults are M 16, <code>EF_CONSTRUCTION</code> 200 and <code>EF_RUNTIME</code> 10. SVS-VAMANA arrived in Redis 8.2 and uses less memory. Its LVQ and LeanVec compression is not in Redis Open Source.</li>
+<li>A filter before <code>=&gt;</code> makes a hybrid query. Redis either filters batches of neighbours, or scores every document that passes the filter.</li>
+<li>Whether the Redis Query Engine stores each vector twice, once in the hash and once in the index, was not checked. Valkey's search module did this for HASH documents until 1.3.0-rc1, which stores them once. So check it before you size a Query Engine node.</li>
+<li>Whether the Query Engine raises <code>EF_RUNTIME</code> to K when K is larger was not checked.</li>
+<li>Valkey has valkey-search, with <code>FT.*</code>, HNSW and FLAT, and <code>FT.HYBRID</code> in 1.3.0-rc1. Valkey has no vector sets, and issue 2569 for them is open.</li>
+<li>The README's Word2Vec test found that an int8 key returned 95.98% of what a linear scan of the same int8 key returned, and a BIN key 35.48%. That measures search error only, because the ground truth used the same quantised key.</li>
+<li>No neutral benchmark of Redis against other vector stores was found. Redis and Qdrant each publish one that puts their own product first.</li>
+<li>Redis 8.10.2 is a security release. It fixes a crash from deeply nested JSON in vector set queries and a crash in RedisSearch KNN with very long vector field names. Upgrade before you pass user input to <code>VSIM ... FILTER</code>. The labs ran on 8.10.1.</li>
+</ul>
+<p>A Query Engine index for the semantic cache, from the redis.io vector docs. It was not run.</p>
+
+<pre><code data-lang="bash"># NOT RUN: this Homebrew build has no Query Engine (FT.CREATE is an unknown command)
+FT.CREATE idx:sem ON HASH PREFIX 1 sem: SCHEMA \
+  tenant TAG  model TAG \
+  vec VECTOR HNSW 6 TYPE FLOAT32 DIM 768 DISTANCE_METRIC COSINE
+FT.SEARCH idx:sem "(@tenant:{acme} @model:{chat_v202609})=&gt;[KNN 1 @vec $B]" \
+  PARAMS 2 B &lt;768 float32 bytes&gt; LIMIT 0 1 DIALECT 2</code></pre>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Recall and latency measured by the phase lab, three seeds, Redis 8.10.1 x86_64 under Rosetta 2. EF repeat runs at 10 gave 0.865 and 0.868. Vectors docs lines 112 and 444 for <code>EF_RUNTIME</code> 10. <code>vset.c</code> line 133 for EF 100. README "Scaling vector sets", line 628, and the recall table near line 660. Homebrew <code>Formula/r/redis.rb</code> line 61 and Redis <code>README.md</code> lines 49 and 219 at 8.10.2. Google Memorystore limits page for the duplicated vectors. Redis 8.10.2 release notes via <code>gh api</code>.</p>
+</details>
+
+<p>Caches and vectors can be rebuilt if Redis loses them. Agent memory is the first job where a lost or a permanent value changes what the model sees, and the next concept starts there.</p>
+
+<h2 data-concept="c3">Why does a session with a TTL still leak memory?</h2>
+
+<p class="why">Memory decides what the model sees next, and a lost TTL makes stale data permanent.</p>
+
+<p>The support agent keeps each session's goal, plan and recent tool results in Redis, and sends them to the model on every turn. A price lookup is fresh for a minute, a weather lookup for a few minutes, and the session itself lasts 30 minutes. If a value outlives its TTL, the model reads stale data on every turn. If it never expires, memory also grows without a bound.</p>
+
+<p>Agent memory has four tiers, and each has its own lifetime and Redis type.</p>
+
+<table>
+<thead><tr><th>Tier</th><th>Redis shape</th><th>Holds</th><th>Lifetime</th></tr></thead>
+<tbody>
+<tr><td>Working memory</td><td>hash per session</td><td>goal, plan, tool results</td><td>key TTL 30 min, field TTLs for tool results</td></tr>
+<tr><td>History</td><td>list per session</td><td>last N messages</td><td><code>RPUSH</code> + <code>LTRIM</code>, then trimmed by tokens before each call</td></tr>
+<tr><td>Long-term</td><td>vectors and text</td><td>facts about the user</td><td>Redis index for recall, durable store for the truth</td></tr>
+<tr><td>Checkpoints</td><td>graph state per step</td><td>a run's progress, to resume after a crash</td><td>durable store, or Redis with AOF and a TTL</td></tr>
+</tbody></table>
+
+<p>Phase 1 showed that a hash field can carry its own TTL. <code>HEXPIRE</code> sets it since Redis 7.4, and <code>HSETEX</code> writes it together with the value since 8.0. For agent memory, the key fact is that a TTL belongs to the value that was written. It does not belong to the field name or the key name. So the next write to that field decides whether the TTL survives.</p>
+
+<details class="predict"><summary>Predict: a tool result was written with <code>HSETEX ... EX 300</code>. Later code refreshes it with a plain <code>HSET</code>. What is the field's TTL now, and what does the model see in an hour?</summary>
+<p>The TTL is gone: <code>HTTL</code> returns -1. The model sees the old tool result for the life of the session key, or forever if the key has no TTL. Most people expect the field to keep its TTL, because an update feels like a change to the same thing. But Redis treats an overwrite as a new value, and the new value was written with no TTL.</p>
+</details>
+
+<p>The <code>HEXPIRE</code> page states the rule: field expirations are cleared only by commands that delete or overwrite the contents of the field. A command that changes the value in place keeps it. Three measured cases show the rule.</p>
+
+<div class="compare">
+<div class="wrong"><pre><code data-lang="bash">HSETEX p7:wm:{acme:s-42} EX 60 FIELDS 1 tool:prices v1   # HTTL -&gt; 60
+HSET   p7:wm:{acme:s-42} tool:prices v2                  # HTTL -&gt; -1, never expires</code></pre></div>
+<div class="right"><pre><code data-lang="bash">HSETEX p7:wm:{acme:s-42} EX 60 FIELDS 1 tool:prices v3   # HTTL -&gt; 60
+HEXPIRE k 60 FIELDS 1 n ; HINCRBY k n 1                  # change, not overwrite: TTL kept</code></pre></div>
+</div>
+
+<p>Inside Redis, the field TTL is stored with the field.</p>
+<ol>
+<li>A small hash with field TTLs uses an encoding that <code>OBJECT ENCODING</code> reports as <code>listpackex</code>. It stores field, value and TTL together, ordered by TTL.</li>
+<li>Each database tracks such hashes by their next field expiry, so Redis can find due fields without scanning every hash.</li>
+<li>Active expiry removes up to 10,000 / hz fields per call, where <code>hz</code> is how many times per second Redis runs its background jobs. When expired fields pile up, that budget is multiplied by up to 32.</li>
+<li>The field TTL costs memory. On the lab build, a one-field hash took 37 bytes without a field TTL and 71 bytes with one. A ten-field hash took 153 and 277 bytes. So a field TTL costs about 24 bytes per hash plus about 10 bytes per field. That fit uses two points: 34 extra bytes for 1 field and 124 for 10 fields.</li>
+</ol>
+
+<div class="callout warn"><p><b>Correction.</b> The phase named the encoding <code>listpack_ex</code>, gave the expiry budget as 10000/hz without the multiplier, and called the extra memory inferred. <code>OBJECT ENCODING</code> replies <code>listpackex</code>, and in Redis 8.10.2 the budget is multiplied by up to 32 under load. The measured cost fits about 24 bytes per hash plus about 10 per field.</p></div>
+
+<p>The second way to lose a TTL is a write and its <code>EXPIRE</code> sent as two calls. If the process dies between them, the key stays with <code>TTL=-1</code>. The lab reproduced it: <code>SET</code> without a TTL, then a crash before <code>EXPIRE</code>, left <code>TTL=-1</code>, while <code>SET ... EX</code> in one command left <code>TTL=30m0s</code>. Nothing reports either failure, so memory on the agent cluster grows slowly and no error names the cause.</p>
+
+
+<p>Popular agent-memory libraries do not protect you from this. In the write paths of five libraries, none uses <code>HEXPIRE</code>, and all five default to no TTL. The Go deeper block below lists what each one does.</p>
+
+<details class="answer deeper"><summary>Go deeper: five memory libraries, Valkey, source lines, and how to find orphans</summary>
+<p>The five agent-memory libraries whose write paths were read.</p>
+
+<table>
+<thead><tr><th>Library</th><th>Storage</th><th>TTL default</th><th>A fact to know</th></tr></thead>
+<tbody>
+<tr><td>Redis Agent Memory Server, <code>V0/</code></td><td>one JSON document per session</td><td>none</td><td class="bad"><code>JSON.SET</code>, then <code>EXPIRE</code> in a second call</td></tr>
+<tr><td>langgraph-checkpoint-redis 0.5.2</td><td>JSON + Search indexes per checkpoint</td><td>none</td><td><code>default_ttl</code> is in <b>minutes</b></td></tr>
+<tr><td>OpenAI Agents SDK <code>RedisSession</code></td><td>hash + list + counter</td><td>none</td><td><code>WATCH</code> and <code>MULTI</code>, no <code>LTRIM</code></td></tr>
+<tr><td>LlamaIndex Redis chat store</td><td>one list per chat</td><td>none</td><td>no <code>LTRIM</code>, uses <code>KEYS *</code>, and <code>delete_message</code> reverses the order</td></tr>
+<tr><td>mem0</td><td>Redis as a vector store</td><td>none</td><td>change history goes to SQLite</td></tr>
+</tbody></table>
+
+<ul>
+<li>Valkey has <code>HEXPIRE</code>, <code>HSETEX</code> and <code>HGETEX</code> since 9.0.0. It converts a listpack hash to a hashtable as soon as a field gets a TTL, so small hashes with field TTLs cost more there. The extra memory on Valkey was not measured.</li>
+<li>The internal name of the encoding is <code>OBJ_ENCODING_LISTPACK_EX</code>, at <code>src/t_hash.c</code> line 1224 in 8.10.2.</li>
+<li>To find orphans, scan with a pattern that matches the hash-tagged key, such as <code>p7:wm:{acme:*</code>, and check <code>TTL</code> and <code>HTTL</code>. A pattern like <code>p7:wm:acme:*</code> does not match <code>p7:wm:{acme:s-42}</code>. Remove orphans with <code>UNLINK</code>.</li>
+<li>The Redis Agent Memory Server two-call write is at <code>working_memory.py</code> lines 648 to 652, from the course research. It was not re-opened for this lesson.</li>
+</ul>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>HEXPIRE docs, line 49 of the page source. <code>src/expire.c</code> lines 102 and 263 to 271 at 8.10.2. Field-TTL memory and encoding measured with <code>redis-cli</code> on Redis 8.10.1 x86_64, libc malloc. Valkey <code>hexpire.json</code> and <code>t_hash.c</code> lines 486 to 495 at 9.1.2. langgraph-redis README line 318. OpenAI Agents SDK <code>redis_session.py</code> line 369 for the default TTL.</p>
+</details>
+
+<p>A TTL keeps memory from living forever, but it does not keep a session's history small enough for the prompt. The next section bounds the history.</p>
+
+<h2 data-concept="c3">How do you bound a session's history twice, by count and by tokens?</h2>
+
+<p>The last section kept each value's TTL attached to it. A list of messages can still grow until it no longer fits in the prompt. A session of the support agent can run to hundreds of turns. If the platform keeps every message, both Redis memory and the model bill grow with each turn.</p>
+
+<p>The first bound is a count in Redis. The lab appends 500 messages of about 150 bytes. The bounded list keeps the newest 50 with <code>RPUSH</code>, <code>LTRIM -50 -1</code> and <code>EXPIRE</code>, sent together in one <code>MULTI</code>. So a crash cannot leave a list without its trim or its TTL.</p>
+
+<div class="bars">
+<div class="bar" style="--v:2.5" data-label="bounded, 500 turns" data-value="LLEN 50, 8,003 B, TTL 30 min"></div>
+<div class="bar" style="--v:25" data-label="unbounded, 500 turns" data-value="LLEN 500, 80,025 B, no TTL"></div>
+<div class="bar" style="--v:100" data-label="unbounded, 2,000 turns" data-value="LLEN 2,000, 321,175 B, no TTL"></div>
+</div>
+
+<p>A count bound is not a prompt bound, because 50 messages can differ by many times in tokens. So the application trims again by tokens before each model call. It keeps the system prompt, then adds the newest messages that fit in the budget, and never splits a message. In the lab, 21 messages and a budget of 2,000 tokens gave 9 messages and 1,950 tokens.</p>
+
+<ol class="flow" data-dir="down">
+<li><b>RPUSH + LTRIM -50 -1 + EXPIRE</b><span>one MULTI per turn keeps at most 50 messages, with a TTL.</span></li>
+<li class="hot"><b>LRANGE 0 -1</b><span>reads the 50 before the model call.</span></li>
+<li><b>trim by tokens</b><span>keeps the system prompt, then the newest messages that fit.</span></li>
+<li class="ok"><b>model call</b><span>gets a prompt that fits, with room for the answer.</span></li>
+<li><b>durable store</b><span>keeps the full transcript if the user can return.</span></li>
+</ol>
+
+<p>The full transcript goes to the durable store on every turn when a user can return tomorrow. The Redis keys are gone by then. Redis holds the short, fast copy that the model reads.</p>
+
+<p>Agents also cancel many Redis calls, because users press stop in the middle of an answer. Phase 6 told the ChatGPT outage. There, a cancelled call left its reply on a pooled connection, and the next request read another user's data. The OpenAI Agents SDK discards a connection after a cancelled command for that reason.</p>
+
+<div class="keypoints">
+<p class="remember">Write each value and its TTL in one command, and bound history twice.</p>
+<p class="trap">A plain <code>HSET</code> over a field with a TTL makes the stale result permanent.</p>
+<p class="try">Run <code>go run ./phase07_ai_agents/agentmemory -turns 2000 -keep 50</code> and compare the two <code>MEMORY USAGE</code> lines.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: checkpoints, and the cancel rule in the SDK</summary>
+<ul>
+<li>A checkpoint stores an agent graph's state after each step, so a crashed run can resume. langgraph-checkpoint-redis writes JSON documents with Search indexes per checkpoint and has no TTL by default. Its <code>default_ttl</code> is counted in minutes, so a value of 60 means one hour. Keep checkpoints in a durable store, or in Redis with AOF and a TTL.</li>
+<li>The cancel block of the OpenAI Agents SDK is near line 576 of <code>redis_session.py</code>. The phase cites the file on <code>main</code>, where line numbers move, so read the block by its content.</li>
+<li>In the ChatGPT case, payment data of 1.2% of active ChatGPT Plus users in a nine-hour window may have been visible.</li>
+</ul>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>List sizes and the token trim measured by the phase lab <code>agentmemory</code>, Redis 8.10.1 x86_64. OpenAI postmortem, archived copy, and redis-py issue 2624. OpenAI Agents SDK <code>redis_session.py</code> lines 576 to 582 on <code>main</code>, from the course research.</p>
+</details>
+
+<p>Memory is read at the start of a turn. The answer is written at the end, token by token, while the user watches. The next concept asks what that user misses when the connection drops.</p>
+
+<h2 data-concept="c4">What does a viewer miss when it reconnects in the middle of an answer?</h2>
+
+<p class="why">Phones change networks mid-answer, and without resume the user sees half an answer.</p>
+
+<p>An answer from the support agent streams for several seconds. In that time a phone changes networks, a browser tab sleeps, or a load balancer drops an idle connection. The API pod that runs the model is often not the pod that serves the viewer. So the tokens pass through Redis, and the question is which Redis feature carries them.</p>
+
+<p>Phase 6 showed that pub/sub keeps no copy of a message, so a server that was away cannot read what it missed. For tokens this means <dfn>at-most-once delivery</dfn>: each viewer gets each token once or never. Redis Streams give the other guarantee, because a stream keeps its entries and each entry has an ID. The entry ID is the reader's position, and a reader that reconnects calls <code>XREAD</code> with the last ID it saw to get the rest.</p>
+
+<details class="predict"><summary>Predict: a phone loses signal for 4 seconds during an answer at 40 tokens per second. Viewer A reads tokens from pub/sub. Viewer B reads with <code>XREAD</code> from its last entry ID. How many tokens does each miss?</summary>
+<p>Viewer A misses about 4 × 40 = 160 tokens, and its text has a hole. Viewer B misses none, as long as the stream key still exists. Many people expect pub/sub to be fine because it is fast and the gap is short. Speed is not the problem: during the gap there is no subscriber, so Redis delivers those messages to nobody and keeps no copy.</p>
+</details>
+
+<div class="lanes" id="s9-gap" data-play>
+<h4>400 tokens, one every 2 ms, viewer away for 150 ms.</h4>
+<div class="lane" data-label="producer">
+<i class="decode" style="--w:200" data-t="XADD + PUBLISH, tokens 1 to 100"></i><i class="decode" style="--w:150" data-t="tokens keep coming"></i><i class="decode" style="--w:450" data-t="the rest of the answer, then done 1"></i></div>
+<div class="lane" data-label="stream viewer">
+<i class="decode" style="--w:200" data-t="reads 100 tokens"></i><i class="wait" style="--w:150" data-t="away: entries wait in the stream"></i><i class="decode" style="--w:450" data-t="XREAD from last ID: 400 of 400"></i></div>
+<div class="lane" data-label="pub/sub viewer">
+<i class="decode" style="--w:200" data-t="reads 100 tokens"></i><i class="frozen" style="--w:150" data-t="away: about 50 to 60 tokens lost"></i><i class="decode" style="--w:450" data-t="new tokens only"></i></div>
+<p class="at" data-step="1">Step 1: both viewers read the first 100 tokens as they arrive.</p>
+<p class="at" data-step="2">Step 2: the viewer is away for 150 ms. The stream keeps every entry, and pub/sub sends each token to no subscriber.</p>
+<p class="at" data-step="3">Step 3: the stream viewer reads from its last ID and ends with identical text. The pub/sub viewer has a hole.</p>
+<p class="at" data-step="all">Lane widths follow the lab setting of 2 ms per token, as an illustration. The token counts were measured in the tokenstream lab.</p>
+</div>
+
+<p>In the <code>tokenstream</code> lab the stream viewer received 400 of 400 tokens with identical text. The pub/sub viewer lost about 50 to 60 tokens in its 150 ms gap, about one token every 2.5 to 3.1 ms. Pub/sub also loses tokens a second way, because Redis closes a subscriber that reads too slowly. Unsent output waits in a buffer per client. The default <code>client-output-buffer-limit pubsub 32mb 8mb 60</code> closes the client at 32 MB, or after 60 seconds above 8 MB. With the limit set to <code>pubsub 1mb 0 0</code>, a subscriber that stopped reading got 400 messages of 10 KB, and <code>INFO stats</code> showed <code>client_output_buffer_limit_disconnections:1</code>.</p>
+
+<div class="callout warn"><p><b>Correction.</b> The phase gives the pub/sub loss as 49 to 57 of 400 tokens, from eight runs. Three later runs on the same build lost 58, 59 and 60, so expect about 50 to 60.</p></div>
+
+<p>The design that follows from this has six rules.</p>
+<ol>
+<li>Use one key per response, <code>resp:{response_id}</code>. One key per response spreads the load over cluster slots, which is inferred.</li>
+<li>Append each chunk with <code>XADD resp:{id} MAXLEN ~ 10000 * seq &lt;n&gt; t &lt;chunk&gt;</code>. <code>MAXLEN</code> guards against a runaway answer, and the TTL is the normal bound.</li>
+<li>Set <code>EXPIRE</code> at the first chunk and again at the end.</li>
+<li>Write a final entry <code>done 1</code>, and let readers stop there. Do not delete the stream as the "done" signal, because a slow reader may not have read the last chunk yet.</li>
+<li>Let each viewer use plain <code>XREAD</code> with its own last ID. A consumer group per viewer keeps a pending list that nobody needs.</li>
+<li>Send the entry ID as the SSE event ID. <dfn>SSE</dfn>, Server-Sent Events, is the HTTP streaming format that a browser resumes by sending a <code>Last-Event-ID</code> header. <code>XREAD</code> is already exclusive, but <code>XRANGE</code> is inclusive, so to resume with it start at <code>(&lt;last id&gt;</code>.</li>
+</ol>
+
+<p><b>Stardrift</b> shows why an answer needs its own stream, and why rule 4 exists. Its agent tasks ran for minutes, so users tabbed away and came back to an interrupted chat. The conversation appeared only after a refresh. The first version streamed each answer over one HTTP connection and saved it to a database at the same time. Its final design writes chunks to a Redis stream keyed by chat and message. A separate key maps the chat to its active message. Stardrift kept that status key because deleting the stream at the end would race the reader. The reader may not have read the final chunk when the stream is deleted. The post gives no latency or volume numbers.</p>
+
+
+<p>Batch tokens into fewer entries, by size and by time, such as 8 tokens or 50 ms, whichever comes first. In the lab, 8 tokens per entry cut 2,000 <code>XADD</code> calls to 250, and memory from 18 or 19 bytes per token to 7. The time limit keeps text moving when the model is slow.</p>
+
+<p>Pub/sub is still useful as the wake-up path, when a durable copy lives elsewhere. LangSmith streams run output over pub/sub and stores no events in Redis, but its thread streams still resume with <code>Last-Event-ID</code> from another store. So the rule is narrower than "never pub/sub": never pub/sub alone, with no stored copy.</p>
+
+<details class="answer deeper"><summary>Go deeper: stream internals, two published libraries, and stopping an answer</summary>
+<ul>
+<li>Vercel <code>resumable-stream</code> 2.2.13 keeps chunks in the producer's memory, not in Redis. It uses pub/sub plus one sentinel key with <code>EX 86400</code>, and a second reader asks the producer to replay. If the producer process dies, the answer cannot resume. This is inferred from the in-memory buffer, <code>const chunks: string[] = []</code> in <code>runtime.ts</code>.</li>
+<li>Upstash AgentKit's <code>EventLog</code> stores each event in a stream with a TTL of 24 hours, set in the same Lua script as the <code>XADD</code>. It has no <code>MAXLEN</code>. Readers resume with <code>XRANGE key (lastId + COUNT 500</code> and poll every 250 ms.</li>
+<li>The AI SDK docs say <code>stop()</code> only closes the connection, and a separate endpoint must cancel the work. Publish a cancel signal that the producer checks between chunks. LangSmith also keeps cancel signals in Redis.</li>
+<li>Where LangSmith keeps the events it replays for <code>Last-Event-ID</code> was not checked. Its docs say they are not in Redis.</li>
+</ul>
+<p>A stream is stored as a radix tree of listpack nodes, each of up to 4,096 bytes or 100 entries. Each node stores the field names once and the IDs as differences from the first ID. So batching tokens into fewer entries saves both calls and memory. In the lab, 2,000 tokens written one call at a time gave the numbers below.</p>
+
+<table>
+<thead><tr><th>Tokens per entry</th><th>XADD calls</th><th>Time</th><th>MEMORY USAGE</th><th>Bytes per token</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>2,000</td><td>192 to 209 ms</td><td>about 37,000</td><td class="bad">18 to 19</td></tr>
+<tr class="pick"><td>8</td><td>250</td><td>23 to 27 ms</td><td>about 14,200</td><td class="ok">7</td></tr>
+</tbody></table>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Pub/sub docs, lines 51 and 54: at-most-once, a message to a disconnected subscriber "is forever lost". <code>redis.conf</code> line 2476 at 8.10.2, and <code>CONFIG GET</code> on 8.10.1 gave <code>pubsub 33554432 8388608 60</code>. Stream node limits in <code>src/t_stream.c</code> at 8.10.2. Token loss: eight phase runs and three study-note runs, Redis 8.10.1 x86_64 under Rosetta 2. Stardrift, "Is resumable LLM streaming hard? No, it's just annoying.", 2025-12-15. LangSmith data-plane line 42 and streaming page line 1055. Upstash <code>event-log.ts</code> at commit 7022274, vendor.</p>
+</details>
+
+<p>A viewer that reads twice only sees text twice. A worker that runs a paid tool call twice spends money twice, and the next section asks how a queue causes that.</p>
+
+<h2 data-concept="c4">How does a tool call run twice, and what stops a second payment?</h2>
+
+<p>A stream lets a token viewer resume, because the viewer keeps its own position. A queue of tool calls needs the opposite guarantee, that each call takes effect once, and Redis cannot give it alone. The support agent calls paid tools that issue a refund, send an email or query a paid API at $0.01 a call. The platform puts these calls on a stream with a consumer group, so any worker pod can run them.</p>
+
+<p>A <dfn>consumer group</dfn> gives each stream entry to one consumer, and keeps it in the group's PEL. The <dfn>PEL</dfn>, the pending entries list, holds the entries that were delivered and not yet acknowledged with <code>XACK</code>. If a worker crashes before <code>XACK</code>, another worker claims the entry with <code>XAUTOCLAIM</code> after a minimum idle time. So delivery is <dfn>at-least-once</dfn>: every entry runs, and some run twice. The worker must make the paid call idempotent, so that one call ID never pays twice. Phase 3 built the two parts this needs, a claim key written with <code>SET ... NX PX</code> and an idempotent effect that the resource refuses to repeat.</p>
+
+<ol class="flow" data-dir="down">
+<li><b>worker A: XREADGROUP</b><span>call-1 is pending for A.</span></li>
+<li><b>SET idem:call-1 A NX PX 30000</b><span>OK, so A owns the call for 30 s.</span></li>
+<li class="hot"><b>paid call, $0.01</b><span>the tool acts once.</span></li>
+<li><b>SET result:call-1</b><span>the result is stored under the same ID.</span></li>
+<li class="bad"><b>A crashes before XACK</b><span>call-1 stays pending.</span></li>
+<li><b>worker B: XAUTOCLAIM min-idle 200 ms</b><span>250 ms later, call-1 moves to B.</span></li>
+<li class="ok"><b>GET result:call-1: found</b><span>B reuses it and sends XACK. Paid calls = 1.</span></li>
+</ol>
+
+<p>The <code>toolqueue</code> lab crashes a worker at three points.</p>
+
+<table>
+<thead><tr><th>Case</th><th>Paid calls</th><th>Outcome</th></tr></thead>
+<tbody>
+<tr><td>no idempotency key, crash before <code>XACK</code></td><td class="bad">2, $0.02</td><td>B pays again</td></tr>
+<tr><td>key, crash after the result was stored</td><td class="ok">1, $0.01</td><td>B reuses the stored result</td></tr>
+<tr><td>key, crash after the paid call, before the result</td><td>1, $0.01</td><td>B reports "unknown", and the entry stays pending</td></tr>
+</tbody></table>
+
+<p>The third row is the gap that no Redis feature closes. The retry cannot know whether the tool acted, so paying again can charge twice and not paying can lose the call. Pass the call ID to the tool's own API as its idempotency key, if the tool accepts one. Only the tool can say whether it already acted. Otherwise send the entry to a person before the claim key's 30-second lease ends. After that, a retry claims the key and pays again, which is inferred from the lab code.</p>
+
+<p>Redis 8 adds three commands that help with the queue. None of them protects the paid call itself.</p>
+<ul>
+<li><code>XADD ... IDMP &lt;producer&gt; &lt;id&gt;</code>, since Redis 8.6, returns the first entry ID for a repeated producer and ID pair, and adds nothing. In the lab, two plain <code>XADD</code> calls gave two entries and two <code>IDMP</code> calls gave one. It keeps 100 IDs per producer for 100 seconds by default, and the docs report 2% to 5% lower throughput. It stops duplicate entries, not duplicate work.</li>
+<li><code>XNACK ... FAIL</code>, since 8.8, releases an entry at once and keeps its delivery count. In the lab, <code>XAUTOCLAIM</code> with a min-idle of 60 seconds still claimed the released entry at once. After 3 deliveries the poison call went to a dead-letter stream and was acknowledged.</li>
+<li><code>DELEX key IFEQ owner</code>, since 8.4, deletes the claim key only if it still holds your owner value, in one command.</li>
+</ul>
+
+
+<p>Valkey 9.1.2 has none of these three commands, so the tool-queue pattern needs other commands there. The Go deeper block below gives one alternative for each.</p>
+
+<div class="keypoints">
+<p class="remember">Readers keep their own position, and workers keep an idempotency key with a stored result.</p>
+<p class="trap">Acknowledging last and checking nothing first doubles the charge after a crash.</p>
+<p class="try">Run <code>go run ./phase07_ai_agents/toolqueue</code> and read the <code>paid calls</code> column: 2, 1, 1.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: the Valkey alternatives, and queues of work that lived only in Redis</summary>
+<p>On Valkey 9.1.2, each Redis 8 command has an alternative.</p>
+<table>
+<thead><tr><th>Redis 8 command</th><th>On Valkey 9.1.2</th></tr></thead>
+<tbody>
+<tr><td><code>XNACK ... FAIL</code></td><td><code>XCLAIM &lt;key&gt; &lt;group&gt; &lt;self&gt; 0 &lt;id&gt; IDLE &lt;min-idle&gt; JUSTID</code>. The next <code>XAUTOCLAIM</code> takes the entry at once, and <code>JUSTID</code> keeps the delivery count.</td></tr>
+<tr><td><code>XADD ... IDMP</code></td><td>a Lua script that returns the ID stored in the pair key, or runs <code>XADD</code> and <code>SET &lt;pair key&gt; &lt;id&gt; EX 100</code></td></tr>
+<tr><td><code>DELEX key IFEQ owner</code></td><td><code>DELIFEQ key owner</code> since Valkey 9.0.0, or the Lua compare-and-delete of Phase 3</td></tr>
+</tbody></table>
+
+<p>The first two alternatives ran on Redis 8.10.1, not on Valkey. The delivery count stayed at 1 after <code>XCLAIM ... JUSTID</code>, and two script calls with the same pair gave one entry.</p>
+
+<ul>
+<li><b>Discord</b> fed new messages to its search indexing workers through a Redis queue. When Elasticsearch nodes failed, the queue backed up, Redis CPU hit its limit and Redis dropped messages. Discord moved that queue to Google Cloud Pub/Sub, which guarantees delivery.</li>
+<li><b>Slack</b> kept its job queue in Redis, with over 1.4 billion jobs on busy days and a peak of 33,000 jobs per second. When database contention slowed the workers, jobs piled up until Redis reached <code>maxmemory</code>. Dequeue also needs free memory, because it moves a job into an in-flight list, so the queue stayed stuck after the database recovered. Slack put Kafka in front of Redis, with a relay that moves jobs at a controlled rate.</li>
+<li>Inngest, from the first section, shows the same lesson for tenants: one tenant that filled memory stopped the queue for every tenant.</li>
+<li>Valkey's <code>t_stream.c</code> skips the delivery-count increment for <code>JUSTID</code>, at lines 3277 to 3281 of tag 9.1.2. At Redis 8.10.2, <code>xnack.json</code> says since 8.8.0 and <code>delex.json</code> since 8.4.0.</li>
+</ul>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Measured by the phase lab <code>toolqueue</code> on Redis 8.10.1, and the "unknown" path is <code>toolqueue/main.go:107</code>. Streams idempotency docs, lines 17, 100 and 101. XNACK docs, lines 26 and 49. Valkey command files at tag 9.1.2: <code>xnack.json</code> and <code>delex.json</code> return 404, and <code>xadd.json</code> has no IDMP. Discord, "How Discord Indexes Trillions of Messages", 2025-04-24. Slack, "Scaling Slack's Job Queue", 2017-12-06.</p>
+</details>
+
+<p>The queue decides how often a paid call runs. The provider decides how many calls it accepts per minute, and the last concept asks how all pods share that limit.</p>
+
+<h2 data-concept="c5">What should a shared limiter count for LLM calls?</h2>
+
+<p class="why">Providers limit tokens per minute, so a request counter admits the wrong amount of work.</p>
+
+<p>The platform's pods share one provider account, and the provider limits each model. If the pods count requests, a few long prompts use the whole budget. Then every pod gets a <dfn>429</dfn>, the HTTP status for "too many requests". If the pods count too much per call, they refuse work the provider would accept.</p>
+
+<p>Providers count tokens, not requests. Anthropic limits requests, input tokens and output tokens per minute with a token bucket. A <dfn>token bucket</dfn> is a counter that refills at a steady rate, so capacity returns continuously. OpenAI counts the larger of <code>max_tokens</code> and an estimate from the character count of the request, and failed requests also count against the limit. The real use of a call is known only after the answer ends. So a shared limiter has to reserve an estimate before the call and correct it to the real use after the call.</p>
+
+<p><b>Airbnb</b> met the same problem in its key-value store. Its first rate limiter was a Redis counter per caller that returned 429 over quota, and every request cost the same. A one-row read counted the same as a scan of 100,000 rows, so the limit did not follow the real load on the backend. The new system gives each request a cost, which is the same move as counting tokens instead of calls.</p>
+
+<details class="predict"><summary>Predict: each call reserves 3,000 tokens and really uses 1,200. The limit is 400,000 tokens per minute. How many calls per minute pass with and without the correction?</summary>
+<p>Without the correction, 400,000 / 3,000 = 133 calls pass. With it, a call passes while 1,200 × n + 3,000 ≤ 400,000, so n ≤ 330 and 331 calls pass, about 2.5 times more. Many people think counting the estimate is close enough, because it is safe. It is safe, but with estimates 2.5 times the real use, the limiter admits only 40% of what fits, and users see 429s from your own code.</p>
+</details>
+
+<p>Redis 8.8.0 added <code>INCREX</code>, which increments a counter, checks a bound and sets a TTL in one O(1) command. So the reserve needs no Lua script.</p>
+
+<pre><code data-lang="text">pod                        Redis counter tpm:{acme}:model-x:&lt;w&gt;
+INCREX BYINT 1500 UBOUND 10000 PX 60000 ENX   -&gt; [1500, 1500]   applied &gt; 0: call the provider
+... the call uses 600 tokens ...
+INCREX BYINT -900 PX 60000 ENX  (same &lt;w&gt;)    -&gt; [600, -900]    the correction always applies
+if a reserve returns applied == 0             -&gt; queue the call, or return 429 to the caller</code></pre>
+
+<ol>
+<li>The reply is <code>[new value, applied increment]</code>. Without <code>SATURATE</code>, a result past the bound is rejected, nothing is written, and the reply is <code>[current, 0]</code>.</li>
+<li><code>ENX</code> sets the TTL only when the key has none. So a later call or a correction never extends the window.</li>
+<li>With no bound given, every increment applies, because the bounds default to the limits of a 64-bit integer.</li>
+<li>The docs mark <code>INCREX</code> as not supported on Redis Software and Redis Cloud, and Valkey 9.1.2 has no <code>INCREX</code>. On those, use a Lua script of <code>INCRBY</code> and <code>PEXPIRE</code>, or the sorted-set window of Phase 1.</li>
+</ol>
+
+<div class="calc" id="s11-budget">
+<h4>Calls admitted per window.</h4>
+<label>Limit, tokens per window <input type="range" name="lim" min="10000" max="1000000" step="10000" value="400000"> <span class="val" data-val="lim"></span></label>
+<label>Estimate per call <input type="range" name="est" min="500" max="10000" step="100" value="3000"> <span class="val" data-val="est"></span></label>
+<label>Real use per call <input type="range" name="real" min="100" max="10000" step="100" value="1200"> <span class="val" data-val="real"></span></label>
+<div class="result">Reserve only: <b data-out="no"></b> calls. Reserve, then correct: <b data-out="yes"></b> calls. Budget left unused without the correction: <b data-out="idle"></b>.</div>
+<script>kit.calc('#s11-budget', function(v){ var r=Math.min(v.real,v.est), no=Math.floor(v.lim/v.est), yes=v.lim<v.est?0:Math.floor((v.lim-v.est)/r)+1; return {no: kit.fmt(no,0), yes: kit.fmt(yes,0), idle: kit.fmt(100*(1-no*r/v.lim),0)+'%'}; });</script>
+<p>The formula from this section. The lab's case is a limit of 10,000, an estimate of 1,500 and a real use of 600, which gives 6 and 15.</p>
+</div>
+
+<p>The lab measured that case with 30 calls in one 60-second window.</p>
+
+<table>
+<thead><tr><th>Budget</th><th>Calls admitted of 30</th><th>Counter</th><th>Real tokens</th></tr></thead>
+<tbody>
+<tr><td>reserve only, no correction</td><td class="bad">6</td><td>9,000</td><td>3,600</td></tr>
+<tr class="pick"><td>reserve, then correction</td><td class="ok">15</td><td>9,000</td><td>9,000</td></tr>
+</tbody></table>
+
+<p>Both counters end at 9,000, but the first budget turned away 9 calls that fit, while 64% of the limit was unused. Each corrected call leaves 600, and a new call needs 1,500 free. So 600 × 14 + 1,500 = 9,900 fits, and 600 × 15 + 1,500 = 10,500 does not.</p>
+
+<p>The correction itself must have no bound. With the counter at 9,900, a call that used 400 more than its estimate tried to add 400. <code>INCREX ... UBOUND 10000</code> rejected it with <code>applied=0</code>, so the counter stayed at 9,900 while real use was 10,300. The bound is for admission, and a correction records what already happened.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>OpenAI rate-limits guide: the maximum of <code>max_tokens</code> and the character estimate, and unsuccessful requests count. Anthropic rate-limits page, lines 26 and 129: "the token bucket algorithm", and <code>max_tokens</code> does not count toward OTPM. <code>src/commands/increx.json</code> and <code>src/t_string.c</code> lines 1033, 1034 and 1265 to 1275 at 8.10.2. INCREX docs, compatibility table at line 212. Airbnb, "From Static Rate Limiting to Adaptive Traffic Management in Airbnb's Key-Value Store", no date on the page. Budget runs measured by the phase lab <code>llmlimits</code>.</p>
+</details>
+
+<p>The correction works while its window is open. A long answer can end after its window has closed, and the next section shows where that correction then goes.</p>
+
+<h2 data-concept="c5">Where does a correction go when the answer ends after its window?</h2>
+
+<p>Reserve and correct admits the right number of calls while each call ends inside its window. A long generation or a slow tool loop can outlive a 60-second window. Then the correction arrives when its key has expired, or when the key belongs to the next window.</p>
+
+<p>The lab tested this with a 1-second window and a reserve of 1,500. The call used 600, and the <code>-900</code> correction came 1.2 seconds later. The right answer is that the next window admits 6 calls, the same as a fresh window.</p>
+
+<ol class="timeline">
+<li><time>t=0 s</time> The reserve runs <code>INCREX ... BYINT 1500 PX 1000 ENX</code>, and the window key now holds 1,500.</li>
+<li><time>t=1.0 s</time> The window key expires with the window.</li>
+<li><time>t=1.0 s+</time> In case B, a new call reserves first, and creates the key for the next window.</li>
+<li><time>t=1.2 s</time> The late <code>-900</code> correction arrives.</li>
+</ol>
+
+<table>
+<thead><tr><th>Key and correction</th><th>After the correction</th><th>Next window admits</th></tr></thead>
+<tbody>
+<tr><td>one key, <code>INCRBY</code>, no call between (case A)</td><td>-900, PTTL -1</td><td class="bad">7 calls</td></tr>
+<tr><td>one key, <code>INCRBY</code>, a call opened the next window (case B)</td><td>600</td><td class="bad">7 calls</td></tr>
+<tr class="pick"><td>key per window, <code>INCREX ... PX ENX</code></td><td>old key -900, PTTL 999 ms</td><td class="ok">6 calls</td></tr>
+</tbody></table>
+
+<p>Both wrong rows give the next window 900 free tokens it should not have. In case A, the <code>INCRBY</code> creates a new key at -900 with no TTL, so it never expires if no call comes. In case B, the correction lands on the next window's key. A Lua guard that corrects only an existing key does not help in case B. The key it finds is the next window's key, so the window still admitted 7.</p>
+
+<p>The fix has two parts.</p>
+<ol>
+<li>Put the window index in the key name: <code>tpm:{acme}:model-x:&lt;w&gt;</code>, with w = unix ms / 60,000, rounded down. The reserve picks the name, and the correction reuses it. So a late correction goes to the old window's key and never reaches the next one.</li>
+<li>Correct with <code>INCREX key BYINT d PX &lt;window&gt; ENX</code>, with no bound. It keeps the reserve's TTL, and if the old key has expired, it creates the key again with a TTL, never without one. No reserve reads that old name again.</li>
+</ol>
+<p>Each pod computes w from its own clock, so clock skew moves the window edge a little for each pod. That trade-off is inferred and was not measured.</p>
+
+<p>A fixed window has a second edge problem. It allows up to twice the limit across the boundary between two windows. The lab admitted 999 tokens at the end of a 2-second window and 1,000 at the start of the next. So 1,999 tokens passed in 147 to 152 ms, against a limit of 1,000 per 2 seconds. Anthropic's token bucket can refuse that burst even though your counter allowed it. So use a window shorter than the provider's, or the sliding window of Phase 1.</p>
+
+<details class="answer deeper"><summary>Go deeper: the source lines behind ENX, and a fixed-window limiter at Lyft</summary>
+<ul>
+<li><code>src/t_string.c</code> at 8.10.2, lines 1186 and 1187: if no expiration option is given, the key's existing TTL is kept, and <code>ENX</code> limits expiration updates to keys that have no TTL. Line 1300 implements it.</li>
+<li>Lyft's rate limit service for Envoy builds a key from a domain and descriptors and counts in Redis. Per-second limits can go to a separate Redis, and a pipeline window of 150 to 500 µs is suggested. An optional local cache keeps keys that are already over their limit, so those requests skip Redis. That it uses fixed-window counters with a TTL is inferred from its README.</li>
+</ul>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Late-correction cases measured by the phase lab <code>llmlimits -part budget</code> part 4, six runs with the same counts, PTTL 996 to 999 ms. The Lua guard run was made with <code>redis-cli</code>. Window edge, eight phase runs and one study-note run. Lyft: the envoyproxy/ratelimit README.</p>
+</details>
+
+<p>A token budget limits how much work starts each minute. The provider also limits how many calls run at the same time. The last section adds that limit and a shared response to a 429.</p>
+
+<h2 data-concept="c5">How do pods cap calls in flight and share one 429?</h2>
+
+<p>The window budget now admits the right number of tokens each minute, even when corrections arrive late. Two more limits act on calls that are already running. A cap on calls in flight stops the pods from opening more calls than the provider allows at once. A shared pause stops every pod when one of them gets a 429.</p>
+
+<p>A <dfn>semaphore</dfn> is a counter of free slots. Here it is a sorted set of holder IDs, each scored by the time its lease ends, read from the Redis clock. The script removes expired leases before each acquire, so a holder that crashed without a release loses its slot when its lease ends. This is the lease idea of Phase 3, applied to N slots instead of one lock. The code is from <code>llmlimits/main.go:310</code>.</p>
+
+<pre><code data-lang="go">var acquireLua = redis.NewScript(`
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local lease = tonumber(ARGV[1])
+for i, k in ipairs(KEYS) do
+  redis.call('ZREMRANGEBYSCORE', k, '-inf', now)
+  if redis.call('ZCARD', k) &gt;= tonumber(ARGV[2 + i]) then return 0 end
+end
+for i, k in ipairs(KEYS) do
+  redis.call('ZADD', k, now + lease, ARGV[2])
+  redis.call('PEXPIRE', k, lease * 2)
+end
+return 1
+`)</code></pre>
+
+<p>With 4 slots, 12 workers and calls of 300 ms, the peak in flight was 4. All calls finished in 907 to 932 ms, against a minimum of 900 ms. Then one holder crashed without a release.</p>
+
+<div class="compare">
+<div class="wrong"><p><b>INCR and DECR counter</b></p><p>3 of 4 slots free at t = 1.1 s, and forever after. The crashed holder's slot never comes back.</p></div>
+<div class="right"><p><b>Lease semaphore</b></p><p>3 of 4 slots free right after the crash, and 4 of 4 at t = 1.1 s, when the lease ended.</p></div>
+</div>
+
+<p>Make the lease longer than a normal call, and renew it during the call. Phase 3 showed what happens to work that outlives its lease.</p>
+
+<p>When one pod gets a 429 with a <code>retry-after</code> header, every pod should pause, not only that one. Every pod checks a key <code>pause:{provider}:{model}</code> before a call. The pod that got the 429 sets it with <code>SET pause:{provider}:{model} 1 PX &lt;retry_after_ms&gt; NX</code>. In the lab, 5 pods sent a call every 100 ms while the provider refused calls for 1.5 seconds.</p>
+
+<table>
+<thead><tr><th>Pause</th><th>429 responses</th><th>Successful calls</th></tr></thead>
+<tbody>
+<tr><td>none</td><td class="bad">74 to 75</td><td>24 to 25</td></tr>
+<tr><td>per pod, local</td><td>5</td><td>24 to 25</td></tr>
+<tr class="pick"><td>shared key in Redis</td><td class="ok">1</td><td>24 to 25</td></tr>
+</tbody></table>
+
+<p>The successful calls are the same in every row, so the extra 429s bought nothing. They also cost budget, because OpenAI counts failed requests toward the limit.</p>
+
+<p>A global semaphore alone lets a busy tenant take every slot. So the same script also checks a cap per tenant, which is why it loops over several keys. With 8 global slots and a cap of 6, the small tenant's average wait fell from as much as 640 ms to about 100 ms. In the running case, acme's batch job can no longer make globex's users wait.</p>
+
+<p>Decide what happens when Redis itself fails. For a provider limit, fail open with a small local limit per pod, because the provider still enforces its own limit. For a spend cap, fail closed, because nothing else stops the spending.</p>
+
+<div class="keypoints">
+<p class="remember">Reserve and correct per window key, lease the slots, and share each 429.</p>
+<p class="trap">A reserve with no correction admitted 6 calls of 15 and left 64% unused.</p>
+<p class="try">Run <code>go run ./phase07_ai_agents/llmlimits -part budget</code> and compare part 4's WRONG and RIGHT rows.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: the fairness runs, LiteLLM's limiter, and why the script reads the Redis clock</summary>
+<p>The fairness run used 8 global slots, 40 calls from tenant big and 4 from tenant small, 200 ms each, over seven runs.</p>
+
+<table>
+<thead><tr><th>Per-tenant cap</th><th>small waits on average</th><th>big waits on average</th></tr></thead>
+<tbody>
+<tr><td>8, no cap</td><td class="bad">233 to 640 ms</td><td>442 to 487 ms</td></tr>
+<tr class="pick"><td>6</td><td class="ok">92 to 102 ms</td><td>579 to 589 ms</td></tr>
+</tbody></table>
+
+<p>The cap costs the big tenant about 100 to 150 ms of wait, and keeps 2 slots for the small tenant at all times.</p>
+
+<ul>
+<li>LiteLLM's in-flight gauge is a similar sorted set, scored by acquire time instead of lease expiry, with Redis <code>TIME</code> and a slot TTL of 3,600 s. Its file header says it is "not yet ready for production".</li>
+<li>LiteLLM shares a cooldown through Redis. The length is the deployment's <code>cooldown_time</code>, else the provider's <code>retry-after</code> header, else 5 seconds.</li>
+<li>If Redis fails, LiteLLM falls back to a window per instance, so N pods can each admit the full limit.</li>
+<li>The script reads <code>TIME</code> from Redis instead of taking <code>now</code> from the client, so every pod compares leases against one clock. A client clock that runs fast could remove other holders' leases early, which is inferred from the script.</li>
+<li>The Lua scripts and the shared pause key are tested by the live runs, not by the offline self-test.</li>
+</ul>
+</details>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Semaphore, 429 and fairness numbers measured by the phase lab <code>llmlimits</code>, Redis 8.10.1 x86_64 under Rosetta 2. LiteLLM <code>litellm/router.py</code> at commit 9c958af, lines 9182 to 9203, and <code>parallel_request_limiter_v3.py</code> lines 1 to 5.</p>
+</details>
+
+<p>That completes the five concepts. The recall section below puts them side by side.</p>
+
+<h2 data-kind="recall">What you can do now, and what comes next</h2>
+
+<p>You can now design each of the platform's six Redis jobs. You can also say what each one loses when something fails. Each question below comes from one concept.</p>
+<ol>
+<li>How often is this semantic cache wrong? The threshold sets the hit rate, and in the AWS test 0.99 still served 7.9% wrong hits. Scope every entry by tenant, locale, model version, template version and embedding model, and measure the wrong share on labelled prompts. Concept c1, the first three teaching sections.</li>
+<li>How much memory will this vector index take, and what limits its recall? At M 16 an element costs about 691 bytes plus its vector, and Q8 stopped recall at 0.975 where NOQUANT reached 1.000. Concept c2.</li>
+<li>Can any write in this memory path lose its TTL? A plain <code>HSET</code> over a field with a TTL, or a write and its <code>EXPIRE</code> in two calls, leaves memory that never expires. Bound history by count in Redis and by tokens before the call. Concept c3.</li>
+<li>What does a reader or a worker miss after a disconnect or a crash? A stream per response lets the viewer resume from its last ID. An idempotency key with a stored result keeps a paid tool call from running twice. Concept c4.</li>
+<li>Does this limiter admit what the provider would accept? Reserve an estimate and correct it on the same window key. Cap calls in flight with leases, and share each 429 through one pause key. Concept c5.</li>
+</ol>
+
+<p>This is the last phase of the Redis course, so no later phase follows it. As a next step, take one agent service you work on and run lab E1 to check each rule. Then trace each Redis call of that service against the five questions above.</p>
+
+<h2 data-kind="lab">Lab: eleven Go exercises on a throwaway Redis</h2>
+
+<details class="answer"><summary>Open the lab: setup, exercises E1 to E11, and the code questions</summary>
+
+<div class="callout note"><p>This lab is copied exactly from the phase. Its programs ran on a local Redis 8.10.1, x86_64 under Rosetta 2, on ports 6571 to 6574, and the "Expected" lines are their real output. The Query Engine steps did not run, because this Homebrew build has no Query Engine. No lab calls a model, and the embeddings are fake and deterministic. Never point the labs at a shared or production Redis.</p></div>
+
+<p>Every command below ran on 2026-10-19, with Go 1.27.1 and go-redis v9.5.1, on port 6571 with no persistence. The "Expected" lines are real output, as ranges where runs differed.</p>
+
+<div class="lab">
+<p>Setup:</p>
+<pre><code data-lang="bash">cd study-material/redis/code
+mkdir -p /tmp/p7redis
+redis-server --port 6571 --dir /tmp/p7redis --save '' --appendonly no --daemonize yes
+redis-cli -p 6571 INFO server | grep redis_version     # redis_version:8.10.1
+redis-cli -p 6571 VADD probe VALUES 3 1 0 0 a           # (integer) 1, so vector sets exist
+redis-cli -p 6571 DEL probe</code></pre>
+</div>
+
+<p>The labs refuse port 6379, which usually holds real data, unless you pass <code>-allow-6379</code>. They delete only <code>p7:</code> keys.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1 (offline).</b> <span class="tag">all concepts</span></label> Run every self-test.
+<ul>
+<li>Run: <code>for d in semcache vectorsets agentmemory tokenstream llmlimits toolqueue; do go run ./phase07_ai_agents/$d -self-test | tail -1; done</code></li>
+<li>Expected: <code>all checks passed</code> six times.</li>
+<li>If it fails: <code>no hash collisions</code> fails when <code>fakeembed.Dim</code> is not 2048.</li>
+<li>Teaches: each rule in the text has a check.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E2 (local).</b> <span class="tag">c1</span></label> Measure exact and semantic caching.
+<ul>
+<li>Run: <code>go run ./phase07_ai_agents/semcache</code></li>
+<li>Expected: the exact-match row shows <code>2</code> hits. The 0.78 row shows <code>16</code> hits and <code>2</code> wrong. The 0.90 row shows <code>10</code> hits, <code>0</code> wrong and <code>6</code> missed.</li>
+<li>Teaches: exact match misses paraphrases, and semantic hits can be wrong.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E3 (break-it, local).</b> <span class="tag">c1</span></label> Remove the tenant scope.
+<ul>
+<li>Run: <code>go run ./phase07_ai_agents/semcache -scope none</code></li>
+<li>Expected: <code>globex cos=1.000 HIT A05 ... &lt;-- WRONG answer served</code>. The 0.90 row has <code>2</code> wrong hits, because acme also receives <code>G01</code>.</li>
+<li>Teaches: the scope is part of correctness, not a tuning option.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E4 (local).</b> <span class="tag">c2</span></label> Measure vector set memory and recall.
+<ul>
+<li>Run: <code>go run ./phase07_ai_agents/vectorsets</code> and repeat with <code>-seed 2</code> and <code>-seed 3</code>.</li>
+<li>Expected, seed 1: <code>NOQUANT ... 1203 ... 1.000</code>, <code>Q8 ... 819 ... 0.975</code>, <code>BIN ... 707 ... 0.17</code>. EF 10 gives recall near <code>0.87</code>.</li>
+<li>Teaches: per-element overhead and the Q8 recall limit.</li>
+</ul>
+<p class="callout note">An extra run at real dimensions shows the same 691-byte overhead: the study note ran <code>vectorsets</code> with <code>-dim 1536 -n 10000 -queries 100 -shards 1 -efs 100</code> and got 6,835, 2,227 and 883 bytes per element. BIN recall varies between runs, even with the same seed, because the HNSW build is not deterministic. Seed 1 gave 0.167 and 0.173 in two runs, and seeds 1 to 3 gave 0.150 to 0.176.</p></li>
+
+<li><label><input type="checkbox"> <b>E5 (break-it, local).</b> <span class="tag">c2</span></label> Use BIN on sparse vectors.
+<ul>
+<li>Run: <code>go run ./phase07_ai_agents/semcache -quant BIN</code></li>
+<li>Expected: every threshold row shows <code>26</code> hits and <code>11</code> wrong. The gap line shows <code>0.9961 (BIN)</code>.</li>
+<li>Teaches: binary quantisation destroys scores for sparse vectors.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E6 (break-it, local).</b> <span class="tag">c3</span></label> Watch a field expire, then lose a TTL two ways.
+<ul>
+<li>Run: <code>go run ./phase07_ai_agents/agentmemory</code></li>
+<li>Expected: <code>HTTL goal, plan, tool:weather:paris -&gt; [-1 -1 2]</code>, then <code>after 2.5 s: fields=[goal plan], session key exists=1</code>. Sections 3 and 4 show <code>plain HSET -&gt; HTTL [-1]</code> and <code>two calls, crash between: TTL=-1</code>.</li>
+<li>Teaches: per-field lifetimes, and how a TTL disappears silently.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E7 (break-it, local).</b> <span class="tag">c4</span></label> Disconnect a viewer for twice as long.
+<ul>
+<li>Run: <code>go run ./phase07_ai_agents/tokenstream -gap 300ms</code></li>
+<li>Expected: the stream viewer shows <code>400 of 400 tokens, reconnects=1, text identical=true</code>. The pub/sub viewer loses 98 to 112 tokens, about twice the default run.</li>
+<li>Teaches: pub/sub loses the gap, and a stream does not.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E8 (local).</b> <span class="tag">c5</span></label> Reserve and correct a token budget.
+<ul>
+<li>Run: <code>go run ./phase07_ai_agents/llmlimits -part budget</code></li>
+<li>Expected: <code>admitted  6 of 30</code> and <code>admitted 15 of 30</code>, then <code>INCREX +400 UBOUND 10000  applied=0 -&gt; counter=9900</code>, then <code>1999 tokens admitted within</code> about 150 ms. Part 4 shows <code>admitted 7</code> in WRONG rows and <code>admitted 6</code> in RIGHT rows.</li>
+<li>Teaches: the correction, the INCREX trap, the window edge and the late correction.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E9 (break-it, local).</b> <span class="tag">c5</span></label> Crash a semaphore holder.
+<ul>
+<li>Run: <code>go run ./phase07_ai_agents/llmlimits -part semaphore</code></li>
+<li>Expected: <code>lease semaphore  : free slots at t=0.0 s: 3 of 4, at t=1.1 s: 4 of 4</code> and <code>INCR/DECR counter: ... at t=1.1 s: 3 of 4, and forever after</code>.</li>
+<li>Teaches: a lease returns a crashed holder's slot, and a counter does not.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E10 (local).</b> <span class="tag">c5</span></label> Share a 429 and cap a tenant.
+<ul>
+<li>Run: <code>go run ./phase07_ai_agents/llmlimits -part 429</code> and <code>go run ./phase07_ai_agents/llmlimits -part fairness</code></li>
+<li>Expected: <code>429 responses =</code> 74 or 75, then 5, then 1, for none, local and shared. <code>per-tenant cap 6: small waits</code> about 100 ms.</li>
+<li>Teaches: one pause key for all pods, and a cap per tenant.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E11 (break-it, local).</b> <span class="tag">c4</span></label> Crash a worker after a paid call.
+<ul>
+<li>Run: <code>go run ./phase07_ai_agents/toolqueue</code></li>
+<li>Expected: <code>paid calls=2 ($0.02)</code> without a key, <code>paid calls=1 ($0.01)</code> with one, and <code>unknown: key taken, no result</code> for the crash before the result.</li>
+<li>Teaches: at-least-once delivery plus an idempotency key.</li>
+</ul></li>
+</ul>
+
+<div class="lab">
+<p>Shut the server down when you finish:</p>
+<pre><code data-lang="bash">redis-cli -p 6571 SHUTDOWN NOSAVE</code></pre>
+</div>
+
+<p><b>Where the labs stop matching reality.</b> The embeddings, vectors, provider, paid tool and token timing are fake. Real models give other hit and error rates. The Query Engine steps did not run.</p>
+
+<h3>Check it yourself</h3>
+<ol>
+<li>Open <code>code/phase07_ai_agents/semcache/main.go:154</code>. This is the scope rule inside <code>lookupMemory</code>. Delete the <code>continue</code> and run <code>-self-test</code>. Which check fails, and what does its detail show?</li>
+<li>Open <code>code/phase07_ai_agents/llmlimits/main.go:315</code>. This is the <code>ZREMRANGEBYSCORE</code> step of <code>acquireLua</code>, modelled in Go at line 534. Why does the script read <code>TIME</code> from Redis instead of taking <code>now</code> from the client, as Redisson's <code>RPermitExpirableSemaphore</code> does?</li>
+<li>Open <code>code/phase07_ai_agents/toolqueue/main.go:107</code>. <code>handle</code> returns "unknown" when the key is taken and no result exists. Name one tool where "unknown" must go to a person, and one where a second call is harmless.</li>
+<li>In any agent service you own, run:
+<pre><code data-lang="bash">grep -rniE "hset|expire|publish" &lt;your repo&gt;/ | grep -iE "session|memory|stream|token"</code></pre>
+Find each <code>HSET</code> on a field with a TTL, and each <code>EXPIRE</code> sent apart from its write. What does a crash between the two leave?</li>
+</ol>
+</details>
+
+<h2 data-kind="checkpoint">Checkpoint questions</h2>
+
+<details class="answer"><summary>Open the questions: seven scenarios, each with an answer sketch</summary>
+
+<p><b>Q1. Walk through what happens when</b> a user loses signal for 4 s during an answer at 40 tokens/s. Compare pub/sub with a stream per response. How many tokens does each viewer miss, and what does the browser send on reconnect?</p>
+<details class="answer"><summary>Answer sketch</summary><p>The gap is 4 s × 40 = 160 tokens, and pub/sub loses all of them. The browser sends <code>Last-Event-ID: &lt;last entry ID&gt;</code>, and the server calls <code>XREAD STREAMS resp:{id} &lt;that ID&gt;</code>. The stream viewer misses 0. If the TTL ran out, the server loads the answer from the durable store. Concept c4.</p></details>
+
+<p><b>Q2. A colleague says</b> "set the threshold to 0.99, then wrong answers are impossible." Argue against it with the AWS numbers. What would you measure instead, and on what data?</p>
+<details class="answer"><summary>Answer sketch</summary><p>In the AWS test, 0.99 kept a 23.5% hit rate, and 7.9% of hits were still wrong, against 8.8% at 0.75. The threshold mostly removed right hits. vCache found that right and wrong hits had mean similarities of 0.84 and 0.85. Measure hit rate and wrong share on labelled prompts from your own traffic. Concept c1.</p></details>
+
+<p><b>Q3. Given these constraints, design</b> working memory for an agent. Sessions last up to 2 hours. Tool results go stale after 5 minutes. Users can return tomorrow. The context is 32,000 tokens. Name each key, its type and TTL, and what also goes to the durable store.</p>
+<details class="answer"><summary>Answer sketch</summary><p><code>wm:{t:s}</code>: hash, <code>EXPIRE</code> 2 h on each write, tool fields with <code>HSETEX EX 300</code>. <code>hist:{t:s}</code>: list, <code>RPUSH</code>, <code>LTRIM -50 -1</code> and <code>EXPIRE 7200</code> in one <code>MULTI</code>, then trimmed by tokens to 32,000 minus the answer budget. The transcript goes to the durable store every turn, since the Redis keys are gone by tomorrow. Concept c3.</p></details>
+
+<p><b>Q4. This is broken.</b> Memory on the agent cluster grows 3% a day. <code>SCAN</code> shows sessions with TTL -1 and tool fields with HTTL -1. No deploy changed the TTL settings. What is the cause, and how do you check it?</p>
+<details class="answer"><summary>Answer sketch</summary><p>Cause one: a write and its <code>EXPIRE</code> sent in two calls. Cause two: a plain <code>HSET</code> over a field with a TTL. Grep the write paths for both, and reproduce them with agentmemory sections 3 and 4. Fix with <code>SET ... EX</code>, <code>HSETEX</code> or <code>MULTI</code>, then remove orphans with <code>SCAN</code> and <code>UNLINK</code>. Concept c3.</p></details>
+
+<p><b>Q5. Show the arithmetic.</b> You need 2 million vectors of 768 dims in vector sets, M 16. Use the lab's 691 bytes of overhead per element. Compute the memory for NOQUANT and Q8, and the Q8 recall you expect on the lab data.</p>
+<details class="answer"><summary>Answer sketch</summary><p>NOQUANT: 768 × 4 = 3,072 + 691 = 3,763 bytes × 2 M = about 7.5 GB. Q8: 768 + 691 = 1,459 bytes × 2 M = about 2.9 GB. On the synthetic lab data, Q8 recall@10 was 0.966 to 0.975 at 128 and 384 dims, and 0.983 at 1,536 dims. Measure it on your own vectors. Concept c2.</p></details>
+
+<p><b>Q6. Given these constraints, design</b> a limiter for one model: 400,000 tokens per minute, 30 pods, 50 tenants. A tenant may use at most 25% of it, and have at most 10 calls in flight. A call estimates 3,000 tokens and uses 1,200 on average. Write the Redis commands for one call. How many calls per minute does it admit, with and without the correction?</p>
+<details class="answer"><summary>Answer sketch</summary><p>Per call, with w the minute index: <code>INCREX itpm:{model}:tenant:{t}:&lt;w&gt; BYINT 3000 UBOUND 100000 PX 60000 ENX</code> for the 25% cap. Then the same on <code>itpm:{model}:all:&lt;w&gt;</code> with <code>UBOUND 400000</code>. Then the lease semaphore with a limit of 10 on <code>inflight:{model}:{t}</code>. After the call, <code>INCREX ... BYINT -1800 PX 60000 ENX</code> both keys of the same w, even if that minute ended. If the global step rejects, return the tenant reservation the same way. Without the correction: 400,000 / 3,000 = 133 calls per minute. With it, a call passes while 1,200 × n + 3,000 ≤ 400,000. So n ≤ 330, and 331 calls pass. Concept c5.</p></details>
+
+<p><b>Q7. Plan a change.</b> The platform moves its semantic cache to a new embedding model on Monday. The cache holds 2 million entries for acme and globex, keyed by a hash of prompt and tenant. What breaks, and what do you change in the keys or the index?</p>
+<details class="answer"><summary>Answer sketch</summary><p>Every stored vector is in the old model's vector space, so new query vectors no longer match them in a meaningful way. Hits stop meaning anything, and with RedisVL's default of no TTL the old entries never expire on their own. Put the embedding model and its version in the index name or a tag, build the new index next to the old one, and switch reads to it. RedisVL refuses a schema change, such as a new vector dimension, unless you pass <code>overwrite=True</code>. A new model with the same dimension passes that check, so the index name or tag is the real guard. Concept c1.</p></details>
+</details>
+
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+
+<details class="answer"><summary>Open the cheatsheet</summary>
+<pre class="cheatsheet">SIX JOBS, AND THE RULE
+  only in Redis : answer cache, embedding cache, token buffers, limit counters
+  also durable  : transcripts, runs, long-term memory, paid tool results
+  shared Redis  : not allkeys-lru for cache + memory; separate, or TTLs + volatile-lru
+
+c1 SEMANTIC CACHE
+  scope key/tag : tenant + locale + model version + template version + embedding model
+  threshold     : sets hit rate, not error rate; measure on your labelled prompts
+  AWS test      : 0.99 -&gt; 23.5% hits, 7.9% wrong; 0.75 -&gt; 90.3% hits, 8.8% wrong, cost -86.3%
+  RedisVL       : distance 0.1 (~0.9 sim), 1 result, TTL none, TTL refreshed on hit
+  LangCache     : similarity 0.85, no expiration
+  TTL           : daily data ~23 h + jitter; delete by tag when a source doc changes
+  prompt cache  : provider reuses the prefix, never the answer; Anthropic 5 min default
+
+c2 VECTOR SETS (Redis 8)
+  VADD key FP32 &lt;blob&gt; &lt;id&gt; [Q8|NOQUANT|BIN]   default Q8, M 16, EF build 200
+  VSIM key FP32 &lt;blob&gt; WITHSCORES COUNT k      score = (cos+1)/2, EF 100, COUNT 10
+  bytes/elem    : vector + ~393 + 18.7 x M  (691 B at M 16; x86_64 libc build)
+  measured 128d : NOQUANT 1203, Q8 819, BIN 707;   1536d: 6835 / 2227 / 883
+  recall@10     : NOQUANT 1.000, Q8 0.971, BIN 0.15-0.18 (3 seeds, synthetic)
+  EF            : 10 -&gt; 0.870, 100 -&gt; 0.975, 500 -&gt; 0.975 at +77% p50
+  scale         : one key = one shard; N keys, query all, merge by score
+QUERY ENGINE    : FLAT &lt; 1M, HNSW M16 EFC200 EF_RUNTIME 10 (not 100), SVS-VAMANA 8.2+
+                  not in the Homebrew build; bundled in Redis 8.10.2
+VALKEY 9.1.2    : valkey-search FT.* HNSW/FLAT; no vector sets, INCREX, XNACK, IDMP, DELEX
+SECURITY        : 8.10.2 fixes a VSIM FILTER nested-JSON crash; upgrade before user input
+
+c3 MEMORY
+  HSETEX key EX 300 FIELDS 1 f v    plain HSET clears the field TTL; HINCRBY keeps it
+  encoding      : listpackex; field TTL ~ +24 B per hash, +10 B per field
+  active expiry : 10000/hz fields per call, up to x32 under backlog
+  RPUSH + LTRIM -N -1 + EXPIRE      in one MULTI; then trim by tokens
+  SET k v EX ttl                    never SET then EXPIRE in two calls
+  langgraph     : default_ttl is in MINUTES
+
+c4 TOKEN STREAMS
+  XADD resp:{id} MAXLEN ~ 10000 * seq n t chunk ; EXPIRE at first and last
+  end           : final entry done 1; never delete the stream as the signal
+  resume        : XREAD STREAMS resp:{id} &lt;lastId&gt;  (XRANGE needs "(lastId")
+  pub/sub       : at-most-once; lab lost ~50-60 of 400 in 150 ms; pubsub 32mb 8mb 60
+  batch 8 tok   : 250 XADD not 2000; 7 B/token not 18-19
+
+c4 TOOL QUEUE
+  delivery      : at least once; XAUTOCLAIM after min-idle; XNACK FAIL (8.8)
+  producer      : XADD ... IDMP pid iid (8.6), default 100 s / 100 ids, 2-5% slower
+  worker        : SET idem:{call} owner NX PX; store result:{call}; XACK last
+  crash gap     : paid, no result -&gt; "unknown"; to a person within the key lease
+  Valkey 9.1.2  : XCLAIM ... IDLE &lt;min-idle&gt; JUSTID; Lua SET + XADD; DELIFEQ
+
+c5 LIMITS
+  reserve       : INCREX k:&lt;w&gt; BYINT est UBOUND lim PX 60000 ENX; w = ms / 60000
+  correct       : INCREX k:&lt;same w&gt; BYINT (actual - est) PX 60000 ENX, no bound
+  admitted      : no correction floor(L/e); with floor((L-e)/r)+1  (lab 6 vs 15)
+  window edge   : up to 2x limit (lab 1999 of 1000 in ~150 ms)
+  in flight     : ZSET holder-&gt;lease expiry, Redis TIME, ZREMRANGEBYSCORE first
+  shared 429    : SET pause:{prov}:{model} 1 PX retry_after NX  (lab 75 -&gt; 1)
+  per tenant    : cap 6 of 8: small waits ~100 ms, big +100-150 ms
+  Redis down    : provider limit fail open (small local limit); spend cap fail closed</pre>
+</details>
+
+<h2 data-kind="sources">Sources</h2>
+
+<details class="answer"><summary>Open the sources</summary>
+<p>The phase's URLs returned HTTP 200 on 2026-10-19. Sources from the seller of a product are marked vendor.</p>
+<ul class="sources">
+<li><a href="https://redis.io/docs/latest/commands/increx/">INCREX, Redis docs</a>: the window counter pattern, O(1), <code>ENX</code>, and the compatibility table.</li>
+<li><a href="https://redis.io/docs/latest/commands/hexpire/">HEXPIRE, Redis docs</a>: what clears a field TTL, and the per-field reply codes.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/modules/vector-sets/README.md">Vector sets README at tag 8.10.2</a>: memory per node, scaling by splitting keys, and the recall table near line 660.</li>
+<li><a href="https://redis.io/docs/latest/develop/ai/search-and-query/vectors/">Vector search, Query Engine docs</a>: FLAT, HNSW and SVS-VAMANA parameters, <code>EF_RUNTIME</code> 10, and hybrid query modes.</li>
+<li><a href="https://redis.io/docs/latest/develop/data-types/streams/idempotency/">Streams idempotency, Redis docs</a>: <code>IDMP</code> parameters, 100 s and 100 IDs, and expiration.</li>
+<li><a href="https://redis.io/docs/latest/develop/pubsub/">Pub/sub, Redis docs</a>: at-most-once delivery, and lost messages for a disconnected subscriber.</li>
+<li><a href="https://redis.io/docs/latest/develop/ai/context-engine/langcache/concepts/index.html.md">LangCache concepts</a>: similarity 0.85 by default, no expiration, deletion by attributes. Vendor.</li>
+<li><a href="https://arxiv.org/abs/2502.03771">vCache, arXiv 2502.03771</a>: right and wrong hits at 0.84 and 0.85, and per-entry thresholds. A preprint.</li>
+<li><a href="https://aws.amazon.com/blogs/database/lower-cost-and-latency-for-ai-using-amazon-elasticache-as-a-semantic-cache-with-amazon-bedrock/">AWS, ElastiCache as a semantic cache</a>: hit rate, accuracy and cost per threshold over 63,796 queries. Vendor.</li>
+<li><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Anthropic prompt caching</a>: the answer is not cached, and the default lifetime is 5 minutes.</li>
+<li><a href="https://docs.langchain.com/langsmith/data-plane.md">LangSmith data plane</a>: what Redis holds and what Postgres holds. Vendor.</li>
+<li><a href="https://docs.langchain.com/langsmith/streaming.md">LangSmith streaming</a>: thread streams resume with <code>Last-Event-ID</code>. Vendor.</li>
+<li><a href="https://github.com/redis-developer/langgraph-redis">langgraph-redis</a>: <code>default_ttl</code> in minutes, and the shallow saver.</li>
+<li><a href="https://raw.githubusercontent.com/openai/openai-agents-python/main/src/agents/extensions/memory/redis_session.py">OpenAI Agents SDK RedisSession</a>: the <code>WATCH</code> and <code>MULTI</code> write, and the cancel block. Cited on <code>main</code>, so line numbers move.</li>
+<li><a href="https://github.com/vercel/resumable-stream">Vercel resumable-stream</a>: chunks buffered in the producer's memory, in <code>src/runtime.ts</code>.</li>
+<li><a href="https://stardrift.ai/blog/streaming-resumptions">Stardrift, resumable LLM streaming</a>: chunks in a Redis stream, and the race when the stream is deleted at the end.</li>
+<li><a href="https://raw.githubusercontent.com/BerriAI/litellm/main/litellm/proxy/hooks/parallel_request_limiter_v3.py">LiteLLM limiter v3</a>: the sorted-set gauge and the fail-open fallback. Cited on <code>main</code>. The cooldown order comes from <code>router.py</code> at commit 9c958af.</li>
+<li><a href="https://platform.claude.com/docs/en/api/rate-limits">Anthropic rate limits</a>: the token bucket, and <code>retry-after</code>.</li>
+<li><a href="https://developers.openai.com/api/docs/guides/rate-limits">OpenAI rate limits</a>: the larger of <code>max_tokens</code> and the estimate counts, and failed requests count.</li>
+<li><a href="https://airbnb.tech/infrastructure/from-static-rate-limiting-to-adaptive-traffic-management-in-airbnbs-key-value-store/">Airbnb, from static rate limiting to adaptive traffic management</a>: a Redis counter per caller where every request cost the same.</li>
+<li><a href="https://github.com/envoyproxy/ratelimit">envoyproxy/ratelimit</a>: Lyft's rate limit service with counters in Redis.</li>
+<li><a href="https://www.inngest.com/blog/migration-to-foundationdb-part-1">Inngest, Our Migration to FoundationDB, Part 1</a>: why the queue left Valkey. Vendor.</li>
+<li><a href="https://www.inngest.com/blog/migration-to-foundationdb-part-2">Inngest, Part 2</a>: about 20,000 accounts per logical shard. Vendor.</li>
+<li><a href="https://www.inngest.com/blog/the-queue-is-the-easy-part">Inngest, fairness in a multi-tenant queue</a>: the post the phase cited under another title. Vendor.</li>
+<li><a href="https://discord.com/blog/how-discord-indexes-trillions-of-messages">Discord, How Discord Indexes Trillions of Messages</a>: a Redis queue that dropped messages under backlog.</li>
+<li><a href="https://slack.engineering/scaling-slacks-job-queue/">Slack, Scaling Slack's Job Queue</a>: a full Redis that could not dequeue.</li>
+<li><a href="https://web.archive.org/web/20250101055603/https://openai.com/index/march-20-chatgpt-outage/">OpenAI, March 20 ChatGPT outage, archived</a>: the cancelled-request mechanism. Read with <a href="https://github.com/redis/redis-py/issues/2624">redis-py issue 2624</a>.</li>
+<li><a href="https://github.com/valkey-io/valkey/issues/2569">Valkey issue 2569, vector sets</a>: open on 2026-10-19.</li>
+<li><a href="https://docs.cloud.google.com/memorystore/docs/cluster/vector-search-limitations?hl=en">Google Memorystore vector search limits</a>: vectors duplicated in Valkey's search module before 1.3.</li>
+</ul>
+</details>
+
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

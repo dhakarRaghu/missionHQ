@@ -794,7 +794,7 @@ You can now review any Redis call with five questions, one for each concept of t
 
 - What does a server miss while it is away? With pub/sub alone, everything. A log with IDs lets it read the gap, and presence uses heartbeats with a TTL. (Concept c5.)
 
-This is the last phase of the Redis course, so no later phase follows it. The next step is to apply these five questions to one service you work on, as lab E10 asks. Then write its fix list in the order of the c2 ranking.
+The next phase, Phase 7, "Redis for AI agents", is the last phase of the course. It uses these ideas for caches, vectors, memory, token streams, limits and tool queues in an AI agent platform. Before you start it, apply these five questions to one service you work on, as lab E10 asks. Then write its fix list in the order of the c2 ranking.
 
 ## Lab: the exercises that teach Phase 6
 

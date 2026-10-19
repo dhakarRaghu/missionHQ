@@ -1316,5 +1316,27 @@
   "sources": [],
   "title": "Reviewing Redis in production",
   "topic": ""
+ },
+ {
+  "article_kind": "",
+  "course_slug": "redis-phase-07-ai-agents",
+  "html_path": "learning/lessons/2026-10-19-redis-phase-07-ai-agents.html",
+  "kind": "course",
+  "lesson_date": "2026-10-19",
+  "md_path": "learning/lessons/2026-10-19-redis-phase-07-ai-agents.md",
+  "one_liner": "How Redis behaves under an AI agent: semantic cache thresholds and scope, vector index memory and recall, field TTLs in agent memory, resumable token streams, idempotent tool queues, and token budgets that reserve and correct.",
+  "path_step": "",
+  "phase_slug": "",
+  "read_at": null,
+  "relationship": "",
+  "review_notes": "",
+  "review_round": 0,
+  "review_score": null,
+  "review_status": "none",
+  "reviewed_at": null,
+  "score": 0,
+  "sources": [],
+  "title": "Redis for AI agents",
+  "topic": ""
  }
 ]
