@@ -307,25 +307,25 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
 <main>
 <header class="hero"><div class="eyebrow">Redis · Phase 4</div><h1>Architecture and high availability</h1><p class="subtitle">What does Redis lose when a node dies, how long do writes fail, and how does a request find its key in a cluster?</p></header>
-<p>In Phase 3 you put a lock per account in Redis. You saw that the lock can disappear when the primary fails over. This phase studies that failover, and everything around it. The running case is your agent service's Redis, this lesson's own example. It holds the session state of each conversation and a cache of tool results. It also holds a lock for each agent run, built like the lock of Phase 3. It runs as one primary with two replicas, and a monitor promotes a replica when the primary dies.</p>
+<p>In Phase 3, Distributed locking, you put a lock per account in Redis, so only one worker changes an account at a time. That phase showed that the lock can disappear when the primary fails over, and it did not explain why. This phase studies that failover, and everything around it. The running case is your agent service's Redis, this lesson's own example. It holds the session state of each conversation and a cache of tool results. It also holds a lock for each agent run, built like the lock of Phase 3. It runs as one primary, the node that takes every write, with two replicas, the nodes that keep a copy of its data. When the primary dies, a monitor runs a failover, which promotes one replica to be the new primary.</p>
 
 <figure class="diagram"><ol class="timeline">
   <li><time>02:10:00</time> The primary's host loses power. In its last second it acknowledged 40 session writes and one run lock.</li>
   <li><time>02:10:00 +</time> Every write to the primary fails. How long this lasts depends on who notices the death and who decides.</li>
   <li><time>after failover</time> A replica is the new primary. Some writes that clients saw acknowledged are not on it.</li>
   <li><time>02:40</time> The old host comes back as a replica. It reconnects, and the new primary must send it what it missed.</li>
-  <li><time>months later</time> The sessions outgrow one node, so you move them to cluster mode. Some requests now fail with redirects.</li>
+  <li><time>months later</time> The sessions outgrow one node, so you split them across several primaries. Some requests now fail with redirects.</li>
 </ol><figcaption>The running case. Times and counts are an illustration, not measured.</figcaption></figure>
 
-<p>Each line of that night is one question this phase answers. How much did the disk keep, and which acknowledged writes are gone? Why can a reconnecting replica take the primary down? How long did writes fail? After the move to cluster mode, how does a request find its key?</p>
+<p>Each line of that night is one question this phase answers. How much did the disk keep, and which acknowledged writes are gone? Why can a reconnecting replica take the primary down? How long did writes fail? After the split, how does a request find its key?</p>
 
 <p>What you must know, in five claims. Each one is taught below, in this order.</p>
 <ol class="concepts">
   <li id="c1"><b>What a crash loses depends on the kind of crash, and an empty restarted primary empties its replicas.</b> <span>State the loss for a process kill, a power loss and a restart.</span></li>
   <li id="c2"><b>WAIT counts the replicas that have your write, but a failover can still lose that write.</b> <span>Bound the loss, and size WAIT for each environment.</span></li>
-  <li id="c3"><b>A replica gap longer than the backlog forces a full resync, which forks the primary and can crash it.</b> <span>Size the backlog and the buffers for your write rate.</span></li>
-  <li id="c4"><b>Failover time is mostly the detection timeout, and in Redis Cluster the masters of other shards vote.</b> <span>Predict how long writes fail, and whether failover happens at all.</span></li>
-  <li id="c5"><b>In cluster mode no node forwards a keyed command, so the client's slot map decides routing.</b> <span>Read MOVED and CROSSSLOT errors, and choose one primary or a cluster.</span></li>
+  <li id="c3"><b>A replica that misses more writes than the primary keeps in memory copies the whole dataset again, and that copy can crash the primary.</b> <span>Size the primary's buffers for your write rate.</span></li>
+  <li id="c4"><b>Failover time is mostly the wait before a node may be declared dead, and in a cluster the other primaries vote.</b> <span>Predict how long writes fail, and whether failover happens at all.</span></li>
+  <li id="c5"><b>When the keys are split across several primaries, no node passes a command on a key to another node, so the client must know where each key lives.</b> <span>Read the redirect errors, and choose one primary or a cluster.</span></li>
 </ol>
 
 <h2 data-kind="orientation">What you bring from Phases 0 to 3</h2>
@@ -333,13 +333,52 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
   <div class="card"><h4>One main thread</h4><p>Redis runs commands one at a time on one main thread. So one slow step, such as a large copy of memory, delays every client of that node. Phase 0 showed this with a 2-second command.</p></div>
   <div class="card"><h4>A cache entry is a copy</h4><p>In Phase 2 a cache-aside read went to the database on a miss and stored the result in Redis. Losing that entry costs a miss, not data. A session or a lock kept only in Redis is different, because no other copy exists.</p></div>
   <div class="card"><h4>Hash tags</h4><p>In Phase 1 you wrote keys such as <code>{&lt;companyId&gt;}key</code>. The part in braces decides where the key is stored in a cluster. This phase gives the mechanism behind that naming rule.</p></div>
-  <div class="card"><h4>The lock at failover</h4><p>In Phase 3 the primary crashed before the lock reached the replica. The replica was promoted, and a second client took the same lock. This phase explains the replication behind that race.</p></div>
+  <div class="card"><h4>The lock at failover</h4><p>In Phase 3 the primary crashed before the lock reached the replica. The replica was promoted, and a second client took the same lock. This phase explains how the copy reaches the replica, and why that race exists.</p></div>
 </div>
-<p>This phase needs the first idea for the cost of a snapshot, and the second to decide what you may lose. It needs the last two for replication and for cluster routing.</p>
+<p>This phase needs the first idea for the cost of a snapshot, and the second to decide what you may lose. It needs the last two for the copies on the replicas and for routing in a cluster.</p>
+<h3>The new words this phase uses</h3>
+<p>One Redis node keeps every key in the memory of one machine. In the running case that is 40 GB of sessions, locks and cache on a 64 GB host. So one power loss stops every write, and the data survives only if another node holds a copy. One node also caps the data at the memory of one machine.</p>
+<p>Redis answers the first problem with copies on other nodes, and the second by splitting the keys across several primaries. Seven words name the parts of those two answers, and almost every section below uses them.</p>
+<table>
+  <tr><th>Word</th><th>What it is</th><th>Where you meet it</th></tr>
+  <tr><td><dfn>replication</dfn></td><td>The primary sends every write it runs to each replica, as one stream of bytes. Each replica applies the stream in order.</td><td><code>INFO replication</code> on any node</td></tr>
+  <tr><td><dfn>offset</dfn></td><td>A position in that stream, counted in bytes. The primary's offset says how much it has sent, and a replica's offset says how much it has applied.</td><td><code>master_repl_offset</code>, and <code>offset=</code> for each replica, in <code>INFO replication</code></td></tr>
+  <tr><td><dfn>replication lag</dfn></td><td>How far a replica is behind the primary. Redis reports it in whole seconds since the replica last confirmed its offset.</td><td><code>lag=</code> for each replica, in <code>INFO replication</code></td></tr>
+  <tr><td><dfn>Redis Cluster</dfn></td><td>The Redis system that splits the keys across several primaries, so each one holds a share of them.</td><td>the cluster docs, and <code>CLUSTER INFO</code></td></tr>
+  <tr><td><dfn>cluster mode</dfn></td><td>The setting that makes a node part of a Redis Cluster. ElastiCache names its groups cluster mode enabled or cluster mode disabled.</td><td><code>CLUSTER INFO</code>, and the ElastiCache console</td></tr>
+  <tr><td><dfn>master</dfn></td><td>The word Redis Cluster uses for a primary. Redis also prints it as the role of a primary that is not in a cluster.</td><td><code>role:master</code> in <code>INFO replication</code>, and <code>CLUSTER NODES</code></td></tr>
+  <tr><td><dfn>shard</dfn></td><td>One master with its replicas. Each shard holds one share of the keys, so each added shard adds memory, writes and CPU.</td><td><code>CLUSTER SHARDS</code>, and the ElastiCache console</td></tr>
+</table>
+<p>A first try shows three of these words in real replies. The first command comes from this phase's lab, and the other two come from the local runs behind this lesson.</p>
+<pre><code data-lang="bash"># the primary of the lab's replication setup, with two replicas
+INFO replication
+role:master
+connected_slaves:2
+
+# one primary and one replica: block until 1 replica has the last write
+WAIT 1 1000
+(integer) 1                    # returned after 39 ms
+
+# a six-node Redis Cluster, on a node that does not hold the key foo
+GET foo
+(error) MOVED 12182 127.0.0.1:17103</code></pre>
+<ul>
+  <li>The first reply calls the node a master, and <code>connected_slaves:2</code> counts the replicas that receive its replication stream.</li>
+  <li>The second shows a replica confirming its offset. <code>WAIT</code> is the command that blocks until a number of replicas have your writes. It returned 1, because the one replica reported an offset past the write.</li>
+  <li>The third shows cluster mode. The node does not hold the key, so it answers with an error that names the node which does. The routing sections below explain that reply.</li>
+</ul>
+<details class="evidence"><summary>Evidence</summary>
+<p>The <code>INFO replication</code> lines are the expected output that the phase's lab gives for its replication setup. That lab needs Docker, and it was not run for this lesson. The <code>WAIT</code> and <code>GET</code> replies come from local runs on <code>redis-server</code> 8.10.1 on 127.0.0.1. The <code>WAIT</code> run used one primary with one replica, and the <code>GET</code> ran on a node that did not own slot 12182. The prompt of <code>redis-cli</code> is left out.</p>
+</details>
 
 <h2 data-concept="c1">What does a crash lose, and which crash?</h2>
 <p>At 02:10 the primary lost power. Before you ask what the replicas have, ask what the primary's own disk kept, because that is what a restart can load.</p>
-<p>Redis keeps the whole dataset in memory. <dfn>Persistence</dfn> writes a copy of it to disk, so a restarted process can load the data again. Redis has two kinds. An <dfn>RDB snapshot</dfn> is one file with the whole dataset at one moment. The <dfn>AOF</dfn>, the append-only file, is a log of every write command, which Redis replays at start. How much a crash loses depends on the copy you chose and on what failed: the Redis process only, or the whole machine.</p>
+<p>Redis keeps the whole dataset in memory. <dfn>Persistence</dfn> writes a copy of it to disk, so a restarted process can load the data again. Redis has two kinds. How much a crash loses depends on the copy you chose and on what failed: the Redis process only, or the whole machine.</p>
+<ul>
+  <li><dfn>RDB</dfn>, short for Redis database, is Redis's compact binary file format for a whole dataset. An <dfn>RDB snapshot</dfn> is one such file, with the whole dataset at one moment.</li>
+  <li>The <dfn>AOF</dfn>, the append-only file, is a log of every write command, which Redis replays at start.</li>
+</ul>
+<p>An AOF write survives a power loss only after <dfn>fsync</dfn>, the system call that moves the kernel's copy of a file to the disk. The setting <dfn>appendfsync</dfn> decides how often Redis calls fsync, and its default value, <dfn>everysec</dfn>, means about once a second.</p>
 
 <figure class="diagram"><ol class="flow">
   <li><b>command runs</b><span>the write changes memory</span></li>
@@ -355,11 +394,11 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 
 <p>The two kinds of persistence work in these steps.</p>
 <ol>
-  <li>For an RDB snapshot, <code>BGSAVE</code> or a <code>save &lt;seconds&gt; &lt;changes&gt;</code> rule makes Redis fork. The child process writes <code>dump.rdb</code> while the parent keeps serving clients.</li>
+  <li>For an RDB snapshot, Redis forks, which starts a child process with a copy of its memory. <dfn><code>BGSAVE</code></dfn>, the command that saves a snapshot in the background, starts the fork, and so does a <code>save &lt;seconds&gt; &lt;changes&gt;</code> rule. The child process writes <code>dump.rdb</code> while the parent keeps serving clients.</li>
   <li>The fork uses <dfn>copy-on-write</dfn>: parent and child share memory pages, and the kernel copies a page only when the parent changes it. So memory grows during a save by every page that clients write in that time.</li>
   <li>A crash with RDB only loses every write since the last finished snapshot. With <code>save 60 1000</code> that can be a minute of writes, or more on a quiet node.</li>
-  <li>For the AOF, each write command is added to a buffer in memory. Before Redis sends the replies of a loop turn, it calls <code>write(2)</code> for that buffer. The code comment says this "must be done before handleClientsWithPendingWrites".</li>
-  <li>The setting <code>appendfsync</code> decides when the kernel copy reaches the disk. With <code>everysec</code> a background thread calls fsync about once a second. With <code>always</code> the main thread calls fsync before replies, and with <code>no</code> Linux flushes about every 30 seconds.</li>
+  <li>For the AOF, each write command is added to a buffer in memory. Before Redis sends the replies of a loop turn, one pass of the event loop over all clients, it calls <code>write(2)</code> for that buffer. The code comment says this "must be done before handleClientsWithPendingWrites".</li>
+  <li>With <code>everysec</code>, the <code>appendfsync</code> default, a background thread calls fsync about once a second. With <code>always</code> the main thread calls fsync before replies, and with <code>no</code> Linux flushes about every 30 seconds.</li>
   <li>If the previous fsync is still running, Redis postpones the next <code>write(2)</code> for up to 2,000 ms, and then counts it in <code>aof_delayed_fsync</code>. Replies still go out during that time, which is inferred from the order of the code. So on a slow disk even a process kill can lose up to about two seconds of acknowledged writes. Those bytes are still in Redis memory, not in the kernel. A power loss can lose more than two seconds, because no new fsync starts while the slow one runs. Both effects are inferred from <code>src/aof.c</code> and were not measured.</li>
 </ol>
 
@@ -405,6 +444,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <h2 data-concept="c1">Why can a restart empty the replicas as well?</h2>
 <p>The disk decides what one node keeps after a crash. With replicas, the bigger risk is what the replicas do when the primary comes back before anyone promotes them.</p>
 <p>Your primary runs with persistence off, as many caches do, because it saves the fork and the disk writes. Suppose a supervisor such as systemd or Kubernetes restarts the process 2 seconds after it crashes. The monitor in a self-hosted setup is <dfn>Sentinel</dfn>, a separate process that watches the primary and promotes a replica. It waits 30 seconds by default before it declares the primary dead, so here it never acts.</p>
+<p>Each primary names its history of writes with a <dfn>replication ID</dfn>, a random string. A replica that reconnects sends that ID and its offset, and so asks the primary to continue its copy from there. When the primary does not know the ID, the replica asks for a complete copy of the primary's dataset. This copy is a <dfn>full sync</dfn>, also called a full resync.</p>
 
 <figure class="diagram"><ol class="flow">
   <li><b>crash</b><span>the primary holds 10,000 keys, and both replicas hold them too</span></li>
@@ -416,7 +456,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <p>The steps run in this order.</p>
 <ol>
   <li>The primary starts with no RDB file and no AOF, so its dataset is empty.</li>
-  <li>It also starts a new <dfn>replication ID</dfn>, a random name a primary gives to its history of writes. A replica uses this ID to ask "continue my copy from here".</li>
+  <li>It also starts a new replication ID, because it keeps no record of its old history.</li>
   <li>The replicas reconnect to the same address. Their copy belongs to the old ID, so the primary cannot continue it, and each replica asks for a full copy.</li>
   <li>A replica that receives a full copy first deletes its own data, and then loads the copy. The copy is empty.</li>
 </ol>
@@ -459,7 +499,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <h2 data-concept="c2">What does an OK from the primary promise?</h2>
 <p>A failover keeps the replicas' data, unlike the empty restart. The open question is how current that data was at 02:10, when the primary died.</p>
 <p>Your agent service writes a run lock with <code>SET</code>, gets OK, and starts the run. Five milliseconds later the primary's host loses power. Whether the lock exists on the new primary decides whether a second worker can start the same run.</p>
-<p>Redis <dfn>replication</dfn> is asynchronous. The primary runs a write, replies OK to the client, and then streams the write to its replicas, which apply it a little later. So for a short time the primary has acknowledged a write that no replica has. If the primary dies in that time and a replica is promoted, the write is gone. The command <dfn>WAIT</dfn> lets a client block until a number of replicas have received its writes.</p>
+<p>Redis replication, the stream of writes from the primary to its replicas, is asynchronous, as the lock race of Phase 3 showed. The primary runs a write, replies OK to the client, and then streams the write to its replicas, which apply it a little later. So for a short time the primary has acknowledged a write that no replica has. If the primary dies in that time and a replica is promoted, the write is gone. The command <dfn>WAIT</dfn> lets a client block until a number of replicas have received its writes.</p>
 
 <figure class="diagram"><ol class="flow">
   <li><b>SET lock</b><span>the primary changes memory</span></li>
@@ -476,7 +516,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <p>Each part of the guarantee comes from one step of the mechanism.</p>
 <ol>
   <li>The primary adds each write to the replication stream and replies to the client. The reply does not wait for any replica.</li>
-  <li>Each replica reports its <dfn>offset</dfn>, the number of stream bytes it has applied, with <code>REPLCONF ACK</code> about once a second. That is why the <code>lag</code> field in <code>INFO replication</code> moves in whole seconds.</li>
+  <li>Each replica reports its offset, the number of stream bytes it has applied, with <code>REPLCONF ACK</code> about once a second. That is why the <code>lag</code> field in <code>INFO replication</code> moves in whole seconds.</li>
   <li><code>WAIT numreplicas timeout</code> blocks only the calling client. It asks the replicas for an ack in the same loop turn. It returns when enough replicas report an offset past its writes, or when the timeout ends.</li>
   <li>WAIT returns a count and changes nothing else. A low count does not undo the write, and other clients can already read the write before any replica has it.</li>
   <li>At failover the promoted replica's history wins. The old primary rejoins as a replica of it, and drops every write the new primary does not have.</li>
@@ -496,9 +536,9 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 
 <div class="callout warn"><p>The phase said WAIT shrinks the loss window "to near-zero" for that write. True now, in the current WAIT docs: WAIT makes loss less likely, and a write on several replicas can still be lost.</p></div>
 
-<details class="answer deeper"><summary>Go deeper: WAITAOF, read-only replicas, the minority side of a cluster, and what zero loss costs</summary>
-<h4>WAITAOF</h4>
-<p><code>WAITAOF numlocal numreplicas timeout</code> exists since Redis 7.2.0. It waits until the write is fsynced to the AOF on the primary, when <code>numlocal</code> is 1, and on <code>numreplicas</code> replicas. <code>numlocal</code> needs <code>appendonly yes</code>. Replicas report the fsynced position in the same message as the offset: <code>REPLCONF ACK &lt;offset&gt; FACK &lt;aof-offset&gt;</code>. It protects against a power loss on the nodes that answered, and it has the same failover limits as WAIT.</p>
+<details class="answer deeper"><summary>Go deeper: waiting for the disk too, read-only replicas, the minority side of a cluster, and what zero loss costs</summary>
+<h4>Waiting for the disk too</h4>
+<p><dfn>WAITAOF</dfn> is a command like WAIT that also waits for the fsync of the AOF. Its form <code>WAITAOF numlocal numreplicas timeout</code> exists since Redis 7.2.0. It waits until the write is fsynced to the AOF on the primary, when <code>numlocal</code> is 1, and on <code>numreplicas</code> replicas. <code>numlocal</code> needs <code>appendonly yes</code>. Replicas report the fsynced position in the same message as the offset: <code>REPLCONF ACK &lt;offset&gt; FACK &lt;aof-offset&gt;</code>. It protects against a power loss on the nodes that answered, and it has the same failover limits as WAIT.</p>
 <h4>Replicas are read-only</h4>
 <p>By default a replica refuses writes with <code>READONLY You can't write against a read only replica.</code>, so every write goes to the primary. A replica can serve reads, and those reads can be up to the replication lag behind.</p>
 <h4>The minority side of a cluster</h4>
@@ -555,28 +595,28 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <h2 data-concept="c3">When does a reconnecting replica copy everything again?</h2>
 <p>WAIT and the failover both assume the replicas are current. A replica stops being current every time its link to the primary drops, so the cost of catching up matters.</p>
 <p>At the evening peak your primary takes about 20 MB of writes a second. A network blip cuts one replica's link for 3 seconds. When the link comes back, the replica must get those 3 seconds of writes, and the primary decides how.</p>
-<p>The replication ID from the empty-restart case names the primary's history. The offset, the byte position in the stream, says how far a replica got. The primary also keeps the <dfn>backlog</dfn>, a fixed-size buffer with the most recent part of its stream. A reconnecting replica sends its ID and offset with the command <dfn>PSYNC</dfn>. If the missing bytes are still in the backlog, the primary sends only those bytes. If not, it does a <dfn>full resync</dfn>. It forks, sends a whole RDB of the dataset, and buffers new writes until the replica has loaded it.</p>
+<p>The replication ID from the empty-restart case names the primary's history. The offset, the byte position in the stream, says how far a replica got. The primary also keeps the <dfn>backlog</dfn>, a fixed-size buffer with the most recent part of its stream. A reconnecting replica sends its ID and offset with the command <dfn>PSYNC</dfn>. If the missing bytes are still in the backlog, the primary sends only those bytes, which is a <dfn>partial resync</dfn>. If not, it does a full sync. It forks and sends a whole RDB of the dataset. Until the replica has loaded it, new writes wait in the replica's <dfn>output buffer</dfn>, the memory for bytes not yet sent to a client.</p>
 
 <ul class="tree">
   <li><b>Does the replica's replication ID match the primary's?</b>
-    <ul><li class="bad"><em>no</em><span>full resync: fork, send the whole dataset</span></li>
+    <ul><li class="bad"><em>no</em><span>full sync: fork, send the whole dataset</span></li>
         <li><em>yes</em><span>check the offset</span>
           <ul><li><b>Are the missing bytes still in the backlog?</b>
             <ul><li class="ok"><em>yes</em><span>partial resync: the primary answers +CONTINUE and sends only the gap</span></li>
-                <li class="bad"><em>no</em><span>full resync</span></li></ul></li></ul></li></ul></li>
+                <li class="bad"><em>no</em><span>full sync</span></li></ul></li></ul></li></ul></li>
 </ul>
 
-<details class="predict"><summary>Predict: the primary takes 20 MB/s of writes, the replica's link drops for 3 seconds, and the backlog has its default size. Partial or full resync? What changes on Valkey 9.1.2?</summary>
-<p>Full resync on both. The gap is 20 MB/s × 3 s = 60 MB. The Redis 8.10.2 default backlog is 1 MB, and the Valkey 9.1.2 default is 10 MB, so neither still holds the start of the gap. The usual guess is "a 3-second blip is harmless, the replica catches up", which is true only while the backlog covers the gap. To survive this blip with a partial resync, the backlog must be larger than 60 MB.</p>
+<details class="predict"><summary>Predict: the primary takes 20 MB/s of writes, the replica's link drops for 3 seconds, and the backlog has its default size. Partial or full sync? What changes on Valkey 9.1.2?</summary>
+<p>Full sync on both. The gap is 20 MB/s × 3 s = 60 MB. The Redis 8.10.2 default backlog is 1 MB, and the Valkey 9.1.2 default is 10 MB, so neither still holds the start of the gap. The usual guess is "a 3-second blip is harmless, the replica catches up", which is true only while the backlog covers the gap. To survive this blip with a partial resync, the backlog must be larger than 60 MB.</p>
 </details>
 
 <div class="calc" id="s6-psync">
-  <h4>Partial or full resync?</h4>
+  <h4>Partial or full sync?</h4>
   <label>Write rate, MB/s <input type="range" name="rate" min="1" max="100" value="20"> <span class="val" data-val="rate"></span></label>
   <label>Link down, seconds <input type="range" name="gap" min="1" max="120" value="3"> <span class="val" data-val="gap"></span></label>
   <label>Backlog, MB <input type="range" name="backlog" min="1" max="1024" value="1"> <span class="val" data-val="backlog"></span></label>
   <div class="result">Missing stream <b data-out="miss"></b> · result <b data-out="verdict"></b> · backlog needed <b data-out="need"></b></div>
-  <script>kit.calc('#s6-psync', function(v){ var miss = Number(v.rate) * Number(v.gap); return {miss: kit.fmt(miss, 0) + ' MB', verdict: miss <= Number(v.backlog) ? 'partial resync' : 'full resync', need: 'more than ' + kit.fmt(miss, 0) + ' MB'}; });</script>
+  <script>kit.calc('#s6-psync', function(v){ var miss = Number(v.rate) * Number(v.gap); return {miss: kit.fmt(miss, 0) + ' MB', verdict: miss <= Number(v.backlog) ? 'partial resync' : 'full sync', need: 'more than ' + kit.fmt(miss, 0) + ' MB'}; });</script>
 </div>
 <p>The calculator uses the lesson's formula, missing bytes = write rate × time the link was down. It ignores the bytes that were already in the backlog before the drop, so treat the result as a lower bound.</p>
 
@@ -586,10 +626,10 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
   <li>The backlog keeps the last <code>repl-backlog-size</code> bytes of the stream. It is 1 MB by default in Redis 8.10.2, and 10 MB in Valkey 9.1.2. The minimum is 16 KB.</li>
   <li>The replica sends <code>PSYNC &lt;replication ID&gt; &lt;offset&gt;</code>. The primary accepts it when the ID matches and the offset is still inside the backlog.</li>
   <li>After a failover the new primary keeps the old ID as a second ID, up to the offset where it took over. So the other replicas can continue with a partial resync from the new primary.</li>
-  <li>Any other case is a full resync. It costs a fork on the primary and a transfer of the whole dataset, which the next section measures.</li>
+  <li>Any other case is a full sync. It costs a fork on the primary and a transfer of the whole dataset, which the next section measures.</li>
 </ol>
 
-<div class="callout note"><p>The phase described only the old full resync. Redis 8.0 added <dfn>RDB channel replication</dfn>. For a full resync the replica opens a second connection, and the fork child streams the RDB on it. The main connection streams new writes at the same time. The replica buffers those writes, so the primary does not. Valkey has a similar mode, <code>dual-channel-replication-enabled</code>, which is <code>no</code> by default in 9.1.2.</p></div>
+<div class="callout note"><p>The phase described only the old full sync. Redis 8.0 added <dfn>RDB channel replication</dfn>. For a full sync the replica opens a second connection, and the fork child streams the RDB on it. The main connection streams new writes at the same time. The replica buffers those writes, so the primary does not. Valkey has a similar mode, <code>dual-channel-replication-enabled</code>, which is <code>no</code> by default in 9.1.2.</p></div>
 <details class="evidence"><summary>Evidence</summary>
 <p>Replication docs, sections "How Redis replication works" and "Replication ID explained". Defaults from <code>src/config.c</code>: Redis 8.10.2 line 3585, Valkey 9.1.2 line 3463. The second ID is <code>replid2</code>, valid up to <code>second_replid_offset</code>, in <code>src/replication.c</code> lines 1018 to 1042. RDB channel replication: Redis 8.0.0 release notes lines 111, 202 and 231. A local replica log shows "PSYNC is not possible, initialize RDB channel". Valkey default from <code>valkey.conf</code> 9.1.2, line 846.</p>
 </details>
@@ -604,20 +644,20 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <h4>Sizing the backlog</h4>
 <p>Size the backlog for the longest link drop you want to survive: write rate × that time, plus a margin. Measure the write rate by reading <code>master_repl_offset</code> twice, 10 seconds apart. The backlog is one shared buffer for all replicas, so a larger one costs its size once. <code>repl-backlog-ttl 3600</code> frees it an hour after the last replica disconnects.</p>
 <h4>History</h4>
-<p>Redis 2.6 always did a full resync after a disconnect. Partial resync arrived in Redis 2.8. The Twilio case in the next section ran on 2.6.</p>
+<p>Redis 2.6 always did a full sync after a disconnect. Partial resync arrived in Redis 2.8. The Twilio case in the next section ran on 2.6.</p>
 </details>
 
-<p>A full resync looks like a slow catch-up. The next section shows how its fork and its buffers can take the primary down.</p>
+<p>A full sync looks like a slow catch-up. The next section shows how its fork and its buffers can take the primary down.</p>
 
-<h2 data-concept="c3">How can a full resync take the primary down?</h2>
-<p>A full resync costs the primary a fork and a buffer of new writes for the replicas that are syncing. Both use memory, and the primary may not have it.</p>
-<p>In the running case the dataset is 40 GB on a node with 64 GB of RAM. A full resync during the evening peak forks that 40 GB process while clients keep writing. The steps below show where the memory goes.</p>
+<h2 data-concept="c3">How can a full sync take the primary down?</h2>
+<p>A full sync costs the primary a fork and a buffer of new writes for the replicas that are syncing. Both use memory, and the primary may not have it.</p>
+<p>In the running case the dataset is 40 GB on a node with 64 GB of RAM. A full sync during the evening peak forks that 40 GB process while clients keep writing. The steps below show where the memory goes.</p>
 <ol>
   <li>The fork shares every memory page between the primary and the child. Each page a client changes during the transfer is copied, so the primary's memory grows with the write rate and the transfer time.</li>
   <li>While the RDB is on its way, an older-style primary buffers every new write for that replica in the replica's output buffer.</li>
   <li>The limit <code>client-output-buffer-limit replica 256mb 64mb 60</code> drops the replica when its buffer passes 256 MB, or stays above 64 MB for 60 seconds. It is the same in Redis 8.10.2 and Valkey 9.1.2.</li>
-  <li>A dropped replica asks for a full resync again, which starts a new fork. When each transfer takes longer than the buffer can cover, this repeats. The Redis blog describes this endless replication loop.</li>
-  <li>Several replicas that lose the link together need a full resync together. The 5-second diskless delay lets them share one fork. Since Redis 7.0 they also share one replication buffer in memory, but the primary checks the output buffer limit for each replica.</li>
+  <li>A dropped replica asks for a full sync again, which starts a new fork. When each transfer takes longer than the buffer can cover, this repeats. The Redis blog describes this endless replication loop.</li>
+  <li>Several replicas that lose the link together need a full sync together. The 5-second diskless delay lets them share one fork. Since Redis 7.0 they also share one replication buffer in memory, but the primary checks the output buffer limit for each replica.</li>
 </ol>
 
 <div class="stack">
@@ -633,7 +673,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <table>
   <tr><th>Step</th><th>What happened</th><th>The mechanism</th></tr>
   <tr><td>1</td><td>The network between the billing replicas and the primary failed</td><td>every replica lost its link at once</td></tr>
-  <tr><td>2</td><td>All replicas asked for a full sync together, and the primary overloaded</td><td>full resync, on Redis 2.6, which had no partial resync</td></tr>
+  <tr><td>2</td><td>All replicas asked for a full sync together, and the primary overloaded</td><td>full sync, on Redis 2.6, which had no partial resync</td></tr>
   <tr><td>3</td><td>Engineers restarted the primary to remove the load</td><td>a restart, used as the fix for a slow primary</td></tr>
   <tr><td>4</td><td>It read a wrong config, tried to load an AOF file that did not exist, and "dropped all balance data"</td><td>a restart with no data to load starts empty</td></tr>
   <tr><td>5</td><td>The same config made it a replica of itself, so it was read-only</td><td>a replica refuses writes</td></tr>
@@ -646,15 +686,15 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <p>The output buffer default is in <code>redis.conf</code> 8.10.2, line 2475. That a dropped replica asks again is inferred from the config text. Redis blog, "The Endless Redis Replication Loop": https://redis.io/blog/the-endless-redis-replication-loop-what-why-and-how-to-solve-it/ .</p>
 </details>
 
-<p>Three settings decide whether a full resync is survivable. First, the backlog decides how often a full resync happens. Second, free memory decides whether the fork's copied pages fit. Third, the replica output buffer must hold the writes of one whole transfer. With RDB channel replication in Redis 8, that last buffer moves to the replica, through <code>replica-full-sync-buffer-limit</code>.</p>
+<p>Three settings decide whether a full sync is survivable. First, the backlog decides how often a full sync happens. Second, free memory decides whether the fork's copied pages fit. Third, the replica output buffer must hold the writes of one whole transfer. With RDB channel replication in Redis 8, that last buffer moves to the replica, through <code>replica-full-sync-buffer-limit</code>.</p>
 
 <details class="answer deeper"><summary>Go deeper: the loop seen at GitLab and Snap, and a test of many resyncs</summary>
 <h4>GitLab</h4>
-<p>At 13:50 UTC the replica output buffer limit was exceeded on GitLab.com's Redis. Both replicas lost their link and started a full resync, and they were back in sync at 13:55. The same happened at 14:52, with sync complete at 14:58. The fix doubled the replica buffer limit with <code>config set client-output-buffer-limit</code>, to 8 GiB hard, 4 GiB soft and 180 seconds. The issue does not state the old limit or the dataset size. Source: https://gitlab.com/gitlab-com/gl-infra/production/-/issues/706 .</p>
+<p>At 13:50 UTC the replica output buffer limit was exceeded on GitLab.com's Redis. Both replicas lost their link and started a full sync, and they were back in sync at 13:55. The same happened at 14:52, with sync complete at 14:58. The fix doubled the replica buffer limit with <code>config set client-output-buffer-limit</code>, to 8 GiB hard, 4 GiB soft and 180 seconds. The issue does not state the old limit or the dataset size. Source: https://gitlab.com/gitlab-com/gl-infra/production/-/issues/706 .</p>
 <h4>Snap</h4>
 <p>Snap moved its caches from KeyDB to Valkey, about 30 caches a week. For high-memory workloads the replication buffer could fill before the snapshot finished, and the full sync then repeated without end. The source is a vendor summary of a Snap talk: https://www.gomomento.com/blog/why-snap-was-willing-to-fork-and-why-they-still-came-back/ .</p>
 <h4>A test with many resyncs</h4>
-<p>antirez tested AOF on, 10 million keys, 70,000 writes a second and four replicas that resynced again and again. He saw no visible latency problem. So a full resync is not always harmful. The harm comes when memory or buffers run out.</p>
+<p>antirez tested AOF on, 10 million keys, 70,000 writes a second and four replicas that resynced again and again. He saw no visible latency problem. So a full sync is not always harmful. The harm comes when memory or buffers run out.</p>
 <h4>Sizing rules</h4>
 <ul>
   <li>Keep free memory for copy-on-write. The MemoryDB paper advises a dataset at most half of the RAM, or forks at a quiet hour.</li>
@@ -672,7 +712,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <h2 data-concept="c4">How long do writes fail after the primary dies?</h2>
 <p>The replicas hold a recent copy, and a resync keeps them current. At 02:10 somebody still has to decide that the primary is dead and choose a replica, and every write fails until that is done.</p>
 <p>A failover has four steps. Something detects that the primary stopped answering, the monitors agree that it is dead, one replica is chosen and promoted, and clients move to it. Detection must wait for a timeout, because a slow node and a dead node look the same for a while. So the timeout, not the vote, sets most of the time that writes fail.</p>
-<p>The clearest case to measure is <dfn>Redis Cluster</dfn>, the mode where several masters each own a share of the keys. A <dfn>shard</dfn> is one master and its replicas. The nodes check each other over the <dfn>cluster bus</dfn>, a second TCP port on every node, at the client port plus 10,000.</p>
+<p>The clearest case to measure is Redis Cluster, where each master owns a share of the keys and forms one shard with its replicas. The nodes check each other over the <dfn>cluster bus</dfn>, a second TCP port on every node, at the client port plus 10,000. When a master dies, its replicas ask for votes in order of <dfn>rank</dfn>, a place set by how recent each copy is.</p>
 
 <details class="predict"><summary>Predict: an open-source Redis Cluster runs with default settings, three masters with one replica each. You kill one master with kill -9. The vote between the nodes takes milliseconds. How long until a write to that master's keys succeeds?</summary>
 <p>About 24 seconds in a local run. Writes failed for about 23 s, then the nodes answered <code>CLUSTERDOWN</code>, and the first write succeeded at 24.0 s. The replica's log shows "Start of election delayed for 857 milliseconds (rank #0...)", and then "Failover election won" 24 ms after the election started. The usual guess is 2 to 5 seconds, because that is what a managed service reports. The default <code>cluster-node-timeout</code> of 15 seconds comes first, before any vote.</p>
@@ -764,7 +804,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
   <tr><td>Who detects</td><td>every node, after <code>cluster-node-timeout</code>, 15 s</td><td>each Sentinel, after <code>down-after-milliseconds</code>, 30 s</td><td>AWS, not described</td></tr>
   <tr><td>Who decides</td><td>a majority of masters that serve keys</td><td>a majority of all Sentinels elects a leader</td><td>AWS</td></tr>
   <tr><td>Which replica</td><td>the first valid one that asks, usually rank 0</td><td>skips long-disconnected ones, then priority, offset, run ID</td><td>the least replication lag</td></tr>
-  <tr><td>How clients find it</td><td>redirect errors, then a new slot map</td><td>they ask Sentinel for the primary</td><td>the endpoint's DNS name moves</td></tr>
+  <tr><td>How clients find it</td><td>redirect errors, then a fresh cluster layout</td><td>they ask Sentinel for the primary</td><td>the endpoint's DNS name moves</td></tr>
   <tr class="pick"><td>When it cannot fail over</td><td>under 3 masters, or a majority of masters lost</td><td>no majority of Sentinels can talk</td><td>a customer reboot of the primary</td></tr>
 </table>
 <div class="callout warn"><p>The phase called Sentinel "cluster-mode DISABLED on ElastiCache" and said "the most up-to-date replica wins". True now: AWS documents a DNS change and the least-lag replica, not Sentinel. Sentinel skips long-disconnected replicas and sorts by priority before the offset.</p></div>
@@ -787,7 +827,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <ol class="flow" data-dir="down">
   <li class="bad"><b>primary dies</b><span>commands time out, or the connection is refused</span></li>
   <li><b>client retries</b><span>with a delay that grows on each try, plus a random part</span></li>
-  <li><b>client rediscovers</b><span>asks Sentinel, resolves the endpoint again, or fetches a new slot map</span></li>
+  <li><b>client rediscovers</b><span>asks Sentinel, resolves the endpoint again, or fetches the cluster layout again</span></li>
   <li class="ok"><b>writes resume</b><span>on the new primary, with the same keys</span></li>
 </ol>
 
@@ -799,7 +839,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
   <li>An application configured with one node's address, not the cluster or primary endpoint, cannot follow a failover at all.</li>
 </ul>
 
-<p><b>Grab</b> saw the second failure in its driver state service. The data sat in an ElastiCache Redis Cluster with 3 shards and 2 replicas each, and reads went to replicas. One replica failed, and for about 1 minute only about 1 in 21 calls succeeded, so rides dropped. The team's own arithmetic said the cluster should stay up, so they looked at the client. Pipelined reads to the dead replica failed, and the library returned one error for the whole pipeline if one command failed. The client also refreshed the cluster state only about once a minute.</p>
+<p><b>Grab</b> saw the second failure in its driver state service. The data sat in an ElastiCache Redis Cluster with 3 shards and 2 replicas each, and reads went to replicas. One replica failed, and for about 1 minute only about 1 in 21 calls succeeded, so rides dropped. The team's own arithmetic said the cluster should stay up, so they looked at the client. Pipelined reads, which send many commands in one batch, failed on the dead replica. The library returned one error for the whole pipeline if one command failed. The client also refreshed the cluster state only about once a minute.</p>
 <details class="evidence"><summary>Evidence</summary>
 <p>Grab, "Preventing Pipeline Calls from Crashing Redis Clusters", 2019: https://engineering.grab.com/preventing-pipeline-calls-from-crashing-redis-clusters . The incident was on 2019-02-15. The post proposes three fixes. One is a separate client for pipelined reads that routes by latency. The others are a result and error per command, and a reload of the cluster state on a pipeline error. The post does not confirm that all of them shipped.</p>
 </details>
@@ -833,7 +873,8 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <h2 data-concept="c5">Where does a key live in cluster mode, and who routes it?</h2>
 <p>The failover sections showed that clients must find the new primary. In cluster mode a client must also find the right shard for every single key, so routing becomes part of every request.</p>
 <p>Months after the night at 02:10, your sessions outgrow the memory of one node. You move them to Redis Cluster with three shards. The same code now sees errors it never saw on one primary.</p>
-<p>Redis Cluster divides the keys into 16,384 <dfn>hash slots</dfn>. A key's slot is <code>CRC16(key) mod 16384</code>, and each slot belongs to one master. The client keeps a <dfn>slot map</dfn>, a table from slot to master, and sends each command to the owner of its key's slot. A node never forwards a command to another node. When it does not own the slot, it answers <code>MOVED</code> with the slot and the owner's address, and the client must retry there.</p>
+<p>Redis Cluster divides the keys into 16,384 <dfn>hash slots</dfn>. A key's slot is <code>CRC16(key) mod 16384</code>, and each slot belongs to one master. The client keeps a <dfn>slot map</dfn>, its copy of the cluster layout as a table from slot to master. It sends each command to the owner of its key's slot. A node never forwards a command to another node. When it does not own the slot, it answers <dfn><code>MOVED</code></dfn>, an error with the slot and the owner's address. The client must retry there.</p>
+<p>Slots can move while the cluster runs. A <dfn>reshard</dfn> moves chosen slots to a chosen master, so a client's slot map can be out of date.</p>
 
 <figure class="diagram"><ol class="flow">
   <li><b>client</b><span>slot map says slot 12182 is on node A</span></li>
@@ -848,9 +889,9 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 
 <p>The node chooses its answer with these rules, in <code>getNodeByQuery</code>.</p>
 <ol>
-  <li>It computes the slot of every key in the command. If the keys are in different slots, it answers <code>CROSSSLOT</code>, so <code>MGET</code> and transactions across slots fail.</li>
+  <li>It computes the slot of every key in the command. If the keys are in different slots, it answers <dfn><code>CROSSSLOT</code></dfn>, the error for keys in more than one slot. So <code>MGET</code> and transactions across slots fail.</li>
   <li>If another node owns the slot, it answers <code>MOVED</code>. The client should update its map, because the move is permanent.</li>
-  <li>If the slot is moving away and the key is no longer here, it answers <code>ASK</code>. The client sends <code>ASKING</code> and the command to the target once, without changing its map.</li>
+  <li>If the slot is moving away and the key is no longer here, it answers <dfn><code>ASK</code></dfn>, a redirect for this one command. The client sends <code>ASKING</code> and the command to the target once, without changing its map.</li>
   <li>If a command with several keys finds some here and some moved, it answers <code>TRYAGAIN</code>, and the client retries a little later.</li>
   <li>Only when this node owns the slot does it run the command. A nil answer then means the key really does not exist.</li>
 </ol>
@@ -864,12 +905,12 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
   <tr><td><code>{company:c7}:profile</code>, <code>{company:c7}:settings</code>, <code>{company:c7}:sessions</code></td><td>8819</td><td class="ok">one slot, so one <code>MGET</code> works</td></tr>
   <tr><td><code>foo</code></td><td>12182</td><td>the key of the local run</td></tr>
 </table>
-<p>A hash tag also has a cost. All of one tenant's keys sit on one master, so a tenant with most of the traffic makes that master hot. Phase 5 deals with hot shards.</p>
+<p>A hash tag also has a cost. All of one tenant's keys sit on one master, so a tenant with most of the traffic makes that master hot. Phase 5 deals with a shard that takes most of the traffic.</p>
 
 <p>The same platform gives a use case that shows why the reply matters. After a cluster layout change, one service's error rate rose, and it recovered only when the service restarted. The phase explained it as nil replies for keys that "look missing". A node answers <code>MOVED</code> instead, so the likely cause was a client that failed on <code>MOVED</code>, or refreshed its map too rarely. A restart loaded a fresh slot map. The real cause is internal and was not checked.</p>
 <div class="callout warn"><p>The phase said a client with a stale slot map gets nil. True now, in <code>src/cluster.c</code> at 8.10.2: the node replies <code>MOVED</code>, or <code>ASK</code> during a migration. A local run confirmed <code>MOVED 12182 127.0.0.1:17103</code> on both nodes that did not own the slot.</p></div>
 
-<p>A <dfn>reshard</dfn> moves chosen slots to a chosen node, and the old owner then answers <code>MOVED</code> for them. Since Redis 8.4 a slot can move atomically. That should shorten the time clients see <code>ASK</code> redirects, which is inferred.</p>
+<p>After a reshard, the old owner answers <code>MOVED</code> for the slots it gave away. Since Redis 8.4 a slot can move atomically. That should shorten the time clients see <code>ASK</code> redirects, which is inferred.</p>
 <div class="callout warn"><p>The phase's demo re-split all slots into equal ranges for three and then four shards, so a slot "moved" between two old shards. A real reshard moves only the slots you choose, to the node you choose. The phase also taught only the key-by-key move, which is no longer the only method.</p></div>
 <details class="evidence"><summary>Evidence</summary>
 <p>Slot rule: cluster spec, "Key distribution model". Reply order: <code>src/cluster.c</code> 8.10.2 lines 1436 to 1487, and CROSSSLOT at line 1500. The slot numbers were computed by the lab's code and match <code>CLUSTER KEYSLOT</code> on 8.10.1. Release notes: 8.4.0 line 104, 8.10.2 line 279, Valkey 9.0.0 line 118. The claim that the <code>ASK</code> window is smaller with atomic migration is inferred, and the design docs were not read.</p>
@@ -892,14 +933,14 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 
 <h2 data-concept="c5">What else changes when you turn on cluster mode?</h2>
 <p>Keyed commands go to the owner of their slot. Commands without a key, and events that a node raises by itself, follow other rules. Code that worked on one primary can break on them.</p>
-<p>Your agent service listens for expired sessions, so it can close each conversation. On one primary it subscribed to keyspace expiry events and saw all of them. After the move to three shards it sees about one third. The table shows why, together with the other changes.</p>
+<p>Your agent service listens for expired sessions, so it can close each conversation. On one primary it subscribed to keyspace expiry events, the pub/sub messages Redis sends when a key expires, and saw all of them. After the move to three shards it sees about one third. The table shows why, together with the other changes.</p>
 
 <table>
   <tr><th>Feature</th><th>One primary</th><th>Redis Cluster</th></tr>
   <tr><td>Databases</td><td>several numbered databases, chosen with <code>SELECT</code></td><td class="bad">database 0 only, <code>SELECT</code> is refused. Valkey 9.0 allows numbered databases</td></tr>
   <tr><td>Commands with several keys</td><td>any keys</td><td class="bad">one slot only, or CROSSSLOT</td></tr>
   <tr><td><code>PUBLISH</code></td><td>to local subscribers</td><td>sent to every node over the cluster bus, so any subscriber gets it</td></tr>
-  <tr><td><code>SPUBLISH</code>, sharded pub/sub</td><td>not needed</td><td class="ok">sent only inside the shard that owns the channel's slot</td></tr>
+  <tr><td><code>SPUBLISH</code>, <dfn>sharded pub/sub</dfn>, where a channel has a slot like a key</td><td>not needed</td><td class="ok">sent only inside the shard that owns the channel's slot</td></tr>
   <tr class="pick"><td>Keyspace notifications</td><td>one node raises all of them</td><td class="bad">each node raises events only for its own keys, and does not send them to other nodes</td></tr>
   <tr><td>Smallest setup that fails over</td><td>one primary, one replica, three Sentinels</td><td>three masters</td></tr>
 </table>
@@ -992,7 +1033,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <h2 data-concept="c2">What does a region failover lose, and what do cross-AZ reads cost?</h2>
 <p class="why">A region failover keeps only the writes that crossed the link, and a cross-AZ read is billed in each direction.</p>
 <p>You saw that a failover inside one region can lose the acknowledged writes a replica had not received. A whole region can fail the same way, and then the cost is larger and the bill is a second surprise.</p>
-<p>Your agent service runs in one region, with a read-only standby in a second region that copies the primary over a wide-area link. An <dfn>Availability Zone (AZ)</dfn> is one or more data centers inside one cloud Region, and a Region has several AZs. Traffic inside one AZ is free. Traffic across AZs in one Region is billed, and traffic across Regions is billed more. The link to the standby is asynchronous, like the replication in this phase, so the standby holds only what reached it.</p>
+<p>Your agent service runs in one region. It keeps a <dfn>standby</dfn>, a read-only replica in a second region that copies the primary over a wide-area link. An <dfn>Availability Zone (AZ)</dfn> is one or more data centers inside one cloud Region, and a Region has several AZs. Traffic inside one AZ is free. Traffic across AZs in one Region is billed, and traffic across Regions is billed more. The link to the standby is asynchronous, like the replication in this phase, so the standby holds only what reached it.</p>
 
 <figure class="diagram"><ol class="flow">
   <li><b>same AZ</b><span>$0.00 per GB</span></li>
@@ -1009,7 +1050,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
   <li>AZ-aware reads are a client feature, not a server one. go-redis v9.5.1 has <code>RouteByLatency</code> but no AZ option. Lettuce has <code>ReadFrom.subnet(...)</code>. Valkey GLIDE has <code>AZ_AFFINITY</code> and needs a client AZ that matches the AZ the server reports.</li>
   <li>For the server to report its AZ, Valkey 8.0 added the <code>availability-zone</code> config, shown in <code>INFO</code> and, since Valkey 8.1, in the <code>HELLO</code> reply. Redis 8.10.2 has no such setting.</li>
   <li>Open-source Redis and Valkey have no multi-primary across Regions. A cross-region replica is an ordinary <code>REPLICAOF</code> over the wide-area link, and you promote it and move clients yourself. This is inferred from the replication docs, and was not checked against every Valkey page.</li>
-  <li>ElastiCache Global Datastore has one writable Region and read-only secondaries. AWS does not fail over across Regions for you. You promote a secondary by hand. The AWS product page, not the docs, says this takes less than 1 minute. Writes not yet replicated are lost, which is inferred from the asynchronous link.</li>
+  <li>ElastiCache Global Datastore has one writable Region and read-only standbys, which AWS calls secondary clusters. AWS does not fail over across Regions for you. You promote a standby by hand. The AWS product page, not the docs, says this takes less than 1 minute. Writes not yet replicated are lost, which is inferred from the asynchronous link.</li>
   <li>At a region failover each kind of data loses its unreplicated window, and each loss is different.</li>
 </ol>
 
@@ -1034,9 +1075,10 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <p>Distance costs money and loses writes. The next section asks what you must set up so the network cannot take the whole server.</p>
 
 <h2 data-concept="c5">What must you secure before Redis faces the network?</h2>
-<p class="why">Redis trusts the network, so you add per-service ACL users, TLS, bus authentication, and prompt patching.</p>
+<p class="why">Redis trusts the network, so you add per-service users, TLS, bus authentication, and prompt patching.</p>
 <p>Cluster mode changed what your client must do for every key. The network changes what any client can do to the whole server, because Redis is built for trusted clients inside a trusted environment.</p>
-<p>Your agent service's Redis holds sessions, locks and a tool cache. If the port is reachable with no password, any client runs every command, including one that erases it. The defence is three layers: the shipped defaults, one <dfn>ACL</dfn> user per service, and TLS. An ACL, access control list, is a named user with a password, a set of allowed commands, and a set of allowed key and channel patterns.</p>
+<p>Your agent service's Redis holds sessions, locks and a tool cache. If the port is reachable with no password, any client runs every command, including one that erases it.</p>
+<p>The defence is three layers. The first is the shipped defaults, such as <dfn>protected mode</dfn>, a default guard that limits who may connect. The second is one <dfn>ACL</dfn> user per service. An ACL, access control list, is a named user with a password, a set of allowed commands, and a set of allowed key and channel patterns. The third is TLS.</p>
 
 <figure class="diagram"><ol class="flow" data-dir="down">
   <li><b>network</b><span>shipped config binds loopback only</span></li>
@@ -1071,7 +1113,7 @@ ACL DRYRUN cache FLUSHALL   # -> OK  (wipes the whole server)</code></pre>
 ACL DRYRUN cache FLUSHALL   # -> no permissions to run 'flushall'</code></pre>
 </div></div>
 
-<p>The <dfn>cluster bus</dfn> is the second TCP port each cluster node opens, at the client port plus 10000. It has no authentication of its own unless <code>tls-cluster yes</code>. A <code>CLUSTER MEET</code> packet from any host that reaches the bus port adds that host as a node, and its gossip is trusted. In a local run a rogue node sent <code>CLUSTER MEET</code> to a two-node cluster, joined it, replicated the data, and then took every slot with <code>CLUSTER FAILOVER TAKEOVER</code>. The only thing that blocked the rogue from reading data was a client password on the primary, which failed its replication AUTH. The password did not stop the takeover. With it set, the rogue still took all 16384 slots, and clients were sent with MOVED to a node that held no keys. Redis 8.10.2 adds <code>cluster-bus-port-protected-mode</code>, default no, which makes a node refuse to start without <code>tls-cluster</code> when set to yes.</p>
+<p>The cluster bus, from the failover sections, is the second TCP port each cluster node opens, at the client port plus 10000. It has no authentication of its own unless <code>tls-cluster yes</code>. A <code>CLUSTER MEET</code> packet from any host that reaches the bus port adds that host as a node, and its gossip is trusted. In a local run a rogue node sent <code>CLUSTER MEET</code> to a two-node cluster, joined it, replicated the data, and then took every slot with <code>CLUSTER FAILOVER TAKEOVER</code>. The only thing that blocked the rogue from reading data was a client password on the primary, which failed its replication AUTH. The password did not stop the takeover. With it set, the rogue still took all 16384 slots, and clients were sent with MOVED to a node that held no keys. Redis 8.10.2 adds <code>cluster-bus-port-protected-mode</code>, default no, which makes a node refuse to start without <code>tls-cluster</code> when set to yes.</p>
 <details class="evidence"><summary>Evidence</summary>
 <p>Protected mode: <code>src/networking.c:1608-1637</code> at Redis 8.10.2. Since Redis 7.0 a non-default bind no longer turns it off (7.0.0 release notes #9034). Categories and left-to-right rules: <code>redis.conf:1059-1092</code>; FLUSHALL is in @dangerous and @keyspace (COMMAND INFO on 8.10.1). The cache-user trap and its fix were run on 2026-10-19: ACL DRYRUN returned OK for FLUSHALL on the WRONG user and "no permissions" after adding -@dangerous, on redis-server 8.10.1. Lua CVEs: of 29 Redis advisories read from 2023 to 2026, 8 were Lua bugs, including CVE-2025-49844, scored 10.0, which needs an authenticated user (GitHub advisories API; Wiz blog, 2025-10-06). ACL LOG reasons: <code>src/acl.c:3167-3182</code>. tls-auth-clients-user CN since Redis 8.6; the 8.10.1 release fixed a NUL-byte Common Name bypass. Cluster bus: 8.10.2 release notes #15722; <code>cluster-bus-port-protected-mode</code> default 0 at <code>src/config.c:3434</code>. The rogue MEET run used loopback ports 6583 to 6588 on 2026-10-19. Dangerous commands off since 7.0: <code>src/config.c:3496-3498</code>, release notes #9920.</p>
 </details>
@@ -1088,13 +1130,13 @@ ACL DRYRUN cache FLUSHALL   # -> no permissions to run 'flushall'</code></pre>
 <ul>
   <li><b>The disk.</b> What a crash loses depends on the kind of crash, and an empty restarted primary empties its replicas. A kill -9 with AOF everysec loses nothing in the normal case, and a power loss loses about one second. A slow disk makes both windows longer. From "What does a crash lose, and which crash?" and "Why can a restart empty the replicas as well?".</li>
   <li><b>The acknowledged writes.</b> WAIT counts the replicas that have your write, but a failover can still lose it. Only <code>min-replicas-to-write</code> bounds the loss, by refusing writes. From "What does an OK from the primary promise?" and "What does WAIT cost when a replica is missing?".</li>
-  <li><b>The reconnect.</b> A replica gap longer than the backlog forces a full resync, which forks the primary and can crash it. From "When does a reconnecting replica copy everything again?" and "How can a full resync take the primary down?".</li>
+  <li><b>The reconnect.</b> A replica gap longer than the backlog forces a full sync, which forks the primary and can crash it. From "When does a reconnecting replica copy everything again?" and "How can a full sync take the primary down?".</li>
   <li><b>The outage.</b> Failover time is mostly the detection timeout, and in Redis Cluster the masters of other shards vote. Your client's timeouts, retries and refresh decide the rest. From the three failover sections.</li>
   <li><b>The route.</b> In cluster mode no node forwards a keyed command, so the client's slot map decides routing. Keyspace events stay on one node, and <code>PUBLISH</code> goes to all of them. From the three cluster sections.</li>
   <li><b>The distance.</b> A region failover keeps only the replicated writes, so sessions, locks, rate limits and caches lose the lag window. A cross-AZ read is billed in each direction, so read from a same-AZ replica. From the region and AZ section.</li>
   <li><b>The guard.</b> Redis trusts the network, so you add per-service ACL users with <code>-@dangerous -@scripting</code>, TLS, cluster-bus authentication, and prompt patching. A key pattern alone does not stop <code>FLUSHALL</code>. From the securing-Redis section.</li>
 </ul>
-<p>You can now state the loss window of a Redis setup for each kind of failure, and predict how long its writes fail. You can also read a <code>MOVED</code> or <code>CROSSSLOT</code> error and choose one primary or a cluster for a workload. Phase 5 asks why a Redis that is up and replicated still answers slowly. It uses the fork, the replica reads and the hash slots from this phase for memory headroom, hot shards and big keys.</p>
+<p>You can now state the loss window of a Redis setup for each kind of failure, and predict how long its writes fail. You can also read a <code>MOVED</code> or <code>CROSSSLOT</code> error and choose one primary or a cluster for a workload. Phase 5, Performance and failures, asks why a Redis that is up and replicated still answers slowly. It uses the fork, the replica reads and the hash slots from this phase. It applies them to memory headroom, to a shard that takes most of the traffic, and to big keys.</p>
 
 <h2 data-kind="lab">Lab: the exercises that teach Phase 4</h2>
 <p>Sixteen of the phase's seventeen exercises, under their own ids and copied from the phase. E11 is left out, because it reads a private repository of the former employer. E1 to E12 use Docker, which was not available for this lesson, so their notes come from a reading of the lab code and from local runs on Redis 8.10.1 under Rosetta 2. E13 to E17 are new in this phase, and every one of them was run on 2026-10-19.</p>

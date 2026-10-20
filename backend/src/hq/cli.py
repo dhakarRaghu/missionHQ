@@ -263,8 +263,12 @@ async def cmd_import_course(topic: str) -> int:
         if slug.startswith(f"{topic}-phase-") and isinstance(item.get("content"), str):
             (folder / f"{slug}.md").write_text(item["content"])
             count += 1
-    (folder / "course.json").write_text(json.dumps(
-        {"topic": topic, "importedFrom": base, "phases": count}, indent=2))
+    # The study skill's course.json holds the outline and the term map that
+    # the page checks read. A stub written over it would erase them, so the
+    # stub is written only where no course.json exists yet.
+    if not (folder / "course.json").is_file():
+        (folder / "course.json").write_text(json.dumps(
+            {"topic": topic, "importedFrom": base, "phases": count}, indent=2))
     print(f"imported {count} phases of {topic} into {folder}")
     return 0 if count else 1
 

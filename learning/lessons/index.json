@@ -1360,5 +1360,27 @@
   "sources": [],
   "title": "Replication, failover, backups and pooling",
   "topic": ""
+ },
+ {
+  "article_kind": "",
+  "course_slug": "redis-phase-02-caching-patterns",
+  "html_path": "../learning/lessons/2026-10-18-redis-phase-02-caching-patterns.html",
+  "kind": "course",
+  "lesson_date": "2026-10-21",
+  "md_path": "../learning/lessons/2026-10-18-redis-phase-02-caching-patterns.md",
+  "one_liner": "Four ways a Redis cache fails when it misses and when it fills, from a load multiplier to a stale late fill, and the fix for each.",
+  "path_step": "",
+  "phase_slug": "",
+  "read_at": null,
+  "relationship": "",
+  "review_notes": "",
+  "review_round": 0,
+  "review_score": null,
+  "review_status": "none",
+  "reviewed_at": null,
+  "score": 0,
+  "sources": [],
+  "title": "Caching patterns: what goes wrong when the cache misses and when it fills",
+  "topic": ""
  }
 ]

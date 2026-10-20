@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from hq import loader, memory
+from hq import loader, memory, term_order
 from hq.config import settings
 from hq.tools.registry import web_read_tools
 
@@ -248,6 +248,19 @@ def _agent_context(spec: loader.AgentSpec) -> list[str]:
     return out
 
 
+def reader_section() -> str:
+    """"The reader", from the learner profile the study skill also reads
+    (learning/study-material/_learner.json). The writer files describe the
+    reader by reference, so a new reader or a new subject changes data, not
+    the prompts."""
+    try:
+        text = str(term_order.load_learner(settings().learning_dir / "study-material")
+                   .get("reader") or "").strip()
+    except (OSError, ValueError):
+        text = ""
+    return f"## The reader\n\n{text}" if text else ""
+
+
 def _writer_procedure(kind: str, *, article: bool, page: str, story: bool = False) -> list[str]:
     files = ["teacher.md"]
     if kind == "writer-outline":
@@ -258,7 +271,8 @@ def _writer_procedure(kind: str, *, article: bool, page: str, story: bool = Fals
         files += ["section.md", "page-kit.md"]
     elif kind == "writer-post":
         files.append("post.md")
-    return [text for text in (_writer_file(n) for n in files) if text]
+    return [text for text in (_writer_file(n) for n in files) if text] + [
+        r for r in [reader_section()] if r]
 
 
 def assemble(kind: str, spec: loader.AgentSpec, *, skill: str = "",

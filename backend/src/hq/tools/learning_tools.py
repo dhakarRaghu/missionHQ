@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from pydantic_ai import ModelRetry, RunContext
 
-from hq import board, db, lesson_index, lesson_kit, privacy, site_posts
+from hq import board, db, lesson_index, lesson_kit, privacy, site_posts, term_order
 from hq import courses as courses_spec
 from hq.config import settings
 from hq.learning_pipeline import (
@@ -955,6 +955,7 @@ async def finish_lesson(
 
         _note_path, note = await _study_note(clean)
         found.add(page_findings(source, html, note))
+        found.add(await asyncio.to_thread(term_findings, clean, html))
     broken = page_script_problems(html) if html.strip() else ""
     if broken:
         found.hard.append(f"a figure on the page cannot work: {broken}")
@@ -1430,6 +1431,125 @@ def course_source_file(slug: str) -> Path:
 def read_course_source_text(slug: str) -> str:
     path = course_source_file(slug)
     return path.read_text() if path.is_file() else ""
+
+
+@dataclass
+class CourseTerms:
+    """What the reader has when a phase starts, and where it sits in its
+    course. Read from files only, the same files the study skill writes: the
+    learner profile, the course's term map, its phase files and the lessons
+    he already has. A course with no map still gets its page order checked
+    from the page's own definitions."""
+    topic: str
+    key: str                                           # "3", "2a"
+    reader: str = ""                                   # the profile's paragraph for writers
+    reader_terms: list[str] = field(default_factory=list)  # never explained
+    earlier_terms: list[str] = field(default_factory=list)  # explained again in a clause
+    phase_terms: list[str] = field(default_factory=list)    # the map says this phase introduces
+    aliases: dict[str, str] = field(default_factory=dict)   # other name -> the course's name
+    short: dict[str, str] = field(default_factory=dict)     # short name -> its term
+    previous: str = ""
+    previous_title: str = ""
+    following: str = ""
+    following_title: str = ""
+
+
+def _study_dir() -> Path:
+    return settings().learning_dir / STUDY_MATERIAL_DIR
+
+
+def reader_profile() -> dict[str, Any]:
+    try:
+        return term_order.load_learner(_study_dir())
+    except (OSError, ValueError) as exc:
+        log.warning("learner profile unreadable: %s", exc)
+        return {}
+
+
+def _lesson_slug(path: Path) -> str:
+    return path.stem[11:] if re.match(r"\d{4}-\d{2}-\d{2}-", path.name) else path.stem
+
+
+def course_terms(slug: str) -> CourseTerms | None:
+    """None for a page that is not a phase of a course."""
+    topic, sep, tail = slug.partition("-phase-")
+    key = re.match(r"\d+[a-z]?", tail) if sep else None
+    if not key or topic.startswith("lab-"):
+        return None
+    folder = _study_dir() / topic
+    learner = reader_profile()
+    try:
+        course = json.loads((folder / "course.json").read_text()) if (folder / "course.json").is_file() else {}
+    except ValueError:
+        course = {}
+    course.setdefault("topic", topic)
+    here = key.group(0)
+    entries = {term_order.phase_key(e.get("phase")): e for e in course.get("outline") or []}
+    mine = entries.get(term_order.phase_key(here), {})
+    earlier = set(term_order.known_before(course, learner, here)) - term_order.learner_known(learner, topic)
+    # The terms of the lessons he has already read, by their own <dfn>.
+    lessons = settings().learning_dir / "lessons"
+    newest: dict[str, Path] = {}
+    for page in sorted(lessons.glob(f"*-{topic}-phase-*.html")) if lessons.is_dir() else []:
+        other = _lesson_slug(page)
+        m = re.match(r"\d+[a-z]?", other.partition("-phase-")[2])
+        if other.startswith(f"{topic}-phase-") and m and term_order.phase_key(m.group(0)) < term_order.phase_key(here):
+            newest[other] = page
+    for page in newest.values():
+        earlier |= {term_order.norm(t) for t, _o, _c in term_order.read_html(page.read_text()).defs}
+    found = (re.match(r"\d+[a-z]?", p.stem.partition("-phase-")[2])
+             for p in folder.glob(f"{topic}-phase-*.md"))
+    keys = sorted({m.group(0) for m in found if m} | {here}, key=term_order.phase_key)
+    i = keys.index(here)
+    prev = keys[i - 1] if i else ""
+    nxt = keys[i + 1] if i + 1 < len(keys) else ""
+    course_level = ((learner.get("courses") or {}).get(topic) or {})
+    return CourseTerms(
+        topic=topic, key=here,
+        reader=str(learner.get("reader") or "")
+        + (f" In this subject: {course_level['level']}." if course_level.get("level") else ""),
+        reader_terms=[*(learner.get("knownTerms") or []), *(course_level.get("knownTerms") or [])],
+        earlier_terms=sorted(earlier),
+        phase_terms=term_order.map_terms(mine, "introduces"),
+        aliases=dict(course.get("aliases") or {}), short=dict(course.get("shortNames") or {}),
+        previous=term_order.phase_label(prev) if prev else "",
+        previous_title=str(entries.get(term_order.phase_key(prev), {}).get("title") or "") if prev else "",
+        following=term_order.phase_label(nxt) if nxt else "",
+        following_title=str(entries.get(term_order.phase_key(nxt), {}).get("title") or "") if nxt else "")
+
+
+_SECTION_H2_RE = re.compile(r"(?is)<h2\b[^>]*>")
+_KEPT_SECTIONS_RE = re.compile(
+    r'(?is)<h2\b[^>]*data-kind="(?:lab|checkpoint|cheatsheet|sources)"[^>]*>.*?(?=<h2\b|</main>|$)')
+_RECALL_RE = re.compile(r'(?is)<h2\b[^>]*data-kind="recall"[^>]*>.*?(?=<h2\b|$)')
+
+
+def term_findings(slug: str, page_html: str) -> Findings:
+    """Every term explained before the page uses it, and the page linked to
+    the phases on each side of it. Hard: a lesson that uses a term thousands
+    of words before it explains it is the lesson he cannot follow."""
+    found = Findings()
+    ctx = course_terms(slug)
+    if ctx is None or not page_html.strip():
+        return found
+    page = term_order.read_html(page_html)
+    found.hard += term_order.order_findings(
+        page, known=[*ctx.reader_terms, *ctx.earlier_terms], extra_terms=ctx.phase_terms,
+        short=ctx.short)
+    if ctx.aliases:
+        # His lab, checkpoint and cheatsheet keep the phase's own words.
+        taught = _KEPT_SECTIONS_RE.sub(" ", page_html)
+        found.hard += term_order.alias_findings(term_order.read_html(taught), ctx.aliases)
+    body = re.split(r"(?i)<main\b[^>]*>", page_html, maxsplit=1)[-1]
+    heads = [m.start() for m in _SECTION_H2_RE.finditer(body)]
+    # The opening and the first section: where the page says where he is.
+    head = _page_text(body[:heads[1]] if len(heads) > 1 else body[:6000])
+    recall = _RECALL_RE.search(body)
+    tail = _page_text(recall.group(0) if recall else body[-6000:])
+    found.hard += term_order.link_findings(
+        head, tail, previous=ctx.previous, previous_title=ctx.previous_title,
+        following=ctx.following, following_title=ctx.following_title)
+    return found
 
 
 async def fetch_platform_document(slug: str) -> dict[str, Any]:

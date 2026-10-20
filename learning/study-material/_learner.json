@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "note": "Draft for the owner to correct. Read by the study skill and by Mission HQ's tutor. 'reader' is what writers are told about the reader. 'knownTerms' are terms the reader has before any course: a page may use them without a definition. Per course, 'level' says how much of that subject the reader has, and 'knownTerms' adds the subject's terms the reader already has.",
+  "reader": "The reader is a backend product engineer early in their career. English is their second language: they are fluent for work, and short plain sentences read best. They have shipped Go and gRPC services, Kubernetes workflows, a RAG feature and an eval pipeline, and they build a multi-agent system in the evenings. They learn each subject from its basics to the depth of a senior engineer: how real systems use it, the mechanism one level below the API, what breaks in production, and the decision it changes.",
+  "knownTerms": [
+    "API", "HTTP", "JSON", "REST", "gRPC", "Go", "Python", "SQL", "database", "table", "row", "index",
+    "query", "transaction", "server", "client", "process", "thread", "CPU", "memory", "RAM", "disk",
+    "network", "latency", "throughput", "request", "response", "timeout", "retry", "queue", "worker",
+    "cron", "log", "metric", "dashboard", "deploy", "container", "Docker", "Kubernetes", "pod", "service",
+    "ORM", "cloud", "AWS", "LLM", "prompt", "token", "RAG", "embedding", "agent", "eval"
+  ],
+  "courses": {
+    "redis": {"level": "has used it a little, not in depth", "knownTerms": []},
+    "elite-storage": {"level": "uses PostgreSQL at work through an ORM, not its internals", "knownTerms": ["PostgreSQL"]},
+    "elite-performance": {"level": "has measured latency, not with a method", "knownTerms": []},
+    "inference-internals": {"level": "calls LLM APIs, not their serving internals", "knownTerms": []},
+    "kubernetes": {"level": "has written Kubernetes workflows", "knownTerms": []}
+  }
+}

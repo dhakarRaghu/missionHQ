@@ -1,32 +1,106 @@
-Your team works on a B2B SaaS platform. About 34 services share several Redis clusters on Amazon ElastiCache, and your service is one of them. You are adding an AI grading service. A learner submits a roleplay answer, and the service grades it against 40 rubric items. It reads the rubric from Redis, counts LLM calls per company, and caches each result.
+Your team works on a B2B SaaS platform. About 34 services share several Redis clusters that AWS runs for the team, and your service is one of them. You are adding an AI grading service. A learner submits a roleplay answer, and the service grades it against 40 rubric items.
+
+Your service needs three kinds of data that all its workers share. It reads the same rubric for every answer, and it counts LLM calls per company across all workers. It also keeps a copy of each result, so that a repeated request does not call the model again. A database can hold all three, but it does the full work of a read every time. Redis exists to serve this kind of data from memory, to every service, with little delay.
 
 The platform's past incidents show why the details of Redis matter. In each of the three below, Redis did what it was built to do. The engineers' picture of Redis was what was wrong.
 
-- An LLM gateway wrote keys with no expiry time to a shared cluster. Memory reached 100%, and an upload service on the same cluster was down with it for 4 hours 37 minutes.
+- An LLM gateway wrote data with no expiry time to a shared cluster. Memory reached 100%, and an upload service on the same cluster was down with it for 4 hours 37 minutes.
 
-- A serializer marked API responses as not cacheable. Every read then missed the cache, so about 300 requests a minute to the settings API became about 30,000.
+- A serializer marked API responses as not cacheable, so the shared client code kept no copy of them in Redis. Every read then went to the settings API, so about 300 requests a minute became about 30,000.
 
-- A client assumed two replicas in every environment. In staging, that assumption added 2 seconds of latency to its calls.
+- A client assumed that every environment had two extra servers with copies of the data. In staging, that assumption added 2 seconds of latency to its calls.
 
 This lesson follows your grading service through five ideas about Redis. Each idea would have prevented one failure of this kind. The later phases use the same platform, and each one names its own example at its start.
 
 ### What you must know
 
-- **One main thread runs every command and the housekeeping, so one slow command delays every client.** Explain a cluster-wide latency spike and find its cause.
+- **One thread runs every request from every client and also the server's upkeep work, so one slow request delays every client.** Explain a cluster-wide latency spike and find its cause.
 
-- **The round trip, not the command, is the cost. Batching removes round trips, up to a fixed ceiling.** Estimate the latency of a call path and fix it with batching.
+- **The trip to Redis and back costs more than the work inside it, and batching requests into one trip saves time only up to a limit.** Estimate the latency of a call path and fix it with batching.
 
-- **One command or one script runs with nothing in between. Two separate commands can be interleaved.** Tell which Redis code can race, and make it safe.
+- **One request or one script runs with nothing in between, but two separate requests can have other clients' requests run between them.** Tell which Redis code can race, and make it safe.
 
-- **At the memory limit the eviction policy decides who fails. Under volatile-lru, keys without a TTL never leave.** Predict who fails when a shared cluster fills up.
+- **At the memory limit, a setting decides which data Redis deletes, and the AWS default never deletes data without an expiry time.** Predict who fails when a shared cluster fills up.
 
-- **Redis keeps the primary copy in RAM, so a lost cache entry costs latency and a lost lock costs money.** Decide what may live in Redis and what needs a durable store.
+- **Redis keeps its main copy of the data in RAM, so a lost copy of a result costs time and a lost lock costs money.** Decide what may live in Redis and what needs a durable store.
+
+## What is Redis, and which words does this lesson use?
+
+The second incident above shows the problem that Redis exists to solve. Without the stored copies, the settings API took about 100 times its normal load, about 30,000 requests a minute instead of 300. Each of those requests was work that a stored copy would have saved.
+
+Redis is a server that keeps all its data in RAM and serves it over the network to every client that connects. A read from RAM costs the server well under a microsecond, so one Redis server can answer many services at once. Redis also has operations that read and change shared data in one step, so many workers can share one counter.
+
+The words below come back throughout this lesson and in the later phases. Each one is explained here once, with the place where you meet it.
+
+### Words for the data
+
+- A *key* is the name under which Redis stores one piece of data, such as `rubric:42`. Every read and every write names its key.
+
+- A *value* is the data stored under a key, such as a rubric in JSON or a number. Redis holds the value in RAM.
+
+- A *command* is one instruction that a client sends to Redis, such as `GET rubric:42`, and Redis sends one reply to each. Your Go client sends one command for each call you make.
+
+- A *TTL*, or time to live, is the number of seconds after which Redis deletes a key. A key with no TTL stays until something deletes it.
+
+- A *round trip* is the path of one command to Redis and of its reply back to the client. Its time is the whole call minus the work that Redis does on the command. Your service waits for one round trip on every call.
+
+### Words for stored copies
+
+- A *cache* is a fast copy of data whose true copy lives somewhere else, such as a database or an LLM. Your grading service caches each grading result in Redis.
+
+- A *cache miss* is a read that finds no copy, so the service must ask the source again. A read that finds its copy is a hit.
+
+- The *hit rate* is the share of reads that find their copy. When it falls, more reads reach the source, as they did in the settings API incident.
+
+### Words for the servers
+
+- The *primary* is the Redis server that takes the writes for its keys. Your service connects to the primary of its cluster.
+
+- A *replica* is a second Redis server that copies every write of the primary over the network, a little later. The third incident above came from a client that assumed two of them.
+
+- A *failover* is the switch in which a replica takes the place of a failed primary. Clients must then send their writes to the new primary.
+
+### Names of the tools
+
+- *Valkey* is an open-source project that started from the Redis code and keeps the same commands. Some numbers in this lesson were measured on Valkey.
+
+- *ElastiCache* is the AWS service that runs Redis or Valkey for you. The platform's shared clusters run on it.
+
+- *Memcached* is another in-memory cache server, which stores plain values and has no data structures. The last concept section compares it with Redis.
+
+### A first try
+
+These commands, typed into `redis-cli`, show most of the words above. Each line is one command and one round trip.
+
+```
+redis-cli PING                        # → PONG
+redis-cli SET orphan:1 payload        # key orphan:1, value payload, no TTL
+redis-cli SET good:1 payload EX 300   # the same, with a TTL of 300 seconds
+redis-cli TTL orphan:1                # → -1: the key never expires
+redis-cli TTL good:1                  # → about 300: the seconds it has left
+redis-cli INCR inc                    # run by 200 processes at the same moment
+redis-cli GET inc                     # → 200: no update was lost
+```
+
+- `PING` is the smallest command, and `PONG` is its reply. It costs one round trip and almost no work on the server.
+
+- The two `SET` commands store the same value under two keys. Only the second key has a TTL.
+
+- `TTL` asks how many seconds a key has left. The -1 means that the key has no TTL, which is the kind of key the LLM gateway wrote in the first incident.
+
+- `INCR` adds 1 to a number and returns the result, in one command. When 200 processes ran it at once, the total was exactly 200, because Redis runs one command at a time.
+
+**Evidence**
+
+PONG and the two TTL replies are the results that the phase's lab gives for its setup step and for E8. They were not run for this lesson. The total of 200 was measured with 200 shell processes that ran `INCR inc` at the same moment, against Redis 8.10.1 on an Apple M4 Pro. The next section's evidence note calls this setup the local run and gives its details.
+
+The first idea starts inside one Redis server, with what it does when thousands of clients connect.
 
 ## What does one Redis process do with thousands of clients?
 
 Your grading service opens connections to the primary node of its cluster, and so do 33 other services. All of their commands arrive at one process on that node.
 
-A Redis server is one process that holds all its data in memory. One *main thread* runs every command, one at a time, from start to end. It serves all clients from one *event loop*, a loop that waits until some sockets have data, serves them, and then waits again. The data needs no locks, because no second thread ever runs a command on it.
+A Redis server is one process that holds all its data in memory. One *main thread* runs every command, one at a time, from start to end. It serves all clients from one *event loop*, a loop that waits until some sockets have data, serves them, and then waits again. The data needs no locks, because no second thread ever runs a command on it. Redis can also run extra *I/O threads*, threads that read sockets, parse commands and write replies, but that never run a command themselves.
 
 1. **wait for sockets** The thread sleeps until some clients have sent data.
 
@@ -54,11 +128,11 @@ About 349 ms. An I/O thread can read and parse the GET, but only the main thread
 
 1. The reply goes into the client's 16 KB reply buffer, and the client joins a list of clients with replies to send.
 
-1. Before the next wait, the function `beforeSleep` writes those replies. It also runs a short expiry pass and writes the append-only file buffer to disk.
+1. Before the next wait, the function `beforeSleep` writes those replies. It also runs a short expiry pass. Then it writes to disk the buffer of the *AOF*, the append-only file in which Redis can log every write.
 
 ### What I/O threads change, and what they do not
 
-*I/O threads* are extra threads that read sockets, parse commands and write replies. They are off by default, because `io-threads` defaults to 1. With more of them, the main thread spends less time on socket work, so one instance serves more requests a second. An I/O thread never runs a command. A comment in the Redis code says so: "If we are in the context of an I/O thread, we can't really execute the command here." The I/O thread hands the parsed command back to the main thread.
+I/O threads are off by default, because `io-threads` defaults to 1. With more of them, the main thread spends less time on socket work, so one instance serves more requests a second. An I/O thread never runs a command. A comment in the Redis code says so: "If we are in the context of an I/O thread, we can't really execute the command here." The I/O thread hands the parsed command back to the main thread.
 
 The gain from I/O threads is large. With 8 I/O threads, Valkey 8 served 1.19 million requests a second, where Valkey 7.2 served 360,000 on the same AWS instance. That result also includes a second change, which prefetches each command's keys from memory before the main thread runs it. Every one of those commands still ran on one main thread.
 
@@ -68,17 +142,21 @@ Redis source at tag 8.10.2: `src/networking.c:3840-3845` holds the comment quote
 
 The phase said that I/O threads arrived in Redis 6.0 as an option for reads and writes. That is out of date. Redis 8.0 has a new I/O threading design, and `io-threads-do-reads` is in its list of deprecated settings. With `io-threads` above 1, the threads always read and parse as well. Valkey 8 also moved `epoll_wait` and memory freeing to I/O threads. Checked at Redis 8.10.2 and Valkey 9.1.2.
 
-### Housekeeping runs on the same thread
+The main thread also has work of its own between commands, and the next section asks what that work is.
 
-The main thread also does the server's own work between commands. While it does that work, no command runs.
+## What else runs on the main thread, and what does that buy?
 
-- **Active expiry.** A key can have a *TTL*, a time to live after which Redis deletes it. A timer samples keys with a TTL and deletes the expired ones. Many keys that expire in the same second can block the server.
+The I/O threads take socket work away from the main thread, but the server's own work stays on it. The main thread does that work between commands, and while it does, no command runs.
 
-- **Eviction.** When memory is full, Redis removes keys before it runs a write. The section on memory explains who loses keys and what that costs.
+- **Expiry.** *Active expiry* is a timer on the main thread that samples keys with a TTL and deletes the expired ones. Many keys that expire in the same second can block the server.
 
-- **Snapshots.** To save its data to disk, Redis calls `fork()`. The fork runs on the main thread, so on a large instance it can pause every client.
+- **A full memory.** When memory is full, Redis removes keys before it runs a write, and this removal is called *eviction*. The section on memory explains who loses keys and what that costs.
 
-This design explains what Redis is good at. Each command is atomic, so counters, rate limits and locks become single commands or short scripts. Each command is also cheap, so one instance can serve many services at once. The price is the shared queue, because anything slow on the main thread is slow for every client.
+- **Saving to disk.** To save its data, Redis writes a *snapshot*, a file that holds a copy of all its data at one moment. A child process writes the file. Redis starts that child with a *fork*, the system call `fork()` that copies a running process. The fork runs on the main thread, so on a large instance it can pause every client.
+
+Freeing a large value also takes time. *UNLINK* is a delete command that removes the key at once and frees the value on a background thread.
+
+This design explains what Redis is good at. Each command is *atomic*, which means that no other client's command can run in the middle of it. So counters, rate limits and locks become single commands or short scripts. Each command is also cheap, so one instance can serve many services at once. The price is the shared queue, because anything slow on the main thread is slow for every client.
 
 **Go deeper: the loop in the source, timers, the two I/O thread designs and the data types**
 
@@ -90,11 +168,11 @@ This design explains what Redis is good at. Each command is atomic, so counters,
 
 **Valkey 9.1 I/O threads.** The main thread owns every client. It puts read, write, poll and free jobs on lock-free queues. All I/O threads share one queue, and each thread also has a private queue. The first I/O thread starts when the main thread is busy more than 30% of the time. More threads start while, on average, more than one job waits in the shared queue. Threads stop one at a time, when the queue is empty and 1000 ms have passed since the last change. In Valkey, `io-threads` can change at runtime. Before this offload, `epoll_wait` alone used more than 20% of the main thread's time.
 
-**ElastiCache.** AWS added its own I/O multiplexing to ElastiCache for Redis 7.0. At 5,200 clients, throughput rose from 202,770 to 349,239 operations a second, a 72% gain. At 400 clients the gain was 26%. At 142,000 requests a second, p99 fell from 8.3 ms to 2.45 ms. In ElastiCache 7.1 the I/O threads also parse commands and format replies. AWS claims over 1 million requests a second per node on r7g.4xlarge or larger.
+**ElastiCache.** AWS added its own I/O multiplexing to ElastiCache for Redis 7.0. At 5,200 clients, throughput rose from 202,770 to 349,239 operations a second, a 72% gain. At 400 clients the gain was 26%. At 142,000 requests a second, the p99 latency, which 99% of requests stay under, fell from 8.3 ms to 2.45 ms. In ElastiCache 7.1 the I/O threads also parse commands and format replies. AWS claims over 1 million requests a second per node on r7g.4xlarge or larger.
 
 **Why one thread.** The Redis FAQ gives the reason: "usually Redis is either memory or network bound". So CPU is rarely the limit, and more command threads would add locks for little gain. The phase also credited a calculation by the creator of Redis. It gave no source, so this lesson leaves it out.
 
-**Background threads.** Some slow work already runs off the main thread: freeing large values after `UNLINK`, closing files and the AOF fsync. Command execution does not.
+**Background threads.** Some slow work already runs off the main thread. UNLINK leaves the freeing of a large value to a background thread, as described above. Closing files and the AOF fsync also run off the main thread. Command execution does not.
 
 **The fork pause.** The Redis latency page says "The fork operation (running in the main thread) can induce latency by itself." Its table of fork times runs from about 9 ms to a few hundred ms per GB of data, by platform. So a 20 GB instance on a slow platform can pause for seconds at each snapshot.
 
@@ -126,6 +204,8 @@ The main thread runs one command at a time, so a long command makes every later 
 
 This is *head-of-line blocking*: the command at the front of the queue takes long, so every command behind it waits. The waiting commands can come from any client and any service. A separate connection, a separate pod or a separate host does not help, because the queue is the main thread itself.
 
+The usual cause is one command that touches every key. *KEYS* is a command that returns the name of every key that matches a pattern, so it walks the whole database in one run. The figure shows one `KEYS *` on a cluster that holds 4 million keys.
+
 **One KEYS command on a shared cluster.**
 
 Step 1: your GET runs in under a microsecond of server time and returns.
@@ -154,7 +234,7 @@ The p99 did not move in that test, because only 5 of the 30,000 GETs met a stall
 
 **Evidence**
 
-Measured on the local run described in the first section: `DEBUG POPULATE 4000000`, then `KEYS *` timed in `SLOWLOG`, four runs. `KEYS key:*` over 1,000,000 keys took 92,618 to 93,575 µs across three runs. The concurrent-client effect on p99 is inferred from the single-client probe. A check would be 50 concurrent probes. The Redis KEYS page is faster: "an entry level laptop can scan a 1 million key database in 40 milliseconds". The local build used `malloc=libc`, which may explain the gap. That was not checked. Phase 5 timed `KEYS k:*` over 1,000,000 keys at 133 to 148 ms on the same build. The key names and the way the keys were created may differ, and this page does not record it.
+Measured on the local run described in the section on one Redis process: `DEBUG POPULATE 4000000`, then `KEYS *` timed in `SLOWLOG`, four runs. `KEYS key:*` over 1,000,000 keys took 92,618 to 93,575 µs across three runs. The concurrent-client effect on p99 is inferred from the single-client probe. A check would be 50 concurrent probes. The Redis KEYS page is faster: "an entry level laptop can scan a 1 million key database in 40 milliseconds". The local build used `malloc=libc`, which may explain the gap. That was not checked. Phase 5 timed `KEYS k:*` over 1,000,000 keys at 133 to 148 ms on the same build. The key names and the way the keys were created may differ, and this page does not record it.
 
 The phase's timeline said that `KEYS *` over 4 million keys takes about 2 seconds. On Redis 8.10.1 it took 0.35 to 0.37 s, and the docs give 40 ms per million keys. The 2-second stall in the lab comes from `DEBUG SLEEP 2`, which is a different command.
 
@@ -166,8 +246,13 @@ The phase's timeline said that `KEYS *` over 4 million keys takes about 2 second
 
 Harness status page, "Feature Flag services is not responding", 2023-09-21, read as JSON with the postmortem body. Downtime 14:32 to 14:46 UTC. The postmortem says the same issue had also occurred "on Friday 15th".
 
-### Commands that hold the thread
+Other commands hold the thread in the same way as `KEYS`, and the next section names them with what to use instead.
 
+## Which commands hold the thread, and what do you use instead?
+
+KEYS held the thread because its work grows with the number of keys, and other commands grow in the same way.
+
+Most rows of the table below show an *O(N) command*, whose run time grows with N, the number of keys or elements it touches. Three other names in the table are new. A *Lua script* is a small program in the Lua language that Redis runs inside the server, from start to end. A Function, added in Redis 7, is the same kind of program that Redis stores under a name, and Phase 3 teaches it. *SCAN* walks the keys a few at a time. Each reply carries a *cursor*, a number that tells the next call where to go on.
 | Command | Why it is slow | Use instead |
 |---|---|---|
 | `KEYS pattern` | walks every key in the database | `SCAN` with a cursor, a few keys per call |
@@ -176,7 +261,7 @@ Harness status page, "Feature Flag services is not responding", 2023-09-21, read
 | `FLUSHALL` or `FLUSHDB` on a large dataset | frees every value on the thread | `FLUSHALL ASYNC` |
 | `DEL` of one enormous key | frees every element on the thread | `UNLINK`, which frees in the background |
 
-A key whose element count grows without limit is called a big key. It is a common way for an O(N) command to turn slow long after launch. The phase on performance shows how to find big keys with `redis-cli --bigkeys`.
+A key whose element count grows without limit is called a *big key*. It is a common way for an O(N) command to turn slow long after launch. The phase on performance shows how to find big keys with `redis-cli --bigkeys`.
 
 The phase said to use `UNLINK` instead of `FLUSHALL`. The right replacement is `FLUSHALL ASYNC`, available since Redis 4.0. Since 6.2, the setting `lazyfree-lazy-user-flush yes` makes the async form the default, but Redis 8.10.2 still ships it as `no`. Valkey 9.1.2 ships every `lazyfree-lazy-*` setting as `yes`, so there `DEL` and `FLUSHALL` already free in the background.
 
@@ -184,7 +269,7 @@ The phase said to use `UNLINK` instead of `FLUSHALL`. The right replacement is `
 
 **Trello** was slow in three bursts of one to two minutes, and then fully down for 7 minutes. The cause was "a Redis function, used primarily for debugging purposes", which had shipped to production for an internal tool. It slowed the cluster until the cluster failed over. Non-production caches held less data, so tests did not show it. The fix was to "block the use of the offending Redis command as well as other debugging commands in production." The postmortem does not name the command. Redis tags `KEYS` and `FLUSHALL` with the ACL category `@dangerous`, so an ACL rule such as `-@dangerous` is one way to block them. That rule was not tested here.
 
-**Spring Data Redis** had a cache-clear method that called `KEYS`. On one production Redis, it pushed CPU to 100%, and the server stopped serving other requests. `SLOWLOG` showed the `KEYS` calls.
+**Spring Data Redis** had a cache-clear method that called `KEYS`. On one production Redis, it pushed CPU to 100%, and the server stopped serving other requests. The list of slow commands that Redis keeps showed the `KEYS` calls.
 
 **The dev-sized test.** A command that is fast on a dev dataset of 1,000 keys can be slow on a production keyspace of 40 million. O(N) grows with the data, and test data rarely grows with production. Harness and Trello both shipped a command that their smaller test data did not show as slow.
 
@@ -220,13 +305,13 @@ Redis records slow commands itself. *SLOWLOG* is a list inside the server of com
 
 1. `SLOWLOG GET 10` lists the last ten commands that ran longer than `slowlog-log-slower-than`. The default threshold is 10000 µs, which is 10 ms. The list keeps `slowlog-max-len` entries, 128 by default.
 
-1. The SLOWLOG docs say the time "does not include I/O operations like talking with the client, sending the reply". So your waiting GET from the last section never appears there, and only the `KEYS` does.
+1. The SLOWLOG docs say the time "does not include I/O operations like talking with the client, sending the reply". So your waiting GET from the section on a slow command never appears there, and only the `KEYS` does.
 
 1. `redis-cli --latency` is a live latency meter that measures from the client side. So it does show the waits.
 
-1. `INFO commandstats` gives `usec_per_call` for each command type. It is server time only, like SLOWLOG.
+1. *INFO* is a command that prints the server's counters, in named sections. `INFO commandstats` prints one of them, which gives `usec_per_call` for each command type. It is server time only, like SLOWLOG.
 
-1. The latency monitor, which records latency spikes inside the server, is off by default. On Redis 8.10.1, `latency-monitor-threshold` returned 0.
+1. The *latency monitor*, which records latency spikes inside the server, is off by default. On Redis 8.10.1, `latency-monitor-threshold` returned 0.
 
 1. `redis-cli --intrinsic-latency`, given a number of seconds, runs on the Redis host and measures the latency of the host itself. It measures the host apart from Redis and the network, so it can show a noisy virtual machine.
 
@@ -270,7 +355,7 @@ You can now explain a stall and find its cause. The next section turns to a cost
 
 A slow command hurts every client at once. The next cost hurts only you, and it comes from a fast command called many times. Your grading service reads 40 rubric items with one GET each, in a loop. A teammate says each GET takes about 0.4 ms, so the loop costs 16 ms, and that is fine.
 
-Every Redis call has two parts. The server's work is the command itself, and for a GET it is well under a microsecond. The *round trip* is everything else. It covers your write system call, the kernel's TCP stack and the network. It also covers the server's read and write system calls, and the same path back. The caller waits for the whole round trip on every call, so the round trip sets the cost.
+Every Redis call has two parts. The server's work is the command itself, and for a GET it is well under a microsecond. The round trip is everything else. It covers your write system call, the kernel's TCP stack and the network. It also covers the server's read and write system calls, and the same path back. The caller waits for the whole round trip on every call, so the round trip sets the cost.
 
 **One GET on the local run, 94 µs at p50.**
 
@@ -313,7 +398,7 @@ Now the running case has a number. Forty GETs in a loop cost 40 round trips. At 
 
 **Go deeper: system calls, an idle server and the response cache**
 
-**System calls cost too.** The pipelining docs say that each command sent alone costs the server one `read()` and one `write()` system call. With pipelining, "many commands are usually read with a single read() system call". So batching helps even on loopback, where the network delay is tiny. The next section shows the numbers.
+**System calls cost too.** The Redis docs say that each command sent alone costs the server one `read()` and one `write()` system call. When a client sends many commands without waiting, "many commands are usually read with a single read() system call". So batching helps even on loopback, where the network delay is tiny. The next section shows the numbers.
 
 **The round trip and an idle server.** Stack Overflow measured a network round trip of about 0.17 ms to its Redis servers. Those servers ran at about 2% average CPU. So clients spend almost all of their Redis time waiting on the network, while the server has spare time.
 
@@ -323,13 +408,13 @@ Now the running case has a number. Forty GETs in a loop cost 40 round trips. At 
 
 **Evidence**
 
-Redis pipelining page, "It's not just a matter of RTT". Redis latency page, section "Latency induced by network and communication", for the 200 µs and 30 µs figures. Stack Overflow figures from Nick Craver's 2019 app caching post, measured 2019-07-30. Local run conditions in the first section's evidence note.
+Redis pipelining page, "It's not just a matter of RTT". Redis latency page, section "Latency induced by network and communication", for the 200 µs and 30 µs figures. Stack Overflow figures from Nick Craver's 2019 app caching post, measured 2019-07-30. The setup of the local run is under the section on what one Redis process does.
 
 Each call pays one round trip, so the fix is to make fewer round trips. The next section asks how much batching saves, and why the saving stops growing.
 
 ## How much does batching save, and where does the saving stop?
 
-Every call pays one round trip, so the fix is to send many commands in one round trip. There are two ways to do it. *Pipelining* means the client writes many commands without waiting for replies, and then reads all the replies. A *variadic command* takes many keys in one command, such as `MGET k1 k2 k3` for reads or `MSET` for writes.
+Every call pays one round trip, so the fix is to send many commands in one round trip. There are two ways to do it. *Pipelining* means the client writes many commands without waiting for replies, and then reads all the replies. The batch of commands that it sends is a *pipeline*. A *variadic command* takes many keys in one command. *MGET* is one, and `MGET k1 k2 k3` reads three keys in one round trip. `MSET` does the same for writes.
 
 Loop of 500 GETsOne pipeline of 500 GETs
 
@@ -427,7 +512,7 @@ Batching made the 40 reads fast. It also showed that other clients' commands can
 
 Other clients' commands can run between two of yours, even inside a pipeline. That matters for the next part of your grading service. It must allow at most 100 LLM calls per company per minute, and many workers update the same counter.
 
-An operation is *atomic* when no other client's command can run in the middle of it. Other clients see either none of it or all of it. One Redis command is atomic, because the main thread runs it to the end before it takes the next one. A Lua script is atomic for the same reason. Two separate commands are not, because the thread may run other clients' commands between them.
+The section on what else runs on the main thread called each command atomic. Other clients see either none of an atomic operation or all of it. One Redis command is atomic, because the main thread runs it to the end before it takes the next one. A Lua script is atomic for the same reason. Two separate commands are not, because the thread may run other clients' commands between them.
 
 **Read in one command, write in another.**
 
@@ -459,7 +544,7 @@ On the local run, 200 shell processes started at the same moment. Each one ran `
 
 ### The tools for atomic work
 
-1. **One command that does the whole job.** `INCR` counts, and `SET key value NX EX 30` sets a key only if it is absent, with a 30-second TTL. Both are a check and a write in one step.
+1. **One command that does the whole job.** `INCR` counts, and `SET key value NX EX 30` sets a key only if it is absent, with a 30-second TTL. Both are a check and a write in one step. The second form is called *SET NX*, after its `NX` option.
 
 1. **A Lua script or a Function.** The script runs on the main thread from start to end, so its reads and writes are one atomic step. Functions, added in Redis 7, follow the same rule.
 
@@ -473,9 +558,9 @@ An atomic script is also a blocking script, because it holds the one main thread
 
 **Evidence**
 
-Local run, `redis-cli` 8.10.1, conditions in the first section. GitHub blog, "How we scaled the GitHub API with a sharded, replicated rate limiter in Redis", Robert Mosolgo, 2021-04-05, updated 2023-03-23, section "Fix 1". `busy-reply-threshold` default from Redis `src/config.c:3573` at tag 8.10.2. `INCREX` from Redis `src/commands/increx.json` at tag 8.10.2, "since": "8.8.0", and the comments at `src/t_string.c:1162` and `:1187`. Valkey 9.1.2 has no `increx.json`.
+Local run, `redis-cli` 8.10.1, conditions in the section on one Redis process. GitHub blog, "How we scaled the GitHub API with a sharded, replicated rate limiter in Redis", Robert Mosolgo, 2021-04-05, updated 2023-03-23, section "Fix 1". `busy-reply-threshold` default from Redis `src/config.c:3573` at tag 8.10.2. `INCREX` from Redis `src/commands/increx.json` at tag 8.10.2, "since": "8.8.0", and the comments at `src/t_string.c:1162` and `:1187`. Valkey 9.1.2 has no `increx.json`.
 
-For your grading service, the counter is now one Lua script that runs `INCR` and sets `EXPIRE` on the first call of each minute. Every worker can run it at the same time, and the count stays exact. On Redis 8.8 and later, the one command `INCREX key EX 60 ENX` does the same work. It adds 1, and `ENX` sets the TTL only when the key has none. Keep the Lua script on older Redis and on Valkey, which has no `INCREX`.
+For your grading service, the counter is now one Lua script that runs `INCR` and sets `EXPIRE` on the first call of each minute. Every worker can run it at the same time, and the count stays exact. On Redis 8.8 and later, one command does the same work. *INCREX* adds 1 to a key and can set its TTL in the same command. In `INCREX key EX 60 ENX`, the `ENX` option sets the TTL only when the key has none. Keep the Lua script on older Redis and on Valkey, which has no `INCREX`.
 
 One command or script is atomic, and a read then a write in your code is not.
 
@@ -489,7 +574,7 @@ Run E7, then the same loop with GET and SET, and compare the totals.
 
 **Locks in three tiers.** One service used `redsync`, a Redlock library with a random lock value and an atomic compare-and-delete unlock. Six other services wrote their own `SETNX` locks with varying care, one of them with exponential backoff. The phase's usage map counts eight repositories with hand-written locks, so the exact count is not certain. A third design marked translation jobs in progress with `ZADD`, `ZREM` and `EXPIRE` on a sorted set. The phase on locking judges each one: who can deadlock, who can run a job twice, and who has no fencing.
 
-**Idempotency keys.** Services used `SET key value NX EX ttl` to process each event once. The first `SET` wins, and every later one gets nil. The TTL frees the key if the process dies before it finishes.
+**Each event once.** Services used a key that records that one event was already processed. They wrote it with `SET key value NX EX ttl`, so each event was processed once. The first `SET` wins, and every later one gets nil. The TTL frees the key if the process dies before it finishes.
 
 **Retries break some commands.** Twitter found that many Redis commands are not idempotent. An `INCR` retried after a network error may count twice, because the first one may have run. So a retry policy must know which commands are safe to repeat.
 
@@ -505,7 +590,9 @@ Commands and scripts share one thread. They also share one pool of memory, and t
 
 Every client shares one main thread, and every client also shares one pool of memory. On your cluster, the LLM gateway team stores prompt results with no TTL. Your grading service writes every cache entry with a 5-minute TTL. One morning the cluster reaches its memory limit.
 
-Each Redis instance has one memory limit, *maxmemory*, shared by every key of every service. When a write would pass that limit, the *eviction policy*, set by `maxmemory-policy`, decides which keys Redis removes to make room. An `allkeys-*` policy may remove any key. A `volatile-*` policy may remove only keys that have a TTL. With `noeviction`, Redis removes nothing and refuses the write.
+Each Redis instance has one memory limit, *maxmemory*, shared by every key of every service. When a write would pass that limit, the *eviction policy*, set by the setting *maxmemory-policy*, decides which keys Redis removes to make room. Redis counts each key it removes in *evicted_keys*, a counter that `INFO stats` prints.
+
+An `allkeys-*` policy may remove any key. A `volatile-*` policy may remove only keys that have a TTL. *LRU* means least recently used. So *volatile-lru* removes the least recently used key among the keys with a TTL, and *allkeys-lru* picks from all keys in the same way. With *noeviction*, Redis removes nothing and refuses the write.
 
 **A full shared cluster under volatile-lru, an illustration, not measured.**
 
@@ -519,7 +606,13 @@ Each Redis instance has one memory limit, *maxmemory*, shared by every key of ev
 
 At first nobody's writes fail. Redis makes room by evicting B's keys, because they are the only candidates, so B's cache hit rate falls. Once no key with a TTL is left, Redis cannot free anything. From then on, every write that needs memory fails, from A and from B alike, and `evicted_keys` stops growing. Most engineers expect A, the careless service, to be the only one hurt.
 
-### What Redis does before each write
+The default policy depends on where Redis runs. Open-source Redis 8.10.2 and Valkey 9.1.2 default to `noeviction`. ElastiCache default parameter groups use `volatile-lru`, and that includes the groups for Valkey 7.2 to 9.1. So a cluster that nobody tuned evicts only keys with a TTL.
+
+The next section follows one write through the check that refuses it once no key with a TTL is left.
+
+## What does Redis do before each write when memory is full?
+
+Under volatile-lru, keys with no TTL are never candidates, so a full pool can run out of keys that Redis may remove.
 
 1. When `maxmemory` is set, `processCommand` calls `performEvictions()` before it runs the command.
 
@@ -527,17 +620,15 @@ At first nobody's writes fail. Redis makes room by evicting B's keys, because th
 
 1. Under a `volatile-*` policy, only keys with a TTL can be sampled. The docs say: "The volatile-xxx policies behave like noeviction if no keys have an associated expiration."
 
-1. If eviction cannot free enough memory and the command can grow memory, Redis rejects it. The client gets `OOM command not allowed when used memory > 'maxmemory'`.
+1. If eviction cannot free enough memory and the command can grow memory, Redis rejects it. The client gets an *OOM* error, which means out of memory. Its text is `OOM command not allowed when used memory > 'maxmemory'`.
 
 1. Reads and deletes still work, so the cluster looks half alive while every write fails.
-
-The default policy depends on where Redis runs. Open-source Redis 8.10.2 and Valkey 9.1.2 default to `noeviction`. ElastiCache default parameter groups use `volatile-lru`, and that includes the groups for Valkey 7.2 to 9.1. So a cluster that nobody tuned evicts only keys with a TTL.
 
 ### The failure, measured
 
 On the local run, the server got `maxmemory 50mb` and `volatile-lru`, then 2,000,000 keys with no TTL, about 150 MB. Then `SET good:1 v EX 300` returned the OOM error, even though that key had a TTL. `evicted_keys` stayed at 0. After a switch to `allkeys-lru`, one `SET` worked, and within half a second `evicted_keys` was 1,268,122.
 
-The counter is the trap here. An alert on `evicted_keys` would not fire, because in this failure nothing is evicted. Alert on `used_memory` against `maxmemory`, and on OOM errors in your clients.
+The counter is the trap here. An alert on `evicted_keys` would not fire, because in this failure nothing is evicted. Alert on *used_memory*, the bytes that Redis has allocated, as `INFO memory` prints them, against `maxmemory`, and on OOM errors in your clients.
 
 ### The case on the platform
 
@@ -551,7 +642,7 @@ Eviction runs on the main thread, so a cache that lives at its limit spends thre
 
 **Evidence**
 
-Redis source at tag 8.10.2: `src/server.c:4656-4672`, `src/evict.c:491-505`, default policy at `src/config.c:3491`. Valkey 9.1.2 `valkey.conf:1346`. Redis eviction page for the quote. AWS ElastiCache engine parameters page: `maxmemory-policy` "Default: volatile-lru". The local run as described in the first section. Platform incident from the phase. Pendo status page, 2020-02-21. GitLab blog, "How we diagnosed and resolved Redis latency spikes with BPF and other tools", Matt Smiley, 2022-11-28. Before the fix, "Each weekday had roughly 2 million Redis requests slower than 1 second".
+Redis source at tag 8.10.2: `src/server.c:4656-4672`, `src/evict.c:491-505`, default policy at `src/config.c:3491`. Valkey 9.1.2 `valkey.conf:1346`. Redis eviction page for the quote. AWS ElastiCache engine parameters page: `maxmemory-policy` "Default: volatile-lru". The local run, under the conditions given above. Platform incident from the phase. Pendo status page, 2020-02-21. GitLab blog, "How we diagnosed and resolved Redis latency spikes with BPF and other tools", Matt Smiley, 2022-11-28. Before the fix, "Each weekday had roughly 2 million Redis requests slower than 1 second".
 
 The phase said Redis has 8 eviction policies. Redis 8.6 added two more, `allkeys-lrm` and `volatile-lrm`, so Redis 8.10.2 has 10. LRM means least recently modified, and only writes update its timestamp. Valkey 9.1.2 still has 8.
 
@@ -592,9 +683,9 @@ Eviction removes some keys on purpose. A restart or a failover can remove all of
 
 ## What does Redis lose, and which loss can each pattern accept?
 
-Eviction removes keys one at a time. A restart, a failover or a bad configuration can remove all of them at once. Your cluster now holds session records, a page cache, the LLM-call counter, a lock and a payment idempotency key.
+Eviction removes keys one at a time. A restart, a failover or a bad configuration can remove all of them at once. Your cluster now holds session records, a page cache, the LLM-call counter and a lock. It also holds a payment *idempotency key*, a key that marks one payment as already processed.
 
-Redis keeps the primary copy of every key in RAM. *Persistence* writes that data to disk in one of two ways. A forked child writes a snapshot, or Redis logs every write to an append-only file, the AOF. A *replica* is a second Redis that copies the primary's writes over the network, a little after they happen. Both reduce what a crash loses. Neither makes Redis the *system of record*, the store whose copy is the truth when two copies disagree.
+Redis keeps the primary copy of every key in RAM. *Persistence* writes that data to disk in one of two ways. A forked child writes a snapshot, or Redis logs every write to an append-only file, the AOF. A replica copies the primary's writes over the network, a little after they happen. Both reduce what a crash loses. Neither makes Redis the *system of record*, the store whose copy is the truth when two copies disagree.
 
 | Pattern on the cluster | What a loss costs | Phase that teaches it |
 |---|---|---|
@@ -666,7 +757,7 @@ One Go file of 106 lines in the content service used four of the six. It publish
 
 **Redis used as a database by accident.** At bsport, one ElastiCache Redis served payments, bookings, sign-in, email and push. A legacy Redis inside their Kubernetes cluster then stopped answering. Retries and reconnects overloaded CoreDNS, and the whole platform went down. The team then found keys with no TTL that were years old, because teams had used Redis as a database. They split it into one Valkey 8 cluster per domain, and uptime rose from 99.87 to 99.97%.
 
-**Why Twilio's syncs were full.** Redis 2.6 needed a full resync after any disconnect, and partial resync came in Redis 2.8. A restart with no persistence can also empty the replicas, which the phase on replication explains.
+**Why Twilio's syncs were full.** Redis 2.6 needed a full sync after any disconnect, and partial resync came in Redis 2.8. A restart with no persistence can also empty the replicas, which the phase on replication explains.
 
 **Evidence**
 
@@ -678,7 +769,7 @@ Each pattern now has a loss cost. The next section uses the same question to cho
 
 The loss cost of each pattern decides what may live in Redis. The same question decides when another tool fits better. In a design review, someone will ask why your grading service does not use Memcached or DynamoDB instead.
 
-The three tools solve different problems. Memcached is a cache of opaque values and nothing more. Redis is a server of data structures with atomic commands, and it keeps data in RAM. DynamoDB is a managed database that stores every item durably on disk, across several availability zones. Valkey is a fork of Redis with the same commands, so it answers the same questions as Redis.
+The three tools solve different problems. Memcached is a cache of opaque values and nothing more. Redis is a server of data structures with atomic commands, and it keeps data in RAM. DynamoDB is a managed database that stores every item durably on disk, across several availability zones. Valkey has the same commands as Redis, so it answers the same questions.
 
 |  | Redis or Valkey | Memcached | DynamoDB |
 |---|---|---|---|
@@ -708,7 +799,7 @@ The platform in the running case made the same split. It ran no Memcached at all
 
 ### Redis or Valkey
 
-Before you compare Redis with other tools, you now pick an engine. Redis 7.2 and earlier used the BSD-3 licence. Redis 7.4 to 7.8 used RSALv2 or SSPLv1, and Redis 8 added AGPLv3 as a third choice. Valkey is a Linux Foundation fork of Redis 7.2.4 under BSD-3. ElastiCache now offers parameter groups for Valkey 7.2 to 9.1, and their default eviction policy is still `volatile-lru`.
+Before you compare Redis with other tools, you now pick an engine. Redis 7.2 and earlier used the BSD-3 licence. Redis 7.4 to 7.8 used RSALv2 or SSPLv1, and Redis 8 added AGPLv3 as a third choice. The Linux Foundation started Valkey from the Redis 7.2.4 code, under BSD-3. ElastiCache now offers parameter groups for Valkey 7.2 to 9.1, and their default eviction policy is still `volatile-lru`.
 
 The two engines now differ in defaults and features. Valkey frees memory in the background by default and can change `io-threads` at runtime. Redis 8 has the Query Engine, vector sets and the LRM eviction policies in its core. So code that runs on one engine may need a check before it runs on the other.
 
@@ -744,13 +835,13 @@ You have now seen all five ideas, from the one thread to the cost of a loss. The
 
 Your grading service now uses Redis with all five ideas in view. Each claim below is short, and the section that taught it is named after it.
 
-- A slow command or a fork on the main thread stalls the clients of every service. The first three sections showed the queue, the stall and how to find its cause.
+- A slow command or a fork on the main thread stalls the clients of every service. The five sections on the main thread showed the queue, the housekeeping, the stall, the slow commands and how to find the cause.
 
 - Latency follows the number of round trips, and a pipeline cuts them until the work per command dominates, near 120x on loopback. The sections on one GET and on batching measured both.
 
 - `INCR` and Lua scripts are safe for a shared counter, and a GET followed by a SET is not. The section on atomic operations lost 195 of 200 updates to show it.
 
-- A full cluster that evicts only keys with a TTL refuses writes once only keys without one are left. The section on the full memory pool showed it, while `evicted_keys` stayed at 0.
+- A full cluster that evicts only keys with a TTL refuses writes once only keys without one are left. The two sections on the full memory pool showed it, while `evicted_keys` stayed at 0.
 
 - A restart can empty Redis, so each pattern needs its own answer to what that loss costs. The last two sections gave that answer for each pattern and each tool.
 
@@ -895,7 +986,7 @@ Note for this lesson: the phase named this exercise after an internal incident, 
 
 - Teaches: the structures in 0.1's table are one command away, not exotic.
 
-Note for this lesson: Phase 1 teaches these types in depth, with its own labs. The table this exercise refers to is in the Go deeper block of the first section.
+Note for this lesson: Phase 1 teaches these types in depth, with its own labs. The table this exercise refers to is in the Go deeper block of the section on what else runs on the main thread.
 
 -  **E10. Break it: fill memory and watch eviction.**
 
@@ -1011,7 +1102,7 @@ THE ONE FORMULA
 
 **Practice: open the sources**
 
-This course's research opened every URL in the first four groups on 2026-10-18. The measurements of the local run came from the course's own Go programs and `redis-cli`, over TCP loopback. The first section's evidence note gives the build and the machine. The last group is the phase's own reading list, with a note on each entry.
+This course's research opened every URL in the first four groups on 2026-10-18. The measurements of the local run came from the course's own Go programs and `redis-cli`, over TCP loopback. The evidence note of the section on one Redis process gives the build and the machine. The last group is the phase's own reading list, with a note on each entry.
 
 **Redis and Valkey source, and the official docs**
 

@@ -22,20 +22,39 @@ The material opens with "The course so far": for each phase he has already
 read, the situation it used, the terms it defined and how it ended. Plan
 this lesson as the next part of that course, not as a new document.
 
+"Where this reader starts" says what he has, from his learner profile and
+the course's term map. The page check holds the lesson to it.
+
+- Terms he has before the course: used with no explanation.
+- Terms the earlier phases explained: explained again in one clause where
+  this lesson first uses them, so they go in `introduces` there.
+- Terms the map gives this phase: each one is in the `introduces` of the
+  section that first needs it. None is used before that section.
+- Any other term is used only after a section of this lesson explains it.
+
 - `running_case`: the one situation this lesson follows from start to
   finish. Continue the case the course already uses, with the next thing
   that goes wrong in it. Start a new case only when no earlier phase exists.
-- `opening`: return to the running case. Say in a clause what the last
-  phase let him do, then what breaks now that it could not explain.
+  A lesson repaired in place keeps its own case.
+- `opening`: return to the running case. Name the last phase, by its label
+  or its title, and say in a clause what it let him do. Then say what
+  breaks now that it could not explain. With no earlier phase, put him in
+  the problem this subject exists to solve. The opening, the title and the
+  subtitle use no term this lesson teaches. A table or list that needs
+  those terms goes in the orientation section.
 - `hands_over`: one sentence on what he can do after this phase, and one on
-  the question the next phase answers. Name the next phase by that question.
+  the question the next phase answers. Name the next phase by its label and
+  by that question. The last phase has no next phase: it sums up what the
+  course taught, phase by phase, and the question that runs through it.
 
 ## Choosing the concepts
 
 A phase teaches three to five concepts. Each is a claim, one sentence, that
 he could be wrong about. Write the claim in words he already has: a term
 the lesson has not taught yet is explained inside the claim or left out of
-it.
+it. The concept list is printed above every section, so the words he has
+are the terms in "Where this reader starts" and everyday words. The plan
+is sent back when a claim uses a term that a section explains later.
 
 | A concept | Not a concept |
 |---|---|
@@ -63,7 +82,8 @@ that supports that number, and the picture that shows the mechanism.
 Every section serves one concept or is one piece of apparatus. A section
 carries ONE idea. A concept with a mechanism, a measurement and a fix takes
 three sections, not one long one. Headings name the question the section
-answers, in plain words.
+answers, in plain words, with only the terms he has at that point. A
+heading does not name the term its own section introduces.
 
 ### The ledger
 
@@ -102,9 +122,24 @@ because it is explained again there in one clause.
 - `post`: two things he could post, one line each.
 - `sources`: every url used, from the note.
 
-An `orientation` section may open the page when the phase builds on earlier
-ones. It explains again, in a sentence each, the earlier ideas this phase
-needs. It is a reminder he can read, not a list of section numbers.
+An `orientation` section opens the page when the concepts need terms he
+does not have yet, or when the phase builds on earlier ones. It comes
+before every concept section, and it does two jobs.
+
+- Where the concepts need basic terms of the subject that are new to him,
+  it teaches them before any concept uses them, in this order. First the
+  problem those terms exist to solve, with one number. Then the idea, in
+  two or three sentences. Then each basic term in plain words: what it is,
+  and where he meets it. Then a first try: a few commands or lines of code
+  from his phase or the note, each with its real output, each showing one
+  of those terms. Its `introduces` lists the terms.
+- Where the phase builds on earlier ones, it explains again, in a sentence
+  each, the earlier ideas this phase needs. It is a reminder he can read,
+  not a list of section numbers.
+
+The limit of three new terms is for a concept section. The orientation
+section carries every basic term the concepts need, in a table or a list,
+each with what it is and where he meets it.
 
 In `source_sections`, name the headings of his phase that each section draws
 on, so the writer of that section reads them. Leave it empty for a section

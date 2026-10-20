@@ -1,30 +1,18 @@
-Phase 0 ended with one shared Redis cluster and one rule. A single thread runs every command, so one slow command makes every service wait. This lesson adds a new feature to that cluster and asks which Redis type each of its needs should use. The feature is an AI roleplay coach, a new example in place of the grading service of Phase 0. The answer decides how many round trips you pay, whether concurrent updates survive, and how much memory you rent.
+Phase 0 ended with one shared Redis cluster and one rule. A single thread runs every command, so one slow command makes every service wait. That rule let you explain a stall. But Phase 0 stored each value as one piece, so it did not show what happens when many workers change parts of one value. This lesson adds a new feature to that cluster and asks which Redis type each of its needs should use. The grading service of Phase 0 grows into an AI roleplay coach, on the same platform. The answer decides how many round trips you pay, whether concurrent updates survive, and how much memory you rent.
 
 What you must know, taught below in this order:
 
-- The value's type decides which read-modify-write Redis does in one command, and a client GET then SET loses updates. You can pick the command that makes a concurrent update safe, and spot code that loses writes.
+- A value's type decides which change Redis can make inside one command, and a client that runs GET and then SET loses updates. You can pick the command that makes a concurrent update safe, and spot code that loses writes.
 
-- Memory follows the encoding, because small collections are flat listpacks that convert to larger structures at fixed sizes. You can predict a memory jump before a deploy, and check it with two commands.
+- Memory follows the internal form of a value, because small collections are stored as one flat block and change to larger structures at fixed sizes. You can predict a memory jump before a deploy, and check it with two commands.
 
-- A sorted set orders members by a score you choose, and a sliding-log limiter stores one member per request. You can build a leaderboard, a time window or a delayed job, and price each in bytes.
+- A collection kept in order by a number you choose can rank, window or schedule, and an exact time window stores one entry per request. You can build a leaderboard, a time window or a delayed job, and price each in bytes.
 
-- A list pop deletes the job, so a reliable queue moves it to a processing list until the work is done. You can say where a job is after a worker crash, and change one command to keep it.
+- Taking a job from a Redis queue deletes it, so a reliable queue moves the job to a second list until the work is done. You can say where a job is after a worker crash, and change one command to keep it.
 
-- A HyperLogLog counts distinct items in at most 12,304 bytes with 0.81% standard error, and cannot list them. You can count unique users for millions of keys, and know when you need an exact structure instead.
+- A counter that estimates distinct items fits in at most 12,304 bytes with 0.81% standard error, but it cannot list the items. You can count unique users for millions of keys, and know when you need an exact structure instead.
 
 The lab tags these five ideas c1 to c5, in the order of this list.
-
-Go deeper: what this phase covered, the versions, and how long it takes
-The original phase. It was a survey of eight topics, in this order. Strings, hashes, lists, sets, sorted sets, then Streams with HyperLogLog and bitmaps, then encodings, then key naming. This lesson keeps every part of it that is correct. It groups them under the five ideas above, because one idea connects them. The type decides which work Redis does inside one command, and the size of the value decides how Redis stores it.
-
-Versions. Current Redis is 8.10.2. Valkey 9.1.2 is the main fork, a project of the Linux Foundation that started from Redis 7.2.4. The lab's container still pins redis:7.2. Where a command or a default differs between these, the section says so.
-
-Time. The phase planned 3 to 5 days for reading and labs. It is the phase you will open most often later, because "which structure?" is a decision you make every week.
-
-How the numbers are labelled. A number that says "measured" comes from a run on Redis 8.10.1 on an Apple M4 Pro, with the libc allocator. Production Linux builds use jemalloc, so absolute byte counts differ there. Ratios and the sizes where an encoding changes do not depend on the allocator. That last point is inferred from how the allocator works, not measured on Linux.
-
-Evidence
-Redis 8.10.2 was released on 2026-09-17, from the GitHub release page. Valkey 9.1.2 is the latest stable tag on 2026-10-18. The measurements ran on 2026-10-18 on a fresh Redis 8.10.1 Homebrew server, an x86_64 build under Rosetta, macOS 26.6, port 6481, no persistence, loopback client.
 
 ## What you bring from Phase 0
 
@@ -44,13 +32,69 @@ An O(N) command blocks everyone
 
 Some commands do work that grows with the size of the value, such as KEYS. Such a command holds the thread for all of that work. Every other client waits, so Phase 0 replaced KEYS with the cursor-based SCAN.
 
+Keys, values and commands
+
+A key names one value in Redis. A command, such as GET or SET, is one instruction that a client sends. A Lua script is a small program that Redis runs as one step, so it is atomic too.
+
+Primaries and replicas
+
+The primary is the Redis server that takes the writes, and a replica copies them a little later. In a failover, a replica takes the place of a primary that failed.
+
+Redis and Valkey
+
+Valkey is an open-source project that started from the Redis code and keeps its commands. Where Valkey behaves differently, the section says so.
+
 A shared cluster shares memory
 
 All services on one cluster use one maxmemory limit. Keys with no TTL, a time to live after which Redis deletes the key, can fill it and take down a neighbour.
 
-This phase needs all five. The type you choose decides whether an update is one atomic command or two that can interleave. It decides how many round trips a feature costs, and how much of the shared memory it uses.
+This phase needs all of them. The type you choose decides whether an update is one atomic command or two that can interleave. It decides how many round trips a feature costs, and how much of the shared memory it uses.
 
-The situation for the whole lesson is the platform from Phase 0, where about 34 services share several Redis clusters. You are adding an AI roleplay coach to it. A learner talks to a simulated buyer, and the coach scores the conversation. Each of its needs below copies a mechanism that another service on the platform already runs.
+The situation for the whole lesson is the platform from Phase 0, where about 34 services share several Redis clusters. Your grading service from Phase 0 grows there into an AI roleplay coach. A learner talks to a simulated buyer, and the coach then runs a scoring job on the conversation. Each of its needs below copies a mechanism that another service on the platform already runs.
+
+### The types that this lesson adds
+
+Phase 0 treated each value as one piece. To change one part of such a value, a client runs GET and changes the value in its own code. Then it runs SET, so the whole value crosses the network twice.
+
+Each home timeline at Twitter was a list of tweet IDs, and its timeline service handled about 30 million queries a second in one data centre. A talk by a Twitter engineer explained why Memcache did not fit this data. With Memcache, each small update read, changed and wrote the whole large timeline, so the network became the limit.
+
+Redis avoids that pattern with types. Every value has a type, and each type has its own commands that change one part of the value inside Redis, in one command. So the type you pick decides which changes are safe, and also how much memory the value takes.
+
+- A String holds one run of bytes, such as a JSON document or a number. The coach caches its buyer persona as a String.
+
+- A Hash keeps named fields, each with its own value, inside one key. The coach keeps each learner's session as a Hash.
+
+- A List keeps strings in the order you push them, and you add or take them at either end. The coach queues transcripts for scoring in a List.
+
+- A Set holds unique strings in no order. The coach keeps the IDs of all sessions of one learner in a Set.
+
+- A sorted set gives each member a number that you choose, called its score, and keeps the members in score order. The coach ranks trending scenarios with one.
+
+- A Stream is a log of entries that Redis keeps in order, and that several workers can share. The queue sections compare it with a List.
+
+- A HyperLogLog estimates how many distinct items it has seen, and it stays small however many it sees. The coach counts unique learners per scenario with one.
+
+These commands come from the lab of this phase, with the results that the lab expects. Each one shows a type at work.
+
+SET s hello                        # a String
+LPUSH s x                          # → a WRONGTYPE error, because s is not a List
+HINCRBY post:1 views 1             # one field of a Hash, used as a counter
+HINCRBY post:1 likes 1
+HINCRBY post:1 views 1
+HGETALL post:1                     # → views 2, likes 1
+ZADD lb 100 raj 250 dana 175 sam   # a sorted set, each score before its member
+ZRANGE lb 0 -1 REV WITHSCORES      # → dana first, with the top score
+
+- The LPUSH fails because s holds a String, and a List command cannot touch it. So the type of a value decides which commands are legal on its key.
+
+- Each HINCRBY changes one field of the Hash inside Redis, in one command, so two counters live in one key.
+
+- ZADD gives each member a score, and ZRANGE ... REV reads the members from the highest score down.
+
+Evidence
+The commands and results are E3, E4 and E8 of the phase's lab, typed for redis-cli without docker exec. The lab was not run for this lesson, so the results are the ones the lab expects. ZRANGE ... REV is the current form of the lab's ZREVRANGE. The Twitter number and the network cost of a whole-value update in Memcache come from High Scalability's summary of Yao Yue's talk, a secondary source that gives no measurement conditions. The summary gives the 30 million queries a second for the timeline service of one data centre.
+
+Each need of the coach maps to one of these types, and the table shows where the lesson answers it.
 
 What the coach needs | The question it raises | Where the lesson answers it
 
@@ -58,7 +102,7 @@ Cache the buyer persona that the model plays | A JSON String or a Hash? | String
 
 Keep each learner's session, and log a user out everywhere | Which fields change one at a time? | Hashes and Sets
 
-Count finished scoring jobs across many workers | Can two workers lose a count? | The lost update
+Count finished scoring jobs across many workers | Can two workers lose a count? | The race between workers
 
 Limit LLM calls per company | A counter or a log of timestamps? | Sliding windows
 
@@ -83,9 +127,9 @@ Phase 5 covers big keys in full, including how to find them and delete them with
 
 The type you store decides whether an update can be lost.
 
-Phase 0 showed that one command is atomic and two commands are not. The coach runs many scoring workers, and each one adds 1 to a count of finished jobs. If each worker reads the count and writes back a new one, some of those additions disappear.
+Phase 0 showed that one command is atomic and two commands are not. The coach runs many scoring workers, and each one adds 1 to a count of finished jobs. If each worker reads the count and writes back a new one, some of those additions disappear. This pattern, in which a client reads a value, changes it in its own code and writes it back, is called a read-modify-write.
 
-A Redis keyspace is one large map from keys to values. The key is always a string. The value has a type, such as String, Hash, List, Set or Sorted Set, and the type decides which commands may touch it. Each type also comes with commands that read and change the value inside Redis, in one command. Those commands are why the type matters for safety and not only for convenience.
+A Redis keyspace is one large map from keys to values. The key is always a string. The value has a type, such as String, Hash, List, Set or sorted set, and the type decides which commands may touch it. Each type also comes with commands that read and change the value inside Redis, in one command. Those commands are why the type matters for safety and not only for convenience.
 
 key (always a string)
 value (one type each)
@@ -96,7 +140,7 @@ Set {abc, def, ghi}
 queue:jobs
 List [j1, j2, j3]
 ratelimit:c7:/report
-Sorted Set {ts1, ts2, ts3}
+sorted set {ts1, ts2, ts3}
 persona:m1:u42
 String "{json...}"
 
@@ -113,7 +157,7 @@ About 20%. In a measured run, the counter ended at 3,234 instead of 16,000, so 7
 
 The reasonable guess is "almost all survive, because Redis is fast and the gap is small". The gap is small, but 8 clients send commands at full speed, so another client's GET or SET lands inside almost every gap.
 
-The loss follows from Phase 0's single thread. Each command runs to the end, but between two commands of one client, other clients run theirs.
+The loss follows from Phase 0's single thread. Each command runs to the end, but between two commands of one client, other clients run theirs. An addition that disappears in that gap, with no error, is called a lost update.
 
 Two clients, one counter, GET then SET
 
@@ -159,13 +203,13 @@ Where the rule stops. If a key has only one writer, GET then SET is safe, becaus
 
 Why names matter here. Keys from dozens of services live in one keyspace on a shared cluster. Without a convention, two services can write the same key, and nobody can say which service owns a key or its memory.
 
-The common style. Colon-separated parts, from general to specific, such as type:sub:id:id. A key like persona:m1:u42 says the type, the scenario and the user. A good prefix makes SCAN MATCH persona:* possible, so you can find, count and size one service's keys.
+The common style. Colon-separated parts, from general to specific, such as type:sub:id:id. A key like persona:m1:u42 says the type, the scenario and the user. A key prefix is the first part of a key, and a good one names its type or its service. It makes SCAN MATCH persona:* possible, so you can find, count and size one service's keys.
 
 Put the tenant ID in the key. A multi-tenant platform writes the company ID value into each key, such as cache:<companyId>:<userId>. This keeps one customer's cache from being served to another customer, so it is a correctness and security property. The platform writes the ID value itself, with no literal COMPANY_ prefix.
 
 More than one convention exists. The platform has no single standard, and several styles live side by side. One API layer uses pipe-separated keys. CK|<url>|<dataHash> holds a cached response. SK|<scope>|md5(url)|<hash> and MSK|md5(scopes)|md5(url)|... tie a response to one or more invalidation scopes. Scope|<scope> lists the keys of one scope, so a whole scope can be deleted at once. Another service uses game|<eid>|company|<cid>|new. When you edit a service, match the style it already uses.
 
-Hash tags. In a cluster, the text inside the braces decides the slot, so {<companyId>}key puts a tenant's keys on one shard. Then one MGET can read them all. This is a sharding tool, not a naming style, and Phase 4 explains slots.
+Keys on one shard. In a cluster, the part of a key inside braces alone decides the slot. So {<companyId>}key puts a tenant's keys on one shard. Then one MGET, the command that reads many keys in one call, can read them all. This is a sharding tool, not a naming style, and Phase 4 explains slots.
 
 The trap. A key with no prefix, such as u42 or count, can collide with another service's key, and you cannot find it with SCAN MATCH.
 
@@ -177,7 +221,7 @@ One command is safe, and some changes need several. The next section asks what a
 
 ## What does a transaction promise, and what does it not?
 
-EXEC runs a queue with nothing in between, and it never undoes a command.
+A transaction runs its queue with nothing in between, and never undoes a command.
 
 INCR made one change safe in one command. The coach also charges each scoring job to its company's LLM budget. It reads the budget, checks that the job fits, then lowers the budget and logs the charge. No single command does all three steps, so the race from the section above comes back.
 
@@ -289,7 +333,7 @@ An open-source file system, SwordFS, met this limit in its tests. Writers of unr
 Evidence
 SwordFS issue #454, closed 2026-10-10, read with its comments. A small open-source project, not a company postmortem. redis-py redis/client.py:628-638 at v8.1.0: while True on WatchError. The cap run used -max-retries 10 on the same server.
 
-In a cluster, every key of one transaction must sit in one hash slot, or EXEC replies CROSSSLOT. The hash tags from the key-naming notes above fix it. {c7}:budget and {c7}:log hash only c7, so they share a slot.
+In a cluster, every key of one transaction must belong to one slot, or EXEC replies CROSSSLOT. A slot is one of the parts into which a cluster divides its keys. A hash tag, the part of a key inside braces, fixes it, because only that part decides the slot. {c7}:budget and {c7}:log hash only c7, so they share a slot.
 
 So pick the smallest tool that does the change on the server in one step.
 
@@ -437,7 +481,7 @@ The claim is the whole idempotency pattern. An AI service on the platform claims
 
 Correction. The phase listed SETNX as a current atomic command. SETNX is deprecated since Redis 2.6.12. Use SET key value NX EX seconds, which also sets the TTL in the same command.
 
-One String bug is common. A plain SET on an existing key removes its TTL, so a cache entry that should expire stays forever. SET key val KEEPTTL changes the value and keeps the expiry.
+One String bug is common. A plain SET on an existing key removes its TTL, so a cache entry that should expire stays forever. KEEPTTL is an option of SET that changes the value and keeps the expiry, as in SET key val KEEPTTL.
 
 So is the persona right as a JSON String? Yes, because the coach reads and writes it whole and never changes one field. The cache layer also has no reason to look inside it. The learner's session is different, because the coach changes its fields one at a time.
 
@@ -506,7 +550,7 @@ A fan-out counter in one Hash. Act on the value that HINCRBY returns, for the re
 
 The session on the platform shows a second lesson, about TTLs. One service creates the session hash with HMSET and then sends a separate EXPIRE, and a second service only reads it. If the writer crashes between those two commands, the hash never expires. It becomes the no-TTL key from Phase 0 that fills a shared cluster. Send HSET and EXPIRE inside one MULTI and EXEC, or one script, so both apply together.
 
-Hash fields can also expire one by one now. HEXPIRE arrived in Redis 7.4.0, and HSETEX, HGETEX and HGETDEL in 8.0.0. So you no longer need one String key per field to give fields their own TTL.
+Hash fields can also expire one by one now, and a TTL on one field is called a field TTL. HEXPIRE, the command that sets one, arrived in Redis 7.4.0, and HSETEX, HGETEX and HGETDEL in 8.0.0. So you no longer need one String key per field to give fields their own TTL.
 
 One line from Phase 0 applies here. HGETALL is O(N) in the number of fields, so on a hash that grew to millions of fields it blocks the thread. Bound the field count, or read with HSCAN.
 
@@ -517,9 +561,9 @@ Acting on the count. One detail of that pattern can start the next step twice. T
 
 The session contract in detail. The writer is a Node service. It runs hmset(key, {email, attempt, company, expiryTime, lastActivityTrackedTime, ...}) and then a separate EXPIRE. The reader runs HGETALL on a userId|companyId key, and deletes secondary-index fields with HDEL. So the Hash is a contract between two services, and a change of field names on one side breaks the other. That last point is inferred.
 
-A measured field TTL. HEXPIRE sess 60 FIELDS 1 token followed by HTTL returned 60 -1, and OBJECT ENCODING returned listpackex.
+A measured field TTL. HEXPIRE sess 60 FIELDS 1 token followed by HTTL returned 60 -1. The command that prints a key's internal form, taught in the memory sections below, then returned listpackex.
 
-Memory. Memory is the other reason to group fields. A small Hash is stored as one flat array, so 20 fields in one Hash cost far less than 20 top-level String keys. It also returns all of them in one round trip with HGETALL. The encoding sections below measure this.
+Memory. Memory is the other reason to group fields. A small Hash is stored as one flat array, so 20 fields in one Hash cost far less than 20 top-level String keys. It also returns all of them in one round trip with HGETALL. The memory sections below measure this.
 
 Check it in your services. Find a session or profile that a service stores as a JSON String. Ask what breaks when two requests change two different fields at the same time. Each one rewrites the whole blob, so the later write removes the earlier change.
 
@@ -587,7 +631,11 @@ Redis stores small collections in a compact form and converts them at fixed size
 
 The first concept decided which work is atomic. The coach's session hash has five short fields today. A deploy adds one field that holds a 100-byte JSON value. Then the cluster's memory climbs for every session at once, with no new users.
 
-Redis stores each Hash, Set, Sorted Set or List in one of two forms. A small one is a listpack, one flat block of bytes that holds the entries one after another. A large one uses a structure built from pointers, such as a hash table, a skip list or a quicklist. That form costs more memory for each element. Redis converts from the small form to the large form when the collection passes a size limit, and that conversion is the memory jump.
+Redis stores each Hash, Set, sorted set or List in one of two forms, and the form is called its encoding. A small one is a listpack, one flat block of bytes that holds the entries one after another. A large one uses a structure built from pointers, such as a hash table or a skip list. A skip list is a sorted linked list with shortcut links. A large List uses a quicklist, a chain of small listpacks.
+
+The large form costs more memory for each element. Redis converts from the small form to the large form when the collection passes a size limit, and that conversion is the memory jump.
+
+The command OBJECT ENCODING prints which form a key uses, so you can see the jump before you measure it.
 
 listpack: one block, entries in a row
 
@@ -628,7 +676,7 @@ Redis uses the slow-looking form on purpose, for three reasons.
 
 - An insert can push the count past the entries limit, or a field or value past the value limit. Then Redis converts the whole collection to the large form in that command.
 
-- Hashes, Sets and Sorted Sets stay in the large form when they shrink. Lists convert back to a listpack, but only below half the limit, so a list near the limit does not convert back and forth.
+- Hashes, Sets and sorted sets stay in the large form when they shrink. Lists convert back to a listpack, but only below half the limit, so a list near the limit does not convert back and forth.
 
 Type | Listpack limit | Value size limit | Large form
 
@@ -646,7 +694,7 @@ Defaults at Redis 8.10.2, from src/config.c and redis.conf. Valkey 9.1.2 has the
 
 Correction. The phase gave 128 as the Hash and List limits. The Hash default is 512 in Redis 7.2.0, 8.10.2 and Valkey 9.1.2. The List setting is -2, which means 8 KB per node. Since 7.2, Sets of strings are listpacks too, and Lists convert back when they shrink.
 
-The jump at each limit was measured one key at a time.
+MEMORY USAGE prints how many bytes one key and its value use, and it measured the jump at each limit one key at a time.
 
 MEMORY USAGE per key, measured on the Homebrew build named under the race table, with libc malloc. One element past the limit costs 3.9 to 18 times the memory. A 64-byte Hash value keeps the listpack, and a 65-byte value converts it.
 
@@ -988,7 +1036,7 @@ FIFO queue: RPUSH at the tail, LPOP at the head. Stack: LPUSH and LPOP.
 A List used as a queue. The producer pushes at the tail and the worker pops at the head.
 
 Predict: a worker runs BLPOP jobs 5, gets a transcript job, and the pod is killed 2 seconds later. Where is the job now? Which one command change would let you recover it, and what second process do you then need?
-The job is nowhere. The pop deleted it from Redis, and the only copy was in the dead pod's memory. Change the pop to BLMOVE jobs jobs:processing LEFT RIGHT, which moves the job into a processing list in the same command. You then need a reaper, a process that pushes jobs back when they stay in the processing list too long.
+The job is nowhere. The pop deleted it from Redis, and the only copy was in the dead pod's memory. Change the pop to BLMOVE jobs jobs:processing LEFT RIGHT, which moves the job into a processing list in the same command. That list holds the jobs a worker has taken but not finished. You then need a reaper, a process that pushes jobs back when they stay in the processing list too long.
 
 The guess "Redis will give it to another worker" is reasonable if you have used Kafka or SQS, which wait for an acknowledgement. A List has no acknowledgement, so a pop is final.
 
@@ -1051,7 +1099,7 @@ The reliable List queue from the Redis docs. A job is always in one of the two l
 
 - A reaper checks the processing list for jobs that have stayed too long, and pushes them back to jobs. The docs describe this as a client that "may monitor the processing list for items that remain there for too much time".
 
-- A job can now run twice, when a worker finishes but dies before its LREM. So this is at-least-once delivery, and the scoring code must be idempotent. A SET ... NX claim on the job ID, from the Strings section, is one way.
+- A job can now run twice, when a worker finishes but dies before its LREM. So this is at-least-once delivery, which means a job runs one or more times but is never lost, and the scoring code must be idempotent. A SET ... NX claim on the job ID, from the Strings section, is one way.
 
 In a measured run, LMOVE q q:processing LEFT RIGHT followed by a simulated crash left q holding j2 j3 and q:processing holding j1. So a reaper could push j1 back. The reaper needs to know how long each job has waited. One way is to record the start time next to the job, which is inferred and not shown in the docs.
 
@@ -1078,7 +1126,7 @@ A Stream remembers delivered jobs, but another consumer must claim them.
 
 The reliable List needs a reaper that you write and run. The coach's team asks whether Redis Streams remove that work, since they keep a record of every delivered entry.
 
-A Stream is an append-only log of entries, each with an ID that grows with time. A consumer group shares the entries of one Stream among several consumers, so each entry goes to one of them. Redis records each delivered entry in the group's pending entries list, the PEL, until the consumer confirms it with XACK.
+A Stream is an append-only log of entries, each with an ID that grows with time. A consumer group shares the entries of one Stream among several consumers, so each entry goes to one of them. Redis records each delivered entry in the group's pending entries list, or PEL for short. The entry stays there until the consumer confirms it with XACK, the command that acknowledges an entry. Another consumer can take over an entry that waits too long with XAUTOCLAIM, which claims entries idle for longer than a time you give.
 
 - XADD s * job t9: The producer appends an entry.
 
@@ -1533,6 +1581,18 @@ KEY NAMES
   {tenant} hash tag puts a tenant's keys on one cluster slot (Phase 4)
 
 ## Sources
+
+Go deeper: what this phase covered, the versions, and how long it takes
+The original phase. It was a survey of eight topics, in this order. Strings, hashes, lists, sets, sorted sets, then Streams with HyperLogLog and bitmaps, then encodings, then key naming. This lesson keeps every part of it that is correct. It groups them under the five ideas above, because one idea connects them. The type decides which work Redis does inside one command, and the size of the value decides how Redis stores it.
+
+Versions. Current Redis is 8.10.2. Valkey 9.1.2 is the main project that continues from the Redis code. The Linux Foundation runs it, and it started from Redis 7.2.4. The lab's container still pins redis:7.2. Where a command or a default differs between these, the section says so.
+
+Time. The phase planned 3 to 5 days for reading and labs. It is the phase you will open most often later, because "which structure?" is a decision you make every week.
+
+How the numbers are labelled. A number that says "measured" comes from a run on Redis 8.10.1 on an Apple M4 Pro, with the libc allocator. Production Linux builds use jemalloc, so absolute byte counts differ there. Ratios and the sizes where an encoding changes do not depend on the allocator. That last point is inferred from how the allocator works, not measured on Linux.
+
+Evidence
+Redis 8.10.2 was released on 2026-09-17, from the GitHub release page. Valkey 9.1.2 is the latest stable tag on 2026-10-18. The measurements ran on 2026-10-18 on a fresh Redis 8.10.1 Homebrew server, an x86_64 build under Rosetta, macOS 26.6, port 6481, no persistence, loopback client.
 
 Open the sources
 Redis source and docs

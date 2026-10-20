@@ -2,13 +2,13 @@
 
 - If a double run wastes work, one Redis node is enough. If it corrupts data, the resource must refuse it.Decide which kind of lock you are writing, and where its guarantee lives.
 
-- Release and extend must compare your own random token and act in one server-side step.Write an acquire, release and extend that never touch another holder's lock.
+- Release and extend must check that the key still holds your own value, and act in one step on the server.Write an acquire, release and extend that never touch another holder's lock.
 
-- Any pause longer than the TTL gives two acting holders, and no check inside the client closes that gap.Size a lease, add a watchdog, and know what neither one fixes.
+- Any pause longer than the TTL gives two acting holders, and no check inside the client closes that gap.Size the TTL, add a task that extends it, and know what neither one fixes.
 
-- A lock on one Redis primary can vanish at failover, and its expiry follows the server's wall clock.Name the two server-side ways a correct client still gets two holders.
+- A lock on one Redis primary can vanish at failover, and its expiry follows the server's system time, which can be moved.Name the two server-side ways a correct client still gets two holders.
 
-- A fencing token protects only if it never goes backwards and the resource checks it in the write.Design a fence, and pick a token source that survives a failover.
+- A number that grows with each lock grant protects only if it never goes backwards and the resource checks it in the write.Design that check, and pick a source for the number that survives a failover.
 
 In Phase 2 you stopped a cache stampede inside one process with singleflight. singleflight lets one call fetch a value while the duplicate callers in the same process wait for its result. This lesson starts where singleflight stops working, because the duplicate callers now run on different machines.
 
@@ -16,11 +16,40 @@ The running case is a weekly summary job for an AI agent feature. It is this les
 
 In this lesson's example, the LLM call usually takes 2 seconds and the lock's TTL is 10 seconds. These two numbers are an illustration, not a measurement. Each section asks what can still go wrong with that lock. Each answer moves the guarantee one step closer to the database row that holds the credits.
 
-## What you bring from Phases 0 to 2
+## Three words for a lock across pods, and what you bring from Phases 0 to 2
+
+The job runs on three pods, and two of them can pick account 42 in the same minute. Without a lock that all three pods can see, the owner gets two emails and pays the credits twice.
+
+The fix starts with one key that every pod tries to create, and only one pod can. The pod that creates it does the job and deletes the key at the end. A TTL frees the key when the holder crashes, and the value inside the key says who the holder is.
+
+- A distributed lock is a key in a shared store that only one process may hold at a time. Every pod tries to create the key, and only the pod that succeeds runs the job. In this lesson it is lock:summary:42.
+
+- A random token is the value the holder writes into the lock key, a random string that no other pod will pick. It names this one holder, so a release can check that the lock is still yours. You meet it in the section on releasing the lock.
+
+- A lease, in Phase 2, was the token that memcache gave to one reader that missed, so only that reader filled the key. In this lesson the same word has a second meaning, a lock with a TTL that ends at a deadline unless its holder renews it. You meet it in the two lease sections.
+
+Two commands from the study note's runs show a lock key, its token and its TTL.
+
+SET lock:y realowner NX PX 30000
+OK
+SET k v NX PX 0
+(error) ERR invalid expire time ...
+
+- The first SET returns OK, so this client now holds the distributed lock on lock:y. Its value, realowner, stands in for a random token.
+
+- PX 30000 gives the lock a TTL of 30 seconds, so a crashed holder blocks the other pods for at most that long.
+
+- The second SET asks for a TTL of 0, and Redis refuses it. The section on the parts of SET NX PX shows how a client library can still create a lock with no TTL.
+
+Evidence
+
+Both replies come from the study note's runs on a local Redis 8.10.1 server. The note records the OK for SET lock:y realowner NX PX 30000. For a raw SET ... PX 0 it records the start of the error text, "ERR invalid expire time", so the page shows the rest of the line as dots.
+
+Three ideas from earlier phases also come back in this lesson, and each card below explains one again.
 
 One thread runs every command, from Phase 0
 
-Redis runs commands one at a time on one main thread. So one command, or one Lua script, is atomic: no other command runs in the middle of it. In Redis 8, I/O threads read, parse and write, but they never run commands.
+Redis runs commands one at a time on one main thread. So one command, or one Lua script, a small program that Redis runs inside the server, is atomic, and no other command runs in the middle of it. In Redis 8, I/O threads read, parse and write, but they never run commands.
 
 TTL and expiry, from Phases 0 to 2
 
@@ -29,10 +58,6 @@ A TTL, time to live, tells Redis to treat a key as deleted after a set time. PX 
 singleflight, from Phase 2
 
 singleflight merges duplicate calls for the same key inside one process. The first caller does the work, and the others wait for its result. It knows nothing about other processes, so three pods still make three calls.
-
-A lock across processes, new here
-
-A distributed lock is a key in a shared store that only one process may hold at a time. Every pod tries to create the key, and only the pod that succeeds runs the job.
 
 - pod picks account 42Pods A, B and C all can.
 
@@ -44,7 +69,7 @@ A distributed lock is a key in a shared store that only one process may hold at 
 
 - release the lockThe next pod may now run.
 
-This phase stays with one job and one lock. Phase 4 explains replication and failover in full. This lesson needs only one fact from it, in the failover section: a replica can miss the last writes of its primary.
+This phase stays with one job and one lock. Phase 4 explains replication and failover, the promotion of a replica when its primary dies, in full. This lesson needs only one fact from it, in the failover section. A replica, the copy of a primary that receives its writes, can miss the last writes of its primary.
 
 ## Is this lock about wasted work or about wrong data?
 
@@ -67,7 +92,7 @@ Any lock service faces the same choice when a holder stops answering, and the st
 
 - The service must free a lock when its holder looks dead, because a crashed holder would otherwise block every other pod forever.
 
-- It decides that a holder looks dead when a lease runs out or a heartbeat stops arriving.
+- It decides that a holder looks dead when a lease runs out or a heartbeat, a small message the holder sends at a fixed interval to show it is alive, stops arriving.
 
 - A holder that is paused, or cut off by the network, looks dead in the same way. But it is still alive, and it can act when it resumes.
 
@@ -91,17 +116,17 @@ Its promiseDo not do the same work twice.Two actors must never both act.
 
 Cost of a double runA duplicate email, a wasted LLM call of about $0.02, a cache entry computed twice.Corrupted data, a customer charged twice, two conflicting writes to one record.
 
-Enough protectionOne Redis node with SET NX PX.Redis alone is not enough. Use an idempotent write, a fencing token or a consensus system with fencing.
+Enough protectionOne Redis node with SET NX PX.Redis alone is not enough. Make the write safe to repeat, have the resource check a number that grows with each lock grant, or use a consensus store with that check.
 
 Many locks in a typical service are efficiency locks. Deduplicating notification emails, building a share link and starting a chat session are all cases where a rare double run is a nuisance. For those, a single Redis node is the right and cheap answer.
 
-The etcd tests also matter for the claim "use a consensus store and the lock is safe". The store passed its own checks under the same faults, so the data in etcd was never wrong. The lock built on top still failed, because a lease is a promise about time, and a paused client cannot see time pass. The report's two fixes are a transaction that checks the lock key's version in the same write, or using the lock key's revision as a fencing token. Both put the check at the resource.
+The etcd tests also matter for the claim "use a consensus store and the lock is safe". The store passed its own checks under the same faults, so the data in etcd was never wrong. The lock built on top still failed, because a lease is a promise about time, and a paused client cannot see time pass. The report's two fixes are a transaction that checks the lock key's version in the same write, or using the lock key's revision, a number that grows with each change, as a token that the resource checks. Both put the check at the resource.
 
 ## Where does the guarantee live when a lock is not enough?
 
 A correctness job needs a check at the resource, and the lock only saves work.
 
-The last section showed that any lease-based lock can have two holders, so the credits need a guard outside the lock. There are three places to put that guard. Each one makes the resource, the system that holds the data, refuse the second actor.
+The last section showed that any lease-based lock can have two holders, so the credits need a guard outside the lock. There are three places to put that guard. Each one makes the resource, the system that holds the data, refuse the second actor. An idempotent write is a write that leaves the same result when it runs twice. A fencing token is a number that grows each time the lock is granted, so the resource can refuse a write that carries an older one.
 
 GuardWhat refuses the second actorWhen it worksCost
 
@@ -113,7 +138,7 @@ Consensus lock plus fencingA consensus store, such as etcd or ZooKeeper, issues 
 
 Redis lock aloneNothing refuses a late actorOnly when a double run is harmlessLowest
 
-An idempotent write is a write that leaves the same result when it runs twice. It is often the best guard, because it also protects against client retries and crashes, which a lock never sees. In the running case, the credits table gets a unique key on account and week. The second deduction then fails on that key, whichever pod sends it.
+The idempotent write is often the best guard, because it also protects against client retries and crashes, which a lock never sees. In the running case, the credits table gets a unique key on account and week. The second deduction then fails on that key, whichever pod sends it.
 
 -- one charge per account and week, whichever pod gets here first
 INSERT INTO credit_charges (account_id, week, credits)
@@ -122,23 +147,23 @@ ON CONFLICT (account_id, week) DO NOTHING;
 
 With this row in place, the Redis lock no longer protects the credits. It only stops most duplicate LLM calls and emails, which is an efficiency job. The decision for any lock follows from that split.
 
-- Efficiency lock. Use one Redis node with SET NX PX, a random token, and a compare-and-delete release. Do not add a multi-node algorithm, and document that a rare double run can happen.
+- Efficiency lock. Use one Redis node with SET NX PX, a random token, and a release that deletes the key only if it still holds your token. Do not add Redlock, a multi-node algorithm that needs a majority of several Redis primaries. Note in the docs that a rare double run is possible.
 
-- Correctness lock. Do not rely on any Redis lock as the guarantee. Make the write idempotent, or add a fencing token that the resource checks, or use a consensus store with fencing. Keep the Redis lock only as a way to save work.
+- Correctness lock. Do not rely on any Redis lock as the guarantee. Make the write idempotent, or add a fencing token that the resource checks, or use a consensus store that issues fencing tokens. Keep the Redis lock only as a way to save work.
 
 Shopify shows what happens when the guard sits in a different store from the data. Inventory reservations lived in Redis as one counter per item, with DECR to reserve and INCR to release. The inventory ledger lived in MySQL, so the claim step could not be atomic across both stores, and that risked overselling. Shopify moved reservations into MySQL as one row per unit, claimed with SELECT FOR UPDATE SKIP LOCKED, up to 1,000 rows per item and location. On Black Friday 2025, Shopify merchants peaked at $5.1M in sales per minute. On the new MySQL design, the throughput limit turned out to be database connections, not CPU.
 
 Evidence
 Shopify Engineering, "We replaced Redis with MySQL for inventory reservations, and it scaled", Emilie Noel, 2026-05-12. The peak figure is for Black Friday 2025. Fetched for the course's company research, re-fetched once, and read again for this review on 2026-10-18, with matching facts.
 
-Go deeper: the Redlock argument, and what both sides agree on
+Go deeper: the argument about a lock on several Redis nodes, and what both sides agree on
 Redlock is an algorithm by antirez, the creator of Redis. It takes the same lock on N independent Redis primaries and counts the lock as held when a majority of them said yes. So the failure of one node does not lose the lock. Martin Kleppmann criticised it, and antirez answered. Their points are below.
 
 Kleppmann's pointsantirez's answers
 
 Redlock cannot give correctness. A pause past the lease gives two holders, so the resource needs fencing tokens. Redlock's random value cannot be put in order, so it cannot serve as one.A large random token plus a check-and-set on the resource gives the same protection as a number that only grows, and it is more practical.
 
-Its safety depends on timing: a bounded pause, a bounded network delay and no clock jump. Real systems break all three.Redlock assumes only that each node can count time with a bounded error, such as 5 seconds with at most 10% error. He agreed that Redis should use a monotonic clock, which the failover section shows never happened for key expiry.
+Its safety depends on timing: a bounded pause, a bounded network delay and no clock jump. Real systems break all three.Redlock assumes only that each node can count time with a bounded error, such as 5 seconds with at most 10% error. He agreed that Redis should use a clock that only moves forward and that no change of the system time can step. The failover section shows that this never happened for key expiry.
 
 For correctness, use ZooKeeper or etcd with fencing. For efficiency, one Redis node is enough. He calls Redlock "neither fish nor fowl": too heavy for efficiency, not safe enough for correctness.Redlock moves people off locks on one primary with failover, which are less safe, at little cost. If the resource can resolve races itself, "it is not clear why you would use a lock with strong properties at all".
 
@@ -149,7 +174,7 @@ The phase's line "if you need fencing, you probably didn't need the heavy lock" 
 Go deeper: an idempotency key for a paid API call
 A paid third-party call, such as an LLM request or a payment, cannot be fenced, because the provider does not check your tokens. The production design for that case is an idempotency-key row in your own database. Brandur Leach describes one for a Stripe-like API in Postgres. Each request carries a key, and the server keeps a row for that key with a locked_at time. The work runs in atomic phases, each one a database transaction, and each phase records a recovery point. A retry can take the key only when its lock is free or older than a lock timeout. A request that crashed then resumes from its last recovery point, on a client retry or through a completer process. A reaper process deletes old keys, after about 72 hours. So the row is a lease plus a record of progress, kept in the same database as the data.
 
-The storage course, Phase 3, teaches the leased task claim and the version-column check in PostgreSQL. This lesson does not teach them again. A version column is the check-and-set that antirez describes: the UPDATE succeeds only if the version is still the one you read.
+The storage course, Phase 3, teaches the leased task claim and the version-column check in PostgreSQL. This lesson does not teach them again. That check reads a number in the row that each write raises by one. It is the check-and-set that antirez describes. An UPDATE that names the version you read changes the row only while that version is unchanged.
 
 Before writing a lock, ask what a double run breaks.
 
@@ -192,7 +217,7 @@ The whole correct lock on one node is two calls: SET NX PX to acquire, and a rel
 
 The pods that lose must decide when to try again. The official Redis lock page asks for a random delay before a retry, so that losing clients do not all retry at the same moment. The Go library redsync uses 32 tries by default, with a random delay of 50 to 250 milliseconds between them.
 
-Flipkart saw what unbounded waiting does to Redis itself. A service that feeds Flipkart's load tests used a lock from Redisson, a Java client. It was a read-write lock on one Redis primary, watched by three Sentinel processes for failover, and it guarded a MySQL calculation. In a peak load test, every request thread polled isLocked in a loop and then called lock with no wait limit. Redis CPU reached 100%, all threads blocked, and pods failed their health checks and restarted in a loop, while pod CPU stayed under 40%. The fix that held was a counter in each pod that let only 5 requests at a time try the lock. It answered HTTP 429 to the rest. The team sized it from the time a request spent inside that gate, 200 to 300 milliseconds, budgeted as 500 ms. That gave about 90 requests per second across 9 pods.
+Flipkart saw what unbounded waiting does to Redis itself. A service that feeds Flipkart's load tests used a lock from Redisson, a Java client. It was a read-write lock on one Redis primary, watched by three Sentinel processes, the Redis tool that promotes a replica when the primary fails, and it guarded a MySQL calculation. In a peak load test, every request thread polled isLocked in a loop and then called lock with no wait limit. Redis CPU reached 100%, all threads blocked, and pods failed their health checks and restarted in a loop, while pod CPU stayed under 40%. The fix that held was a counter in each pod that let only 5 requests at a time try the lock. It answered HTTP 429 to the rest. The team sized it from the time a request spent inside that gate, 200 to 300 milliseconds, budgeted as 500 ms. That gave about 90 requests per second across 9 pods.
 
 Evidence
 Flipkart Tech blog, "When Good Locks Go Bad: Diagnosing a System Meltdown Under Load", Yash Agrawal, 2025-11-10. The course's company research read the full text from the blog's feed. This review fetched the feed again on 2026-10-18, got HTTP 200, and re-read the full text. Each Flipkart fact on this page matches it. The go-redis behaviour is from its source: at v9.5.1, SetNX with expiry 0 sends SETNX, and at v9.23.0 it sends SET k v NX. In both versions the key has no TTL. The "ERR invalid expire time" reply was run by the study note's author on Redis 8.10.1.
@@ -214,7 +239,7 @@ releaseScript.Run(ctx, rdb, []string{key}, token)    // DEL only if value == my 
 
 - The go-redis method name SetNX hides which command it sends. At v9.5.1, the version the lab pins, a non-zero expiry sends SET key value PX ms NX, or EX with seconds for a whole-second TTL, and 0 sends plain SETNX. At v9.23.0, 0 sends SET k v NX with no TTL. A helper that takes the TTL from its caller should refuse 0, or set a default.
 
-- Other SET options include XX, which sets only if the key exists, and GET, which returns the old value. EX and PX take a TTL in seconds or milliseconds, EXAT and PXAT take an absolute time, and KEEPTTL keeps the old TTL. Since 8.4.0, IFEQ, IFNE, IFDEQ and IFDNE set the key only when a condition on its current value holds. A lock needs NX with PX or EX to acquire, and IFEQ to extend.
+- Other SET options include XX, which sets only if the key exists, and GET, which returns the old value. EX and PX take a TTL in seconds or milliseconds, EXAT and PXAT take an absolute time, and KEEPTTL keeps the old TTL. Since 8.4.0, IFEQ, which Phase 2 used for a conditional cache fill, IFNE, IFDEQ and IFDNE set the key only when a condition on its current value holds. A lock needs NX with PX or EX to acquire, and IFEQ to extend.
 
 - Lab exercise E2 watches the acquire on the wire with MONITOR. The first SET ... NX returns OK and the second returns nil, because the key already exists.
 
@@ -268,7 +293,7 @@ EVAL "if redis.call('GET',KEYS[1]) == ARGV[1]
       then return redis.call('DEL',KEYS[1])
       else return 0 end" 1 lock:summary:42 <my-token>
 
-A Lua script runs on the one command thread, so no other command runs between its GET and its DEL. Now pod A's late release at t=3.0 s finds B's token, returns 0 and deletes nothing. The same rule applies to extending a lease: set a new TTL only if the value is still your token, in one step. On Redis 8.4 and later that is SET lock:summary:42 <my-token> IFEQ <my-token> PX 10000, which does nothing when the key is gone or holds another token.
+On Redis 8.4 and later, DELEX with IFEQ is a delete that runs only if the key's value matches the one you give, in one command. On any version, a Lua script runs on the one command thread, so no other command runs between its GET and its DEL. Now pod A's late release at t=3.0 s finds B's token, returns 0 and deletes nothing. The same rule applies to extending a lease. A compare-and-extend sets a new TTL only if the value is still your token, in one step. On Redis 8.4 and later that is SET lock:summary:42 <my-token> IFEQ <my-token> PX 10000, which does nothing when the key is gone or holds another token.
 
 Correction. The phase gives only the Lua script for release, and says to extend by "re-PEXPIRE while you still own it". Since Redis 8.4.0, the official lock page gives DELEX key IFEQ token as the release step and keeps Lua for older versions. An extend must be a compare-and-extend, either SET key token IFEQ token PX ttl on 8.4 and later, or the Lua script above. A bare PEXPIRE can extend another pod's lock.
 
@@ -298,7 +323,7 @@ else
     return 0
 end
 
-- Valkey has no DELEX. It has DELIFEQ key value since 9.0.0, and SET ... IFEQ since 8.1.0. Code that must run on both Redis and Valkey needs the Lua script, or a branch for each server.
+- Valkey, the open-source fork of Redis, has no DELEX. It has DELIFEQ key value since 9.0.0, and SET ... IFEQ since 8.1.0. Code that must run on both Redis and Valkey needs the Lua script, or a branch for each server.
 
 - Whether AWS ElastiCache, Google Memorystore and Azure support DELEX or SET IFEQ was not checked. Test it on your managed service before you remove the Lua script.
 
@@ -320,7 +345,7 @@ The release is safe now. But pods A and B still worked at the same time, so the 
 
 A correct lock still gives two holders when the holder stops longer than the TTL.
 
-The last section ended with pods A and B working at the same time, even though both followed the rules. The lock in this section is fully correct, with a random token and a compare-and-delete release. It still fails, because a lock with a TTL is a lease: a promise that the key is yours until a deadline. You hold that promise only if your work finishes before the deadline, and the holder cannot see itself miss it.
+The last section ended with pods A and B working at the same time, even though both followed the rules. The lock in this section is fully correct, with a random token and a compare-and-delete release. It still fails, because a lock with a TTL is a lease in the second meaning from the start of this lesson, a promise that the key is yours until a deadline. You hold that promise only if your work finishes before the deadline, and the holder cannot see itself miss it.
 
 A correct lock with a 5 s TTL, and a 6 s pause in pod A.
 
@@ -361,9 +386,9 @@ The gap does not need a bug in your code. A pause, a page fault, CPU steal on a 
 
 The arithmetic is what turns a rare event into a routine one. If one call in 10,000 stalls past the TTL, as this lesson assumes, a job that runs 5 million times a week sees about 500 overlaps every week. This is an illustration, not a measurement.
 
-The lock cannot close this gap, but it can make it smaller. The next section measures how far a longer TTL and a watchdog narrow it, and what each one costs.
+The lock cannot close this gap, but it can make it smaller. The next section measures how far a longer TTL and a task that extends the lease narrow it, and what each one costs.
 
-## How far do a longer TTL and a watchdog narrow the gap?
+## How far do a longer TTL and automatic extension narrow the gap?
 
 Both make overlaps rarer, and neither makes them impossible.
 
@@ -421,9 +446,9 @@ Every failure so far needed a slow client, so the next section asks how the lock
 
 ## How can the lock vanish when no client paused?
 
-Replication and the wall clock can both end a lease early, on the server.
+Replication and the server's system time can both end a lease early.
 
-Every failure so far needed a pod that was slow, and a faster pod or a longer TTL made it rarer. This section shows two failures that happen inside Redis, so a perfect client cannot prevent them. The summary lock now lives on a primary with one replica and automatic failover.
+Every failure so far needed a pod that was slow, and a faster pod or a longer TTL made it rarer. This section shows two failures that happen inside Redis, so a perfect client cannot prevent them. The summary lock now lives on a primary with one replica and automatic failover. Redis uses asynchronous replication, which means the primary answers the client first and sends the write to the replica afterwards. The command WAIT blocks the client until a given number of replicas confirm its writes, or until a timeout passes.
 
 Predict: no pod pauses, and every pod uses the correct lock from the release section. Name the sequence that gives two holders of lock:summary:42. Then say what changes if pod A runs WAIT 1 100 right after it acquires.
 Pod A acquires on the primary. The primary crashes before it sends that write to the replica. The replica is promoted and has no lock key, so pod B's SET NX succeeds, and both pods hold the lock. WAIT 1 100 blocks pod A for up to 100 milliseconds until one replica confirms the write. A reply of 1 makes this loss less likely, and a reply of 0 tells A that its lock is at risk. It does not make the failover safe, which is inferred: WAIT only reports how many replicas acknowledged, and with several replicas, the promoted one can still be one that did not. The guess "a correct client is enough" is reasonable, because every step of the client was correct.
@@ -450,7 +475,7 @@ The second failure is in how Redis decides that a key has expired. It uses the w
 
 - A promoted replica checks the old primary's deadline against its own clock, so clock skew between the two machines moves every lease at failover. This step is inferred from the code paths above.
 
-Correction. The phase says antirez "conceded" the monotonic clock, which reads as if Redis now uses one. It does not. The current official lock page says that "Redis is not using monotonic clock for TTL expiration mechanism". The Redis 8.10.2 source and the Valkey 9.1.2 source both decide expiry from the wall clock.
+Correction. The phase says antirez "conceded" the monotonic clock, a clock that only moves forward. That reads as if Redis now uses one. It does not. The current official lock page says that "Redis is not using monotonic clock for TTL expiration mechanism". The Redis 8.10.2 source and the Valkey 9.1.2 source both decide expiry from the wall clock.
 
 Redlock is antirez's algorithm that takes the same lock on several independent Redis primaries and needs a majority of them. A Redlock library does not protect against either failure when it talks to one endpoint. redsync computes its quorum as half the number of Redis pools plus one, and with one pool the quorum is 1. So the library gives single-node behaviour, with a safe compare-and-delete and a nicer API. The phase's former employer ran its Redlock-library locks this way, against one managed Redis cluster. All its locks therefore lived on the same primaries, so one failover could affect all of them at once.
 
@@ -483,7 +508,7 @@ A paused pod and a failover both leave a late writer behind, so the next section
 
 The resource, not the lock, refuses the late writer, in the same step as the write.
 
-A paused pod and a failover both leave a late writer that believes it holds the lock, so the check has to sit where the write lands. A fencing token is a number that grows each time the lock is granted. The holder sends its token with every write. The resource rejects any write whose token is lower than the highest token it has already accepted.
+A paused pod and a failover both leave a late writer that believes it holds the lock, so the check has to sit where the write lands. The fencing token from the second section is the number that grows each time the lock is granted, and here is its full mechanism. The holder sends its token with every write. The resource rejects any write whose token is lower than the highest token it has already accepted.
 
 - A acquires, token 33Then a pause stops A, and its lease ends.
 
@@ -514,7 +539,7 @@ The check is easy when the resource is a row you control. It is hard when the re
 
 A token that nobody checks does nothing. A team can add INCR on acquire, pass the number through every call, log it, and still accept every write. Lab exercise E8 shows the result: with no check, the stale writer's data is what remains.
 
-antirez makes one more point about this check. If the resource can already refuse an out-of-date write, you may not need a strong lock at all. A version column does the same job: the UPDATE succeeds only if the version is still the one you read, and it adds one to the version. For the summary row, the version check and the fence are the same SQL with a different number in it.
+antirez makes one more point about this check. If the resource can already refuse an out-of-date write, you may not need a strong lock at all. A version column, the number in the row that each write raises by one, does the same job. The UPDATE succeeds only if the version is still the one you read, and it adds one to the version. For the summary row, the version check and the fence are the same SQL with a different number in it.
 
 Evidence
 The fencing idea, the 33 and 34 example, and the advice to check at the storage are from Martin Kleppmann's post "How to do distributed locking". The point that a lock with strong properties is unclear when races are resolved another way is from antirez, "Is Redlock safe?". Chubby, Google's lock service, calls its tokens "sequencers", as the Jepsen etcd report notes.
@@ -584,7 +609,7 @@ if redis.call("SET", KEYS[1], ARGV[1], "NX", "PX", ARGV[2]) then
 end
 return 0
 
-In Redis Cluster both keys must be in the same hash slot, for example {summary:42}:lock and {summary:42}:fence.
+Redis Cluster splits the keys across several primaries, and a script may touch only keys that are stored together. So both keys need the same part in braces, for example {summary:42}:lock and {summary:42}:fence. That part is a hash tag from Phase 1, which decides where a key is stored.
 
 A fence needs a token that never repeats and a check inside the write.
 
@@ -669,11 +694,11 @@ Every release and extend in that audit is a Lua script, so the next section asks
 
 ## What happens to the lock's scripts at a failover, or when one runs long?
 
-Every lock here runs a Lua script, and a failover empties the script cache.
+Every lock here runs a Lua script, and a failover loses the stored scripts.
 
-The audited locks trust the server to keep their scripts. Pod A releases lock:summary:42 with the compare-and-delete script. The team sends it with EVALSHA, so each call carries a hash instead of the source. Then the primary fails over.
+The audited locks trust the server to keep their scripts. Pod A releases lock:summary:42 with the compare-and-delete script. The team sends it with EVALSHA, the command that runs a script Redis already stored, named by the script's SHA1 hash. So each call carries a hash instead of the source. Then the primary fails over.
 
-Redis keeps two kinds of server-side code in two different places. A script cache is a table in the memory of one Redis process that maps the SHA1 hash of a script to its source. It is not part of the data set, so it is not saved to disk and not sent to replicas. A function is Lua code in a named library that you load once with FUNCTION LOAD. Libraries belong to the data set, like keys, so they survive a restart and a failover.
+Redis keeps two kinds of server-side code in two different places. A script cache is a table in the memory of one Redis process that maps the SHA1 hash of a script to its source. The command EVAL sends a script's full source, and Redis stores the script there as it runs it. The script cache is not part of the data set, so it is not sent to replicas and not saved to disk. Disk here means the snapshot file that Redis calls RDB and the AOF, the append-only file of writes. Redis calls the second kind of code a Function, Lua code in a named library that you load once with FUNCTION LOAD. Libraries belong to the data set, like keys, so they survive a restart and a failover. When EVALSHA names a hash that the script cache does not hold, Redis answers with the error NOSCRIPT.
 
 primary
 replica, then promoted
@@ -755,7 +780,7 @@ Code that calls only EVALSHANothing, the error reaches the callerThe unlock fail
 
 Two more rules keep scripts working in a cluster and on replicas. Pass every key a script touches in its key arguments, never in ARGV, because the client routes the call by those keys. In cluster mode the server also refuses a key that lives on another node. And a replica never runs your script: the primary sends it only the writes the script made. When there is more than one write, it wraps them in MULTI and EXEC. So the replica's empty cache matters only on the day it becomes the primary.
 
-While one script runs, the server serves nobody else. After busy-reply-threshold, 5000 ms by default, Redis does not stop the script. It answers every other client with BUSY instead. SCRIPT KILL stops the script only if it has not written yet, because stopping it after a write would leave half its writes behind. E14 lowered the threshold to 200 ms on its own server and measured both cases.
+While one script runs, the server serves nobody else. After busy-reply-threshold, 5000 ms by default, Redis does not stop the script. It answers every other client with BUSY instead, an error that says a script is still running. SCRIPT KILL stops the script only if it has not written yet, because stopping it after a write would leave half its writes behind. E14 lowered the threshold to 200 ms on its own server and measured both cases.
 
 - t=50 ms Client 2 sends PING while a read-only script spins. It gets no reply, because the server is inside the script.
 
@@ -802,7 +827,7 @@ The busy limit in detail. The config is busy-reply-threshold, with the old name 
 
 - The full refusal from E14 is UNKILLABLE Sorry the script already executed write commands against the dataset. You can either wait the script termination or kill the server in a hard way using the SHUTDOWN NOSAVE command.
 
-- Redis checks the limit from a Lua hook every 100,000 Lua instructions, in src/script_lua.c:1669-1671. One long redis.call, such as KEYS * on a large database, cannot be stopped while it runs. This is inferred from the hook and was not measured.
+- Redis checks the limit from a Lua hook every 100,000 Lua instructions, in src/script_lua.c:1669-1671. One long redis.call, such as KEYS *, which lists every key, on a large database, cannot be stopped while it runs. This is inferred from the hook and was not measured.
 
 - A threshold of 0 removes the limit, so the script can never be killed. The lab server refused CONFIG SET busy-reply-threshold -1 with "argument must be between 0 and 9223372036854775807 inclusive".
 

@@ -227,7 +227,7 @@ def test_the_writer_is_told_to_connect_and_never_to_shorten() -> None:
     section = " ".join((lw.writer_dir() / "section.md").read_text().split())
     course = " ".join((lw.writer_dir() / "outline-course.md").read_text().split())
     editor = " ".join((lw.writer_dir() / "editor.md").read_text().split())
-    assert "Length is not the lever" in teacher and "He is new to this subject" in teacher
+    assert "Length is not the lever" in teacher and "how much of this subject he has" in teacher
     assert "join them with because, so or but" in teacher
     assert "No figurative nouns" in teacher
     for old in ("He is not a beginner", ):

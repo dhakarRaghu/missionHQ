@@ -58,7 +58,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.usage import UsageLimits
 
-from hq import assemble, db, llm, loader, memory, signals, site_posts
+from hq import assemble, db, llm, loader, memory, signals, site_posts, term_order
 from hq import learning_pipeline as learning
 from hq.config import settings
 from hq.dbos_app import DBOS, REPLAY_ERRORS
@@ -400,8 +400,9 @@ def story_section_rules() -> str:
 
 
 def editor_instructions() -> str:
-    """The editor's rubric, and nothing else: it judges, it does not write."""
-    return (writer_dir() / "editor.md").read_text()
+    """The editor's rubric and the reader it judges for: it does not write."""
+    reader = assemble.reader_section()
+    return (writer_dir() / "editor.md").read_text() + (f"\n\n{reader}\n" if reader else "")
 
 
 def _tutor() -> AgentSpec:
@@ -940,6 +941,41 @@ def taught_before(memories: Sequence[PhaseMemory]) -> list[str]:
     return [f"{m.title or m.slug}: {idea}" for m in memories for idea in m.taught]
 
 
+def reader_block(terms: lt.CourseTerms | None) -> str:
+    """What the plan is told about where this reader starts, from data."""
+    if terms is None:
+        return ""
+    parts = []
+    if terms.reader_terms:
+        parts.append("Terms the reader has before this course, used with no explanation: "
+                     + ", ".join(terms.reader_terms) + ".")
+    if terms.earlier_terms:
+        parts.append("Terms the earlier phases explained, each explained again in one clause"
+                     " where this lesson first uses it: " + ", ".join(terms.earlier_terms) + ".")
+    if terms.phase_terms:
+        parts.append("The course's term map gives these terms to this phase. Every one is"
+                     " introduced by a section, before any section or claim uses it: "
+                     + ", ".join(terms.phase_terms) + ".")
+    if terms.previous:
+        parts.append(f"The previous phase is {terms.previous}"
+                     + (f", {terms.previous_title}" if terms.previous_title else "")
+                     + ". The opening names it and the problem it left open.")
+    if terms.following:
+        parts.append(f"The next phase is {terms.following}"
+                     + (f", {terms.following_title}" if terms.following_title else "")
+                     + ". The recall section names it and the question it answers.")
+    head = f"## Where this reader starts\n\n{terms.reader}\n\n" if terms.reader else "## Where this reader starts\n\n"
+    return head + " ".join(parts) + "\n\n" if parts or terms.reader else ""
+
+
+def _merged(*lists: Sequence[str]) -> list[str]:
+    seen: dict[str, str] = {}
+    for items in lists:
+        for term in items:
+            seen.setdefault(str(term).lower(), str(term))
+    return list(seen.values())
+
+
 def known_terms(memories: Sequence[PhaseMemory]) -> list[str]:
     seen: dict[str, str] = {}
     for m in memories:
@@ -1022,6 +1058,11 @@ class Material(BaseModel):
     # call is given so this lesson continues them.
     memory: str = ""
     known_terms: list[str] = Field(default_factory=list)
+    # From the learner profile and the course's term map (lt.course_terms):
+    # terms he has before the course, never explained; and the terms the map
+    # gives this phase, which the plan must introduce.
+    reader_terms: list[str] = Field(default_factory=list)
+    phase_terms: list[str] = Field(default_factory=list)
     # What his earlier phases taught, as "phase: idea": a planned concept that
     # teaches one again is sent back.
     taught_before: list[str] = Field(default_factory=list)
@@ -1048,11 +1089,13 @@ async def gather(payload: dict[str, Any]) -> Material:
         sequence = await _course_sequence(course, slug)
         memories, phases = await _course_so_far(course, slug)
         so_far = memory_block(memories)
+        terms = await asyncio.to_thread(lt.course_terms, slug)
+        reader = reader_block(terms)
         articles = await _articles_on(slug)
         lost = await signals.lost_material(str(payload.get("course") or ""), slug)
         prompt = (
             f"# The phase: {payload.get('title')} ({slug})\n\n"
-            f"{payload.get('summary') or ''}\n\n{sequence}\n\n"
+            f"{payload.get('summary') or ''}\n\n{reader}{sequence}\n\n"
             + (f"{so_far}\n\n" if so_far else "")
             + (f"{lost}\n\n" if lost else "")
             + (f"He has already read these articles on this phase; do not retell"
@@ -1062,7 +1105,10 @@ async def gather(payload: dict[str, Any]) -> Material:
         )
         return Material(article=False, slug=slug, note=note, source=source, prompt=prompt,
                         owner_state=his, source_urls=_source_urls(note), payload=payload,
-                        memory=so_far, known_terms=known_terms(memories), course_map=phases,
+                        memory=so_far, course_map=phases,
+                        known_terms=_merged(known_terms(memories), terms.earlier_terms if terms else []),
+                        reader_terms=terms.reader_terms if terms else [],
+                        phase_terms=terms.phase_terms if terms else [],
                         taught_before=taught_before(memories))
 
     digests = [str(d) for d in payload.get("digests") or []]
@@ -1317,12 +1363,18 @@ def _term(text: str) -> str:
     return " ".join(w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words)
 
 
-def ledger_problems(outline: Outline, known: Sequence[str] = ()) -> list[str]:
+def ledger_problems(outline: Outline, known: Sequence[str] = (), *,
+                    reader: Sequence[str] = (), required: Sequence[str] = ()) -> list[str]:
     """Where the plan's order would make him read a term before its meaning,
     or a section with no link to the one above. [] when the order holds.
 
     A lesson he could not follow used "compaction" at word 291 and explained
-    it at word 5,302. Nothing in a sentence shows that; the order does."""
+    it at word 5,302. Nothing in a sentence shows that; the order does.
+
+    `known`: terms of earlier phases, explained again in a clause. `reader`:
+    terms the learner profile says he has, never explained. `required`: the
+    terms the course's term map gives this phase. The concept list is read
+    before every section, so a claim may use no term the lesson explains."""
     probs: list[str] = []
     teaching = [s for s in outline.sections if not s.kind]
     if not teaching:
@@ -1335,6 +1387,7 @@ def ledger_problems(outline: Outline, known: Sequence[str] = ()) -> list[str]:
                      " teaching section, so the order of terms can be checked")
         return probs
     earlier = {_term(t) for t in known}
+    has = {_term(t) for t in reader}
     # What the sections above a teaching section have explained, the
     # orientation's reminders included: a plan that explained "prefill" again
     # in its orientation was sent back for assuming it two sections later.
@@ -1359,7 +1412,7 @@ def ledger_problems(outline: Outline, known: Sequence[str] = ()) -> list[str]:
         new = {_term(t) for t in s.introduces}
         for term in s.assumes:
             key = _term(term)
-            if not key or key in given or key in new:
+            if not key or key in given or key in new or key in has:
                 continue
             if key in earlier:
                 probs.append(f"section {s.heading!r} assumes {term!r} from an earlier phase:"
@@ -1368,6 +1421,21 @@ def ledger_problems(outline: Outline, known: Sequence[str] = ()) -> list[str]:
             else:
                 probs.append(f"section {s.heading!r} assumes {term!r}, which no section"
                              " above introduces: introduce it there, or here")
+    introduced = {_term(t): t for s in outline.sections for t in s.introduces}
+    for term in required:
+        if _term(term) not in introduced and _term(term) not in has:
+            probs.append(f"the course's term map gives {term!r} to this phase, and no section"
+                         " introduces it: give it to the section that first needs it")
+    for c in outline.concepts:
+        said = f"{c.claim} {c.lets_him}"
+        for key, term in introduced.items():
+            if key in earlier or key in has:
+                continue
+            case = any(ch.isupper() for ch in term[1:])
+            if term_order._pattern(term, case).search(said):
+                probs.append(f"{c.id}'s claim uses {term!r}, which a section explains only"
+                             " later; the concept list is read first, so say it in words he"
+                             " already has")
     return probs
 
 
@@ -2191,7 +2259,8 @@ class Writer:
                 # back like any finding, but never the reason a lesson is
                 # lost: on the last try the plan is kept, the doubts are
                 # reported, and each section is still told its own terms.
-                order = ledger_problems(outline, self.m.known_terms)
+                order = ledger_problems(outline, self.m.known_terms,
+                                        reader=self.m.reader_terms, required=self.m.phase_terms)
                 if order and attempt == PLAN_ATTEMPTS - 1:
                     self.report.append("order of terms, kept with doubts: " + "; ".join(order))
                     await self._progress("plan", "plan kept on the last attempt, with doubts"
@@ -2394,7 +2463,8 @@ class Writer:
             + (f"\n\n{self.m.memory}" if self.m.memory else "")
             + "\n\n## This section\n\nThe opening, before the first heading: two short"
             " paragraphs. When the course so far is given above, the first paragraph"
-            " returns to its situation: what the last phase let him do, in one sentence,"
+            " returns to its situation: name the last phase by its label or title and"
+            " say what it let him do, in one sentence,"
             " then what goes wrong now that it could not explain. With no earlier phase,"
             " put him in the situation where not knowing this costs him something. The"
             " second paragraph is the question that leaves open. Use only words he"
@@ -2489,6 +2559,7 @@ class Writer:
             found = lt.page_findings(self.m.lab_source, html, self.m.note, least=0, most=0)
         elif self.m.source:
             found = lt.page_findings(self.m.source, html, self.m.note)
+            found.add(lt.term_findings(self.m.slug, html))
         elif self.m.story:
             found = lt.page_findings("", html, "", least=lt.STORY_CONCEPTS_MIN,
                                      most=lt.STORY_CONCEPTS_MAX)
@@ -2526,8 +2597,33 @@ class Writer:
         the parts that fail their own checks, else the largest."""
         if "reads heavier" in finding:
             return self._heavy_parts() or self._largest_parts()
+        terms = self._parts_for_terms(finding)
+        if terms is not None:
+            return terms
         return (self._parts_quoting(finding) or self._over_budget(finding)
                 or self._failing_parts() or self._largest_parts())
+
+    def _parts_for_terms(self, finding: str) -> list[int] | None:
+        """A term-order finding goes to the section that first uses the term,
+        where it must be explained; a chapter-link finding goes to the first
+        section or to the recall section. None for any other finding. The
+        opening (part 0) is not rewritten here, so its share goes to the
+        first section."""
+        if finding.startswith("the opening does not say where"):
+            return [1] if len(self.parts) > 1 else []
+        if finding.startswith("the ending does not lead to"):
+            assert self.outline is not None
+            recall = [i + 1 for i, s in enumerate(self.outline.sections) if s.kind == "recall"]
+            return recall[:1] or [len(self.parts) - 1]
+        m = re.match(r"'(.+?)' is (used at word|a term this phase introduces)", finding)
+        if not m:
+            return None
+        term = m.group(1)
+        pattern = term_order._pattern(term, any(c.isupper() for c in term[1:]))
+        for i in range(1, len(self.parts)):
+            if pattern.search(lt._page_text(self.parts[i])):
+                return [i]
+        return [1] if len(self.parts) > 1 else []
 
     async def _finish(self, *, quality_ok: bool = False) -> tuple[str, str]:
         assert self.outline is not None

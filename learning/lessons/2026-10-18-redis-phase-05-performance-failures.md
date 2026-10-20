@@ -1,23 +1,15 @@
-This phase follows one shared Redis cluster. The platform of Phase 0 runs about 34 services on several shared, managed clusters. This cluster is one of them, and it uses the provider's default eviction policy. One of the services is an AI agent, and it keeps the memory of each chat session in Redis. That chat memory is this lesson's own example. In Phase 4 you learned how such a cluster saves its data, copies it to replicas and fails over. This phase covers the two pages that an on-call engineer gets for it: "Redis is slow" and "Redis is out of memory".
+In Phase 4, Architecture and HA, you learned how a Redis cluster saves its data, copies it to replicas and fails over. Those mechanisms keep a cluster up, but they do not explain why a cluster that is up answers slowly or refuses writes. This phase covers the two pages that an on-call engineer gets for that: "Redis is slow" and "Redis is out of memory".
+
+This phase follows one shared Redis cluster. The platform of Phase 0 runs about 34 services on several shared, managed clusters. This cluster is one of them, and it uses the provider's default eviction policy, the rule for which keys Redis removes when memory is full. One of the services is an AI agent, and it keeps the memory of each chat session in Redis. That chat memory is this lesson's own example.
 
 1. Monday The p99 of the tenant-settings read jumps from 1 ms to 150 ms for about one second, every few minutes. `SLOWLOG GET` is empty.
-2. Tuesday One shard runs at 100% CPU and the other five at about 30%. The team adds six shards, and the hot shard stays at 100%.
+2. Tuesday One shard runs at 100% CPU and the other five at about 30%. The team adds six shards, and that one shard stays at 100%.
 3. Day 9 Every service on the cluster gets `OOM command not allowed` on writes. Reads still work.
 4. Night During the nightly `BGSAVE`, the operating system kills the Redis process, although `used_memory` was under `maxmemory`.
 
 The running case. The days and numbers are an illustration, not measured. Each concept below explains one line of it.
 
-None of these four lines is a bug in Redis. Each one comes from the way the services use Redis, and each one shows up in a command that a person can run in minutes. The hard part is to know what each command measures, and what it cannot see. The table maps each symptom to its cause and to the first tool you run.
-
-| What you see | The cause | The first tool | Where |
-|---|---|---|---|
-| Many fast calls per request, no slow command | Too many round trips | Count calls per request, then `MGET` or a pipeline | Phase 0, recap below |
-| Every client freezes for tens of milliseconds | A slow O(N) command | `SLOWLOG GET`, `INFO latencystats` | c1 |
-| Spikes, and `SLOWLOG` is empty | Main-thread work that is not a command | `LATENCY LATEST`, `LATENCY DOCTOR` | c1 |
-| One key holds millions of elements | A big key | `--memkeys`, `--bigkeys`, `MEMORY USAGE` | c2 |
-| One shard is hot and the others are idle | A hot key | `--hotkeys`, `HOTKEYS START`, `CLUSTER SLOT-STATS` | c3 |
-| Writes fail with OOM, reads work | The eviction policy meets keys without a TTL | `INFO memory`, `INFO errorstats` | c4 |
-| Throughput drops at the memory cap, or the process is killed | Eviction work and memory outside `used_memory` | `INFO memory`, `INFO persistence` | c5 |
+None of these four lines is a bug in Redis. Each one comes from the way the services use Redis, and each one shows up in a command that a person can run in minutes. The hard part is to know what each command measures, and what it cannot see.
 
 What you must know, in five claims. Each one is taught below, in this order.
 
@@ -25,7 +17,7 @@ What you must know, in five claims. Each one is taught below, in this order.
 2. **A big key costs O(N) in every whole-key operation, even expiry and eviction, and UNLINK protects only your own delete.** Predict which operation on a big key will freeze the server, and remove the key safely.
 3. **Sharding spreads keys, not requests, so a hot key loads one thread on one shard however many shards you add.** Find the hot key and stop its requests before they reach that thread.
 4. **Volatile policies evict only keys with a TTL, so keys without one turn a full cache into noeviction for everyone.** Choose a policy and audit TTLs before a shared cluster fills.
-5. **Reaching maxmemory is a latency event, and memory outside used_memory, such as fork copies, decides if Redis survives.** Size a node from peak RSS, and read the memory fields that matter.
+5. **Reaching maxmemory is a latency event, and memory outside used_memory, such as fork copies, decides if Redis survives.** Size a node from its peak memory during a save, and read the memory fields that matter.
 
 The tables, the sections and the lab tags call these five claims c1 to c5, in this order.
 
@@ -51,13 +43,58 @@ A TTL is the time a key has left before Redis deletes it. A cache multiplies loa
 
 #### Fork and copy-on-write (Phase 4)
 
-For a `BGSAVE` or a replica's full sync, Redis forks a child process that writes a snapshot. Parent and child share memory pages, and the operating system copies a page when the parent changes it.
+For a `BGSAVE` or a replica's full sync, a complete copy of the dataset, Redis forks a child process that writes a snapshot. Parent and child share memory pages, and the operating system copies a page when the parent changes it.
 
 #### Hash slots and replicas (Phase 4)
 
 In a cluster, each key maps to one of 16,384 hash slots, and each slot lives on one primary. Replicas copy a primary and can serve reads.
 
 Phase 0 already taught the round trip as the first thing to check. This phase starts where that check finds nothing: every call is batched, and the p99 still jumps.
+
+### The new words this phase uses
+
+When the round trip is not the cause, most engineers run `SLOWLOG GET` next, the log of commands that ran too long. On Monday in the running case that log is empty, while the p99 of one read jumps from 1 ms to 150 ms. Each tool of this phase measures one part of the time or the memory, and it cannot see the other parts. Four new words name the tools that see what `SLOWLOG` misses.
+
+| Word | What it measures | Where you meet it |
+|---|---|---|
+| *latencystats* | The p50, p99 and p99.9 latency of each command type, including the time the command waited for the main thread. | `INFO latencystats`, on by default |
+| *LATENCY LATEST* | The latest and the worst spike of each kind of main-thread work that is not a command, such as an expiry cycle or a fork. | the latency monitor, which records nothing until you set `latency-monitor-threshold` |
+| *--bigkeys* | The largest key of each type by element count, found by walking the keyspace with SCAN. | `redis-cli --bigkeys`, run once on each primary |
+| *--hotkeys* | Keys ranked by the access counter that Redis keeps for each key under some eviction policies. | `redis-cli --hotkeys` |
+
+A first try shows what three of these replies look like. Each line is real output from the course research's runs.
+
+```text
+# INFO latencystats, after KEYS ran on 1,000,000 keys
+latency_percentiles_usec_keys:p50=137363.455
+
+# the counter that --hotkeys reads, after 5,000 GETs on one key under an LFU policy
+OBJECT FREQ hot
+(integer) 36
+
+# INFO errorstats, after writes failed on a full volatile-lru node
+errorstat_OOM:count=146
+```
+
+- The first line is latencystats for the `KEYS` command. Its p50 is 137,363 µs, which is 137 ms for one command.
+- The second is the access counter of one key. It is only 36 after 5,000 reads, and the hot-key sections explain why it grows so slowly.
+- The third counts the writes that Redis refused because memory was full, and the eviction sections explain which writes fail.
+
+**Evidence**
+
+Where these come from: the KEYS test, the counter test and the full-memory test of the course research, each described with its build and its settings in the evidence box of its own section below.
+
+The table maps each symptom of the running case to its cause and to the first tool you run.
+
+| What you see | The cause | The first tool | Where |
+|---|---|---|---|
+| Many fast calls per request, no slow command | Too many round trips | Count calls per request, then `MGET` or a pipeline | Phase 0, recap below |
+| Every client freezes for tens of milliseconds | A slow O(N) command | `SLOWLOG GET`, `INFO latencystats` | c1 |
+| Spikes, and `SLOWLOG` is empty | Main-thread work that is not a command | `LATENCY LATEST`, `LATENCY DOCTOR` | c1 |
+| One key holds millions of elements | A big key | `--memkeys`, `--bigkeys`, `MEMORY USAGE` | c2 |
+| One shard is hot and the others are idle | A hot key | `--hotkeys`, `HOTKEYS START`, `CLUSTER SLOT-STATS` | c3 |
+| Writes fail with OOM, reads work | The eviction policy meets keys without a TTL | `INFO memory`, `INFO errorstats` | c4 |
+| Throughput drops at the memory cap, or the process is killed | Eviction work and memory outside `used_memory` | `INFO memory`, `INFO persistence` | c5 |
 
 ## Why does one slow command delay every client?
 
@@ -163,7 +200,7 @@ The 224x and the 300 to 600 µs come from the Phase 0 demo on Docker Desktop. Th
 - **ZRANGE and LIMIT.** `LIMIT offset count` applies only with `BYSCORE` or `BYLEX`. This is inferred from the earlier audit, and the ZRANGE page was not opened. For a rank range, bound the start and stop instead.
 - **KEYS on 1,000,000 keys.** The course research measured `KEYS k:*` at 133 to 148 ms over three runs, and one `SCAN 0 COUNT 1000` at 0.25 to 0.30 ms. The `KEYS` documentation gives 40 ms for 1 million keys on an entry-level laptop. So the cost per key differed by about three times. The pattern, the libc build and the x86_64 emulation under Rosetta may explain the gap, but its cause was not isolated. Phase 0 timed `KEYS key:*` over 1,000,000 keys at 92.6 to 93.6 ms on the same build. The two runs used other key names, and this page does not record how either run created its keys. So that gap is not explained either.
 - **Valkey `COMMANDLOG`.** On Valkey 8.1 and later, `SLOWLOG` is part of a wider tool. Its threshold is `commandlog-execution-slower-than`, also 10,000 µs by default, and the old `slowlog-*` settings are deprecated there. Since Valkey 8.1.0 it keeps three logs. The first is slow execution. The second is large requests, with a default threshold of 1,048,576 bytes. The third is large replies, which finds `HGETALL` and `SMEMBERS` on big keys directly. Source: valkey.conf at 9.1.2, lines 2135 to 2200, and https://valkey.io/commands/commandlog-get/.
-- **I/O threads.** In Redis 8, an I/O thread reads and parses a request, then hands the client to the main thread to run the command. Pub/sub, `MONITOR`, blocked and tracking clients stay on the main thread. `io-threads` is 1, which means off, by default. In Valkey 9.1, the main thread owns all clients and sends read, write and poll jobs to a shared queue. Threads start when the main thread is busy more than 30% of the time. In both, a slow command still blocks every client. Source: `src/iothread.c` at 8.10.2 and `src/io_threads.c` at Valkey 9.1.2.
+- **I/O threads.** In Redis 8, an I/O thread reads and parses a request, then hands the client to the main thread to run the command. Pub/sub clients, *`MONITOR`* clients, which get a copy of every command the server runs, and blocked and tracking clients stay on the main thread. `io-threads` is 1, which means off, by default. In Valkey 9.1, the main thread owns all clients and sends read, write and poll jobs to a shared queue. Threads start when the main thread is busy more than 30% of the time. In both, a slow command still blocks every client. Source: `src/iothread.c` at 8.10.2 and `src/io_threads.c` at Valkey 9.1.2.
 - **AWS ElastiCache multiplexing** shows what I/O threads buy. At 5,200 clients on an r6g.xlarge, with 80% GET and 20% SET, throughput rose from 202,770 to 349,239 operations per second, a 72% gain. At 400 clients the gain was 26%. The commands still ran on one engine thread.
 - **Stack Overflow** wrote that `KEYS` "can cause a production blockage in a hurry", and at their scale it always does.
 
@@ -196,7 +233,7 @@ The main thread runs these jobs that are not commands. Each one can hold it for 
 2. **Freeing a big value.** When an expired or evicted key is a collection, Redis frees every element on the main thread by default. The next concept covers this in full.
 3. **Eviction.** Above `maxmemory`, Redis evicts keys in the command path before it runs commands. Concept c5 covers this.
 4. **The `fork()` call.** The fork for `BGSAVE` itself runs in the main thread, and it takes longer for a larger process. The latency documentation gives about 9 to 13 ms per GB on physical machines and on VMware.
-5. **The operating system.** Transparent huge pages make copy-on-write slower after a fork, and swapping moves Redis memory to disk. Redis turns off transparent huge pages for itself by default, with `disable-thp yes`.
+5. **The operating system.** *Transparent huge pages*, a Linux feature that gives a process larger memory pages, make copy-on-write slower after a fork. Swapping moves Redis memory to disk. Redis turns off transparent huge pages for itself by default, with `disable-thp yes`.
 
 Each part of the sum has its own tool. Run them in this order when `SLOWLOG` is empty:
 
@@ -283,7 +320,7 @@ Active expiry deletes the key on the main thread and frees all 2,000,000 members
 The mechanism has three steps:
 
 1. Freeing a collection walks every element and returns each one to the allocator. So the cost of a free grows with the element count, not with the byte size alone.
-2. `UNLINK` removes the key from the keyspace at once. If the free effort is above 64, it gives the value to a background thread. For a set, a sorted set or a hash in its hash-table encoding, the effort is the element count. For a list, it is the number of quicklist nodes, the blocks of up to 8 KB that hold its elements. A value in a compact encoding, such as a small listpack, counts as 1.
+2. `UNLINK` removes the key from the keyspace at once. If the free effort is above 64, it gives the value to a background thread, which Redis calls a *lazy free*. For a set, a sorted set or a hash in its hash-table encoding, the effort is the element count. For a list, it is the number of quicklist nodes, the blocks of up to 8 KB that hold its elements. A value in a compact encoding, such as a small listpack, counts as 1.
 3. Redis also deletes keys without a user call, in the four rows of the table that it starts itself. By default each of these frees the value as if `DEL` was called, until you set the matching setting to `yes`. The settings are all `no` in Redis 8.10.2 and all `yes` in Valkey 9.1.2.
 
 The course research timed each operation from `SLOWLOG`, with the threshold at 0, so the numbers are server execution time only.
@@ -312,7 +349,7 @@ One run, Redis 8.10.1 from Homebrew, an x86_64 build under Rosetta with `malloc=
 **The three harms of a big key.** The phase names three, and the table above covers the first:
 
 - **It blocks.** An O(N) read or free on 5,000,000 elements runs for hundreds of milliseconds on the main thread, and no other client is served.
-- **It makes a hot shard.** A key lives in one slot on one shard. That shard holds all of the key's memory and serves all of its traffic, and a reshard cannot split one key.
+- **It makes one shard busier than the rest.** A key lives in one slot on one shard. That shard holds all of the key's memory and serves all of its traffic, and a reshard cannot split one key.
 - **It stalls a move.** Moving the key to another shard, or freeing it on failover or expiry, is one large piece of work at a bad time.
 
 - **Effort.** `src/lazyfree.c` at 8.10.2, lines 168 to 235, computes the free effort. For sets, sorted sets and hashes in a hash-table encoding it is the element count. For a list it is the number of quicklist nodes, not of elements. A small value is freed at once, even by `UNLINK`, because a hand-off to a thread costs more than the free.
@@ -401,7 +438,7 @@ A big key puts a lot of work into one key's size. On Tuesday in the running case
 
 It stays the same. The key maps to one hash slot, and a reshard moves whole slots, so the slot and all 200,000 reads per second still land on one primary. That primary still runs them on one thread. The other shards get less load, and the bill doubles. The guess "twice the shards, half the load per shard" is right for keys spread evenly, and that is the case sharding was built for. A hot key is the case it cannot split.
 
-A *hot key* is one key that receives a large share of all requests. Sharding spreads keys across nodes, but every request for one key goes to the node that owns it. That node runs the commands on one main thread, so the key's request rate is capped by one CPU core. Adding nodes moves other keys away from the hot shard, and the hot key stays where it is.
+A *hot key* is one key that receives a large share of all requests. Sharding spreads keys across nodes, but every request for one key goes to the node that owns it. That node runs the commands on one main thread, so the key's request rate is capped by one CPU core. Adding nodes moves other keys away from that node, and the hot key stays where it is. So its shard becomes a *hot shard*, one shard far busier than the others, however many shards the cluster has.
 
 - shard 1: 30% CPU
 - shard 2: 30% CPU
@@ -417,13 +454,13 @@ The CPU values are an illustration, not measured. Doubling the shards halves the
 The path of one request shows why. Each step has one owner, and no step can spread one key:
 
 1. The client hashes the key name with CRC16 and takes the result modulo 16,384. That gives the key's hash slot.
-2. The cluster map says which primary owns that slot. The client sends the request there.
+2. The client's slot map, its table from slot to primary, says which primary owns that slot. The client sends the request there.
 3. That primary runs the command on its main thread. Its replicas only copy writes, unless your client sends reads to them.
 4. A reshard moves whole slots between primaries. So the hot key's slot moves as one unit, with all its traffic, to one new owner.
 
 So the ceiling for one key is what one core can run. More shards raise the ceiling for the whole keyspace, but they leave the ceiling for each key where it was.
 
-**Salesforce Marketing Cloud** moved its cache from Memcached to Redis Cluster, at about 1.5 million cache events per second across more than 50 services. After the move, heavily read keys caused CPU spikes on single shards. The team wrote that a hot key "can saturate a single CPU core" per shard. The fix was a local in-memory cache in each application, backed by Redis, with read replicas as a short-term step. During the migration, the p50 was near 1 ms and the p99 near 20 ms. The post gives no CPU numbers from before and after the fix.
+**Salesforce Marketing Cloud** moved its cache from Memcached to Redis Cluster, at about 1.5 million cache events per second across more than 50 services. After the move, heavily read keys caused CPU spikes on single shards. The team wrote that a hot key "can saturate a single CPU core" per shard. The fix was a *local cache*, a copy of hot values in the memory of each application process, backed by Redis. Read replicas were a short-term step. During the migration, the p50 was near 1 ms and the p99 near 20 ms. The post gives no CPU numbers from before and after the fix.
 
 **Evidence**
 
@@ -453,7 +490,7 @@ Adding shards does not help a hot key. The next section answers how to find whic
 
 The section above showed that the hot shard stays hot whatever the shard count. Before you can fix it, you need the key's name, because one shard holds about 2,700 slots and maybe millions of keys.
 
-Four tools can name the key. They differ in what they need and in what they measure:
+Four tools can name the key. They differ in what they need and in what they measure. The first needs *LFU*, short for least frequently used, the eviction policies that keep an access counter for each key.
 
 | Tool | What it needs | What it ranks by |
 |---|---|---|
@@ -470,7 +507,7 @@ Per-shard CPU in your metrics tells you which shard to look at. Then one of thes
 
 Once you have the key, stop its requests before they reach the one thread. The fixes, in order of effect:
 
-1. **Local in-process cache**Keep the value inside each application process with a short TTL, so most reads never reach Redis.
+1. **Local cache**Keep the value inside each application process with a short TTL, so most reads never reach Redis.
 2. **Server-assisted client-side caching**With `CLIENT TRACKING`, Redis remembers which keys a client read and sends it an invalidation message when one changes.
 3. **Reads from replicas**Spread the reads over the shard's replicas. They can return stale data, and in cluster mode a client must send `READONLY` first.
 4. **N copies of the key**Store `hotkey:0` to `hotkey:N` in different slots and read a random copy. Writes must update every copy.
@@ -519,10 +556,10 @@ The concepts so far were about time on the main thread. On Day 9 in the running 
 | `volatile-lru` | Only keys with a TTL | Least recently used |
 | `volatile-lfu` | Only keys with a TTL | Least frequently used |
 | `volatile-random` | Only keys with a TTL | A random key |
-| `volatile-ttl` | Only keys with a TTL | The shortest TTL left |
+| *`volatile-ttl`* | Only keys with a TTL | The shortest TTL left |
 | `volatile-lrm` | Only keys with a TTL | Least recently modified |
 
-LRU evicts the key that nobody touched for the longest time. LFU evicts the key with the fewest accesses, which suits skewed access. LRM updates its timestamp only on writes, so a key that is read often but never changed still counts as old. Open-source Redis defaults to `noeviction`. ElastiCache defaults to `volatile-lru`.
+LRU evicts the key that nobody touched for the longest time. LFU evicts the key with the fewest accesses, which suits skewed access. *LRM*, least recently modified, updates its timestamp only on writes, so a key that is read often but never changed still counts as old. Open-source Redis defaults to `noeviction`. ElastiCache defaults to `volatile-lru`.
 
 > The phase lists "all 8" policies. Redis 8.6 and later have ten, adding `allkeys-lrm` and `volatile-lrm`. Valkey 9.1.2 still has the eight older ones.
 
@@ -693,7 +730,7 @@ In the running case, a cache that sits at its cap all day shows the same shape. 
 - **What GitLab ruled out.** A lower `maxmemory-eviction-tenacity` helped only a little. `lazyfree-lazy-eviction` was not the cause. Replication buffers stayed small. Host contention and one large key were also ruled out. So the usual settings did not fix a cache that lived at its cap.
 - **`maxmemory-clients`** limits the total memory of client connections. Above the limit, Redis drops the connections that use the most memory, in `beforeSleep`. It is 0, which means off, in Redis 8.10.2, and commented out in redis.conf at lines 2489 to 2506. The setting arrived in Redis 7.0, whose release notes list it as a new setting: https://raw.githubusercontent.com/redis/redis/7.0.0/00-RELEASENOTES. The GitLab post was current for Redis 6.2, before this setting existed.
 - **Output buffer limits.** The default `client-output-buffer-limit` for normal clients is `0 0 0`, no limit. So a client that reads a big reply slowly, or a `KEYS *` reply, can grow its buffer without bound. Replicas default to `256mb 64mb 60` and pub/sub clients to `32mb 8mb 60`.
-- **What does not count.** Replication and AOF buffers do not count toward `maxmemory`. `INFO memory` reports them as `mem_not_counted_for_evict`. So they can push RSS above the cap without any eviction.
+- **What does not count.** Replication and AOF buffers do not count toward `maxmemory`. `INFO memory` reports them as `mem_not_counted_for_evict`. So they can push the memory of the process above the cap without any eviction.
 - **Pressure fields.** `current_eviction_exceeded_time` shows how long memory has been over the cap in the current episode. `evicted_keys` is cumulative, so alert on its rate.
 - **Managed serverless.** ElastiCache Serverless evicts keys that have a TTL by LRU when memory is full, and throttles requests when compute is full.
 
@@ -701,11 +738,11 @@ Eviction explains slow commands at the cap. The next section answers the last li
 
 ## Which memory numbers decide whether the process survives?
 
-*The kernel kills by memory use, and RSS holds more than used_memory.*
+*The kernel kills by real memory use, which holds more than used_memory.*
 
 The section above showed what the cap costs in time. The last line of the running case is worse. During the nightly `BGSAVE`, the operating system kills Redis, although `used_memory` was under `maxmemory`.
 
-`used_memory` counts the bytes that Redis's allocator handed out. The operating system sees *RSS*, the resident set size, which is the physical memory the process really holds. When the machine runs out, the kernel's out-of-memory killer gives each process a score from its memory and swap use. It kills the process with the highest score. On a host that runs mainly Redis, that process is usually Redis. This last point is inferred, not measured. RSS includes memory that `used_memory` does not count, and during a fork the child's copied pages come on top of both.
+`used_memory` counts the bytes that Redis's allocator handed out. The operating system sees *RSS*, the resident set size, which is the physical memory the process really holds. When the machine runs out, the kernel's *OOM killer*, its out-of-memory killer, gives each process a score from its memory and swap use. It kills the process with the highest score. On a host that runs mainly Redis, that process is usually Redis. This last point is inferred, not measured. RSS includes memory that `used_memory` does not count, such as *fragmentation*, the gaps between allocations that the allocator holds but cannot hand out. During a fork the child's copied pages come on top of both.
 
 #### An 8 GB node with maxmemory 7.5gb during a BGSAVE
 
@@ -736,7 +773,7 @@ The formula is an illustration of the mechanism, not a measured model. Measure t
 
 Stack Overflow, Nick Craver, 2019: https://nickcraver.com/blog/2019/08/06/stack-overflow-how-we-do-app-caching/. The same post says "the rate at which new changes rack up is your memory growth during a copy". The fields `current_cow_peak` and `latest_fork_usec` are in `src/server.c` and `src/childinfo.c` at 8.10.2. RSS and the fragmentation fields: https://redis.io/commands/info/. The out-of-memory score from memory and swap use is described in the kernel documentation, section 3.1 of https://docs.kernel.org/filesystems/proc.html.
 
-The fields that matter most are `used_memory`, `used_memory_rss`, `mem_not_counted_for_evict`, `allocator_frag_ratio` and `current_cow_peak`. The Go deeper block below lists every field to read in an investigation, with what each one tells you.
+The fields that matter most are `used_memory`, `used_memory_rss`, `mem_not_counted_for_evict`, `allocator_frag_ratio` and `current_cow_peak`. The Go deeper block below lists every field to read in an investigation, with what each one tells you. One field misleads on small nodes, *`mem_fragmentation_ratio`*, as the callout below shows.
 
 > The phase says a `mem_fragmentation_ratio` above 1.5 means fragmentation. The INFO page says that when total fragmentation bytes are low, a few megabytes, a high ratio "is not an indication of an issue". The course research's 8 MB test showed `mem_fragmentation_ratio:12.06` with `allocator_frag_ratio:1.00`. Use `allocator_frag_ratio`. A `used_memory` far above `used_memory_rss` still means part of Redis was swapped out.
 
@@ -799,7 +836,7 @@ That closes the four lines of the running case. The next section collects what y
 - **`volatile-*` policies evict only keys with a TTL.** Keys that lost their TTL turn a full shared cluster into `noeviction` for every service. Taught in "What does full mean under each eviction policy?" and "How does a key lose its TTL?".
 - **The memory cap is a latency event, and RSS decides survival.** Eviction runs on the main thread, and the fork's copied pages are outside `used_memory`. Taught in "Why is reaching maxmemory a latency event?" and "Which memory numbers decide whether the process survives?".
 
-You can now take "Redis is slow" or "Redis is out of memory" on a shared cluster and name the cause with the right command, in minutes. Phase 6 asks how one production service should use Redis from end to end, from its client settings to a review of every key it writes.
+You can now take "Redis is slow" or "Redis is out of memory" on a shared cluster and name the cause with the right command, in minutes. Phase 6, Redis in production: a review, asks how one production service should use Redis from end to end. It goes from its client settings to a review of every key it writes.
 
 ## Lab: the exercises that teach Phase 5
 

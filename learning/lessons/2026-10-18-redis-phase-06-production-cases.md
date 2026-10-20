@@ -1,18 +1,20 @@
-This phase reviews a real system. It is the platform of Phase 0, which ran about 34 services on several shared, managed Redis clusters. This review follows one of them, as its own example. That cluster used the eviction policy volatile-lru, took RDB backups and had no AOF. Redis did six jobs there: caching, sessions, locks, idempotency keys, queues and rate limits. You are the engineer asked to review that use and write the fix list.
+Phase 5, Performance and failures, taught you to name the cause of "Redis is slow" or "Redis is out of memory" with one command. A service that uses Redis can still fail in ways that no server command shows, so this phase reviews a real system to find them. It is the platform of Phase 0, which ran about 34 services on several shared, managed Redis clusters. This review follows one of those clusters as its example.
+
+That cluster's eviction policy, the setting that picks which keys Redis removes when memory is full, was volatile-lru. So it removed only keys that had a TTL, the time after which Redis deletes a key. It took RDB backups, copies of all its data written to disk from time to time. It had no AOF, the log of every write that Redis can replay after a restart. Redis did six jobs there: caching, sessions, locks, idempotency keys, queues and rate limits. An idempotency key records that an action has already run, so a retry of the same request does not run it twice. You are the engineer asked to review that use and write the fix list.
 
 The earlier phases taught each part of Redis on its own. This review asks a different question about every Redis call you open. What does this call lose when something fails, and what does the client do while it waits? The platform had real answers, and some of them were outages. One service wrote keys with no TTL, and those keys filled the shared memory. One response flag turned off caching for a hot endpoint, and the source service took about 100 times its normal load. Public companies saw the same failures, and this lesson puts their cases next to these.
 
-The review also has one new request. A product team wants live chat and presence between users, and its users connect to many WebSocket servers. The team wants to send messages between those servers with Redis pub/sub on the same cluster. The last concept of this lesson answers what that design loses and how real systems recover it.
+The review also has one new request. A product team wants live chat and presence, the online or offline status of each user that other users see. Its users connect to many WebSocket servers. The team wants to send messages between those servers with Redis pub/sub on the same cluster. Pub/sub sends each message to the clients that listen on a channel at that moment. The last concept of this lesson answers what that design loses and how real systems recover it.
 
 ### What you must know
 
-- When Redis stalls, the client's timeouts and pool decide how long you wait, and a context deadline may not apply.Set the client so a slow Redis fails fast and leaves no stale replies.
+- When Redis stalls, the client's timeouts and connection pool decide how long you wait, and the deadline on your Go context may not end it.Set the client so a slow Redis fails fast and no old reply stays on a connection.
 
-- Redis loses keys by eviction and by failover, so each job's cost of loss sets its TTL rule and store.Classify a Redis call by its job, then rank what to fix.
+- Redis loses keys when memory fills and in a failover, so what a lost key costs decides each job's TTL and where its data lives.A failover is a replica, a server that keeps a copy of the primary's data, taking over when the primary fails. Classify a Redis call by its job, then rank what to fix.
 
-- The origin serves only the misses, so a hit rate fall from 99% to 98% doubles origin load.Predict the load on the database when a cache gets worse.
+- The database behind a cache serves only the misses, so a hit rate fall from 99% to 98% doubles its load.Hit rate here means the fraction of reads that find their key in the cache. Predict the load on the database when a cache gets worse.
 
-- With a local cache in front of Redis, a change is seen only after every layer drops its copy.Compute the real staleness bound of a layered cache.
+- When each server process keeps its own cache in front of Redis, a change is seen only after every layer drops its copy.Compute how long a reader can still see a value after it changed.
 
 - Pub/sub delivers each message at most once, so servers that must not miss messages read a durable log.Design chat and presence between servers that survive a disconnect.
 
@@ -20,11 +22,11 @@ The sections, the recall list and the lab tags call these five ideas c1 to c5, i
 
 ## What you bring from Phases 0 to 5
 
-Five ideas from earlier phases come back in this review. Each card explains one again in plain words, so you do not need to open the earlier phase.
+Six ideas from earlier phases come back in this review. Each card explains one again in plain words, so you do not need to open the earlier phase.
 
 One thread runs every command
 
-Phase 0 showed that Redis runs commands one at a time on one main thread. So one slow command, such as KEYS *, makes every other client wait. Your client sees that wait as a slow reply.
+Phase 0 showed that Redis runs commands one at a time on one main thread. So one slow command, such as KEYS *, which reads every key name, makes every other client wait. Your client sees that wait as a slow reply.
 
 Cache-aside and the TTL
 
@@ -32,17 +34,21 @@ In cache-aside, the application reads Redis first and, on a miss, reads the data
 
 Eviction under maxmemory
 
-When memory reaches maxmemory, Redis removes keys to make room, by its eviction policy. Phase 5 showed that volatile-lru removes only keys that have a TTL. A key with no TTL stays.
+When memory reaches maxmemory, the memory limit you set, Redis removes keys to make room, by its eviction policy. Phase 5 showed that volatile-lru removes only keys that have a TTL. A key with no TTL stays.
 
 Replicas copy writes later
 
-Phase 4 taught asynchronous replication, which means the primary replies OK before any replica has the write. In a failover, a replica becomes the new primary when the old one fails. Writes it did not receive are gone.
+Phase 3 used asynchronous replication, which means the primary replies OK before any replica has the write. In a failover, a replica becomes the new primary when the old one fails. Writes it did not receive are gone.
 
 A lock needs a fencing token
 
 Phase 3 showed that a Redis lock can expire while its holder still works. A fencing token is a number that grows with each lock grant. The store that holds the data rejects a write that carries an older token.
 
-This phase needs all five because a review judges each Redis call by what happens when one of these mechanisms meets a failure. The first place the review looks is the client library, because every call passes through it.
+A cluster splits the keys into slots
+
+Phase 4 moved data to Redis Cluster, the mode where several primaries each own a share of the keys. It divides the keys into 16,384 hash slots, and a key's slot comes from a hash of its name. A shard is one primary and its replicas, and it owns some of the slots.
+
+This phase needs all six because a review judges each Redis call by what happens when one of these mechanisms meets a failure. The first place the review looks is the client library, because every call passes through it.
 
 ## What does your service wait for when Redis stops answering?
 
@@ -143,7 +149,7 @@ This section showed how long a call waits. It did not show what a timed-out or c
 
 ## What does a timed-out or cancelled call leave on its connection?
 
-The last section showed that go-redis closes a connection after a read timeout. The reason is that Redis still sends the reply, and the reply waits on that socket until something reads it. A connection is an ordered stream. The client knows which reply belongs to which command only by their order, so one unread reply shifts every later pairing by one.
+The last section showed that go-redis closes a connection after a read timeout. The reason is that Redis still sends the reply, and the reply waits on that socket until something reads it. A stale reply is a reply that still waits on a connection after its request timed out or was cancelled. A connection is an ordered stream. The client knows which reply belongs to which command only by their order, so one unread reply shifts every later pairing by one.
 
 Connection kept after a cancel
 
@@ -171,7 +177,7 @@ Connection closed after a cancel
 
 This is the failure behind a ChatGPT outage that leaked user data. OpenAI used the asyncio redis-py client with Redis Cluster and a shared connection pool. A request cancelled after it was sent, but before its reply was read, left that reply on the connection. The next, unrelated request read it. A server change raised the rate of cancelled requests, and some users saw parts of other users' chat history. Payment details of 1.2% of ChatGPT Plus subscribers active in a nine-hour window may have been visible. OpenAI fixed redis-py and added a check that cached data matches the user who asked for it.
 
-Closing the connection is the safe choice, but it has its own cost. A new connection needs a TCP handshake, and often TLS and an AUTH, before the first command. AWS measured 2.82 ms per operation when PHPRedis opened a new connection per request, against 0.21 ms with persistent pooled connections. Both ran from EC2 to an m6g.2xlarge ElastiCache node in the same Availability Zone. So when Redis is slow and every call times out, every call also opens a new connection. Many clients reconnecting at once with no backoff and no jitter is a reconnect storm. AWS reports that such loops in redis-py-cluster, Lettuce and Redisson have driven server CPU to 100%.
+Closing the connection is the safe choice, but it has its own cost. A new connection needs a TCP handshake, and often TLS and an AUTH, before the first command. AWS measured 2.82 ms per operation when PHPRedis opened a new connection per request, against 0.21 ms with persistent pooled connections. Both ran from EC2 to an m6g.2xlarge ElastiCache node in the same Availability Zone. ElastiCache is the AWS service that runs Redis for you. So when Redis is slow and every call times out, every call also opens a new connection. Many clients reconnecting at once with no backoff and no jitter is a reconnect storm. AWS reports that such loops in redis-py-cluster, Lettuce and Redisson have driven server CPU to 100%.
 
 A cache that fails open, which means it goes to the database when Redis errors, has one more cost. It still waits a full ReadTimeout on every request while Redis is down. A circuit breaker stops calling a failing dependency for a short time after errors pass a threshold, so requests skip Redis at once. Uber puts a sliding-window circuit breaker in front of each Redis node.
 
@@ -211,11 +217,11 @@ ContextTimeoutEnabled is not setthe caller's deadline does not reach the socket
 
 fail-open has no circuit breakerevery request waits at least 1 s while Redis stalls, and longer when go-redis retries the read
 
-CacheAside has no singleflight and no TTL jitterPhase 2's stampede rules are missing, and concept c4 returns to this
+CacheAside has no singleflight and no TTL jitterPhase 2's stampede rules are missing. Singleflight lets one caller rebuild a missing key while the others wait. TTL jitter adds a random amount to each TTL, so keys do not expire together. Concept c4 returns to this
 
 the unlock runs in a defer with the caller's context and ignores its resultif that context is cancelled, the lock stays until its TTL ends. This is inferred from the code and not tested
 
-its multi-get is one MGET command, not a pipelinein a cluster all its keys must hash to one slot
+its multi-get is one MGET command, which reads many keys in one call, not a pipeline, a batch of separate commands sent without waiting for each replyin a cluster all its keys must hash to one slot
 
 The client decides how long you wait. It does not decide what Redis keeps, and the next section starts with the keys Redis cannot remove.
 
@@ -231,7 +237,7 @@ CacheGET, SET with TTL, delete on writeone slower requestalways a TTLyes, it is 
 
 Sessionhash plus TTLthe user logs in againa TTL on every writeyes, if a new login is acceptable
 
-LockSET NX PXtwo holders at oncethe TTL is the leaseno, for correctness fence at the store
+LockSET NX PXtwo holders at oncethe TTL is the lease, the time the lock is yoursno, for correctness fence at the store
 
 Idempotency keySET NX EXan action runs twiceas long as clients retryno, when a duplicate costs money
 
@@ -239,16 +245,18 @@ QueueList, pub/sublost worknoneno, for work that must run
 
 Rate limitINCR plus EXPIRE in Lua, or INCREX on Redis 8.8 and latera few extra requests passthe windowyes
 
-Predict: a shared instance uses volatile-lru. Memory is 100% full and evicted_keys is 0. A new cache write with EX 60 arrives. What happens, and which one INFO line tells you why?
-The write fails with an OOM error, even though it carries a TTL. INFO keyspace shows expires far below keys, because the memory is full of keys with no TTL. Most people expect Redis to evict an old key, and that is right for allkeys-lru. Under volatile-lru no key is a candidate, so Redis rejects the write instead.
+SET NX writes a key only if it does not exist yet, so the first caller wins. PX and EX give that key a TTL in milliseconds or in seconds. INCREX does the INCR and the EXPIRE in one command.
+
+Predict: a shared instance uses volatile-lru. Memory is 100% full and evicted_keys, the count of keys Redis has evicted at the memory limit, is 0. A new cache write with EX 60 arrives. What happens, and which line of INFO, the command that prints the server's counters, tells you why?
+The write fails with an OOM error, Redis's out-of-memory error, even though it carries a TTL. INFO keyspace shows expires far below keys, because the memory is full of keys with no TTL. Most people expect Redis to evict an old key, and that is right for allkeys-lru, which may evict any key. Under volatile-lru no key is a candidate, so Redis rejects the write instead.
 
 Five facts produce that outcome:
 
-- The volatile-* policies evict only keys that have a TTL. The eviction page says they "behave like noeviction if no keys have an associated expiration".
+- The volatile-* policies evict only keys that have a TTL. The eviction page says they "behave like noeviction if no keys have an associated expiration". noeviction is the policy that refuses every write that needs memory.
 
 - When no key can be evicted, every write that needs memory fails with OOM command not allowed when used memory > 'maxmemory'. A correct new cache key fails too, because Redis checks memory before it runs the command.
 
-- A plain SET removes an existing TTL. The SET page says "Any previous time to live associated with the key is discarded on successful SET operation". So one rewrite without KEEPTTL or EX makes a key permanent.
+- A plain SET removes an existing TTL. The SET page says "Any previous time to live associated with the key is discarded on successful SET operation". So one rewrite without KEEPTTL, the option that keeps the old TTL, or EX makes a key permanent.
 
 - In go-redis a zero duration means no TTL. So Set(ctx, k, v, 0*time.Hour) writes a key that never expires, with no error.
 
@@ -268,7 +276,7 @@ The platform had this outage. One service wrote keys with no TTL into the shared
 
 Pendo had the same cause, and its Redis was still evicting keys. Its Redis on Google Memorystore was near the memory limit and evicting keys. CPU spikes made replies slow and connections fail. Two code paths created cache keys with no expiry. The guides service had about a 60% error rate for the first 90 minutes. Pendo flushed all Redis instances to recover, then fixed the two code paths and added safeguards and Redis monitoring.
 
-Correction. The phase treats volatile-lru and allkeys-lru as the policy choices, and the original Phase 5 text counted 8. Redis 8.6 and later has 10, adding allkeys-lrm and volatile-lrm, which evict the least recently modified key. Valkey 9.1.2 still has 8. The phase also does not state the defaults: noeviction in open-source Redis 8.10.2, and volatile-lru on ElastiCache.
+Correction. The phase treats volatile-lru and allkeys-lru as the policy choices, and the original Phase 5 text counted 8. Redis 8.6 and later has 10, adding allkeys-lrm and volatile-lrm, which evict the least recently modified key. Valkey 9.1.2, the open-source fork of Redis, still has 8. The phase also does not state the defaults: noeviction in open-source Redis 8.10.2, and volatile-lru on ElastiCache.
 
 The fix has four parts. A pure cache instance uses an allkeys-* policy, so a forgotten TTL cannot block writes. The shared wrapper refuses a cache write with no TTL. Every rewrite of a key with a TTL uses KEEPTTL or sets the TTL again. An alert on the gap between keys and expires in INFO keyspace has a named owner.
 
@@ -278,7 +286,7 @@ Eviction page, source line 118: https://redis.io/docs/latest/develop/reference/e
 Go deeper: KEEPTTL, the capstone guard, the session gap, and the other eviction policies
 How the platform scored on the six jobs
 
-The platform did all six jobs, and its gaps followed this order. The caches failed open but had no stampede protection, which costs latency. Sessions were written with a hash write and a separate EXPIRE, so a crash between the two left a session with no TTL. Every lock protected efficiency, such as not sending one email twice, and used a plain DEL with no fencing. That is acceptable only while nobody copies the pattern to a payment. Idempotency keys used SET NX EX, which is the right command for that job. List queues held only work that could be lost, and durable work ran on another system. Rate limits used a fixed-window counter in Lua, which is cheap and close enough. A sliding window on a sorted set is the more accurate upgrade.
+The platform did all six jobs, and its gaps followed this order. The caches failed open but had no stampede protection, which costs latency. Sessions were written with a hash write and a separate EXPIRE, so a crash between the two left a session with no TTL. Every lock protected efficiency, such as not sending one email twice, and used a plain DEL with no fencing. That is acceptable only while nobody copies the pattern to a payment. Idempotency keys used SET NX EX, which is the right command for that job. List queues held only work that could be lost, and durable work ran on another system. Rate limits used a fixed-window counter in Lua, which is cheap and close enough. A sliding window on a sorted set, which keeps its members ordered by a score such as a timestamp, is the more accurate upgrade.
 
 The opposite design: Trello
 
@@ -340,7 +348,7 @@ So INCR and SET NX are atomic on one node, and they are not durable across a fai
 
 The WAIT command from Phase 4 makes the primary wait until a number of replicas confirm the write. It narrows the window, but it does not close it. The replication page says WAIT "does not turn a set of Redis instances into a CP system with strong consistency: acknowledged writes can still be lost during a failover".
 
-The size of this loss was measured. Jepsen ran five Redis nodes with Sentinel, cut the network between them, and sent 2,000 writes. Redis acknowledged 1,998 of them, and only 872 were in the final data set. The report says "Redis threw away 56% of the writes it told us succeeded." That run used an old Redis and Sentinel. Asynchronous replication, the mechanism behind it, is still how Redis replicates today. The size of the loss on a current version has not been measured.
+The size of this loss was measured. Jepsen ran five Redis nodes with Sentinel, the separate process that watches the primary and promotes a replica. It cut the network between them, and sent 2,000 writes. Redis acknowledged 1,998 of them, and only 872 were in the final data set. The report says "Redis threw away 56% of the writes it told us succeeded." That run used an old Redis and Sentinel. Asynchronous replication, the mechanism behind it, is still how Redis replicates today. The size of the loss on a current version has not been measured.
 
 So correctness moves to the store that keeps the data. A conditional write is a write that the store applies only if a stated condition still holds, such as "the version is still 7". The fencing token from Phase 3 is one: the storage server remembers the highest token it accepted and rejects a write with a lower one. DynamoDB does the same with a version attribute. If the condition fails, the write fails and the caller reads again and retries.
 
@@ -358,7 +366,7 @@ Kleppmann's example uses two clients. Client 1 gets the lock with token 33, paus
 
 The safe unlock no longer needs Lua
 
-Phase 3 released a lock with a Lua script that deletes the key only if it still holds your token. Redis 8.4 added DELEX key IFEQ value, which does that in one command. Valkey 9.0 added DELIFEQ. Redis 8.4 and Valkey 8.1 also accept SET ... IFEQ, which changes a value only if it still matches. These commands make the unlock shorter. They do not make the lock safe for correctness, because a failover can still lose the lock key itself.
+Phase 3 released a lock with a compare-and-delete, a Lua script that deletes the key only if it still holds your token. Redis 8.4 added DELEX key IFEQ value, which does that in one command. Valkey 9.0 added DELIFEQ. Redis 8.4 and Valkey 8.1 also accept SET ... IFEQ, which changes a value only if it still matches. These commands make the unlock shorter. They do not make the lock safe for correctness, because a failover can still lose the lock key itself.
 
 When a repeated ID is harmless
 
@@ -388,7 +396,7 @@ The two P0 rows show the method. The full list of ten fixes, ranked P0 to P3, is
 
 Every item on this platform's list is about how code used Redis. None says that Redis is too slow or the cluster too small. That is a finding about one platform, and it is not a rule. The section above showed a failover losing acknowledged writes when the code was correct.
 
-The list also has no security row and no Kubernetes row. The Go deeper block below adds seven, from ACL users to the liveness probe.
+The list also has no security row and no Kubernetes row. The Go deeper block below adds seven, from ACL users, one login with its own command rights for each service, to the liveness probe.
 
 Classify the job, ask what a loss costs, then fix what has already happened first.
 
@@ -399,7 +407,7 @@ Run INFO keyspace on an instance you use, and compare keys= with expires=.
 Go deeper: isolating a shared instance, why each rank was chosen, which engine runs it, and the security rows
 One shared instance is one failure for everyone
 
-The platform ran about 34 services on several shared clusters. So one service's keys could stop writes for every service on its cluster. Shopify had the same shape after it split its MySQL into shards. Every shard still shared one Redis, and an outage of that Redis took down all of Shopify. Its fix was pods, where each pod has its own MySQL, Redis and memcached. bsport gave each business domain its own cluster. The Figma case in concept c5 split by use case. A review of a shared instance should ask whether the services on it can afford to fail together.
+The platform ran about 34 services on several shared clusters. So one service's keys could stop writes for every service on its cluster. Shopify had the same shape after it split its MySQL into shards. Every shard still shared one Redis, and an outage of that Redis took down all of Shopify. Its fix was pods, where each pod has its own MySQL, Redis and memcached, another in-memory cache server. bsport gave each business domain its own cluster. The Figma case in concept c5 split by use case. A review of a shared instance should ask whether the services on it can afford to fail together.
 
 The rest of the fix list
 
@@ -413,7 +421,7 @@ P1Read the replica count for WAIT from the environment, never from a constant.a 
 
 P2Add TTL jitter to caches filled in bulk, and singleflight on the hottest shared keys.keys that expire together send a stampede to the source
 
-P2Alert on hot keys and on SLOWLOG, not only on capacity.a slow command blocks every client
+P2Alert on hot keys, which get a large share of requests, and on SLOWLOG, the list of slow commands, not only on capacity.a slow command blocks every client
 
 P2Retire the oldest client, and set timeouts and context deadlines in all of them.it waits 3 seconds on every call during a stall
 
@@ -449,7 +457,7 @@ Only cluster members reach the cluster bus port.The bus port is the data port pl
 
 protected-mode yes, and no instance answers another host without a password.With no config file, Redis listens on every interface, and only protected mode stops a remote client.From another host, redis-cli -h <host> PING must fail with NOAUTH or DENIED.P0
 
-An owner applies security releases on a schedule.Redis 8.10.2 fixed #15673. Commands queued in MULTI could still reach keys whose ACL access was revoked before EXEC.redis_version against the release notes. ElastiCache applies only critical updates in the maintenance window.P1
+An owner applies security releases on a schedule.Redis 8.10.2 fixed #15673. Commands queued after MULTI, which starts a transaction, could still reach keys whose ACL access was revoked before EXEC ran them.redis_version against the release notes. ElastiCache applies only critical updates in the maintenance window.P1
 
 A Kubernetes liveness probe never calls Redis.Harness's probe checked every downstream service, so Kubernetes restarted healthy pods while Redis was slow.Read the probe handler. Redis may sit in the readiness probe, which only removes a pod from traffic.P1
 
@@ -523,7 +531,7 @@ Since RedisCommands Valkey 9.1.2 does not have
 
 8.10LMOVEM, BLMOVEM, SDIFFCARD, SUNIONCARD, HIMPORT, BACKUP
 
-The target version matters as much as the engine. HEXPIRE, HGETEX and HSETEX reached Valkey only in 9.0, and MSETEX only in 9.1. So a move to Valkey 8.1 loses them as well.
+The target version matters as much as the engine. HEXPIRE, HGETEX and HSETEX, the commands that give single hash fields a TTL, reached Valkey only in 9.0, and MSETEX only in 9.1. So a move to Valkey 8.1 loses them as well.
 
 Valkey also answers INFO server with redis_version:7.2.4, then server_name:valkey. It keeps the old field for clients that turn features on by version. So any check that reads only redis_version calls every Valkey "Redis 7.2.4".
 
@@ -597,7 +605,7 @@ This works only from Redis 7.2 and older. The Valkey migration guide gives these
 
 - Run REPLICAOF NO ONE on the Valkey node.
 
-For a cluster, add Valkey nodes as replicas with redis-cli --cluster add-node ... --cluster-replica. Run CLUSTER FAILOVER on each, then remove the Redis nodes with redis-cli --cluster del-node. Airbnb ran the same cutover from EC2 Redis to ElastiCache, which was not a Valkey move. It paused writes, compared offsets and promoted the replica, with no downtime.
+For a cluster, add Valkey nodes as replicas with redis-cli --cluster add-node ... --cluster-replica. Run CLUSTER FAILOVER on each, then remove the Redis nodes with redis-cli --cluster del-node. Airbnb ran the same cutover from EC2 Redis to ElastiCache, which was not a Valkey move. It paused writes, compared replication offsets, the count of replication bytes each node has applied, and promoted the replica, with no downtime.
 
 Method 2: an RDB file copy
 
@@ -605,7 +613,7 @@ Disconnect the clients and record INFO keyspace. Run SAVE, copy the file into th
 
 Method 3: the ElastiCache engine change
 
-- Make a single node with cluster mode disabled into a replication group first.
+- Make a single node with cluster mode disabled, which means one shard, into a replication group first.
 
 - Copy a custom parameter group into a Valkey parameter group with the same static values.
 
@@ -619,7 +627,7 @@ Inside, ElastiCache adds Valkey nodes that replicate from the Redis primaries, f
 
 Method 4: blue/green with a copy tool
 
-MaiCoin, a cryptocurrency exchange, chose this method because the in-place change gave no live check and no roll back. It created a Valkey cluster, asked AWS to turn on PSYNC, and ran RedisShake: a full copy by SCAN, then live changes from keyspace notifications, with TTLs kept. It compared key counts and sample values, then moved traffic in steps. The price is two clusters during the move. A tool that sends RESTORE meets the same version check as a replica. The RedisShake README lists Redis 2.8 to 8.4 as supported sources, so Redis 8.10 is outside its stated range.
+MaiCoin, a cryptocurrency exchange, chose this method because the in-place change gave no live check and no roll back. It created a Valkey cluster, asked AWS to turn on PSYNC, the command a replica uses to sync from a primary, and ran RedisShake. RedisShake made a full copy by SCAN, which walks all keys in small batches. Then it copied live changes from keyspace notifications, the events Redis sends on each key change, with TTLs kept. It compared key counts and sample values, then moved traffic in steps. The price is two clusters during the move. A tool that sends RESTORE meets the same version check as a replica. The RedisShake README lists Redis 2.8 to 8.4 as supported sources, so Redis 8.10 is outside its stated range.
 
 Method 5: dual writes from the client
 
@@ -643,7 +651,7 @@ What changes in the clients
 
 - Snap's KeyDB ran MGET across slots. Valkey does not, and Snap found that gap only after the move.
 
-- EVALSHA answers NOSCRIPT until the script is loaded on the new node, because a copy by commands does not carry the script cache. This is inferred.
+- EVALSHA, which runs a script by its hash, answers NOSCRIPT until the script is loaded on the new node. The reason is that a copy by commands does not carry the script cache, the table of loaded scripts that each server keeps in memory. This is inferred.
 
 - Two argument gaps hide in shared commands. Only Redis takes SET ... IFNE, IFDEQ and IFDNE, and XREADGROUP ... CLAIM, MAXCOUNT and MAXSIZE.
 
@@ -671,7 +679,7 @@ At Snap's pace, 100 caches take 100 / 30 = about 3.3 weeks. The Leboncoin number
 
 This section changed the engine under the cache. It did not measure what the source of truth carries when the cache works less well, and the next concept starts there.
 
-## Why does a small fall in hit rate overload the source?
+## Why does a small fall in hit rate overload the database behind the cache?
 
 A cache hides most of the real load, and a small change uncovers it.
 
@@ -701,7 +709,7 @@ The platform had this failure on its hottest endpoint. A serializer marked a res
 
 Correction. The phase's check question says the fix cut origin traffic by 80%, "so the hit rate is around 80%". Its own numbers, 30,000 down to 300 calls per minute, are a 99% drop. So the restored hit rate is near 99%.
 
-Slack saw the miss path cost more than one query each. An upgrade restarted Consul agents on 25% of the fleet at peak traffic. Each restart replaced a memcached node with an empty one, so the hit rate fell. A missed lookup of group message membership ran a scatter query on every shard, because that keyspace was sharded by user. The post says "the read load increased superlinearly in relation to the percentage of cache misses". Queries timed out, so the cache could not refill, and the overload held itself in place. Slack throttled client boot, read only the missing rows, read from replicas, and raised the throttle in small steps.
+Slack saw the miss path, the work done after a cache miss, cost more than one query each. An upgrade restarted Consul agents on 25% of the fleet at peak traffic. Each restart replaced a memcached node with an empty one, so the hit rate fell. A missed lookup of group message membership ran a scatter query on every shard, because that keyspace was sharded by user. The post says "the read load increased superlinearly in relation to the percentage of cache misses". Queries timed out, so the cache could not refill, and the overload held itself in place. Slack throttled client boot, read only the missing rows, read from replicas, and raised the throttle in small steps.
 
 The check that catches this before production is a load test with the cache cold or turned off. AWS names the failure a service "addicted to its cache" and says "Run load tests with caches disabled to validate this." For a cold start it names request coalescing, which sends one origin read for many waiting misses of the same key.
 
@@ -721,7 +729,7 @@ A bad configuration value made every client treat its cached copy as invalid and
 
 Stack Overflow: a TTL bug in the local cache
 
-Stack Overflow keeps an in-memory cache on each web server in front of Redis. A TTL bug made about 95% of keys stop filling that local cache, so those reads all went to Redis. Redis had room for it, so nothing broke, and nobody noticed for hours. A hit rate fall in one layer moves load to the next layer, so watch the hit rate of every layer.
+Stack Overflow keeps an in-memory cache on each web server in front of Redis. A TTL bug made about 95% of keys stop filling that cache, so those reads all went to Redis. Redis had room for it, so nothing broke, and nobody noticed for hours. A hit rate fall in one layer moves load to the next layer, so watch the hit rate of every layer.
 
 The platform incident, the rest of the numbers
 
@@ -744,11 +752,11 @@ h = 0.999                                       1 / (1 - 0.999) = 1000x
 
 Hit rate tells you how much load the cache removes. It does not tell you whether the value it returns is current, and the next concept follows one change through every layer of a cache.
 
-## When does a change reach every reader of a layered cache?
+## When does a change reach every reader of a cache with several layers?
 
 Each cache layer keeps its own copy, so each layer needs its own invalidation.
 
-The last concept measured how much load a cache removes. This one asks whether the value it returns is current. The platform's most-read cache held company settings, and it had more than one layer. An in-process cache is a map in the memory of each server process, read without any network call. It sits in front of Redis to absorb the hottest reads. The source service used delete-on-write: on every change it deleted the Redis key, so the next reader missed and loaded the new value.
+The last concept measured how much load a cache removes. This one asks whether the value it returns is current. The platform's most-read cache held company settings, and it had more than one layer. A layered cache is a chain of caches in front of one store. A reader asks the first layer, and each miss goes to the next layer down. An invalidation is the delete or the message that removes a cached copy after the data changes. A local cache, also called an in-process cache, is a map in the memory of each server process. It is read without any network call. It sits in front of Redis to absorb the hottest reads. The source service used delete-on-write: on every change it deleted the Redis key, so the next reader missed and loaded the new value.
 
 - source serviceupdates settings, deletes the Redis key
 
@@ -783,7 +791,7 @@ Two rules give that bound:
 
 - A lost delete in a lower layer adds that layer's TTL, because the upper layer can refill from it at the last moment.
 
-In the platform, the two services with in-process caches were stale for up to 5 or 10 minutes after each change, even when the Redis delete worked. This is inferred from the design as the phase describes it.
+In the platform, the two services with local caches were stale for up to 5 or 10 minutes after each change, even when the Redis delete worked. This is inferred from the design as the phase describes it.
 
 Delete-on-write also races with a reader that missed. The steps happen in this order:
 
@@ -801,7 +809,7 @@ Uber closes this gap with a Lua script that writes into the cache only if the ro
 
 Correction. The phase says delete-on-write is "race-free (delete not update)" and "Worst-case staleness = the TTL". A reader that missed can store the old value after the delete. For layers that are not invalidated, staleness is their own TTL after every change, and a lost delete adds the Redis TTL.
 
-An in-process layer needs its own message to drop its copy. Stack Overflow runs an in-memory cache on each web server in front of Redis. On a change, it deletes the value in Redis first, and then publishes the key on a purge channel. Each web server drops its local copy when the message arrives. The post says the order matters, because reversing these "would create a race and end up in a re-fetch of the old value sometimes". If the servers dropped their copies first, one could reload the old value from Redis before Redis was purged.
+A local cache layer needs its own message to drop its copy. Stack Overflow has a local cache on every web server, so it sends that message. On a change, it deletes the value in Redis first, and then publishes the key on a purge channel. Each web server drops its local copy when the message arrives. The post says the order matters, because reversing these "would create a race and end up in a re-fetch of the old value sometimes". If the servers dropped their copies first, one could reload the old value from Redis before Redis was purged.
 
 Staleness is the sum of every layer that can miss the change.
 
@@ -839,7 +847,7 @@ Stack Overflow's purge channel uses Redis pub/sub. The next section shows what a
 
 Pub/sub keeps no copy, so a message is lost the moment no one is there.
 
-The last section ended on Stack Overflow's purge channel, which tells every web server to drop a local copy. The chat team wants the same tool for a different job. Its users connect to many WebSocket servers, and a message from a user on server A must reach a user on server C. Each server subscribes to the channels of its connected users, and the sending server publishes to that channel.
+The last section ended on Stack Overflow's purge channel, which tells every web server to drop its local copy. The chat team wants the same tool for a different job. Its users connect to many WebSocket servers, and a message from a user on server A must reach a user on server C. Each server subscribes to the channels of its connected users, and the sending server publishes to that channel.
 
 Pub/sub is Redis's publish and subscribe feature: PUBLISH channel message sends the message to every client subscribed to that channel at that moment. Redis keeps no copy of the message. So delivery is at-most-once, which means each subscriber gets a message once or never, and never a second time. This is fast and simple, and it is the reason the design loses messages.
 
@@ -890,7 +898,7 @@ After the channel's own subscribers, PUBLISH loops over every pattern that any c
 
 Replicas have an output buffer too
 
-Replicas use the same mechanism with a larger default, 256mb 64mb 60. GitLab once saw its replica output buffer limit exceeded. Both replicas lost their link to the primary and started a full resync, and it happened again an hour later. GitLab raised the limit to 8 GiB hard and 4 GiB soft over 180 seconds. A buffer limit protects Redis memory, and the price is a disconnected client, whether that client is a replica or a chat server.
+Replicas use the same mechanism with a larger default, 256mb 64mb 60. GitLab once saw its replica output buffer limit exceeded. Both replicas lost their link to the primary and started a full sync, and it happened again an hour later. GitLab raised the limit to 8 GiB hard and 4 GiB soft over 180 seconds. A buffer limit protects Redis memory, and the price is a disconnected client, whether that client is a replica or a chat server.
 
 One Redis node loses messages only when a subscriber is gone. A cluster adds two more ways to lose them, and a cost that can stop the cluster, which the next section shows.
 
@@ -938,7 +946,7 @@ Sharded pub/sub and the broadcast: pub/sub page source lines 199 to 208, https:/
 Go deeper: what else Figma learned, and pattern channels in a shard
 Figma's other findings
 
-Figma ruled out backups, a spike in commands, slow commands and big keys before it found the cause. AWS rate limits on manual failover blocked one failover during the incident. More nodes lowered the load needed to start the loop, which is why the larger cluster made things worse. Figma now plans regular drills that run core features with ElastiCache turned off.
+Figma ruled out backups, a spike in commands, slow commands and big keys, single keys with millions of elements, before it found the cause. AWS rate limits on manual failover blocked one failover during the incident. More nodes lowered the load needed to start the loop, which is why the larger cluster made things worse. Figma now plans regular drills that run core features with ElastiCache turned off.
 
 Sharded channels have no patterns
 
@@ -968,9 +976,9 @@ Three systems built this, each with a different log:
 
 - Discourse's message_bus library keeps a backlog in Redis, by default 2,000 messages for all channels and 1,000 per channel. The client sends the last message ID it saw and gets the gap. A keepalive message every 60 seconds detects a subscriber that stopped receiving, and it reconnects after 3 missed intervals.
 
-- Socket.IO's Redis adapter sends packets between servers over pub/sub. Its docs say that if the connection to Redis is cut, packets go only to the clients on the current server. Its docs say the Redis Streams adapter handles a temporary disconnection from Redis and can "resume the stream without losing any packets". Its stream is trimmed to about 10,000 entries by default, so a longer gap can still lose packets. That last point is inferred from the maxLen default.
+- Socket.IO's Redis adapter sends packets between servers over pub/sub. Its docs say that if the connection to Redis is cut, packets go only to the clients on the current server. Its docs describe a second adapter, which keeps the packets in a Redis log called a Stream. They say it handles a temporary disconnection from Redis and can "resume the stream without losing any packets". Its stream is trimmed to about 10,000 entries by default, so a longer gap can still lose packets. That last point is inferred from the maxLen default.
 
-A Redis Stream is an append-only log inside Redis, where every entry gets an ID that grows with time. A reader asks for entries after the last ID it processed, so a reader that was away reads exactly what it missed. A consumer group lets several readers share a stream. Redis tracks each delivered entry in a pending list until the reader confirms it with XACK. XAUTOCLAIM hands the pending entries of a crashed reader to another one. MAXLEN or MINID trims the stream, so its memory stays bounded.
+A Redis Stream is an append-only log inside Redis, where every entry gets an ID that grows with time. A reader asks for entries after the last ID it processed, so a reader that was away reads exactly what it missed. A consumer group lets several readers share a stream. Redis tracks each delivered entry in the group's pending entries list, the PEL, until the reader confirms it with XACK. XAUTOCLAIM hands the pending entries of a crashed reader to another one. MAXLEN or MINID trims the stream, so its memory stays bounded.
 
 A Stream is still Redis memory. The two losses of concept c2 still apply to it: eviction can remove it, and a failover can lose its newest entries. So choose the log by what a lost message costs.
 
@@ -998,9 +1006,9 @@ Evidence
 Trello, "The Trello tech stack", 2012-01-19: https://www.atlassian.com/blog/trello/the-trello-tech-stack. Discourse message_bus README, main branch: https://github.com/discourse/message_bus. Socket.IO: https://socket.io/docs/v4/redis-adapter/ and https://socket.io/docs/v4/redis-streams-adapter/, read from the website's source repository because the live pages timed out. LinkedIn, "Now you see me, now you don't", 2018-01: https://engineering.linkedin.com/blog/2018/01/now-you-see-me--now-you-dont--linkedins-real-time-presence-platf. Harness on Redis Streams, 2021-11-17: https://harness.io/blog/event-driven-architecture-redis-streams. No named company with public numbers runs chat or presence on Redis pub/sub at scale. Trello is the closest, and it has no load numbers.
 
 Go deeper: what consumer groups cost, Trello's move to Kafka, and two Redis queues that failed
-The pending list grows
+The pending entries list grows
 
-XREADGROUP without NOACK adds every delivered entry to the group's pending list. An entry stays there until XACK. A reader that crashes leaves its entries pending until another reader claims them. So a group whose readers never confirm grows without limit in memory. Harness built its event system on Streams with XREADGROUP, XACK, XAUTOCLAIM and MAXLEN or MINID. It reported three problems: the memory cost, one failing message blocking the head of the stream, and no built-in lag metric.
+XREADGROUP without NOACK adds every delivered entry to the group's pending entries list. An entry stays there until XACK. A reader that crashes leaves its entries pending until another reader claims them. So a group whose readers never confirm grows without limit in memory. Harness built its event system on Streams with XREADGROUP, XACK, XAUTOCLAIM and MAXLEN or MINID. It reported three problems: the memory cost, one failing message blocking the head of the stream, and no built-in lag metric.
 
 Trello left Redis pub/sub
 
@@ -1032,7 +1040,7 @@ You can now review any Redis call with five questions, one for each concept of t
 
 - What does a server miss while it is away? With pub/sub alone, everything. A log with IDs lets it read the gap, and presence uses heartbeats with a TTL. (Concept c5.)
 
-The next phase, Phase 7, "Redis for AI agents", is the last phase of the course. It uses these ideas for caches, vectors, memory, token streams, limits and tool queues in an AI agent platform. Before you start it, apply these five questions to one service you work on, as lab E10 asks. Then write its fix list in the order of the c2 ranking.
+The next phase, Phase 7, "Redis for AI agents", is the last phase of the course. It asks which data of an AI agent platform Redis can lose, and how its caches, vectors, memory, streamed answers, limits and tool queues fail. Before you start it, apply these five questions to one service you work on, as lab E10 asks. Then write its fix list in the order of the c2 ranking.
 
 ## Lab: the exercises that teach Phase 6
 

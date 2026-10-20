@@ -306,20 +306,20 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <div class="layout">
 <nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
 <main>
-<header class="hero"><div class="eyebrow">Redis · Phase 7</div><h1>Redis for AI agents</h1><p class="subtitle">Which agent data can Redis lose, and how do caches, vectors, memory, token streams, limits and tool queues fail when the data is probabilistic, long and paid per token?</p></header>
+<header class="hero"><div class="eyebrow">Redis · Phase 7</div><h1>Redis for AI agents</h1><p class="subtitle">Which agent data can Redis lose, and how do caches, vectors, memory, streamed answers, limits and tool queues fail when the data is probabilistic, long and paid per token?</p></header>
 <p>Phase 6 reviewed how a shared Redis behaves when a client waits, a key is evicted or a server misses a message. This last phase builds the AI features on top of that knowledge. The running case is a support agent platform with two tenants, acme and globex. API pods take user questions, call a model provider, call paid tools, and stream answers to a web page. Every section and every lab is one part of that platform.</p>
 
-<p>An <dfn>AI agent</dfn> is a program that calls a model in a loop, calls tools and keeps state between the calls. The platform uses Redis for six jobs: an answer cache, an embedding cache, memory, token streams, limits and a tool-call queue. Each job looks like a pattern from Phases 1 to 3, but it breaks in a new way here. The data is probabilistic, because a cache hit depends on a similarity score. It is long, because an answer streams for seconds. And it is paid per token or per call, so a mistake costs money that no log line shows.</p>
+<p>In this lesson an AI agent is a program that calls a model in a loop, calls tools and keeps state between the calls. The platform uses Redis for six jobs. It caches answers and embeddings, keeps the agent's memory, and streams answers to the page. It also limits model calls and queues paid tool calls. Each job looks like a pattern from Phases 1 to 3, but it breaks in a new way here. The data is probabilistic, because a cache hit depends on a similarity score. It is long, because an answer streams for seconds. And it is paid per token or per call, so a mistake costs money that no log line shows.</p>
 
-<p>Two failures show the size of the problem. With no tenant scope, the lab cache served acme's answer to a globex user at a similarity of 1.000. With a token budget that never corrects its estimates, the lab limiter admitted 6 calls where 15 fit.</p>
+<p>Two failures show the size of the problem. With no tenant scope, the lab cache served acme's answer to a globex user at a similarity of 1.000. With a shared limit on tokens that never corrects its estimates, the lab limiter admitted 6 calls where 15 fit.</p>
 
 <h3>What you must know</h3>
 <ol class="concepts">
-<li id="c1"><b>A semantic cache's threshold sets its hit rate, not its error rate, so correctness comes from scope and measurement.</b><span>Pick a threshold from labelled traffic, and scope every entry by tenant and model.</span></li>
-<li id="c2"><b>A vector costs its bytes plus a graph cost that grows with M, and quantisation sets the recall ceiling.</b><span>Size a vector index from the graph, and tune EF only when the search is the limit.</span></li>
-<li id="c3"><b>A TTL belongs to the value that was written, so an overwrite or a split write can make memory permanent.</b><span>Write agent memory so every value and field keeps its TTL.</span></li>
-<li id="c4"><b>Pub/sub delivers at most once and Streams at least once, so readers keep positions and workers keep idempotency records.</b><span>Build a token stream a client can resume and a tool queue that never pays twice.</span></li>
-<li id="c5"><b>A shared LLM limit must reserve an estimate before the call and correct it after, in the same window.</b><span>Build a token budget, an in-flight cap and a shared 429 pause across pods.</span></li>
+<li id="c1"><b>When a cache matches questions by meaning, its threshold sets the hit rate, not the error rate, so correctness comes from scope and measurement.</b><span>Pick a threshold from labelled traffic, and scope every entry by tenant and model.</span></li>
+<li id="c2"><b>A stored vector costs its bytes plus its graph links, and fewer bits per number cap how many true nearest matches a search finds.</b><span>Size the memory from the graph, and tune the search effort only when the search is the limit.</span></li>
+<li id="c3"><b>A TTL belongs to the value that was written, so an overwrite or a TTL sent in a second command can make memory permanent.</b><span>Write agent memory so every value and field keeps its TTL.</span></li>
+<li id="c4"><b>Pub/sub delivers at most once and Streams at least once, so readers keep their position and workers record each paid call.</b><span>Build an answer stream that a client can resume, and a queue of tool calls that never pays twice.</span></li>
+<li id="c5"><b>A shared LLM limit must reserve an estimate before the call and correct it after, in the same window.</b><span>Build a shared token limit per window, a cap on calls running at once, and one pause for all pods after a refusal.</span></li>
 </ol>
 
 <h2 data-kind="orientation">Which earlier ideas does this phase use, and where does Redis sit?</h2>
@@ -327,15 +327,25 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <p>Six ideas from earlier phases come back here. Each card explains one again in a few sentences, so you do not need to reopen the earlier lesson.</p>
 
 <div class="cards" data-cols="2">
-<div class="card"><h4>Persistence and replication lose recent writes</h4><p>Phase 4 showed that AOF is off by default. So a crash loses everything since the last RDB snapshot. Replication is asynchronous, so a failover can lose writes the old primary had acknowledged, including <code>XADD</code> entries.</p></div>
-<div class="card"><h4>Eviction removes keys under memory pressure</h4><p>Phase 5 showed that the default <code>maxmemory-policy</code> is <code>noeviction</code>. With <code>allkeys-lru</code>, Redis may remove any key, including keys that have no TTL.</p></div>
-<div class="card"><h4>Hash fields can expire one by one</h4><p>Phase 1 showed that <code>HEXPIRE</code> gives one hash field its own TTL. A small hash with field TTLs keeps a compact encoding. This phase uses field TTLs for agent memory.</p></div>
-<div class="card"><h4>A cache fill can return old or wrong data</h4><p>Phase 2 taught cache-aside with its miss path and fill path. It added delete-on-write and TTL jitter. A semantic cache keeps all of that and adds a new way to be wrong.</p></div>
-<div class="card"><h4>Claims, leases and idempotent writes</h4><p>Phase 3 claimed work with a lease, using <code>SET key owner NX PX ms</code>. It also showed that the resource must refuse a repeated effect. A paid tool call needs the same idea.</p></div>
+<div class="card"><h4>Persistence and replication lose recent writes</h4><p>Phase 4 showed that AOF, the log of every write, is off by default. So a crash loses everything since the last RDB snapshot, the file that holds all keys at one moment. Phase 3 used asynchronous replication, where the primary replies before any replica has the write. So a failover, a replica taking over from a failed primary, can lose acknowledged writes, including entries that <code>XADD</code> added to a stream.</p></div>
+<div class="card"><h4>Eviction removes keys under memory pressure</h4><p>Phase 5 showed the default <code>maxmemory-policy</code>, the rule for which keys Redis removes when memory is full. It is <code>noeviction</code>, which removes no key and refuses writes that need more memory. With <code>allkeys-lru</code>, Redis may remove any key, including keys that have no TTL.</p></div>
+<div class="card"><h4>Hash fields can expire one by one</h4><p>Phase 1 showed that <code>HEXPIRE</code> gives one hash field its own TTL. A small hash with field TTLs keeps a compact encoding, the form Redis picks to store a value in memory. This phase uses field TTLs for agent memory.</p></div>
+<div class="card"><h4>A cache fill can return old or wrong data</h4><p>Phase 2 taught cache-aside. On the miss path a reader finds nothing and reads the source, and on the fill path it writes what it found back into Redis. Phase 2 also used delete-on-write, which deletes the key on every write, and added TTL jitter, a random amount on each TTL so keys do not expire together. A cache that matches questions by meaning keeps all of that and adds a new way to be wrong.</p></div>
+<div class="card"><h4>Claims, leases and idempotent writes</h4><p>Phase 3 claimed work with a lease, a key that is yours until its TTL ends, using <code>SET key owner NX PX ms</code>. <code>NX</code> writes only if the key is absent, and <code>PX</code> sets the TTL in milliseconds. It also showed that the resource must refuse a repeated effect, which makes the write idempotent. A paid tool call needs the same idea.</p></div>
 <div class="card"><h4>Pub/sub keeps no copy</h4><p>Phase 6 showed that a pub/sub message reaches only the subscribers connected at that moment. A server that was away reads the gap from a log, never from pub/sub.</p></div>
 </div>
 
 <p>These ideas decide which of the six jobs can live only in Redis. Four jobs hold data you can rebuild. Two hold data that someone paid for, or that a user expects to see again.</p>
+
+<p>The six jobs, and the two tiers of the memory job, have names that the rest of this lesson uses. Each item says what the job holds and where you meet it in the platform.</p>
+<ul>
+<li>The answer cache and the embedding cache keep model answers and computed vectors, so a repeated question or text skips a paid call.</li>
+<li><dfn>Working memory</dfn> is what the agent holds for one active session, such as its goal, its plan and the latest tool results. The agent passes it to the model at each turn.</li>
+<li><dfn>Long-term memory</dfn> is the facts about a user that the agent keeps across sessions. The durable store holds the truth, and Redis holds an index to find them.</li>
+<li>A <dfn>token stream</dfn> is one model answer on its way to the web page, sent token by token while the model writes it.</li>
+<li>The limit counters count what all pods send to the model provider. The provider limits requests per minute, RPM, and tokens per minute, TPM. Above a limit it answers <dfn>429</dfn>, the HTTP status for too many requests.</li>
+<li>The <dfn>tool-call queue</dfn> holds the paid tool calls that the agent asked for, until a worker pod runs each one.</li>
+</ul>
 
 <figure class="diagram"><svg viewBox="0 0 720 300" role="img" aria-label="An API pod between the web page, the model provider, Redis and a durable store">
 <g fill="none" stroke="currentColor" stroke-width="1.5">
@@ -375,15 +385,15 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 <tr><td>Tool-call queue</td><td>a paid call is lost or runs twice</td><td class="bad">the call and its result</td></tr>
 </tbody></table>
 
-<p>Two published designs follow this split. <b>LangSmith Agent Server</b> keeps a worker wake-up list, cancel signals, the pub/sub stream of output and a retry counter in Redis. Its docs state that no user or run data is stored in Redis, and Postgres holds runs, threads, state and long-term memory. <b>Inngest</b> ran its queue of customer jobs on Valkey. When a Valkey cluster ran out of memory, the whole cluster went down, not only the tenant that filled it. After about two years of patches, Inngest is moving the queue state to FoundationDB.</p>
+<p>Two published designs follow this split. <b>LangSmith Agent Server</b> keeps a worker wake-up list, cancel signals, the pub/sub stream of output and a retry counter in Redis. Its docs state that no user or run data is stored in Redis, and Postgres holds runs, threads, state and long-term memory. <b>Inngest</b> ran its queue of customer jobs on Valkey, the open-source fork of Redis. When a Valkey cluster ran out of memory, the whole cluster went down, not only the tenant that filled it. After about two years of patches, Inngest is moving the queue state to FoundationDB.</p>
 
 <div class="callout warn"><p><b>Correction.</b> The phase cited the Inngest post "the queue is the easy part" for why the queue left Valkey. That URL is a post about fairness in a multi-tenant queue. The reasons for leaving Valkey are in "Our Migration to FoundationDB, Part 1".</p></div>
 
-<p>The common mistake with this split is one shared Redis with <code>allkeys-lru</code> for the cache and for working memory. Under memory pressure, Redis then evicts live sessions in the same way as stale cache entries. Put each class of data in its own instance, or give the memory keys TTLs and use <code>volatile-lru</code>. To check a Redis you own, run <code>redis-cli CONFIG GET maxmemory-policy appendonly</code>, and mark each job it holds against the table above.</p>
+<p>The common mistake with this split is one shared Redis with <code>allkeys-lru</code> for the cache and for working memory. Under memory pressure, Redis then evicts live sessions in the same way as stale cache entries. Put each class of data in its own instance, or give the memory keys TTLs and use <code>volatile-lru</code>, which evicts only keys with a TTL. To check a Redis you own, run <code>redis-cli CONFIG GET maxmemory-policy appendonly</code>, and mark each job it holds against the table above.</p>
 
 <details class="answer deeper"><summary>Go deeper: the durability defaults, and the two published designs in detail</summary>
 <ul>
-<li>AOF is off by default. With <code>appendfsync everysec</code>, a crash loses up to about 1 second of writes. With the default rules <code>save 3600 1 300 100 60 10000</code>, RDB alone can lose up to an hour of writes. These are the <code>redis.conf</code> values at 8.10.2.</li>
+<li>AOF is off by default. With <code>appendfsync everysec</code>, which writes the AOF to disk once a second, a crash loses up to about 1 second of writes. With the default rules <code>save 3600 1 300 100 60 10000</code>, RDB alone can lose up to an hour of writes. These are the <code>redis.conf</code> values at 8.10.2.</li>
 <li><code>maxmemory-policy</code> defaults to <code>noeviction</code>. With <code>allkeys-lru</code>, Redis evicts memory keys that have no TTL.</li>
 <li>Replication is asynchronous, so a failover can lose <code>XADD</code> writes as well as plain keys.</li>
 <li>LangSmith limits retries to 3 per run, with the counter in a Redis string that expires. Its output streams over pub/sub, and the next sections show why that is safe only because a durable copy lives elsewhere.</li>
@@ -397,7 +407,7 @@ details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;tex
 
 <p>The cheapest job to lose is the answer cache, and it is also the one that can return a wrong answer with no error. The next section starts there.</p>
 
-<h2 data-concept="c1">Why does an exact cache miss most questions, and what does a semantic cache return instead?</h2>
+<h2 data-concept="c1">Why does an exact cache miss most questions, and what does a cache that matches by meaning return?</h2>
 
 <p class="why">A cache hit skips a paid model call, and a wrong hit returns a confident wrong answer.</p>
 
@@ -450,7 +460,7 @@ any threshold &lt;= 0.775 accepts both; any threshold &gt; 0.866 rejects both</c
 <tr><td><code>ttl</code></td><td>None</td><td>entries never expire</td></tr>
 <tr><td>TTL on a hit</td><td>refreshed on every matched key</td><td>a hot entry never expires</td></tr>
 <tr><td>index</td><td>FLAT, COSINE</td><td>every lookup compares with every entry</td></tr>
-<tr><td>entry ID</td><td>SHA-256 of prompt and filter values</td><td>the model version is not part of the ID</td></tr>
+<tr><td>each cache entry's ID</td><td>SHA-256 of prompt and filter values</td><td>the model version is not part of the ID</td></tr>
 </tbody></table>
 
 <p>LangCache, Redis's managed semantic cache, defaults to a similarity threshold of 0.85 and no expiration. Its docs also say that no single value is correct for every use case.</p>
@@ -464,7 +474,7 @@ any threshold &lt;= 0.775 accepts both; any threshold &gt; 0.866 rejects both</c
 
 <h2 data-concept="c1">Why does a higher threshold not remove the wrong answers?</h2>
 
-<p>The lab showed one wrong question that scored higher than a right paraphrase. A published test with a real embedding model shows the same effect at scale. <b>AWS</b> ran 63,796 Chatbot Arena queries and their paraphrases through a semantic cache on ElastiCache for Valkey. Amazon Titan Text Embeddings V2 made the vectors, and Claude 3 Haiku wrote the answers. The cache started empty. For each threshold, the post reports an "accuracy", the share of hits whose stored answer fits the question. So the wrong share is 100% minus that accuracy.</p>
+<p>The lab showed one wrong question that scored higher than a right paraphrase. A published test with a real embedding model shows the same effect at scale. <b>AWS</b> ran 63,796 Chatbot Arena queries and their paraphrases through a semantic cache on ElastiCache for Valkey, the AWS service that runs Valkey for you. Amazon Titan Text Embeddings V2 made the vectors, and Claude 3 Haiku wrote the answers. The cache started empty. For each threshold, the post reports an "accuracy", the share of hits whose stored answer fits the question. So the wrong share is 100% minus that accuracy.</p>
 
 <div class="calc" id="s3-aws">
 <h4>The AWS test, one threshold at a time.</h4>
@@ -547,15 +557,19 @@ any threshold &lt;= 0.775 accepts both; any threshold &gt; 0.866 rejects both</c
 <p>Scope runs measured by the phase lab, and the 2 wrong hits at 0.90 come from the review run. langchain-redis <code>libs/redis/langchain_redis/cache.py</code>, lines 494 to 499. RedisVL <code>semantic.py</code> at v0.28.0, lines 44 to 50 for the warning and 198 to 211 for the schema check, re-opened for this review. The schema compares the vector dimension and type, not the model name, in <code>schema.py</code> lines 116 to 135. AWS "around 23 hours", vendor. Anthropic prompt caching page, lines 212 and 769.</p>
 </details>
 
-<p>Every semantic cache lookup is a nearest-neighbour search over stored vectors. The next concept asks what that search costs in memory, and what limits its accuracy.</p>
+<p>Every semantic cache lookup searches the stored vectors for the ones nearest to the question. The next concept asks what that search costs in memory, and what limits its accuracy.</p>
 
 <h2 data-concept="c2">How much memory does one stored vector really take?</h2>
 
-<p class="why">A vector index costs more than its vectors, and the graph decides by how much.</p>
+<p class="why">A stored vector costs more than its own bytes, and the graph decides by how much.</p>
 
-<p>The semantic cache, the platform's long-term memory and any RAG retrieval all run the same nearest-neighbour search. <dfn>RAG</dfn>, retrieval-augmented generation, adds documents found by that search to the prompt. Before the platform stores a million support articles as vectors, you have to size the Redis node, and the obvious sizing is wrong.</p>
+<p>The semantic cache, the platform's long-term memory and any RAG retrieval all run the same <dfn>nearest-neighbour search</dfn>. That search finds the stored vectors closest to a query vector. <dfn>RAG</dfn>, retrieval-augmented generation, adds documents found by that search to the prompt. Before the platform stores a million support articles as vectors, you have to size the Redis node, and the obvious sizing is wrong.</p>
 
-<p>Redis 8 has two vector engines. <dfn>Vector sets</dfn> are a data type, and one key holds the vectors and an HNSW graph. <dfn>HNSW</dfn>, Hierarchical Navigable Small World, is a layered graph that finds near neighbours by walking from node to node along links. Each node keeps up to 2 × M links to its neighbours at the lowest layer, and up to M at each higher layer. So M sets the size of the graph. The Query Engine instead indexes many hash or JSON keys with <code>FT.CREATE</code>, and adds filters, full text and automatic sharding across a cluster.</p>
+<p>A <dfn>vector index</dfn> is the structure that holds the stored vectors and answers this search. Redis 8 has two vector engines that build one.</p>
+
+<p><dfn>Vector sets</dfn> are a data type, and one key holds the vectors and their search graph. That graph is <dfn>HNSW</dfn>, Hierarchical Navigable Small World, a layered graph that finds near neighbours by walking from node to node along links. Each node keeps up to 2 × M links to its neighbours at the lowest layer, and up to M at each higher layer. So M sets the size of the graph.</p>
+
+<p>The <dfn>Query Engine</dfn>, the search module of Redis, instead indexes many hash or JSON keys with <code>FT.CREATE</code>. It adds filters, full text and automatic sharding across a cluster. Vector sets store each vector with <dfn>quantisation</dfn> by default, which keeps each number of the vector in fewer bits to save memory. Quantisation also lowers <dfn>recall</dfn>, the share of the true nearest vectors that a search returns, and the next section measures that.</p>
 
 <div class="tabs">
 <div data-tab="Vector sets: VADD / VSIM"><ul>
@@ -586,7 +600,7 @@ any threshold &lt;= 0.775 accepts both; any threshold &gt; 0.866 rejects both</c
 <li><code>VSIM</code> returns (cos + 1) / 2, not the cosine. Convert it back before you compare it with a cosine threshold.</li>
 </ul>
 
-<p>The lab <code>vectorsets</code> loaded 20,000 clustered synthetic vectors of 128 dimensions and divided <code>MEMORY USAGE</code> by the element count.</p>
+<p>The lab <code>vectorsets</code> loaded 20,000 clustered synthetic vectors of 128 dimensions and divided <code>MEMORY USAGE</code> by the element count. <code>MEMORY USAGE</code> gives the bytes Redis holds for one key.</p>
 
 <div class="stack">
 <h4>One Q8 element at 128 dimensions, M 16: 819 bytes.</h4>
@@ -640,7 +654,7 @@ any threshold &lt;= 0.775 accepts both; any threshold &gt; 0.866 rejects both</c
 
 <h2 data-concept="c2">What limits recall: the search or the rounding?</h2>
 
-<p>The last section sized the graph, and showed that Q8 saves less memory than the vector bytes suggest. The other cost of quantisation is recall. <dfn>Recall</dfn> is the share of the true nearest neighbours that a search returns. A recall@10 of 0.97 means 9.7 of the true top 10 on average. The lab found the true neighbours by a brute-force search in Go on the float32 originals. It ran 200 queries with k = 10 and three seeds.</p>
+<p>The last section sized the graph, and showed that Q8 saves less memory than the vector bytes suggest. The other cost of quantisation is recall. Recall is the share of the true nearest neighbours that a search returns. A recall@10 of 0.97 means 9.7 of the true top 10 on average. The lab found the true neighbours by a brute-force search in Go on the float32 originals. It ran 200 queries with k = 10 and three seeds.</p>
 
 <table>
 <thead><tr><th>Quantisation, 128 dims</th><th>bytes per element</th><th>recall@10</th></tr></thead>
@@ -751,7 +765,7 @@ HEXPIRE k 60 FIELDS 1 n ; HINCRBY k n 1                  # change, not overwrite
 <ol>
 <li>A small hash with field TTLs uses an encoding that <code>OBJECT ENCODING</code> reports as <code>listpackex</code>. It stores field, value and TTL together, ordered by TTL.</li>
 <li>Each database tracks such hashes by their next field expiry, so Redis can find due fields without scanning every hash.</li>
-<li>Active expiry removes up to 10,000 / hz fields per call, where <code>hz</code> is how many times per second Redis runs its background jobs. When expired fields pile up, that budget is multiplied by up to 32.</li>
+<li>Active expiry is the background job that deletes expired keys and fields. It removes up to 10,000 / hz fields per call, where <code>hz</code> is how many times per second Redis runs its background jobs. When expired fields pile up, that budget is multiplied by up to 32.</li>
 <li>The field TTL costs memory. On the lab build, a one-field hash took 37 bytes without a field TTL and 71 bytes with one. A ten-field hash took 153 and 277 bytes. So a field TTL costs about 24 bytes per hash plus about 10 bytes per field. That fit uses two points: 34 extra bytes for 1 field and 124 for 10 fields.</li>
 </ol>
 
@@ -778,7 +792,7 @@ HEXPIRE k 60 FIELDS 1 n ; HINCRBY k n 1                  # change, not overwrite
 <ul>
 <li>Valkey has <code>HEXPIRE</code>, <code>HSETEX</code> and <code>HGETEX</code> since 9.0.0. It converts a listpack hash to a hashtable as soon as a field gets a TTL, so small hashes with field TTLs cost more there. The extra memory on Valkey was not measured.</li>
 <li>The internal name of the encoding is <code>OBJ_ENCODING_LISTPACK_EX</code>, at <code>src/t_hash.c</code> line 1224 in 8.10.2.</li>
-<li>To find orphans, scan with a pattern that matches the hash-tagged key, such as <code>p7:wm:{acme:*</code>, and check <code>TTL</code> and <code>HTTL</code>. A pattern like <code>p7:wm:acme:*</code> does not match <code>p7:wm:{acme:s-42}</code>. Remove orphans with <code>UNLINK</code>.</li>
+<li>To find orphans, scan with a pattern that matches the hash-tagged key, such as <code>p7:wm:{acme:*</code>, and check <code>TTL</code> and <code>HTTL</code>. A pattern like <code>p7:wm:acme:*</code> does not match <code>p7:wm:{acme:s-42}</code>. Remove orphans with <code>UNLINK</code>, which frees their memory in the background.</li>
 <li>The Redis Agent Memory Server two-call write is at <code>working_memory.py</code> lines 648 to 652, from the course research. It was not re-opened for this lesson.</li>
 </ul>
 </details>
@@ -841,7 +855,7 @@ HEXPIRE k 60 FIELDS 1 n ; HINCRBY k n 1                  # change, not overwrite
 
 <p>An answer from the support agent streams for several seconds. In that time a phone changes networks, a browser tab sleeps, or a load balancer drops an idle connection. The API pod that runs the model is often not the pod that serves the viewer. So the tokens pass through Redis, and the question is which Redis feature carries them.</p>
 
-<p>Phase 6 showed that pub/sub keeps no copy of a message, so a server that was away cannot read what it missed. For tokens this means <dfn>at-most-once delivery</dfn>: each viewer gets each token once or never. Redis Streams give the other guarantee, because a stream keeps its entries and each entry has an ID. The entry ID is the reader's position, and a reader that reconnects calls <code>XREAD</code> with the last ID it saw to get the rest.</p>
+<p>Phase 6 showed that pub/sub keeps no copy of a message, so a server that was away cannot read what it missed. For tokens this means <dfn>at-most-once delivery</dfn>: each viewer gets each token once or never. Redis Streams give the other guarantee, because a stream keeps its entries and each entry has an ID. The <dfn>entry ID</dfn>, the ID that Redis gives an entry when it is added and that grows with time, is the reader's position. A reader that reconnects calls <code>XREAD</code> with the last ID it saw to get the rest.</p>
 
 <details class="predict"><summary>Predict: a phone loses signal for 4 seconds during an answer at 40 tokens per second. Viewer A reads tokens from pub/sub. Viewer B reads with <code>XREAD</code> from its last entry ID. How many tokens does each miss?</summary>
 <p>Viewer A misses about 4 × 40 = 160 tokens, and its text has a hole. Viewer B misses none, as long as the stream key still exists. Many people expect pub/sub to be fine because it is fast and the gap is short. Speed is not the problem: during the gap there is no subscriber, so Redis delivers those messages to nobody and keeps no copy.</p>
@@ -871,8 +885,8 @@ HEXPIRE k 60 FIELDS 1 n ; HINCRBY k n 1                  # change, not overwrite
 <li>Append each chunk with <code>XADD resp:{id} MAXLEN ~ 10000 * seq &lt;n&gt; t &lt;chunk&gt;</code>. <code>MAXLEN</code> guards against a runaway answer, and the TTL is the normal bound.</li>
 <li>Set <code>EXPIRE</code> at the first chunk and again at the end.</li>
 <li>Write a final entry <code>done 1</code>, and let readers stop there. Do not delete the stream as the "done" signal, because a slow reader may not have read the last chunk yet.</li>
-<li>Let each viewer use plain <code>XREAD</code> with its own last ID. A consumer group per viewer keeps a pending list that nobody needs.</li>
-<li>Send the entry ID as the SSE event ID. <dfn>SSE</dfn>, Server-Sent Events, is the HTTP streaming format that a browser resumes by sending a <code>Last-Event-ID</code> header. <code>XREAD</code> is already exclusive, but <code>XRANGE</code> is inclusive, so to resume with it start at <code>(&lt;last id&gt;</code>.</li>
+<li>Let each viewer use plain <code>XREAD</code> with its own last ID. Do not give each viewer a consumer group, the Redis feature that shares one stream among workers. A group keeps a pending entries list, the delivered entries not yet confirmed, and no viewer needs it.</li>
+<li>Send the entry ID as the event ID of <dfn>SSE</dfn>, Server-Sent Events, the HTTP streaming format that a browser resumes by sending a <code>Last-Event-ID</code> header. <code>XREAD</code> is already exclusive, but <code>XRANGE</code> is inclusive, so to resume with it start at <code>(&lt;last id&gt;</code>.</li>
 </ol>
 
 <p><b>Stardrift</b> shows why an answer needs its own stream, and why rule 4 exists. Its agent tasks ran for minutes, so users tabbed away and came back to an interrupted chat. The conversation appeared only after a refresh. The first version streamed each answer over one HTTP connection and saved it to a database at the same time. Its final design writes chunks to a Redis stream keyed by chat and message. A separate key maps the chat to its active message. Stardrift kept that status key because deleting the stream at the end would race the reader. The reader may not have read the final chunk when the stream is deleted. The post gives no latency or volume numbers.</p>
@@ -909,7 +923,7 @@ HEXPIRE k 60 FIELDS 1 n ; HINCRBY k n 1                  # change, not overwrite
 
 <p>A stream lets a token viewer resume, because the viewer keeps its own position. A queue of tool calls needs the opposite guarantee, that each call takes effect once, and Redis cannot give it alone. The support agent calls paid tools that issue a refund, send an email or query a paid API at $0.01 a call. The platform puts these calls on a stream with a consumer group, so any worker pod can run them.</p>
 
-<p>A <dfn>consumer group</dfn> gives each stream entry to one consumer, and keeps it in the group's PEL. The <dfn>PEL</dfn>, the pending entries list, holds the entries that were delivered and not yet acknowledged with <code>XACK</code>. If a worker crashes before <code>XACK</code>, another worker claims the entry with <code>XAUTOCLAIM</code> after a minimum idle time. So delivery is <dfn>at-least-once</dfn>: every entry runs, and some run twice. The worker must make the paid call idempotent, so that one call ID never pays twice. Phase 3 built the two parts this needs, a claim key written with <code>SET ... NX PX</code> and an idempotent effect that the resource refuses to repeat.</p>
+<p>A <dfn>consumer group</dfn> gives each stream entry to one consumer, and keeps it in the group's PEL. The <dfn>PEL</dfn>, the pending entries list, holds the entries that were delivered and not yet acknowledged with <code>XACK</code>. If a worker crashes before <code>XACK</code>, another worker claims the entry with <code>XAUTOCLAIM</code> after a minimum idle time. So delivery is <dfn>at-least-once</dfn>: every entry runs, and some run twice. The worker must make the paid call idempotent, so that one call ID never pays twice. Phase 3 built the two parts this needs, a claim key written with <code>SET ... NX PX</code> and an idempotent effect that the resource refuses to repeat. Here the <dfn>idempotency record</dfn> is the pair of keys kept for one call ID, the claim key <code>idem:call-1</code> and the stored result <code>result:call-1</code>.</p>
 
 <ol class="flow" data-dir="down">
 <li><b>worker A: XREADGROUP</b><span>call-1 is pending for A.</span></li>
@@ -979,9 +993,9 @@ HEXPIRE k 60 FIELDS 1 n ; HINCRBY k n 1                  # change, not overwrite
 
 <p class="why">Providers limit tokens per minute, so a request counter admits the wrong amount of work.</p>
 
-<p>The platform's pods share one provider account, and the provider limits each model. If the pods count requests, a few long prompts use the whole budget. Then every pod gets a <dfn>429</dfn>, the HTTP status for "too many requests". If the pods count too much per call, they refuse work the provider would accept.</p>
+<p>The platform's pods share one provider account, and the provider limits each model. If the pods count requests, a few long prompts use the whole budget. Then every pod gets a 429, the provider's answer that a limit was passed. If the pods count too much per call, they refuse work the provider would accept.</p>
 
-<p>Providers count tokens, not requests. Anthropic limits requests, input tokens and output tokens per minute with a token bucket. A <dfn>token bucket</dfn> is a counter that refills at a steady rate, so capacity returns continuously. OpenAI counts the larger of <code>max_tokens</code> and an estimate from the character count of the request, and failed requests also count against the limit. The real use of a call is known only after the answer ends. So a shared limiter has to reserve an estimate before the call and correct it to the real use after the call.</p>
+<p>Providers count tokens, not requests. Anthropic limits requests, input tokens and output tokens per minute with a <dfn>token bucket</dfn>, a counter that refills at a steady rate, so capacity returns continuously. OpenAI counts the larger of <code>max_tokens</code> and an estimate from the character count of the request, and failed requests also count against the limit. The real use of a call is known only after the answer ends. So a shared limiter has to reserve an estimate before the call and correct it to the real use after the call. In this lesson that limiter is the <dfn>token budget</dfn>, one shared counter of the tokens all pods may spend in a window.</p>
 
 <p><b>Airbnb</b> met the same problem in its key-value store. Its first rate limiter was a Redis counter per caller that returned 429 over quota, and every request cost the same. A one-row read counted the same as a scan of 100,000 rows, so the limit did not follow the real load on the backend. The new system gives each request a cost, which is the same move as counting tokens instead of calls.</p>
 
@@ -1063,12 +1077,12 @@ if a reserve returns applied == 0             -&gt; queue the call, or return 42
 </ol>
 <p>Each pod computes w from its own clock, so clock skew moves the window edge a little for each pod. That trade-off is inferred and was not measured.</p>
 
-<p>A fixed window has a second edge problem. It allows up to twice the limit across the boundary between two windows. The lab admitted 999 tokens at the end of a 2-second window and 1,000 at the start of the next. So 1,999 tokens passed in 147 to 152 ms, against a limit of 1,000 per 2 seconds. Anthropic's token bucket can refuse that burst even though your counter allowed it. So use a window shorter than the provider's, or the sliding window of Phase 1.</p>
+<p>A fixed window, a counter that starts again at each window boundary, has a second edge problem. It allows up to twice the limit across the boundary between two windows. The lab admitted 999 tokens at the end of a 2-second window and 1,000 at the start of the next. So 1,999 tokens passed in 147 to 152 ms, against a limit of 1,000 per 2 seconds. Anthropic's token bucket can refuse that burst even though your counter allowed it. So use a window shorter than the provider's, or the sliding window of Phase 1.</p>
 
 <details class="answer deeper"><summary>Go deeper: the source lines behind ENX, and a fixed-window limiter at Lyft</summary>
 <ul>
 <li><code>src/t_string.c</code> at 8.10.2, lines 1186 and 1187: if no expiration option is given, the key's existing TTL is kept, and <code>ENX</code> limits expiration updates to keys that have no TTL. Line 1300 implements it.</li>
-<li>Lyft's rate limit service for Envoy builds a key from a domain and descriptors and counts in Redis. Per-second limits can go to a separate Redis, and a pipeline window of 150 to 500 µs is suggested. An optional local cache keeps keys that are already over their limit, so those requests skip Redis. That it uses fixed-window counters with a TTL is inferred from its README.</li>
+<li>Lyft's rate limit service for Envoy builds a key from a domain and descriptors and counts in Redis. Per-second limits can go to a separate Redis, and a pipeline window of 150 to 500 µs is suggested. An optional local cache, kept in each server's own memory, holds keys that are already over their limit, so those requests skip Redis. That it uses fixed-window counters with a TTL is inferred from its README.</li>
 </ul>
 </details>
 
@@ -1080,7 +1094,7 @@ if a reserve returns applied == 0             -&gt; queue the call, or return 42
 
 <h2 data-concept="c5">How do pods cap calls in flight and share one 429?</h2>
 
-<p>The window budget now admits the right number of tokens each minute, even when corrections arrive late. Two more limits act on calls that are already running. A cap on calls in flight stops the pods from opening more calls than the provider allows at once. A shared pause stops every pod when one of them gets a 429.</p>
+<p>The window budget now admits the right number of tokens each minute, even when corrections arrive late. Two more limits act on calls that are already running. An <dfn>in-flight cap</dfn>, a limit on calls running at the same moment, stops pods from opening more calls than the provider allows. A shared pause stops every pod when one of them gets a 429.</p>
 
 <p>A <dfn>semaphore</dfn> is a counter of free slots. Here it is a sorted set of holder IDs, each scored by the time its lease ends, read from the Redis clock. The script removes expired leases before each acquire, so a holder that crashed without a release loses its slot when its lease ends. This is the lease idea of Phase 3, applied to N slots instead of one lock. The code is from <code>llmlimits/main.go:310</code>.</p>
 
@@ -1108,7 +1122,7 @@ return 1
 
 <p>Make the lease longer than a normal call, and renew it during the call. Phase 3 showed what happens to work that outlives its lease.</p>
 
-<p>When one pod gets a 429 with a <code>retry-after</code> header, every pod should pause, not only that one. Every pod checks a key <code>pause:{provider}:{model}</code> before a call. The pod that got the 429 sets it with <code>SET pause:{provider}:{model} 1 PX &lt;retry_after_ms&gt; NX</code>. In the lab, 5 pods sent a call every 100 ms while the provider refused calls for 1.5 seconds.</p>
+<p>When one pod gets a 429 with a <dfn>retry-after</dfn> header, every pod should pause, not only that one. That header says how long the provider asks you to wait. Every pod checks a key <code>pause:{provider}:{model}</code> before a call. The pod that got the 429 sets it with <code>SET pause:{provider}:{model} 1 PX &lt;retry_after_ms&gt; NX</code>. In the lab, 5 pods sent a call every 100 ms while the provider refused calls for 1.5 seconds.</p>
 
 <table>
 <thead><tr><th>Pause</th><th>429 responses</th><th>Successful calls</th></tr></thead>
@@ -1122,7 +1136,7 @@ return 1
 
 <p>A global semaphore alone lets a busy tenant take every slot. So the same script also checks a cap per tenant, which is why it loops over several keys. With 8 global slots and a cap of 6, the small tenant's average wait fell from as much as 640 ms to about 100 ms. In the running case, acme's batch job can no longer make globex's users wait.</p>
 
-<p>Decide what happens when Redis itself fails. For a provider limit, fail open with a small local limit per pod, because the provider still enforces its own limit. For a spend cap, fail closed, because nothing else stops the spending.</p>
+<p>Decide what happens when Redis itself fails. For a provider limit, fail open and let calls through with a small local limit per pod, because the provider still enforces its own limit. For a spend cap, fail closed and refuse calls, because nothing else stops the spending.</p>
 
 <div class="keypoints">
 <p class="remember">Reserve and correct per window key, lease the slots, and share each 429.</p>
@@ -1168,7 +1182,18 @@ return 1
 <li>Does this limiter admit what the provider would accept? Reserve an estimate and correct it on the same window key. Cap calls in flight with leases, and share each 429 through one pause key. Concept c5.</li>
 </ol>
 
-<p>This is the last phase of the Redis course, so no later phase follows it. As a next step, take one agent service you work on and run lab E1 to check each rule. Then trace each Redis call of that service against the five questions above.</p>
+<p>This is the last phase of the Redis course, so no later phase follows it. The eight phases form one line, in the order you read them.</p>
+<ol>
+<li>Phase 0, Why Redis: one Redis call has a real cost, and one tenant's mistake can stop every service on a shared cluster.</li>
+<li>Phase 1, Data structures: the right type reads, changes and writes a value for you in one command, and each type has its own cost in safety and memory.</li>
+<li>Phase 2, Caching patterns: a cache in front of a slow source breaks when it misses or fills. You stop that by controlling the miss path and the fill path.</li>
+<li>Phase 3, Distributed locking: a lock that passed every test can still let two workers act. So the store refuses a write with an older fencing token, the number that grows with each lock grant.</li>
+<li>Phase 4, Architecture and HA: a node that dies can lose acknowledged writes, and writes fail until the failover ends. A cluster sends each key to one node, chosen by a hash of the key's name.</li>
+<li>Phase 5, Performance and failures: when Redis is slow or out of memory, one command names the cause. You must also know what that command does not see.</li>
+<li>Phase 6, the review of Redis in production: every Redis call is judged by what it loses when something fails and by how long its client waits.</li>
+<li>Phase 7, this phase: the same two questions for an AI agent platform, where the data is probabilistic, long and paid per token.</li>
+</ol>
+<p>The question that runs through all eight phases is what this data costs if Redis loses it, and where its durable copy lives. As a next step, take one agent service you work on and run lab E1 to check each rule. Then trace each Redis call of that service against the five questions above.</p>
 
 <h2 data-kind="lab">Lab: eleven Go exercises on a throwaway Redis</h2>
 

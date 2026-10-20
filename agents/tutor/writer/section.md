@@ -119,6 +119,7 @@ An apparatus section has no `<p class="why">` lead and no key-point box:
 those belong to a concept section.
 
 - `recall`: the concept claims again, each in a sentence he can now read,
+  now with the terms the lesson taught,
   with the section that taught it. Then the hand-over: what he can do now,
   and the question the next phase answers. Nothing new is taught.
 - `lab`: the exercises exactly as his phase has them (ids, `Run:` commands,
@@ -129,16 +130,28 @@ those belong to a concept section.
 - `cheatsheet`: one `<pre class="cheatsheet">`, no prose.
 - `post`: two lines, each the claim and what makes it his.
 - `sources`: `<ul class="sources">`, one short line per url saying what it gave.
-- `orientation`: one `<div class="cards">`, a card per earlier idea it
-  builds on. The card's heading names the idea and its paragraph explains it
-  again in plain words, in two or three sentences. Under the cards, one
-  short paragraph says why this phase needs them. When the earlier ideas
-  happen in an order, draw that order as an `<ol class="flow">` as well.
+- `orientation`: the start of the chapter, before any concept.
+  - When its `introduces` lists basic terms, teach them in the order the
+    plan gives: the problem with one number, the idea, then each term in
+    `<dfn>` with what it is and where he meets it. Then the first try: the
+    commands or code in one `<pre><code data-lang="...">` with their real
+    output, shown as the tool prints it, a list that says what each one
+    shows, and a `<details class="evidence">` that says where the output
+    comes from. Real output comes from a run. When the lab was not run, use
+    the phase's expected output and say so in the evidence box. When the
+    basic terms are not commands, the first try is a worked example with
+    real values from his phase or the note.
+  - For the earlier ideas it builds on: one `<div class="cards">`, a card
+    per earlier idea. The card's heading names the idea and its paragraph explains
+    it again in plain words, in two or three sentences. Under the cards,
+    one short paragraph says why this phase needs them. When the earlier
+    ideas happen in an order, draw that order as an `<ol class="flow">`.
 
 ## What you return
 
 The section body as HTML and nothing else: no `<h2>` (it is added from the
 plan), no doctype, no `<head>`, no `<style>`, no markdown fences around it.
 Build it only from the kit pieces listed below, plus `<dfn>` for a term at
-its definition. Every id you use starts with the prefix you are given, so
+its definition. A label in a figure is read like a sentence: a term in it
+is defined at or before the figure. Every id you use starts with the prefix you are given, so
 ids stay unique across the page.

@@ -1,3 +1,5 @@
+Phase 1 taught you to pick a Redis type for each job, and to price that choice in round trips and memory. It ended on a question it did not answer. A value in Redis is often a copy of a database row, and Phase 1 did not say how that copy stays correct when the row changes, or what happens when many requests miss it at once. This lesson answers both with a new example.
+
 Your agent platform runs on 40 pods. Every agent run first reads its tenant's settings: the model, the tools the tenant allows, and its rate limits. The settings live in Postgres, and Redis sits in front of Postgres as a cache. Each cached key has a one-hour *TTL*, the time to live after which Redis deletes the key by itself.
 
 Together the pods read settings about 5,000 times per second. The *hit rate*, written h, is the share of reads that Redis answers. At h = 0.98 only about 100 reads per second reach Postgres, so Postgres was sized for that load. This lesson follows the settings cache through four failures, and each one is a real class of production incident. The agent platform is this lesson's own example, not the grading service of Phase 0. The real cases about "the platform" come from the shared platform of Phase 0.
@@ -10,21 +12,58 @@ Together the pods read settings about 5,000 times per second. The *hit rate*, wr
 
 - A broken client asks for tenants that do not exist, thousands of times per second.
 
-All four happen in the same two places of a cache that readers fill. On the *miss path*, a reader finds nothing and goes to the source. On the *fill path*, that reader writes what it found back into Redis.
+All four happen in the same two places of a cache that readers fill. In the first place a reader finds nothing and goes to the source, and in the second that reader writes what it found back into Redis. The first section below gives both places a name and shows them in four commands.
 
 ### What you must know
 
-- **The source serves only the misses. When caching stops, its load jumps 1/(1 − h) times, with no error.**Size the source for a cache outage, and make failing open cheap.
+- **The source serves only the misses. When caching stops, its load jumps 1/(1 − h) times, with no error.**Size the source for a cache outage, and make the fallback to the source cheap when Redis fails.
 
-- **Each reader that misses during a rebuild starts its own rebuild, so coalescing must span every process that reads.**Pick singleflight, a lease, routing by key or early refresh, and predict the source calls.
+- **Each reader that misses during a rebuild starts its own rebuild, so the readers must share one rebuild across every process that reads.**Pick a way to share one rebuild across 40 pods, and predict the source calls.
 
-- **Delete-on-write is not race-free. A slow reader can write the old value back after the delete.**Make a fill prove that nothing changed, with a lease and `SET IFEQ`.
+- **Deleting the cached key on every write is not race-free. A slow reader can write the old value back after the delete.**Give each fill a token that the delete removes, so a late fill is refused.
 
 - **A cached "not found" is a cache entry too. The create path must delete it, like any update.**Stop floods of missing IDs without hiding new rows.
 
 The cheatsheet tags these four ideas c1 to c4, in the order of this list.
 
-## What you bring from Phases 0 to 1
+## Three names for a cache that readers fill, and what you bring from Phases 0 to 1
+
+Postgres was sized for about 100 reads per second, and the 40 pods send 5,000. So Redis must answer about 4,900 of every 5,000 reads, and each failure in this lesson is a way that share drops or a copy goes wrong.
+
+A cache that readers fill works in three moves. A reader asks Redis first, and on a miss it reads Postgres and copies the answer into Redis with a TTL. When an admin changes the row, the old copy must go, or readers keep it until the TTL ends. This lesson uses one name for each move.
+
+- The *miss path* is the code a reader runs when Redis has no value for the key, so it reads the source instead. You meet it first in the section on how much load reaches Postgres.
+
+- The *fill path* is the code that writes what the reader found back into Redis, with a TTL. You meet it in the stampede sections, where many fills run at once, and in the race sections, where one fill lands late.
+
+- *Invalidation* is the removal of a cached value, or a mark that it is old, because the source changed. You meet it when an admin removes a tool from tenant 42.
+
+Four `redis-cli` commands show the three moves on the running case's key.
+
+```
+GET tenant:42:settings:v1
+(nil)
+SET tenant:42:settings:v1 v1 EX 3600
+OK
+TTL tenant:42:settings:v1
+(integer) 3600
+DEL tenant:42:settings:v1
+(integer) 1
+```
+
+- `GET` returns nil, so this reader is on the miss path and reads Postgres next.
+
+- `SET ... EX 3600` returns OK. This is the fill path, and the copy now lives for one hour.
+
+- `TTL` returns 3600, the seconds left before Redis deletes the copy by itself.
+
+- `DEL` returns 1 because it removed one key. This is invalidation, so the next `GET` misses and fills fresh data.
+
+**Evidence**
+
+The replies come from the study note's `redis-cli` run of the race in the invalidation sections, on the same local Redis 8.10.1 server as its other runs. That run used its own key, and the note records the replies as nil, OK, a TTL of 3600 and a DEL of 1. This page shows them in the usual `redis-cli` format, in a shorter order than the race. Exercise E10 in the lab runs the same `SET`, `DEL` and `GET` on a key of its own.
+
+Three ideas from Phases 0 and 1 also come back in this phase, and each card below explains one again.
 
 **One command thread, and the round trip**
 
@@ -86,11 +125,11 @@ Caching can stop for several reasons, and none of them looks like an error in th
 
 - A cache node restarts empty, or a new empty node replaces a failed one.
 
-- A new region or a fresh deploy starts with a cold cache.
+- A new region or a fresh deploy starts with a *cold cache*, a cache that holds no keys yet, so every first read misses.
 
 - Redis is down, and the client "fails open" by reading the source on every cache error.
 
-**Slack** saw the second reason as a wave of users who could not connect. An upgrade of the Consul agent restarted agents on a quarter of the fleet. Each restart removed a memcached node, and an empty spare node took its place. A miss on group DM membership became a query to every database shard. Slack wrote that the read load grew "superlinearly" with the share of misses. The queries timed out, so the cache could not be filled, and the overload continued. The first fix was a throttle on client boot. Then the query was changed to read only the missing data, and to read from replicas too. Later Slack added a table sharded by channel.
+**Slack** saw the second reason as a wave of users who could not connect. An upgrade of the Consul agent restarted agents on a quarter of the fleet. Each restart removed a node of memcached, the older in-memory cache that Slack runs in front of its databases, and an empty spare node took its place. A miss on group DM membership became a query to every database shard. Slack wrote that the read load grew "superlinearly" with the share of misses. The queries timed out, so the cache could not be filled, and the overload continued. The first fix was a throttle on client boot. Then the query was changed to read only the missing data, and to read from replicas, the read-only copies of each database, too. Later Slack added a table sharded by channel.
 
 **Evidence**
 
@@ -106,9 +145,9 @@ The same platform had two defensive patterns that show the right instinct. One r
 
 **Facebook** had a site outage of about 2.5 hours from a cache repair loop. A system replaced invalid cache values with values from the persistent store. Then it met an invalid value in the store itself. Every client that saw the value tried to repair it, and clients that got a database error deleted the cache key. The database cluster received "hundreds of thousands of queries a second". The fix was to stop all traffic to that cluster, which meant turning off the site, then to let users back slowly, and to turn off the repair system.
 
-**Stack Overflow** keeps an in-process L1 cache in front of Redis. A TTL bug stopped about 95% or more of keys from filling the local cache, by the author's estimate. So all those reads went to Redis. Nobody noticed for a few hours. This is the same silent bypass one layer up.
+**Stack Overflow** keeps a first-level cache, a copy in the memory of each application process, in front of Redis. A TTL bug stopped about 95% or more of keys from filling that cache, by the author's estimate. So all those reads went to Redis. Nobody noticed for a few hours. This is the same silent bypass one layer up.
 
-**Hotstar** shows the opposite cost. A read-through cache with a short TTL on its subscription API made p99 latency 20% worse. Free users far outnumbered paid users, and each call added a cache write. Caching only the IDs of paid users fixed it, because a miss could then mean "free user". The general point is inferred from this case: a cache that saves few source reads still adds a round trip and a write.
+**Hotstar** shows the opposite cost. A cache on its subscription API, with a short TTL and filled by a cache layer on every miss, made p99 latency 20% worse. Free users far outnumbered paid users, and each call added a cache write. Caching only the IDs of paid users fixed it, because a miss could then mean "free user". The general point is inferred from this case: a cache that saves few source reads still adds a round trip and a write.
 
 **Gutter** is how Facebook's memcache absorbs a failed server without the multiplier. A small pool of spare servers, the gutter pool, takes over the keys of a failed server for a short time. Facebook reported that gutter "converts 10%-25% of failures into hits each day".
 
@@ -130,21 +169,21 @@ The formula says the source must survive the misses. It does not yet say which p
 
 Cache-aside left the source carrying every miss, and it fills the cache only on reads. A cache design answers two separate questions. Who fills the cache on a miss? And what happens to the cache when someone writes to the source?
 
-The phase said there are "exactly three write policies", and then it defined four. They sit on two axes. Cache-aside and read-through are read strategies. Write-through and write-behind are write strategies, and a design picks one from each axis.
-
 On the read axis, the two strategies differ only in where the miss code lives.
 
 - **Cache-aside**: your application reads Redis, reads the source on a miss, and fills Redis.
 
-- **Read-through**: a cache library or a proxy does the source read on a miss, so your code calls only `cache.get(key)`. It is cache-aside with the miss code moved behind an interface, and it has the same failure modes.
+- ***Read-through***: a cache library or a proxy does the source read on a miss, so your code calls only `cache.get(key)`. It is cache-aside with the miss code moved behind an interface, and it has the same failure modes.
 
 On the write axis there are three choices, and each one decides what the cache can lose.
 
 - **Write-around with delete**: the writer updates only the source and then deletes the cache key. The next reader fills it again. This is the usual partner of cache-aside, and the invalidation sections below look at it closely.
 
-- **Write-through**: the writer updates the source and the cache in the same request, before it returns. Every write pays the cache's latency, and you must decide what to do when the cache write fails.
+- ***Write-through***: the writer updates the source and the cache in the same request, before it returns. Every write pays the cache's latency, and you must decide what to do when the cache write fails.
 
-- **Write-behind**, also called write-back: the writer updates the cache now and queues the source write for a background flush, often in batches. Writes are fast and absorb bursts. But a crash before the flush loses those writes.
+- ***Write-behind***, also called write-back: the writer updates the cache now and queues the source write for a background flush, often in batches. Writes are fast and absorb bursts. But a crash before the flush loses those writes.
+
+The phase said there are "exactly three write policies", and then it defined four. They sit on two axes. Cache-aside and read-through are read strategies. Write-through and write-behind are write strategies, and a design picks one from each axis.
 
 | | Cache-aside, delete on write | Write-through | Write-behind |
 |---|---|---|---|
@@ -168,9 +207,9 @@ Exercise E9 shows the trade in numbers. Five write-through writes take about 269
 
 The second lab folder, `phase02_caching_patterns/write_behind`, keeps its queue in a Redis list. Its flusher takes an event with `LPOP` and then writes it to the source, at line 172. A crash between those two steps loses the event, so delivery is at most once. The program also prints "batched by flusher" at line 141, although it writes one row at a time.
 
-An at-least-once flush keeps the event until the write succeeds. One way is `LMOVE` from the queue to a processing list, then a delete from the processing list after the source write. A restart then finds unfinished events in the processing list. Another way is a Redis Stream with a consumer group, where the flusher sends `XACK` only after the source write. Phase 1 taught both lists and Streams. At least once means the source may see an event twice, so the source write must be idempotent.
+An at-least-once flush, one that may repeat an event but never loses it, keeps the event until the write succeeds. One way is `LMOVE` from the queue to a processing list, a second list that holds the events in progress, then a delete from the processing list after the source write. A restart then finds unfinished events in the processing list. Another way is a Redis Stream, the append-only log type, with a consumer group. Each entry then stays pending until a reader confirms it with `XACK`, and the flusher sends `XACK` only after the source write. Phase 1 taught both lists and Streams. At least once means the source may see an event twice, so the source write must be idempotent.
 
-The queue also lives only as long as Redis keeps it. The lab's `docker-compose.yml` starts Redis with `--appendonly no` and `--save ""`, so persistence is off. A Redis restart then empties the queue, and every write in it is lost. A write-behind queue in Redis needs persistence that matches the loss you can accept. Phase 4 covers persistence and failover.
+The queue also lives only as long as Redis keeps it. The lab's `docker-compose.yml` starts Redis with `--appendonly no` and `--save ""`, so persistence is off. A Redis restart then empties the queue, and every write in it is lost. A write-behind queue in Redis needs persistence that matches the loss you can accept. Phase 4 covers persistence and failover, the promotion of a replica when the primary dies.
 
 A safer pattern for "write to the database and also tell another system" is the outbox. The writer stores the event in a database table in the same transaction as the data, and a relay publishes it later. The elite-storage course teaches the outbox in its transactions phase.
 
@@ -186,9 +225,9 @@ Cache-aside is the right default for settings. The toy version of it fails the r
 
 The toy cache-aside read is three lines: `GET`, and on nil read the source and `SET`. In production it breaks in three ways. Redis can be down, a cached value can be corrupt, and the value format can change between deploys. The lab program `phase02_caching/cache_aside/main.go` handles all three with five properties.
 
-- **A versioned key.** The key is `course:v1:<id>`. When the shape of the cached value changes, you change `v1` to `v2`. New code never reads the old keys, and their TTL removes them. You need no migration, and old bytes cannot crash new code.
+- **A version in the key name.** A *versioned key* carries a version part in its name, and here the key is `course:v1:<id>`. When the shape of the cached value changes, you change `v1` to `v2`. New code never reads the old keys, and their TTL removes them. You need no migration, and old bytes cannot crash new code.
 
-- **Fail open on a cache error.** If `GET` returns an error that is not `redis.Nil`, the code logs a warning and reads the source. A Redis outage makes the request slower, but the request still succeeds.
+- **Read the source on a cache error.** To *fail open* means to treat a cache error like a miss and read the source. If `GET` returns an error that is not `redis.Nil`, the code logs a warning and reads the source. A Redis outage makes the request slower, but the request still succeeds.
 
 - **Tolerate corruption.** If the cached bytes do not unmarshal, because of format drift, a partial write or a bad value, the code reads the source. The next fill replaces the bad value.
 
@@ -229,7 +268,7 @@ if b, e := json.Marshal(c); e == nil {
 
 Returning the cache's error to the caller is the trap here. A Redis blip then becomes a user-facing 500, and the cache has made the service less available than having no cache. Failing open fixes that, but it does not make an outage harmless. It has two costs, and the first one is the multiplier from the first section. During the outage every read reaches Postgres, so Postgres sees 5,000 reads per second instead of 100.
 
-The second cost is time. A client that fails open first waits for its read timeout, and it may retry. If Redis is hung, for example paused or stuck in a long command, each request waits for those timeouts before it falls back. One `GET` against a paused Redis took these times with go-redis v9.5.1, the version the labs pin.
+The second cost is time. A client that fails open first waits for its read timeout, which go-redis sets with the option *ReadTimeout*. Then it may retry, up to the number of times in the option *MaxRetries*. If Redis is hung, for example paused or stuck in a long command, each request waits for those timeouts before it falls back. One `GET` against a paused Redis took these times with go-redis v9.5.1, the version the labs pin.
 
 | Client options | Time until the GET fails |
 |---|---|
@@ -244,11 +283,11 @@ The current go-redis release defaults `ReadTimeout` to 5 s and keeps `MaxRetries
 
 - No retry on a cache read, or at most one, because the source is the fallback.
 
-- A circuit breaker per Redis node, which stops calling a failing node for a while and goes straight to the source. Uber uses a sliding-window breaker per node.
+- A *circuit breaker* per Redis node, which stops calling a failing node for a while and goes straight to the source. Uber uses a sliding-window breaker per node.
 
 - A limit on how many misses may reach the source at once. Requests above the limit wait or get a fast error, so the source keeps serving the rest.
 
-Some caches must fail closed instead. A rate limiter keeps its counters in Redis, so Redis is the source of truth and there is nothing to fall back to. If it fails open, every tenant runs with no limit during the outage. Fail closed when the cache holds a decision that is unsafe to skip. You then accept that the feature stops whenever Redis is down.
+Some caches must *fail closed* instead, which means the request fails when Redis fails. A rate limiter keeps its counters in Redis, so Redis is the source of truth and there is nothing to fall back to. If it fails open, every tenant runs with no limit during the outage. Fail closed when the cache holds a decision that is unsafe to skip. You then accept that the feature stops whenever Redis is down.
 
 The source must survive every miss, and an outage turns every read into one.
 
@@ -266,9 +305,9 @@ The lab's `cache_aside` program passes `ReadTimeout: time.Second` when it create
 
 **Key versions in practice.** Exercise E11 writes a `v1` and a `v2` key and lists both with `KEYS`. Use `KEYS` only on a sandbox, because it scans the whole keyspace on the one command thread and blocks every other client. A version bump also causes a cold start for that key family. Every key misses once after the deploy, so the multiplier from the first section applies to that family. Roll a bump out to a share of pods first if the family is hot. That rollout advice is inferred from the multiplier, not from a measured case.
 
-**A TTL on every key.** A key with no TTL stays until something deletes it. On the platform, keys with no TTL filled a shared cluster to 100% of memory, and a shared upload service was down for 4 hours 37 minutes. That figure is from the platform and not checked. **Pendo** published the same failure. Two code paths created cache keys with no expiry, so Redis ran near its memory limit and evicted keys. CPU spikes then caused slow replies and connection failures, with an error rate near 60% for 90 minutes on its guides service. They flushed all Redis instances, then fixed the two code paths. `TTL key` returns -1 for a key with no expiry and -2 for a key that does not exist. `SET k v KEEPTTL` changes the value and keeps the current expiry. Phase 5 covers eviction.
+**A TTL on every key.** A key with no TTL stays until something deletes it. On the platform, keys with no TTL filled a shared cluster to 100% of memory, and a shared upload service was down for 4 hours 37 minutes. That figure is from the platform and not checked. **Pendo** published the same failure. Two code paths created cache keys with no expiry, so Redis ran near its memory limit and evicted keys, which means it deleted keys to make room. CPU spikes then caused slow replies and connection failures, with an error rate near 60% for 90 minutes on its guides service. They flushed all Redis instances, then fixed the two code paths. `TTL key` returns -1 for a key with no expiry and -2 for a key that does not exist. `SET k v KEEPTTL` changes the value and keeps the current expiry. Phase 5 covers eviction.
 
-**A TTL per hash field.** A tenant's settings can be one hash with one field per setting. Since Redis 7.4.0, `HEXPIRE` gives each field its own TTL. Since Redis 8.0.0, `HGETEX` and `HSETEX` read or write a field and set its TTL in one command. Valkey added `HEXPIRE` in 9.0.0.
+**A TTL per hash field.** A tenant's settings can be one hash with one field per setting. Since Redis 7.4.0, `HEXPIRE` gives each field its own TTL. Since Redis 8.0.0, `HGETEX` and `HSETEX` read or write a field and set its TTL in one command. Valkey, the open-source fork of Redis, added `HEXPIRE` in 9.0.0.
 
 **Measuring the hit rate.** `INFO stats` reports `keyspace_hits` and `keyspace_misses`, and E12 computes hits / (hits + misses). Those counters cover every read on the server, including lock reads and reads by other services. So the server number can hide one cache whose hit rate fell. Keep a hit counter and a miss counter for each cache in your application. That advice is inferred, not taken from a measured case.
 
@@ -292,11 +331,11 @@ Timing table: measured by the study note on 2026-10-18, one Mac, an x86_64 Homeb
 
 So far the misses were spread over many keys. One key that every request reads behaves differently when it expires, and the next section shows how.
 
-## What happens when a hot key expires?
+## What happens when a key that every request reads expires?
 
 The first concept treated misses as spread over many keys. A *hot key* is one key that a large share of requests read, so its misses arrive together. In the running case it is `agent:config:v1`, the routing table that every agent run reads. It gets all 5,000 reads per second, and rebuilding it takes a 200 ms query that joins several tables.
 
-A *cache stampede*, also called a thundering herd, starts when a hot key is missing. Every request that arrives before the first rebuild finishes also misses, and each one starts its own rebuild. They all do the same expensive work to get the same answer. Go's *singleflight* package is the common first fix. It merges concurrent calls that use the same key inside one process. Only the first caller runs the rebuild, and the others wait for its result.
+A *cache stampede*, also called a *thundering herd*, starts when a hot key is missing. This lesson uses the name cache stampede, or stampede for short. Every request that arrives before the first rebuild finishes also misses, and each one starts its own rebuild. They all do the same expensive work to get the same answer. The fix is *request coalescing*, which makes concurrent requests for the same key share one rebuild. Go's *singleflight* package is the common first tool for it. It merges concurrent calls that use the same key inside one process. Only the first caller runs the rebuild, and the others wait for its result.
 
 **Predict: all 40 pods wrap the rebuild in singleflight. The key gets 5,000 reads per second, and the rebuild takes 200 ms. How many Postgres queries run when the key expires?**
 
@@ -335,7 +374,7 @@ Postgres queries for one expiry of `agent:config:v1`, from the arithmetic above.
 
 Exercises E3 and E4 show the single-process result. 200 concurrent misses make 200 source calls without singleflight and 1 with it, and 1,000 misses still make 1. One process is the easy case, and 40 pods make 40 calls. The cross-pod version is the subject of the next section.
 
-The strongest public number comes from **Facebook**'s memcache fleet. For a set of keys that were "particularly susceptible to thundering herds", measured over one week, the peak database query rate was 17K/s without leases. With leases, a shared marker that the next section explains, it was 1.3K/s.
+The strongest public number comes from **Facebook**'s memcache fleet. For a set of keys that were "particularly susceptible to thundering herds", that is, to cache stampedes, measured over one week, the peak database query rate was 17K/s without the fix that Facebook calls a *lease*. A lease is a short-lived token that the cache gives to one reader that missed, so only that reader fills the key. With leases the peak was 1.3K/s, and the next section shows how a lease works.
 
 **Evidence**
 
@@ -351,7 +390,7 @@ singleflight: `golang.org/x/sync` v0.22.0, `singleflight/singleflight.go`, lines
 
 **Errors are shared too.** Every waiting caller receives the winner's error. If the rebuild times out, all of them fail together. `DoChan` returns a channel, so a caller can stop waiting at its own deadline. `Forget` removes a key from the map, so the next caller starts a fresh call instead of joining a stuck one.
 
-**A platform with no stampede protection.** On the platform, the Redis path had no request coalescing, no lock around cache fills, no early refresh and no TTL jitter. Every TTL was a fixed constant. The only coalescing was in in-process loading caches, such as Guava's `LoadingCache`, which merge concurrent loads inside one JVM. So the shared Redis caches for settings and for the hot endpoint were exposed to exactly this stampede. It also explains why the bypass flag multiplied load at once. With no coalescing, every concurrent request went straight to the source. These findings come from a code review of that platform and are not checked here.
+**A platform with no stampede protection.** On the platform, the Redis path had no request coalescing, no lock around cache fills, no refresh before expiry and no random spread of TTLs. Every TTL was a fixed constant. The only coalescing was in local loading caches, such as Guava's `LoadingCache`, which merge concurrent loads inside one JVM. So the shared Redis caches for settings and for the hot endpoint were exposed to exactly this stampede. It also explains why the bypass flag multiplied load at once. With no coalescing, every concurrent request went straight to the source. These findings come from a code review of that platform and are not checked here.
 
 **Hot keys at larger scale.** When one key's reads are too many for one Redis node, coalescing is not enough. The fixes are a local copy of the value in each process, or several copies of the key on different nodes. Phase 5 covers hot keys.
 
@@ -371,13 +410,13 @@ The cache keeps the old value while one caller rebuilds it. Memcache can return 
 
 **Route by key**
 
-Every request for one key goes to the same process, so in-process coalescing works for the whole fleet. **Discord** built data services in Rust that coalesce requests, and routes requests by channel ID with consistent hashing. So one instance coalesces each channel.
+Every request for one key goes to the same process, so coalescing inside one process works for the whole fleet. **Discord** built data services in Rust that coalesce requests, and routes requests by channel ID with consistent hashing. So one instance coalesces each channel.
 
 **Refresh before expiry**
 
-Each reader may refresh the key a little before its TTL ends, with a chance that rises as expiry gets closer. One reader refreshes early while the key is still valid for everyone else. This is called XFetch, or probabilistic early expiry.
+With an *early refresh*, each reader may refresh the key a little before its TTL ends, with a chance that rises as expiry gets closer. One reader refreshes early while the key is still valid for everyone else. The best-known rule for that chance is called *XFetch*, or probabilistic early expiry.
 
-In Redis the lease uses the command from Phase 1. The reader that misses runs `SET agent:config:v1:lease <random> NX PX 5000`. If it gets OK, it rebuilds the key. Then it deletes the lease only if the lease still holds its own token. A plain `DEL` could remove a newer lease that another pod took after this one expired. Phase 3 teaches this safe release. If it gets nil, another pod is already rebuilding. The pod that lost either waits a short time and reads again, or it serves an old copy. The Redis blog post "Caches, Promises and Locks" builds the waiting with Pub/Sub. The winner publishes when the value is ready, so waiting pods do not poll. The lease's `PX 5000` limits the damage if the winner dies, because the lease expires and another reader can try.
+In Redis the lease uses the command from Phase 1. The reader that misses runs `SET agent:config:v1:lease <random> NX PX 5000`. If it gets OK, it rebuilds the key. Then it deletes the lease only if the lease still holds its own token. A plain `DEL` could remove a newer lease that another pod took after this one expired. Phase 3 teaches this safe release. If it gets nil, another pod is already rebuilding. The pod that lost either waits a short time and reads again, or it serves an old copy. The Redis blog post "Caches, Promises and Locks" builds the waiting with *pub/sub*, the Redis feature where a client publishes a message to a channel and every client subscribed to that channel receives it. The winner publishes when the value is ready, so waiting pods do not poll. The lease's `PX 5000` limits the damage if the winner dies, because the lease expires and another reader can try.
 
 The phase said XFetch means "there's never a moment where the key is absent". That holds only for a key that is read often near its expiry. A cold key still expires before anyone refreshes it. A simulation of the XFetch rule used a 0.1 s rebuild and a 60 s TTL. At 0.5 requests per second, 94.5% of cycles still had a hard miss.
 
@@ -435,7 +474,7 @@ Coalescing handles one hot key. It does not help when thousands of different key
 
 A lease coalesces the rebuilds of one key. A deploy can cause a different stampede, made of many keys that each miss once at the same moment. In the running case, a deploy job warms the settings of all 50,000 tenants, each key with a flat `EX 3600`. For 59 minutes everything is fine. In minute 60 all 50,000 keys expire within the same second or two, and the next read of each one misses.
 
-That is a spike of up to 50,000 Postgres reads in a few seconds, against a source sized for about 100 per second. The deploy set the timer, so the spike repeats one TTL after every deploy. A canary or a staging test rarely shows it, because few keys are warmed there and the test seldom runs for a full TTL. *TTL jitter* is the fix. Each key gets the base TTL plus or minus a random amount, so the expiries spread over a window.
+That is a spike of up to 50,000 Postgres reads in a few seconds, against a source sized for about 100 per second. The deploy set the timer, so the spike repeats one TTL after every deploy. A canary or a staging test rarely shows it, because few keys are warmed there and the test seldom runs for a full TTL. The fix is *TTL jitter*, a random part added to each key's TTL. Each key gets the base TTL plus or minus a random amount, so the expiries spread over a window.
 
 ```go
 // base 3600 s, jitter 300 s: each key expires between 3300 s and 3900 s.
@@ -471,7 +510,7 @@ Redis removes expired keys in two ways. *Lazy expiry* deletes a key when a comma
 
 - It repeats while more than 10% of the sampled keys were already expired, so a mass expiry keeps it looping.
 
-- The slow cycle may use up to 25% of CPU per tick, which is 25 ms at the default `hz 10`. A fast cycle of up to 1 ms can also run before the event loop waits for input, at most once every 2 ms.
+- The slow cycle may use up to 25% of CPU per tick, which is 25 ms at the default `hz 10`. A fast cycle of up to 1 ms can also run each time the event loop, the loop in which the main thread serves clients, is about to wait for input. It runs at most once every 2 ms.
 
 - Each delete of a large value runs on the main thread when `lazyfree-lazy-expire` is `no`, the Redis default. So a mass expiry of large values adds latency to every client.
 
@@ -479,9 +518,9 @@ The Redis latency documentation lists many keys expiring in the same second as o
 
 `active-expire-effort` goes from 1 to 10, and the default is 1. Each step adds 25% more keys per loop and 25% more fast-cycle time, adds about 2% CPU, and lowers the stale target by 1%. Raise it only if `INFO` shows many expired keys still in memory.
 
-Valkey 9.1.2 sets all `lazyfree-lazy-*` options to `yes` by default, so its deletes of large values run in a background thread. Redis 8.10.2 sets them to `no`. Asynchronous free happens only when a value's free effort is above 64. For a set, sorted set or hash in its large encoding, the effort is its element count. For a list, it is the number of internal list nodes. A small value in a compact encoding counts as 1, so Redis always frees it at once. If you run Redis and cache large hashes or lists, set `lazyfree-lazy-expire yes`.
+Valkey 9.1.2 sets all `lazyfree-lazy-*` options to `yes` by default, so its deletes of large values run in a background thread. Redis 8.10.2 sets them to `no`. Asynchronous free happens only when a value's free effort is above 64. For a set, sorted set or hash in its large encoding, the internal layout that Redis picks by size, the effort is its element count. For a list, it is the number of internal list nodes. A small value in a compact encoding counts as 1, so Redis always frees it at once. If you run Redis and cache large hashes or lists, set `lazyfree-lazy-expire yes`.
 
-A key can stay in memory after its TTL until a lookup or a sample finds it. On a replica, an expired key looks missing to readers but still holds its memory until the primary sends the delete. So `DBSIZE` and memory can lag behind the TTLs you set.
+A key can stay in memory after its TTL until a lookup or a sample finds it. On a replica, an expired key looks missing to readers but still holds its memory until the primary, the node that takes the writes, sends the delete. So `DBSIZE` and memory can lag behind the TTLs you set.
 
 Jitter has a price too. Some keys now live up to one jitter period longer, so the longest stale window grows by that amount. With a base of 3,600 s and a jitter of 300 s, a missed delete can leave a value stale for up to 3,900 s.
 
@@ -493,7 +532,7 @@ E5 and E6: study note runs on the same x86_64 build under Rosetta 2. E6 used `EX
 
 Both stampede problems are about many fills at once. The next concept is about one fill that arrives too late, and it breaks the rule that the phase called race-free.
 
-## Is delete-on-write race-free?
+## Is deleting the key on every write race-free?
 
 The stampede sections counted fills that arrive together. Here the problem is a single late fill. In the running case an admin removes the `web_search` tool from tenant 42. The settings service updates Postgres, and then it deletes `tenant:42:settings:v1` so that the next read fills fresh data.
 
@@ -530,13 +569,13 @@ Step 4: the writer deletes the key, and DEL returns 0 because the key is absent.
 
 Step 5: the reader writes the old row, so Redis serves it for the next hour.
 
-The order of events from the stale-set race. Steps are not to scale.
+The order of events in the race between a late fill and a delete. Steps are not to scale.
 
-The phase said delete-on-write is "cheaper and race-free" and that "the next read always pulls the current source truth". It is cheaper, and it removes the race between two writers. It does not remove the race between a reader's fill and a writer's delete. This holds for every Redis and Valkey version. The fix in the next section needs Redis 8.4.0 or later, Valkey 8.1.0 or later, or a Lua script.
+The phase said delete-on-write is "cheaper and race-free" and that "the next read always pulls the current source truth". It is cheaper, and it removes the race between two writers. It does not remove the race between a reader's fill and a writer's delete. This holds for every Redis and Valkey version. The fix in the next section needs Redis 8.4.0 or later, Valkey 8.1.0 or later, or a Lua script, a small program that Redis runs as one atomic step.
 
 The cost in production is a wrong value for a full TTL, with no error anywhere. With a one-hour TTL, that is up to one hour of a wrong price, permission or setting. For an agent platform the removed tool keeps running, which is a security problem and not only a freshness problem. The race needs a reader whose fill is slow. So it is rare on a quiet key, and more common on a key that is busy and changes often.
 
-**Uber** met this race in CacheFront, the Redis cache inside its Docstore database layer. Fills on the read path and invalidations from change data capture, a stream of row changes read from the MySQL binlog, both write the cache. The team wrote that "it is possible that we inadvertently write a stale row to the cache, overwriting the newest value". Their fix is a Lua script that writes a row into the cache only if its timestamp is newer than the cached one. Shadow reads, which compare a share of cached reads with the database, measured 99.99% consistency.
+**Uber** met this race in CacheFront, the Redis cache inside its Docstore database layer. Fills on the read path and invalidations from *change data capture*, a stream of row changes read from the MySQL binlog, both write the cache. The team wrote that "it is possible that we inadvertently write a stale row to the cache, overwriting the newest value". Their fix is a Lua script that writes a row into the cache only if its timestamp is newer than the cached one. Shadow reads, which compare a share of cached reads with the database, measured 99.99% consistency.
 
 **Evidence**
 
@@ -564,9 +603,9 @@ Deleting at the right time is not enough, because the reader's fill comes later.
 
 ## How does a fill prove that nothing changed since its miss?
 
-The race needs two things: a read of the source that started before the write, and a fill that lands after the delete. So the fix is a *conditional fill*, a cache write that succeeds only if no invalidation happened since the reader's miss. Facebook's memcache does this with a *lease*, "a 64-bit token bound to the specific key". A delete of the key cancels the token, and a fill that carries a cancelled token is refused.
+The race needs two things: a read of the source that started before the write, and a fill that lands after the delete. So the fix is a *conditional fill*, a cache write that succeeds only if no invalidation happened since the reader's miss. Facebook's memcache does this with the lease from the stampede sections, the token that only one reader gets. The paper describes it as "a 64-bit token bound to the specific key". A delete of the key cancels the token, and a fill that carries a cancelled token is refused.
 
-Redis can do the same with two plain commands since version 8.4.0. `SET` there has an `IFEQ` option, which sets the key "only if its current value is equal to ifeq-value". If the key does not exist, `SET ... IFEQ` does not create it. The lease then takes three steps.
+Redis can do the same with two plain commands since version 8.4.0. `SET` there has an *`IFEQ`* option, which sets the key "only if its current value is equal to ifeq-value". If the key does not exist, `SET ... IFEQ` does not create it. The lease then takes three steps.
 
 - **The reader claims the fill.** On a miss it runs `SET tenant:42:settings:v1 lease:<random> NX PX 5000`. OK means this reader may fill. Nil means another reader holds the lease, so this one waits briefly or reads Postgres without filling.
 
@@ -611,8 +650,8 @@ Lease: "Scaling Memcache at Facebook", NSDI 2013, section 3.2.1, which also says
 
 | Layer | TTL | Kind |
 |---|---|---|
-| in-process map in the owning service | 5 min | in-process |
-| in-process loading cache in another service | 10 min | in-process |
+| local map in the owning service | 5 min | process memory |
+| local loading cache in another service | 10 min | process memory |
 | serverless consumer's own copy | 10 min | Redis, TTL only |
 | shared client library | 1 hour | Redis, with delete |
 | shared cluster default | 30 min to 1 hour | Redis, TTL only |
@@ -633,15 +672,15 @@ Valkey: `src/commands/set.json` at tag 9.1.2, and the Valkey docs for `SET` and 
 
 The lease fixes the race for fills that go through Redis. Two other channels also tell caches about changes, and each one has the same race or a weaker promise.
 
-## Do client-side caching and keyspace notifications avoid the race?
+## Do the two ways Redis tells clients about changes avoid the race?
 
-The lease protects fills that go through Redis. Many services also keep a second copy in process memory, and they need a way to learn that the Redis copy changed. Redis offers two channels for that, and neither one removes this kind of race.
+The lease protects fills that go through Redis. Many services also keep a second copy in a *local cache*, a cache in the memory of their own process, and they need a way to learn that the Redis copy changed. Redis offers two channels for that, and neither one removes this kind of race.
 
-*Client-side caching* in Redis, turned on with `CLIENT TRACKING`, lets a client keep values in its own memory. Redis remembers which keys each client read, and it sends that client an invalidation message when one of those keys changes. When the client uses one connection for data and a second one for invalidation messages, the two can arrive out of order. The invalidation for a key can arrive before the reply that carries the old value. The client then stores the old value after it already threw away the invalidation.
+*Client-side caching* in Redis, turned on with the *`CLIENT TRACKING`* command, lets a client keep values in its own memory. Redis remembers which keys each client read, and it sends that client an invalidation message when one of those keys changes. When the client uses one connection for data and a second one for invalidation messages, the two can arrive out of order. The invalidation for a key can arrive before the reply that carries the old value. The client then stores the old value after it already threw away the invalidation.
 
 The Redis documentation fixes this with a placeholder, which is the lease idea again. Before it sends the read, the client sets "the local copy of 'foo' to 'caching-in-progress'". If an invalidation arrives, it removes the placeholder. When the reply arrives, the client stores the value only if the placeholder is still there.
 
-*Keyspace notifications* are Pub/Sub messages that Redis publishes when keys change or expire. The documentation calls Pub/Sub "fire and forget", so a subscriber that is disconnected for one second loses that second's messages. It also gives "no guarantees" that an `expired` event fires when the TTL reaches zero. The event fires when Redis actually deletes the key, which can be later.
+*Keyspace notifications* are pub/sub messages that Redis publishes when keys change or expire. The documentation calls pub/sub "fire and forget", so a subscriber that is disconnected for one second loses that second's messages. It also gives "no guarantees" that an `expired` event fires when the TTL reaches zero. The event fires when Redis actually deletes the key, which can be later.
 
 The phase linked keyspace notifications as "an alternative to delete-on-write". They cannot carry invalidations safely. Use them for hints and metrics, never as the only invalidation path.
 
@@ -651,7 +690,7 @@ The phase linked keyspace notifications as "an alternative to delete-on-write". 
 | TTL | Redis expiry | always ends the stale value, after up to one TTL | stale for up to one TTL |
 | Change data capture | a consumer reads the database log and updates the cache | as reliable as the consumer and its position in the log | a fill against a log write, fixed by a timestamp check |
 | `CLIENT TRACKING` | Redis pushes a message to the client | lost while the client is disconnected | invalidation before reply, fixed by a placeholder |
-| Keyspace notifications | Pub/Sub | fire and forget | lost events, and late expired events |
+| Keyspace notifications | pub/sub | fire and forget | lost events, and late expired events |
 
 The pattern is the same in every row that has a race. A channel can change the cache after a read has started. So the read must carry a marker, a version or a timestamp, and a late write must lose. In the running case the settings service keeps delete-on-write with a lease. It keeps the one-hour TTL as the backstop, and it does not rely on keyspace notifications. A tool removal is then visible on the next read after the delete.
 
@@ -691,11 +730,11 @@ Every concept so far was about rows that exist. Cache-aside fills the cache only
 
 - **next request**The same two steps again: 10,000 requests per second become 10,000 queries.
 
-The fix is *negative caching*: the reader stores the absence too, as a sentinel value with a short TTL. A *sentinel* is a value that no real row can have, so readers can tell "not found" from data.
+The fix is *negative caching*, where the reader stores the absence too, with a short TTL. It stores a *sentinel value*, a value that no real row can have, so readers can tell "not found" from data.
 
 **Predict: a tenant is created 5 s after a request for it returned "not found". The negative entry's TTL is 30 s, and the create path does not touch the cache. How long can the new tenant stay invisible?**
 
-Up to 25 more seconds. Readers keep getting the sentinel until its TTL ends, although the row now exists. Most people answer "until the next read", because the create path wrote Postgres. But the cache never learned about the create, so the negative entry is a stale entry like any other.
+Up to 25 more seconds. Readers keep getting the sentinel value until its TTL ends, although the row now exists. Most people answer "until the next read", because the create path wrote Postgres. But the cache never learned about the create, so the negative entry is a stale entry like any other.
 
 ```go
 val, err := rdb.Get(ctx, key).Result()
@@ -716,11 +755,11 @@ So a negative entry needs the same care as a positive one. The create path must 
 
 The phase gave 30 to 60 seconds as "a common sweet spot" for the negative TTL. No source supports that range. Choose the TTL from how long a new row may stay hidden in your product, and make the create path delete the key.
 
-A **lagging replica** makes this worse. If the reader fills from a replica, it can read "not found" after the create has committed on the primary. It can also store that sentinel after the create path's delete. That is the stale-set race again, with the replica as the slow reader. Facebook's memcache rule is direct: "A cache refill from a replica's database should only be allowed after the replication stream has caught up". Facebook sends such reads to the primary region with a remote marker. A simpler rule for one region is to keep the negative TTL close to your usual replication lag. Phase 4 covers replication lag.
+A **lagging replica** makes this worse. If the reader fills from a replica, it can read "not found" after the create has committed on the primary. It can also store that sentinel value after the create path's delete. That is the race of a late fill after a delete again, with the replica as the slow reader. Facebook's memcache rule is direct: "A cache refill from a replica's database should only be allowed after the replication stream has caught up". Facebook sends such reads to the primary region with a remote marker. A simpler rule for one region is to keep the negative TTL close to your usual replication lag. Phase 4 covers replication lag.
 
 **Uber** caches absent rows in CacheFront: "These non-existent rows are written to the cache with a special flag".
 
-A **Bloom filter**, a compact bit array that can answer "certainly absent" for an ID, is the other answer for IDs that never repeat. The Go deeper block below explains its limits.
+A *Bloom filter*, a compact bit array that can answer "certainly absent" for an ID, is the other answer for IDs that never repeat. The Go deeper block below explains its limits.
 
 A negative entry is a stale entry once the row exists, so the create path deletes it.
 
@@ -738,9 +777,9 @@ Replica rule: "Scaling Memcache at Facebook", NSDI 2013, section 5. Uber: the Ca
 
 **A live penetration path.** On the platform, no Redis cache stored "not found". A login service's OAuth client lookup read Redis, and on a miss it loaded the client from an internal entity store. It wrote Redis only if it found a record. So every repeated lookup for an unknown client ID reached the entity store.
 
-**The same platform did it right in memory.** An edge service used a null sentinel in an in-process cache, with a negative TTL of 5 s against a positive TTL of 10 s. Its comment said the short value bounds how long a freshly created token could 404 while a request raced ahead of cross-region replication. That is the replication rule above, applied to a TTL. Another service on the platform read from a replica pool and wrote to a primary pool, which is exactly the setup where a fill can read old data. None of these platform details could be checked.
+**The same platform did it right in memory.** An edge service used a null sentinel value in a local cache, with a negative TTL of 5 s against a positive TTL of 10 s. Its comment said the short value bounds how long a freshly created token could 404 while a request raced ahead of cross-region replication. That is the replication rule above, applied to a TTL. Another service on the platform read from a replica pool and wrote to a primary pool, which is exactly the setup where a fill can read old data. None of these platform details could be checked.
 
-**Designing a full flow.** For `GET /entity/{id}` with many requests for absent IDs, the pieces are: a versioned key such as `entity:v1:<id>`, a positive TTL with jitter, a sentinel with a short TTL, a delete of the key on create and on update, and fail-open reads with a short client timeout. Checkpoint question Q5 asks you to defend the negative TTL against both directions.
+**Designing a full flow.** For `GET /entity/{id}` with many requests for absent IDs, the pieces are: a versioned key such as `entity:v1:<id>`, a positive TTL with jitter, a sentinel value with a short TTL, a delete of the key on create and on update, and fail-open reads with a short client timeout. Checkpoint question Q5 asks you to defend the negative TTL against both directions.
 
 A Bloom filter is a compact bit array that answers "certainly absent" or "maybe present" for an ID. It has no stale entry per ID, but it has false positives, and every create must add the new ID to it. Redis has a Bloom filter data type.
 
@@ -760,7 +799,7 @@ You can now predict four failures of a cache that readers fill, and choose the f
 
 - **A cached "not found" is an entry like any other.** The create path deletes it, and its TTL is the longest a new row can stay hidden.
 
-The lease in this phase is a token that a write must still match when it lands. Phase 3 asks the same question about locks. When is a Redis lock safe, and what happens when its holder pauses past the TTL? It builds on `SET NX PX`, a release that checks the token, and fencing tokens.
+The lease in this phase is a token that a write must still match when it lands. Phase 3 asks the same question about locks. When is a Redis lock safe, and what happens when its holder pauses past the TTL? It builds on `SET NX PX`, a release that checks the token, and a number that lets the protected resource refuse an old holder.
 
 ## Lab: the exercises that teach Phase 2
 
@@ -1077,7 +1116,7 @@ Production cases.
 
 - [Pendo status incident](https://status.pendo.io/incidents/g8nfbs1vdn69): keys with no TTL filled memory.
 
-- [Redis blog, Caches, Promises and Locks](https://redis.io/blog/caches-promises-locks/): a lease with Pub/Sub waiting.
+- [Redis blog, Caches, Promises and Locks](https://redis.io/blog/caches-promises-locks/): a lease with pub/sub waiting.
 
 Redis and Valkey reference.
 
