@@ -95,8 +95,15 @@ models:
     output_per_mtok: 2.50
     settings:
       reasoning_effort: high
-      max_tokens: 64000
-      timeout_s: 900      # see kimi_deep
+      # 128k output. On 2026-10-20 the citation judge reasoned to the 64k cap
+      # on both attempts of one batch (64,000 output tokens, 610s and 730s),
+      # wrote no verdict, and three lesson runs failed. The gateway accepted
+      # 128000 on 2026-10-21; acceptance is not proof it is honoured.
+      max_tokens: 128000
+      # About 100k tokens at the speed measured above. 1200 is the most the
+      # hang watchdog's 100-minute limit allows (test_learning); a call that
+      # still runs out is split by the citation pass, not retried whole.
+      timeout_s: 1200     # see kimi_deep
     # kimi-latest is the spare: the only other model in use. A longer chain
     # would push the hang watchdog past the course lane's cap.
     fallback: [kimi_deep]

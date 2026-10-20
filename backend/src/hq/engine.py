@@ -542,6 +542,12 @@ def friendly_error(exc: BaseException) -> str:
         # failure sends the reader looking in the wrong place.
         if "model.request" in low:
             return "the model gateway kept failing after several attempts"
+        # The lesson writer's stages are model calls, not tools: on
+        # 2026-10-20 "a tool kept failing" hid a citation judge that hit
+        # its output cap. Name the stage instead.
+        stage = re.search(r"step writer\.(\w+)", low)
+        if stage:
+            return f"the lesson writer's {stage.group(1)} stage kept failing after several attempts"
         return "a tool kept failing after several attempts (network or a bad page)"
     if "connection error" in low or "connecterror" in low or "timed out" in low:
         return "the model gateway was unreachable for a moment"

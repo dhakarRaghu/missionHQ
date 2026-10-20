@@ -52,7 +52,7 @@ def test_every_registry_model_streams_and_classifies_its_failures() -> None:
     model = llm.registry().resolve("teacher")
     assert isinstance(model, FallbackModel)
     assert all(isinstance(m, llm.StreamingModel) for m in model.models)
-    assert model.models[0].limit_s == 900.0
+    assert model.models[0].limit_s == 1200.0
 
 
 def test_a_stream_that_breaks_midway_goes_to_the_spare(calls) -> None:

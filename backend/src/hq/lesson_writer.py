@@ -22,11 +22,14 @@ stage runs:
    section. Each part is checked as it is written and rewritten alone.
 3. ASSEMBLY: the parts are joined and the page contract runs. A refusal is
    traced to the parts it quotes and only those are rewritten.
-4. CITATION PASS: a cheap judge maps every checkable sentence of every
-   part to the study note; unsupported sentences send their part back once.
-   Parts rewritten by the page check are checked again. Whatever still does
-   not map is listed on the lesson, which is marked "flagged"; a clean page
-   is "passed". Neither stops the course: only his own "failed" does.
+4. CITATION PASS: the teacher model (kimi-k3, low effort) maps every
+   checkable sentence of every part to the study note, in batches;
+   unsupported sentences send their part back once. Parts rewritten by the
+   page check are checked again. Whatever still does not map is listed on
+   the lesson, which is marked "flagged"; a clean page is "passed". A batch
+   the judge cannot finish is split in half until it can; a single sentence
+   it still cannot finish is listed as not checked, so the lesson is
+   flagged, never lost. Neither stops the course: only his own "failed" does.
 5. TEACHING EDITOR: after the parts are cited and before the page is
    assembled, the teacher model scores each teaching section (not
    apparatus, and never a lab card or week review) on the rubric in
@@ -95,7 +98,14 @@ LEDGER_TERMS = 3             # new terms one section may introduce
 SHORT_SENTENCE_WORDS = 5
 SHORT_SHARE = 0.15
 SHORT_MIN_SENTENCES = 12
-CITATION_BATCH = 30
+# Sentences per citation call. At 30 the judge (kimi-k3) reasoned to the 64k
+# output cap on both attempts of one batch on 2026-10-20 and three lesson runs
+# failed; its normal calls already reasoned for 20k to 40k tokens. Fewer
+# sentences per call means less to weigh at once; the rules and the sentences
+# checked are unchanged.
+CITATION_BATCH = 10
+# Why a sentence is listed when the judge could not finish on it alone.
+UNCHECKED_WHY = "the citation check could not finish on this sentence; read it against the note"
 # The release test and the citation check read claims against material:
 # judgement, not volume, so they use the teacher model at low effort (quick,
 # and the stronger reader). Cost is not the constraint; content is.
@@ -2733,13 +2743,34 @@ class Writer:
     async def _unsupported(self, claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
         found: list[dict[str, Any]] = []
         for at in range(0, len(claims), CITATION_BATCH):
-            batch = claims[at:at + CITATION_BATCH]
-            sent = [{k: c[k] for k in ("id", "section", "claim", "urls")} for c in batch]
-            verdict = CitationVerdict.model_validate(await _citation_step(self._material(), sent))
-            reasons = dict(zip(verdict.unsupported, verdict.reasons, strict=False))
-            found += [{**c, "why": reasons.get(c["id"], "")} for c in batch
-                      if c["id"] in set(verdict.unsupported)]
+            found += await self._judge(claims[at:at + CITATION_BATCH])
         return found
+
+    async def _judge(self, batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The sentences of one batch the material does not support.
+
+        A batch the judge cannot finish (on 2026-10-20 it reasoned to the
+        output cap on both attempts and the whole lesson failed) is split in
+        half and each half judged. A single sentence it still cannot finish
+        is returned with ``unchecked`` set: it is listed on the lesson and
+        flags it, but it is not sent for repair, since nothing found it wrong."""
+        sent = [{k: c[k] for k in ("id", "section", "claim", "urls")} for c in batch]
+        try:
+            verdict = CitationVerdict.model_validate(await _citation_step(self._material(), sent))
+        except REPLAY_ERRORS:
+            raise
+        except Exception as exc:  # noqa: BLE001 — the batch is split, a sentence is flagged
+            if len(batch) == 1:
+                self.report.append(f"citation check could not finish on {batch[0]['id']}"
+                                   f" ({type(exc).__name__})")
+                return [{**batch[0], "why": UNCHECKED_WHY, "unchecked": True}]
+            await self._progress("citations", f"the judge could not finish {len(batch)}"
+                                 f" sentence(s) ({type(exc).__name__}); judging them in halves")
+            half = len(batch) // 2
+            return await self._judge(batch[:half]) + await self._judge(batch[half:])
+        reasons = dict(zip(verdict.unsupported, verdict.reasons, strict=False))
+        return [{**c, "why": reasons.get(c["id"], "")} for c in batch
+                if c["id"] in set(verdict.unsupported)]
 
     async def cite(self, parts: list[int] | None = None, *, repair: bool = True
                    ) -> list[dict[str, Any]]:
@@ -2748,21 +2779,26 @@ class Writer:
         assert self.outline is not None
         todo = parts if parts is not None else list(range(1, len(self.parts)))
         unsupported: list[dict[str, Any]] = []
+        # Sentences the judge could not finish, in parts not checked again.
+        unchecked: list[dict[str, Any]] = []
         rounds = ARTICLE_REPAIR_ROUNDS if self.m.article and not self.m.page else REPAIR_ROUNDS
         for round_ in range(rounds + 1):
             claims = self._claims(todo)
             if not claims:
-                return []
+                return unchecked
             unsupported = await self._unsupported(claims)
-            if not unsupported or not repair or round_ == rounds:
+            wrong = [c for c in unsupported if not c.get("unchecked")]
+            if not wrong or not repair or round_ == rounds:
                 break
             by_part: dict[int, list[dict[str, Any]]] = {}
-            for c in unsupported:
+            for c in wrong:
                 by_part.setdefault(c["part"], []).append(c)
             for i, found in by_part.items():
                 await self._correct(i, found)
+            unchecked += [c for c in unsupported
+                          if c.get("unchecked") and c["part"] not in by_part]
             todo = sorted(by_part)
-        return unsupported
+        return unchecked + unsupported
 
     # --- the teaching editor ----------------------------------------------------
 

@@ -405,7 +405,7 @@ def test_every_part_is_cited_and_an_unmapped_sentence_flags_without_blocking(
     assert asyncio.run(w.run()) is not None, w.report
     # An article sends every sentence of every part, numbers or not, tagged
     # with its part, in batches.
-    cited = [c for batch in log["cited"][:1] for c in batch]
+    cited = [c for batch in log["cited"] for c in batch]
     # (The fake sources line is too short to be a sentence.)
     assert {int(c[1:].split("-")[0]) for c in cited} == {1, 2, 3}
     # Section 3's unsupported sentences are corrected in place; its section
