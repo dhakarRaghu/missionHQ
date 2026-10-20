@@ -1338,5 +1338,27 @@
   "sources": [],
   "title": "Redis for AI agents",
   "topic": ""
+ },
+ {
+  "article_kind": "",
+  "course_slug": "elite-storage-phase-05-replication",
+  "html_path": "../learning/lessons/2026-10-20-elite-storage-phase-05-replication.html",
+  "kind": "course",
+  "lesson_date": "2026-10-20",
+  "md_path": "../learning/lessons/2026-10-20-elite-storage-phase-05-replication.md",
+  "one_liner": "Read a standby's byte gap, cap a slot, give each replica its role, time a restore and budget connections on managed PostgreSQL 17.",
+  "path_step": "",
+  "phase_slug": "",
+  "read_at": null,
+  "relationship": "",
+  "review_notes": "",
+  "review_round": 0,
+  "review_score": null,
+  "review_status": "none",
+  "reviewed_at": null,
+  "score": 0,
+  "sources": [],
+  "title": "Replication, failover, backups and pooling",
+  "topic": ""
  }
 ]

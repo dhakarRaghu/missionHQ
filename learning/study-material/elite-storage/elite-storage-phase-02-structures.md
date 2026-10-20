@@ -4,17 +4,21 @@
 
 **The promise this phase pays.** Phase 1 left one step of its store for later. It is the compaction step, which Bitcask calls merge, with the hint files it writes. Section 2.4 builds both.
 
+**Versions.** PostgreSQL 17 is the base of this phase. Source citations are at tag REL_17_11, the latest 17 minor release. Docs citations are to the PostgreSQL 17 manual. Where PostgreSQL 14 behaves differently and you may still meet it, one clause says so. Where 18 differs, one line says so. MySQL facts come from the 8.4 manual, RocksDB facts from tag v11.8.1, and pgvector facts from tag v0.8.7.
+
 ## Why you're here
 
 Here is the situation this phase follows. It is an example, and its numbers are arithmetic that later sections show.
 
 The order store of Phase 1 works, and it keeps its durability promise. Now it holds 10 million orders, and each order was written three times: created, paid and shipped. Three limits appear, and none of them is a bug:
 
-1. **Memory.** The keydir holds every key. At about 30 bytes per key, that is 300 MB for 10 million orders. A billion orders would need 30 GB of memory before the store could serve one read. Section 2.2 shows where the 30 bytes come from.
+1. **Memory.** The keydir is the store's hash table in memory. It maps each key to the offset of its newest entry, so it holds every key. At about 30 bytes per key, that is 300 MB for 10 million orders. A billion orders would need 30 GB of memory before the store could serve one read. Section 2.2 shows where the 30 bytes come from.
 2. **Space.** Every old version stays in the log. 30 million entries of 1,230 bytes fill 36.9 GB, for 12.3 GB of current orders.
 3. **Order.** A report asks for orders `order:1041` to `order:2040`. The keydir is a hash table, so it has no key order. The store must check all 10 million keys, then read 1,000 entries at 1,000 scattered offsets.
 
 The same team also runs a write-heavy event store on PostgreSQL. A colleague proposes a move to a database built on a log-structured merge tree, or LSM tree. The reason given is that "it is faster for writes". Section 2.3 explains the structure. Suppose the team does it. Writes get faster. Reads get slower. Disk usage can reach three times the data before compaction removes the old versions. Compaction is the background work of section 2.4. A burst of that work each night becomes the new p99 problem. p99 is the latency that 99% of requests stay under. Nothing is wrong with either database. The workload was matched to the wrong structure, and nobody had a way to say so before the move.
+
+The same team then adds an agent feature that stores one embedding per document, with the pgvector extension. An embedding is a list of numbers that a model computes for a text. The table holds a million of them, and nobody has asked what it costs the database. Section 2.9 answers that with the tools of this phase.
 
 Every structure in this phase lowers one cost by raising another. This phase shows how to estimate each cost for your workload before a migration, and which measurement confirms the estimate.
 
@@ -28,6 +32,9 @@ Every structure in this phase lowers one cost by raising another. This phase sho
 6. Estimate read, write and space amplification of a workload on each structure.
 7. Choose a structure from a decision table, and name the measurement that would prove the choice wrong.
 8. Explain why LRU fails during a table scan, and what PostgreSQL and InnoDB do about it. Name the PostgreSQL scans that still flood the pool.
+9. Size `shared_buffers` on RDS and on Aurora, and price a cache miss on an EBS gp3 volume against the laptop SSD.
+10. Look inside the buffer pool and at the I/O of one query on PostgreSQL 17, with `pg_buffercache`, `pg_stat_statements` and `pg_stat_io`.
+11. Estimate what a pgvector table and its HNSW or IVFFlat index cost in heap pages, TOAST, index pages, build memory and WAL. Say what VACUUM does after deletes.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -41,7 +48,8 @@ Every structure in this phase lowers one cost by raising another. This phase sho
 │ 2.6 Amplification              read, write and space, as three ratios    │
 │ 2.7 Matching structure         the decision table and its measurements   │
 │ 2.8 Eviction                   LRU, LFU, 2Q, ARC, and real buffer pools  │
-│ Lab: E1 to E13. The demonstration: E6, E8, E9 and E10                    │
+│ 2.9 Vectors as storage         pgvector: TOAST, index size, build cost   │
+│ Lab: E1 to E16. The demonstration: E6, E8, E9 and E10                    │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -57,9 +65,9 @@ Three ideas from earlier are used here and not taught again.
 
 **Left for later.** Phase 4 covers indexes as the query planner sees them, and table partitioning.
 
-**Where it runs, and what it costs.** Everything runs on your laptop and costs nothing. The labs use Python 3.12 or later and the standard library only. They run in memory on the simulated file system of Phase 1. Two exercises, E12 and E13, use your local PostgreSQL 14 at `/tmp:5432`, in the database `storage_lab` that Phase 1 created. E13 also uses the `pageinspect` and `pgstattuple` extensions, which ship with PostgreSQL. Run all commands from `elite-storage/code/`.
+**Where it runs, and what it costs.** Everything runs on your laptop and costs nothing. The labs use Python 3.12 or later and the standard library only. They run in memory on the simulated file system of Phase 1. Four exercises, E12, E13, E14 and E16, use a local PostgreSQL 17 server at `/tmp:5432`, in the database `storage_lab` that Phase 1 created. E13 also uses the `pageinspect` and `pgstattuple` extensions, and E14 uses `pg_buffercache` and `pg_stat_statements`. All four ship with PostgreSQL. E16 needs the pgvector extension. Use 0.8.7, and nothing older than 0.8.4, for the reasons in section 2.9. The PostgreSQL exercises were not run by the author yet. Run all commands from `elite-storage/code/`.
 
-Time: 2 hours for the reading. The labs take longer, about 2 to 3 hours.
+Time: about 3 hours for the reading. The labs take about 3 hours more.
 
 ---
 
@@ -99,26 +107,29 @@ Each frame also carries two flags that matter for the rest of this phase. A pin 
 
 So the answer is about 4 times slower: 10.25 / 2.375 = 4.3. The hit rate fell by 9 points, but the miss rate grew 10 times, from 1% to 10%. The misses decide the average, because one miss costs as much as 59 hits. A hit in a database's own buffer pool skips even the system call, so it costs less than 1.5 µs. That cost was not measured in this course. It makes the ratio between a hit and a miss larger, not smaller.
 
-**PostgreSQL's buffer pool.** The setting is `shared_buffers`. Its default is 16,384 buffers of 8 kB, which is 128 MB. Verified from `guc_tables.c` lines 2384 to 2385 at tag REL_18_6, and from the PostgreSQL 18 docs, section 19.4. The docs say "a reasonable starting value for `shared_buffers` is 25% of the memory in your system". They add a limit: "it is unlikely that an allocation of more than 40% of RAM to `shared_buffers` will work better than a smaller amount". The page size of 8,192 bytes is the default of a build option. This course did not read it in the source, and E12 shows the value on your own server.
+**PostgreSQL's buffer pool.** The setting is `shared_buffers`. Its default is 16,384 buffers of 8 kB, which is 128 MB. Verified from `guc_tables.c` lines 2267 to 2268 at tag REL_17_11, and from the PostgreSQL 17 docs, section 19.4. The docs say "a reasonable starting value for `shared_buffers` is 25% of the memory in your system". They add a limit: "it is unlikely that an allocation of more than 40% of RAM to `shared_buffers` will work better than a smaller amount". The page size of 8,192 bytes is the default of the build option `blocksize`, at `meson_options.txt` lines 5 to 8, REL_17_11. E12 shows the value on your own server.
 
 **Two prices for one miss.** PostgreSQL reads its files through the kernel, so the page cache sits below `shared_buffers`. Rogov, "PostgreSQL 14 Internals", page 147, says PostgreSQL "reads and writes all data via buffered file operations". The CMU 15-445 Fall 2025 notes for lecture #04 name PostgreSQL as a system "that uses the OS's page cache". Both are verified. So one page can sit in memory twice, once in each cache. That is the likely reason for the 40% limit above. The reason is inferred, because the docs do not state it.
 
 A miss in `shared_buffers` therefore has two prices. It costs about 1.5 µs when the page cache holds the page. It costs about 89 µs when the SSD must serve it. Take a 99% hit rate in `shared_buffers`. If every miss finds the page cache, the misses add 0.01 × 1.5 = 0.015 µs to the average read. If every miss goes to the SSD, they add 0.01 × 89 = 0.89 µs. So one hit rate covers miss costs that differ by 59 times.
 
-PostgreSQL's counters cannot tell these two cases apart. The PostgreSQL 18 docs, section 27.2.2, say its I/O statistics "do not differentiate between data which had to be fetched from disk and that which already resided in the kernel page cache". The PostgreSQL 14 docs, section 28.2.2, say the same in other words. Both are verified. PostgreSQL 18 also changed how it issues reads, with `io_method = worker` by default at `postgresql.conf.sample` line 211, REL_18_6. Its docs still carry the sentence above. Here are the counters, and what each one calls a read:
+PostgreSQL's counters cannot tell these two cases apart. The PostgreSQL 17 docs, section 27.2.2, say its I/O statistics "do not differentiate between data which had to be fetched from disk and that which already resided in the kernel page cache". The PostgreSQL 14 docs, section 28.2.2, say the same in other words. Both are verified. Here are the counters, and what each one calls a read:
 
 | Where | A hit | A read, which may be a page-cache hit | Version |
 |---|---|---|---|
-| `EXPLAIN (ANALYZE, BUFFERS)` | `shared hit` | `read` | 14 and 18 |
-| `pg_statio_user_tables` | `heap_blks_hit`, `idx_blks_hit` | `heap_blks_read`, `idx_blks_read`. The 14 docs call it "Number of disk blocks read" | 14 and 18 |
+| `EXPLAIN (ANALYZE, BUFFERS)` | `shared hit` | `read` | 14 to 18 |
+| `pg_statio_user_tables` | `heap_blks_hit`, `idx_blks_hit` | `heap_blks_read`, `idx_blks_read`. The 14 docs call it "Number of disk blocks read" | 14 to 18 |
 | `pg_stat_io` | `hits` | `reads`, per process type and context | since 16 |
+| `pg_stat_statements` | `shared_blks_hit` | `shared_blks_read`, per statement | 14 to 18 |
 
-The `pg_statio` columns are verified from the PostgreSQL 14 docs, Table 28.27. In their names, `heap` means the table's own pages and `idx` its indexes. Section 2.2 explains the heap. `pg_stat_io` is verified from the 16.0 release notes and the 18 docs. Two other sources tell the cases apart. `iostat` on the host counts the reads that reached the device. `track_io_timing`, off by default at `postgresql.conf.sample` line 664, makes `pg_stat_database.blk_read_time` count read time in milliseconds. Divide it by `blks_read` for the time of one read. A few microseconds means the page cache served most reads, and about 89 µs means the SSD did. That reading of the average is inferred from the M2 numbers.
+The `pg_statio` columns are verified from the PostgreSQL 17 docs, Table 27.31. In their names, `heap` means the table's own pages and `idx` its indexes. Section 2.2 explains the heap. `pg_stat_io` is verified from the 16.0 release notes and the 17 docs, Table 27.23. Its `context` column says why the process did the I/O. The value `normal` covers most reads. `bulkread` is a large read done through a small ring of buffers, such as a sequential scan of a large table. `bulkwrite` covers COPY and table rewrites, and `vacuum` covers VACUUM. Section 2.8 explains rings. The `pg_stat_statements` columns are verified from its 1.11 SQL file at REL_17_11 and from the 1.9 file at REL_14_24. Two other sources tell the cases apart. `iostat` on the host counts the reads that reached the device. `track_io_timing`, off by default at `postgresql.conf.sample` line 645, REL_17_11, makes `pg_stat_database.blk_read_time` count read time in milliseconds. Divide it by `blks_read` for the time per block. On 17 a sequential scan reads up to 16 blocks in one call, and the call's time is counted once, at `bufmgr.c` lines 1518 to 1521. So the average is lower than the device time of one call. Compare it on index lookups, which read one page per call. There, a few microseconds means the page cache served most reads, and about 89 µs means the SSD did. That reading of the average is inferred from the M2 numbers.
 
-**The WAL rule, inside the buffer pool.** Phase 1 stated the WAL rule as a principle. Here is the line of PostgreSQL that enforces it. Every page header holds `pd_lsn`, the position in the WAL just after the record of the page's last change. Before the buffer manager writes a dirty page, it forces the WAL to disk up to that position. From `bufmgr.c` at tag REL_18_6, copied from the source, with lines cut where marked:
+**On 17 and on 18.** PostgreSQL 17 reads a sequential scan through streaming I/O. It can group up to `io_combine_limit` of pages into one read call. The default is 128kB, which is 16 pages, at `postgresql.conf.sample` line 211, REL_17_11. The 17.0 release notes list the change. So a cold sequential scan may read 16 pages per call, while an index lookup still reads one page. That reading is inferred from the setting and the note. PostgreSQL 18 adds asynchronous reads, with `io_method = worker` by default. Its docs keep the sentence about the page cache. On 18, `EXPLAIN ANALYZE` also prints the buffer lines without the BUFFERS option, at `explain_state.c` lines 179 and 180, REL_18_6.
+
+**The WAL rule, inside the buffer pool.** Phase 1 stated the WAL rule as a principle. Here is the line of PostgreSQL that enforces it. Every page header holds `pd_lsn`, the position in the WAL just after the record of the page's last change. Before the buffer manager writes a dirty page, it forces the WAL to disk up to that position. From `bufmgr.c` at tag REL_17_11, copied from the source, with lines cut where marked:
 
 ```c
-/* src/backend/storage/buffer/bufmgr.c, FlushBuffer(), REL_18_6, lines 4353 to 4371. Cut: ... */
+/* src/backend/storage/buffer/bufmgr.c, FlushBuffer(), REL_17_11, lines 3909 to 3927. Cut: ... */
 	/*
 	 * Force XLOG flush up to buffer's LSN.  This implements the basic WAL
 	 * rule that log updates must hit disk before any of the data-file changes
@@ -131,15 +142,108 @@ The `pg_statio` columns are verified from the PostgreSQL 14 docs, Table 28.27. I
 
 This is also why a database keeps its own buffer pool instead of mapping its files into memory with `mmap`. With `mmap`, the kernel decides when a dirty page goes to disk. It could write the page before its WAL record, which breaks the WAL rule. That reason is inferred from the WAL rule. The CMU lecture discusses `mmap` at about 22:52.
 
-**The failure: every buffer pinned.** A pinned page cannot leave its frame. If every frame is pinned when a miss needs one, PostgreSQL cannot read the page at all. Its clock sweep scans every buffer once, and then raises the error `no unpinned buffers available`. Verified at `freelist.c` line 353, REL_18_6. A pool that is too small for the number of pages that queries hold at once fails this way. A pool that is too small for the hot data fails more quietly. The hit rate falls, and the average read gets several times slower, as the arithmetic above shows.
+**The failure: every buffer pinned.** A pinned page cannot leave its frame. If every frame is pinned when a miss needs one, PostgreSQL cannot read the page at all. If its clock sweep passes every buffer in a row and finds each one pinned, it raises the error `no unpinned buffers available`. Verified at `freelist.c` line 353, REL_17_11. A pool that is too small for the number of pages that queries hold at once fails this way. A pool that is too small for the hot data fails more quietly. The hit rate falls, and the average read gets several times slower, as the arithmetic above shows.
+
+`shared_buffers` is not the only fixed-size cache. PostgreSQL also keeps small caches, called SLRU caches, for commit status and for subtransactions. PostgreSQL 17 lets you size them, with settings such as `subtransaction_buffers`, at `postgresql.conf.sample` line 170, REL_17_11. Phase 3, section 3.2, tells the GitLab case where one of them was too small.
+
+### Managed PostgreSQL: the pool size and the price of a miss
+
+Why this matters: most backend teams run PostgreSQL on RDS or Aurora. Both change the two numbers of this section, the pool size and the miss price. The 25% advice above is right on one of them and wrong on the other.
+
+**RDS for PostgreSQL.** The RDS memory page gives the default as `{DBInstanceClassMemory/32768}`. That page calls the unit bytes. The RDS parameters page says RDS uses "the default PostgreSQL units for all parameters", and gives `shared_buffers` in 8 KB. So the formula gives 8,192 / 32,768 of `DBInstanceClassMemory`, which is 25%. `DBInstanceClassMemory` is a little less than the instance memory, because RDS subtracts the memory it reserves. Verified from the two AWS pages. Check the value with `show shared_buffers` on your instance. Below the pool sits the operating system and its page cache, as on your laptop. That is inferred from the buffered I/O of this section, because the AWS page does not say. RDS stores the files on General Purpose SSD, gp2 and gp3, or on Provisioned IOPS SSD, io1 and io2 Block Express. Verified from the RDS storage page, fetched 2026-10-20.
+
+**Aurora PostgreSQL.** Sameer Kumar and Gopalakrishnan Subramanian wrote the AWS blog post "Amazon Aurora PostgreSQL parameters, Part 1", on 12 April 2021. It says: "There is no file system or secondary level of caching for tables or indexes." The default is `SUM({DBInstanceClassMemory/12038},-50003)`, "which is about 75% of the available memory". The unit is again 8 kB, so the formula itself gives 8,192 / 12,038, about 68%, minus 50,003 buffers, about 390 MiB. That arithmetic is this course's. The post reports one test of `shared_buffers`, a select-only pgbench run on a db.r5.2xlarge with 500 clients at scale 1,000. With `shared_buffers` at 15% of memory, it "showed a 14% reduction in performance and 14% increase in VolumeReadIOPS". This is a vendor source, verified from the post.
+
+So on Aurora a miss in `shared_buffers` has no OS page cache below it. It is a read from the storage service, and the 1.5 µs page-cache price does not exist there. One exception exists. On NVMe instances in an I/O-Optimized cluster, Aurora Optimized Reads adds a tiered cache on the local NVMe, per the AWS Optimized Reads page. Each storage read counts in the CloudWatch metric `VolumeReadIOPs`, a count per 5 minutes, which the post calls "[Billed] Volume Read IOPS". On Aurora Standard each read is billed per I/O. On Aurora I/O-Optimized, reads have no I/O charge, per the Aurora pricing page.
+
+| | Self-managed on a VM or laptop | RDS for PostgreSQL | Aurora PostgreSQL |
+|---|---|---|---|
+| default `shared_buffers` | 128 MB | 25% of `DBInstanceClassMemory` | "about 75%" per AWS. The formula gives about 68%, minus about 390 MiB |
+| cache below the pool | the OS page cache | the OS page cache | no OS page cache. Optimized Reads adds an NVMe cache on some instances |
+| a miss in `shared_buffers` costs | 1.5 µs or a device read | a page-cache hit, not measured on RDS, or an EBS read | a storage read. Billed per I/O on Aurora Standard |
+| the hit-rate signal | `pg_statio`, `pg_stat_io` | the same, plus Performance Insights | the same, plus `BufferCacheHitRatio` and `VolumeReadIOPs` |
+
+**The price of a miss on EBS.** The M2 laptop's 89 µs is not a cloud number. The EBS docs say gp3 volumes "provide single-digit millisecond latency". On plain EBS, a gp3 volume has a baseline of 3,000 IOPS, and you can buy up to 80,000. RDS for PostgreSQL differs: below 400 GiB, gp3 gives a fixed 3,000 IOPS, and from 400 GiB it gives 12,000 to 64,000, per the RDS storage page. io2 Block Express gives an "average latency of under 500 microseconds for 16KiB I/O operations". All are verified from the EBS and RDS docs, fetched 2026-10-20. Take 1 ms per miss as an example inside "single-digit millisecond":
+
+- At a 99% hit rate, the misses add 0.01 × 1,000 = 10 µs to the average read. On the M2 they added 0.89 µs.
+- At a 90% hit rate, they add 0.10 × 1,000 = 100 µs.
+- At 3,000 IOPS, the volume serves at most 3,000 misses a second, whatever the latency.
+
+So on a cloud volume, each point of hit rate costs about 11 times more than on the laptop. The lab's latency model takes that price with `--latency --read-us 1000`. The flag changes only the latency model, at `amplification.py:314`, so it needs `--latency`. In the write-heavy workload about 10% of the 20,000 operations a second are gets, from E6. At about one block per get and 1 ms per block, the gets alone need about 2 seconds of device time each second. So expect the queue to grow without limit. Add `--rate 5000` for a load that one device can serve. That outcome is this course's arithmetic, not run.
+
+**What you see when the pool is too small.** A backend that waits for a page read shows the wait event `DataFileRead` of type `IO` in `pg_stat_activity`. The source spells it `DATA_FILE_READ`, at `wait_event_names.txt` line 211, REL_17_11. Performance Insights on RDS and Aurora shows the same wait as `IO:DataFileRead`. The current AWS docs show that dashboard as part of CloudWatch Database Insights. The AWS page for that event gives the reading. "If the IO:DataFileRead event occurs frequently, your shared buffer pool might be too small to accommodate your workload." Run this a few times during the slow period:
+
+```sql
+-- Which waits do the active sessions spend their time in?
+select wait_event_type, wait_event, count(*)
+from pg_stat_activity
+where state = 'active'
+group by 1, 2
+order by 3 desc;
+```
+
+**Two real cases of a cold pool.** A cold pool is one that holds few of the hot pages, such as right after a restart.
+
+- **GitHub, September 2012.** Jesse Newland's post "GitHub availability this week" describes a failover to a MySQL replica. The new active database "had a cold InnoDB buffer pool and performed rather poorly". The load on the cold cache made the health checks fail again, so the cluster failed back. Verified from the post. Phase 5, section 5.5, covers failover itself.
+- **Canva, post of 2022.** Canva ran its media metadata on MySQL on RDS, before it moved to DynamoDB. Its post "From Zero to 50 Million Uploads per Day" lists the limits it hit. One of them: "Servicing our normal production traffic required a hot buffer pool, so instance restarts and version upgrades weren't possible without accepting some downtime." Verified from the post.
+
+In PostgreSQL, the `pg_prewarm` module can reload the pool after a restart. With `pg_prewarm` in `shared_preload_libraries`, the module will, "using 2 background workers, reload those same blocks after a restart". Verified from the PostgreSQL 17 docs, F.28. The AWS extension pages list `pg_prewarm` 1.2 for RDS and for Aurora PostgreSQL 17.11. The Aurora blog post above adds that Aurora "maintains shared buffers contents during restarts and potentially during failovers". Both are vendor sources, fetched 2026-10-20.
+
+### Looking inside the pool, and the I/O of one query
+
+Why this matters: the counters above give one hit rate for the whole server. A slow query or a flooded pool needs two finer views. The first is which tables hold the pool now. The second is which statements cause the reads.
+
+**`pg_buffercache`: what the pool holds.** This extension ships with PostgreSQL. It has two summary functions, `pg_buffercache_summary()` and `pg_buffercache_usage_counts()`, since its version 1.4 in PostgreSQL 16. `pg_buffercache_usage_counts()` returns one row per usage count, 0 to 5, with the number of buffers, dirty buffers and pinned buffers. Section 2.8 explains usage counts. Verified from `pg_buffercache--1.3--1.4.sql` lines 6 to 21 at REL_17_11, and the 17 docs, F.25. The docs give this query for the relations that hold the most buffers:
+
+```sql
+create extension if not exists pg_buffercache;
+select * from pg_buffercache_usage_counts();
+-- The docs' per-relation query, from pgbuffercache.sgml lines 385 to 393:
+select n.nspname, c.relname, count(*) as buffers
+from pg_buffercache b join pg_class c
+  on b.relfilenode = pg_relation_filenode(c.oid) and
+     b.reldatabase in (0, (select oid from pg_database
+                          where datname = current_database()))
+join pg_namespace n on n.oid = c.relnamespace
+group by n.nspname, c.relname
+order by 3 desc
+limit 10;
+```
+
+The functions need a superuser or a role with the privileges of `pg_monitor`, per the docs. RDS for PostgreSQL 17.11 lists `pg_buffercache` 1.5 in its extension versions page, verified on 2026-10-20. Version 1.5 adds `pg_buffercache_evict()`. The 17.0 release notes say that it "is useful for testing".
+
+**`pg_stat_statements`: which statements read.** It counts hits and reads per statement. On PostgreSQL 17 the read time column is `shared_blk_read_time`. On 14 to 16 it was `blk_read_time`, and the 17.0 release notes record the rename. The time columns stay zero unless `track_io_timing` is on, per the 17 docs, F.30. The module must be in `shared_preload_libraries`, so adding it needs a restart. On RDS, PostgreSQL 11 and later load it by default, per the AWS Performance Insights page for PostgreSQL. That page names the same counter `db.sql_tokenized.stats.shared_blks_read_per_sec`.
+
+```sql
+-- The ten statements that read the most pages that were not in shared_buffers
+select queryid, calls, shared_blks_hit, shared_blks_read,
+       round(shared_blk_read_time::numeric, 1) as read_ms,
+       round(100.0 * shared_blks_read
+             / nullif(shared_blks_hit + shared_blks_read, 0), 1) as miss_pct,
+       left(query, 60) as query
+from pg_stat_statements
+order by shared_blks_read desc
+limit 10;
+```
+
+**`pg_stat_io`: reads by process type and reason.** It splits the server's I/O by `backend_type`, `object` and `context`. Run `select pg_stat_reset_shared('io');` before a test to start from zero. The reset target `io` is at `pgstatfuncs.c` line 1740, REL_17_11. Then read it:
+
+```sql
+select backend_type, context, reads, hits, evictions, reuses
+from pg_stat_io
+where object = 'relation' and reads > 0
+order by reads desc;
+```
+
+On PostgreSQL 18, `pg_stat_io` drops `op_bytes` and adds byte columns such as `read_bytes`, per the 18.0 release notes. E14 runs all three tools on the tables of E12.
 
 A page is now the unit of every read. That says how data moves. It does not say how a store finds the one page that holds `order:1041` among millions. The next section is the structure that does that, with very few misses.
 
-**The sentence to remember:** a buffer pool's miss rate decides the average read time. Going from 1% to 10% misses makes reads about 4 times slower. In PostgreSQL a miss costs 1.5 µs or 89 µs, and its counters do not say which.
+**The sentence to remember:** a buffer pool's miss rate decides the average read time. Going from 1% to 10% misses makes reads about 4 times slower. On the laptop a PostgreSQL miss costs 1.5 µs or 89 µs, on EBS gp3 about a millisecond, and the counters do not say which.
 
-**The trap:** reading the hit rate instead of the miss rate, or reading PostgreSQL's `read` counter as disk reads. A 90% hit rate means 10 times the misses of 99%. A `read` may be a page-cache hit, so sizing `shared_buffers` from that counter alone sizes it for the wrong cache.
+**The trap:** reading the hit rate instead of the miss rate, or reading PostgreSQL's `read` counter as disk reads. A 90% hit rate means 10 times the misses of 99%. A `read` may be a page-cache hit, so sizing `shared_buffers` from that counter alone sizes it for the wrong cache. Another trap is copying the 25% rule to Aurora, which has no OS page cache below the pool. AWS's own test at 15% of memory lost 14% of throughput.
 
-**Try this now:** run `psql -h /tmp -p 5432 -d storage_lab -c "show shared_buffers" -c "show block_size" -c "select sum(heap_blks_read) as read, sum(heap_blks_hit) as hit from pg_statio_user_tables"`. Compare the first two values with the defaults above. Then say which cache could have served the `read` count, and which tool would tell you.
+**Try this now:** run `psql -h /tmp -p 5432 -d storage_lab -c "show shared_buffers" -c "show block_size" -c "select sum(heap_blks_read) as read, sum(heap_blks_hit) as hit from pg_statio_user_tables"`. Compare the first two values with the defaults above. Then say which cache could have served the `read` count, and which tool would tell you. On a managed instance, run the `pg_stat_activity` wait query above and look for `IO` / `DataFileRead`.
 
 ---
 
@@ -171,7 +275,7 @@ Why this matters: the B-tree is the default index type of PostgreSQL, and InnoDB
 
 **Where the row lives: a heap, or the tree itself.** The two databases answer this differently. Each answer has a cost.
 
-- **PostgreSQL keeps rows in a heap.** A heap is the table's own file of 8 kB pages. Its rows are in no key order. One row version in it is a tuple. A line pointer is a 4-byte slot near the start of a page. It gives the offset and length of one tuple. A TID, or tuple ID, is a page number and a line pointer number, 6 bytes in all. Every index is a separate B-tree, and its leaf entries hold a key and the TID of a heap tuple. The primary key is one more index of this kind. Verified from Rogov, "PostgreSQL 14 Internals", section 3.1, pages 63 and 64, and the PostgreSQL 18 docs, section 66.6.
+- **PostgreSQL keeps rows in a heap.** A heap is the table's own file of 8 kB pages. Its rows are in no key order. One row version in it is a tuple. A line pointer is a 4-byte slot near the start of a page. It gives the offset and length of one tuple. A TID, or tuple ID, is a page number and a line pointer number, 6 bytes in all. Every index is a separate B-tree, and its leaf entries hold a key and the TID of a heap tuple. The primary key is one more index of this kind. Verified from Rogov, "PostgreSQL 14 Internals", section 3.1, pages 63 and 64, and the PostgreSQL 17 docs, section 65.6.
 - **InnoDB keeps rows inside the primary-key B-tree.** The MySQL 8.4 manual describes it: "Each `InnoDB` table has a special index called the clustered index that stores row data". Its leaves hold whole rows, in primary-key order. And "each record in a secondary index contains the primary key columns for the row". So a lookup through a secondary index walks two trees. Verified from the manual's page "Clustered and Secondary Indexes".
 
 ```
@@ -203,14 +307,14 @@ The CMU 15-445 Fall 2025 notes for lecture #05 call the InnoDB layout index-orga
 
 PostgreSQL also has hash, GiST, GIN, SP-GiST and BRIN indexes, in Rogov's chapters 24 to 29. In this phase, "index" means a B-tree index.
 
-**A row in the heap.** A heap tuple starts with a fixed header, "occupying 23 bytes on most machines". Each tuple also takes a line pointer, "4 bytes per item". Verified from the PostgreSQL 18 docs, section 66.6.1 and Table 66.2. Phase 3 explains the header's fields. An order of the running case has 1,210 bytes of key and value. With its header and length bytes, it takes about 1,250 bytes of a page. So about 6 orders fit on one heap page of 8,192 − 24 = 8,168 usable bytes. That count is inferred from the docs' sizes, and was not checked with `pageinspect`.
+**A row in the heap.** A heap tuple starts with a fixed header, "occupying 23 bytes on most machines". Each tuple also takes a line pointer, "4 bytes per item". Verified from the PostgreSQL 17 docs, section 65.6.1 and Table 65.2. Phase 3 explains the header's fields. An order of the running case has 1,210 bytes of key and value. With its header and length bytes, it takes about 1,250 bytes of a page. So about 6 orders fit on one heap page of 8,192 − 24 = 8,168 usable bytes. That count is inferred from the docs' sizes, and was not checked with `pageinspect`.
 
-A row wider than `TOAST_TUPLE_THRESHOLD`, "normally 2 kB", has its large values compressed or moved out of line. The moved values go to a separate TOAST table in chunks of "about 2000 bytes". Verified from the PostgreSQL 18 docs, "TOAST". Rogov, page 157, adds that these values "are always accessed via an index". So reading a large JSON payload costs a lookup in a second B-tree and reads of a second heap. An UPDATE "incurs no TOAST costs if none of the out-of-line values change", per the same docs page. The 1,230-byte order of the running case stays inline, because it is under 2 kB.
+A row wider than `TOAST_TUPLE_THRESHOLD`, "normally 2 kB", has its large values compressed or moved out of line. TOAST is PostgreSQL's name for this out-of-line storage. The moved values go to a separate TOAST table in chunks of "about 2000 bytes". Verified from the PostgreSQL 17 docs, section 65.2, "TOAST". For 8 kB pages the exact numbers are a threshold of 2,032 bytes and chunks of at most 1,996 bytes. Both follow from the macros in `heaptoast.h`, lines 23 to 26, 46 to 48 and 84 to 89, at REL_17_11, and `vector_storage.py` repeats the arithmetic. Rogov, page 157, adds that these values "are always accessed via an index". So reading a large JSON payload costs a lookup in a second B-tree and reads of a second heap. An UPDATE "incurs no TOAST costs if none of the out-of-line values change", per the same docs page. The 1,230-byte order of the running case stays inline, because it is under 2,032 bytes. An embedding of 1,536 dimensions takes 6,152 bytes, so it moves out of line. Section 2.9 works out what that costs.
 
-**The arithmetic of height.** The number of entries a page holds decides the height, and the height decides the reads. Here are the inputs, from PostgreSQL 18 at tag REL_18_6:
+**The arithmetic of height.** The number of entries a page holds decides the height, and the height decides the reads. Here are the inputs, from PostgreSQL 17 at tag REL_17_11. They are the same at REL_18_6:
 
-- A page is 8,192 bytes. The page header is 24 bytes, from `PageHeaderData` in `bufpage.h` and Table 66.2 of the docs. The B-tree's own data at the end of the page, `BTPageOpaqueData` in `nbtree.h`, is 16 bytes. So 8,192 − 24 − 16 = 8,152 bytes hold entries.
-- A leaf is filled to 90% when the index is built, and an inner page to 70%. These are `BTREE_DEFAULT_FILLFACTOR` and `BTREE_NONLEAF_FILLFACTOR` at `nbtree.h` lines 201 and 202.
+- A page is 8,192 bytes. The page header is 24 bytes, from `PageHeaderData` in `bufpage.h` and Table 65.2 of the 17 docs. The B-tree's own data at the end of the page, `BTPageOpaqueData` in `nbtree.h`, is 16 bytes. So 8,192 − 24 − 16 = 8,152 bytes hold entries.
+- A leaf is filled to 90% when the index is built, and an inner page to 70%. These are `BTREE_DEFAULT_FILLFACTOR` and `BTREE_NONLEAF_FILLFACTOR` at `nbtree.h` lines 200 and 201.
 - One entry for an 8-byte key is 20 bytes. The index tuple header is `IndexTupleData` at `itup.h` lines 35 to 51. It is a 6-byte TID and a 2-byte `t_info`, so 8 bytes. The key adds 8 bytes, and the line pointer 4. Verified from the source and the docs.
 
 So a leaf holds 8,152 × 0.9 / 20 = 366 entries, rounded down. An inner page holds 8,152 × 0.7 / 20 = 285. For 10 million keys:
@@ -225,7 +329,7 @@ A real index agrees. Rogov, pages 428 and 429, inspects `bookings_pkey` on Postg
 
 Now compare the keydir of the order store. A compact keydir entry needs the 10-byte key, an 8-byte offset, a 4-byte size and an 8-byte sequence number. That is 30 bytes per key before any hash-table overhead, the figure the opening situation used. The Phase 1 store in Python uses much more per key, and that was not measured. So the B-tree needs about 776 KiB of memory where the keydir needs 300 MB. The price is one more page read per lookup. The keydir knew the exact offset, and the B-tree must read a leaf to find it.
 
-**The page itself.** Every PostgreSQL page, heap and B-tree pages alike, is a slotted page. The source draws it at `bufpage.h` lines 28 to 48:
+**The page itself.** Every PostgreSQL page, heap and B-tree pages alike, is a slotted page. The source draws it at `bufpage.h` lines 29 to 42, REL_17_11:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -241,7 +345,7 @@ Now compare the keydir of the order store. A compact keydir entry needs the 10-b
 │ header   pd_lsn: the WAL position of the last change, 2.1                │
 │ BT data  BTPageOpaqueData: left and right sibling, level, flags          │
 │ offset 1 the high key: an upper bound for keys on this page              │
-│ offset 2 the first data key, nbtree.h lines 368 to 370                   │
+│ offset 2 the first data key, P_FIRSTKEY at nbtree.h line 368             │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -250,7 +354,7 @@ A TID names a line pointer, not a byte offset. So a tuple can move inside its pa
 **What a write updates.** A PostgreSQL insert changes one heap page and one leaf in every index of the table. Each change appends its own WAL record, and each page is now dirty in the buffer pool. The page reaches its data file later, through one of the three writers in this phase's recap. If the server crashes first, recovery replays the change from the WAL, starting at the REDO point. When a leaf is full, it splits into two pages, and the parent gets one more separator. The fill factor applies only in some splits, as this comment in the source says:
 
 ```c
-/* src/include/access/nbtree.h, REL_18_6, lines 191 to 202. Copied from the source */
+/* src/include/access/nbtree.h, REL_17_11, lines 190 to 201. Copied from the source */
  * The leaf-page fillfactor defaults to 90% but is user-adjustable.
  * For pages above the leaf level, we use a fixed 70% fillfactor.
  * The fillfactor is applied during index build and when splitting
@@ -267,7 +371,26 @@ A TID names a line pointer, not a byte offset. So a tuple can move inside its pa
 
 So keys that always grow, such as a time or a sequence, fill the rightmost page to 90%. They leave full pages behind. Keys in random order split pages in the middle, into two halves. Dong and others measured the result in Facebook's production databases. B-tree pages were "only 1/2 to 2/3 full". So the B-tree used more than 1.5 times the space of its data. Verified from "Optimizing Space Amplification in RocksDB", CIDR 2017, section 3.
 
-**What a split writes, and what never shrinks.** A leaf split changes up to four pages. The full page keeps the lower keys. A new right sibling gets the upper keys. The old right neighbour, if there is one, gets a new left link. And the parent gets the new separator. The comment in `nbtxlog.h` at REL_18_6, lines 89 to 94, says what the split's WAL record holds. "On insert with split, we save all the items going into the right sibling". It adds: "The left page, however, is handled in the normal incremental-update fashion". So the new right page never takes a full page image. `nbtinsert.c` registers it with `REGBUF_WILL_INIT` at lines 1984 to 1990, REL_18_6. The left page and the old neighbour take one if this is their first change since the checkpoint. The parent's insert is a separate WAL record, with the same rule for its page. Verified from the two files. So a leaf split logs about half a page of tuples, plus those images. That size is inferred from the comment, and a `pg_waldump` of one split would confirm it. PostgreSQL does not merge half-empty pages. Rogov, page 425: "once split, nodes can never be merged together, even if they contain very few elements after vacuuming". InnoDB tries to merge a page that falls below `MERGE_THRESHOLD`, "50% by default", per the MySQL 8.4 manual. So after a mass delete, a PostgreSQL index stays about as large until a REINDEX rebuilds it. That follows from the quote and is inferred. Phase 4, section 4.7, gives the locks a REINDEX takes.
+**What a split writes.** A leaf split changes up to four pages:
+
+1. The full page keeps the lower keys.
+2. A new right sibling gets the upper keys.
+3. The old right neighbour, if there is one, gets a new left link.
+4. The parent gets the new separator, in a separate WAL record.
+
+The comment in `nbtxlog.h` at REL_17_11, lines 90 to 95, says what the split's record holds: "On insert with split, we save all the items going into the right sibling". And: "The left page, however, is handled in the normal incremental-update fashion". So the new right page never takes a full page image. `nbtinsert.c` registers it with `REGBUF_WILL_INIT` at line 1985, REL_17_11. The left page, the old neighbour and the parent each take an image if this is their first change since the checkpoint. Verified from the two files. So a leaf split logs about half a page of tuples, plus those images. That size is inferred from the comment. A `pg_waldump` of one split would confirm it.
+
+**What never shrinks, and what VACUUM gives back.** PostgreSQL does not merge half-empty pages. Rogov, page 425: "once split, nodes can never be merged together, even if they contain very few elements after vacuuming". VACUUM does delete a leaf that has become completely empty, unless it is the rightmost page of its level, README line 239. The nbtree README at REL_17_11 has a section "Deleting entire pages during VACUUM", at lines 232 to 240. It says that VACUUM deletes a page "only when it's become completely empty of items". The deleted page goes into the free space map later, and a later split reuses it. That is the README section "Placing deleted pages in the FSM", at line 383. InnoDB tries to merge a page that falls below `MERGE_THRESHOLD`, "50% by default", per the MySQL 8.4 manual.
+
+So after a mass delete, a PostgreSQL index file keeps its size on disk:
+
+- Its emptied pages are reused by later inserts.
+- Its half-empty pages stay half empty, unless new keys fall into their key range. Only a REINDEX packs them.
+- The tree stays balanced the whole time.
+
+So an index does not need regular rebuilds. It needs one when its half-empty pages cost memory or I/O that you measured. That follows from the quotes and is inferred. VACUUM VERBOSE on 17 prints one line for each index that it scanned, such as `index "orders_pkey": pages: 27323 in total, 0 newly deleted, 0 currently deleted, 0 reusable`. The format is at `vacuumlazy.c` line 726, REL_17_11, and the numbers here are an example. `pgstatindex` shows `avg_leaf_density`, `empty_pages` and `deleted_pages`. Measure with both before you rebuild. Phase 4, section 4.7, gives the locks a REINDEX takes.
+
+**A case of a file that never shrinks.** Roblox's 73-hour outage, 28 to 31 October 2021, had one cause in BoltDB. Consul uses BoltDB to store its Raft log. The Roblox post says: "even when the oldest log entries are deleted, the space BoltDB uses on disk never shrinks". Freed 4 kB pages went on a "freelist". One "4.2GB log store is only storing 489MB of actual data". Its freelist was 7.8 MB. Each log append wrote that whole freelist, "even though the actual raw data being appended was 16kB or less". The fix was to compact the file. Verified from the post "Roblox Return to Service 10/28-10/31 2021", fetched 2026-10-20. PostgreSQL keeps its free space in a separate free space map, so this exact failure is not one it has. That is inferred. The lesson still holds: reused pages keep the file large, and only a rebuild returns the space.
 
 **Write amplification.** Write amplification is the number of bytes the device writes for each byte the application changes. For one B-tree page, it depends on one number: how many changes the page collects between two writes of it. Call it c. Each change writes one WAL record. After a checkpoint, the first change to a page also writes the whole page into the WAL. Phase 1, section 1.4, explained why. Then the page itself is written once. So each change to a page costs the WAL record plus two pages shared by c changes:
 
@@ -302,7 +425,7 @@ A page that collects 100 changes before it is written costs 53 times less per ch
 
 New rows fill the heap in arrival order, so one heap page collects about 6 inserts of the running case. Its share is 150 + 16,384 / 6 = 2,881 bytes per insert. A leaf of a random-key index has c near 1, so it costs 16,534 bytes. A table with two random-key indexes then writes about 2,881 + 2 × 16,534 = 35,949 bytes per insert. That is 30 bytes per byte of a 1,210-byte order. These are examples from the model, not measurements. `btree_model.py --indexes 2 --heap-changes-per-page 6` prints the same sum.
 
-The model uses one 150-byte WAL record for every page. Two details of the heap page move its share in opposite directions. Its insert record holds the whole new tuple, so it is about 1,300 bytes here. And the first insert on a fresh heap page sets `XLOG_HEAP_INIT_PAGE`, so that page takes no full page image. That is at `heapam.c` lines 2191 to 2196, REL_18_6, verified. With both, the heap share is about 1,300 + 8,192 / 6 = 2,665 bytes. The total is then about 35,700 bytes, still about 30 bytes per byte. The 1,300 is inferred from the tuple size, and not checked with `pg_waldump`.
+The model uses one 150-byte WAL record for every page. Two details of the heap page move its share in opposite directions. Its insert record holds the whole new tuple, so it is about 1,300 bytes here. And the first insert on a fresh heap page sets `XLOG_HEAP_INIT_PAGE`, so that page takes no full page image. That is at `heapam.c` lines 2218 to 2222, REL_17_11, verified. With both, the heap share is about 1,300 + 8,192 / 6 = 2,665 bytes. The total is then about 35,700 bytes, still about 30 bytes per byte. The 1,300 is inferred from the tuple size, and not checked with `pg_waldump`.
 
 **The measurement: a random key wrote 20 times the WAL.** Tomas Vondra measured this on PostgreSQL. His post is "On the impact of full-page writes", 2016. His table had only a primary key. He ran "a 1h benchmark, throttled to 5000 inserts per second". His result: "With BIGSERIAL primary key this produces ~2GB of WAL, while with UUID it’s more than 40GB." Then: "Clearly, vast majority of the records are full-page images". A sequence puts each new key on the same rightmost leaf, so few changes are first changes. A random UUID lands on a different leaf on almost every insert. Verified from the post. The factor of about 20 is this course's arithmetic from his two numbers.
 
@@ -310,19 +433,54 @@ The run made 5,000 × 3,600 = 18 million inserts. So each insert wrote about 110
 
 His limits matter. The text of the post does not give the PostgreSQL version, the hardware or the checkpoint settings. Its charts are images, and this course did not read them. For uniform random UPDATEs, the key type stopped mattering. Most of the WAL was then for the heap, not the indexes. The HOT case, he wrote, "pretty much eliminates all index-related WAL traffic". He also warned that "in practice there will be secondary indexes, foreign keys etc.". Each of those adds a leaf per row change, by the sum above.
 
-**When the pool is smaller than the hot leaves.** c counts changes between two writes of a page. The checkpointer is not the only writer. Suppose the buffer pool is smaller than the set of leaves that receive changes. Then a dirty leaf is evicted long before the next checkpoint. The bgwriter or a backend writes it, and a later change reads it back. So c is bounded by how long a page stays in the pool, not by the checkpoint interval. That is inferred from eviction, section 2.1, and Phase 1's write path. The full page image still comes once per checkpoint, so early eviction adds page writes, not WAL. The PostgreSQL 14 docs, Table 28.21, show who wrote each page, in `pg_stat_bgwriter`. `buffers_checkpoint` counts the checkpointer, `buffers_clean` the bgwriter, and `buffers_backend` the "buffers written directly by a backend". PostgreSQL 17 removed `buffers_backend` from that view in favour of `pg_stat_io`, per the 17.0 release notes. The same release moved the checkpointer's count into the new view `pg_stat_checkpointer`. The PostgreSQL 18 docs name it `buffers_written`. A large backend share is the sign of the c near 1 case. That reading is inferred.
+**When the pool is smaller than the hot leaves.** c counts changes between two writes of a page. The checkpointer is not the only writer. Suppose the buffer pool is smaller than the set of leaves that receive changes. Then a dirty leaf is evicted long before the next checkpoint. The bgwriter or a backend writes it, and a later change reads it back. So c is bounded by how long a page stays in the pool, not by the checkpoint interval. The full page image still comes once per checkpoint. So early eviction adds page writes, not WAL. This is inferred from eviction, section 2.1, and Phase 1's write path.
 
-**Every index pays its own write.** Item 4 above gave the rule. An update that is not HOT adds an entry to every index. The PostgreSQL 18 docs, "Heap-Only Tuples", give two conditions for HOT. The update must not modify any columns referenced by the table's indexes. And there must be sufficient free space on the page that holds the old row. Then "New index entries are not needed". Since PostgreSQL 16, a change to a column that only BRIN indexes cover still allows HOT. The 16.0 release notes say so. The docs call BRIN a summarizing index. Uber's 2016 post "Why Uber Engineering Switched from Postgres to MySQL" described one such update. For it, "we had to issue at least four physical updates". Its example changed an indexed column, so HOT could not apply. The post gives no measured byte counts. It is a design argument, and its conditions matter.
+Each version shows who wrote the pages in a different place:
+
+| Writer | PostgreSQL 14 | PostgreSQL 17 and 18 |
+|---|---|---|
+| checkpointer | `pg_stat_bgwriter.buffers_checkpoint` | `pg_stat_checkpointer.buffers_written` |
+| bgwriter | `pg_stat_bgwriter.buffers_clean` | `pg_stat_bgwriter.buffers_clean` |
+| a backend | `pg_stat_bgwriter.buffers_backend`, "buffers written directly by a backend" | `pg_stat_io.writes` where `backend_type = 'client backend'` and `context = 'normal'` |
+
+The 14 columns are from the PostgreSQL 14 docs, Table 28.21. The 17.0 release notes record the removal of `buffers_backend`. The 17 columns are verified from `system_views.sql` at REL_17_11, lines 1134 to 1173. On 17, run:
+
+```sql
+-- Who wrote the table and index pages since the last reset?
+select backend_type, context, writes, evictions, reuses
+from pg_stat_io
+where object = 'relation' and writes > 0
+order by writes desc;
+select buffers_written from pg_stat_checkpointer;
+```
+
+A large `client backend` share of the writes in context `normal` is the sign of the c near 1 case. That reading is inferred. To find the statement that writes the page images, read `pg_stat_statements`. It has `wal_records`, `wal_fpi` and `wal_bytes` per statement, since its version 1.8. Verified from `pg_stat_statements--1.7--1.8.sql` at REL_17_11.
+
+**Every index pays its own write.** Item 4 above gave the rule. An update that is not HOT adds an entry to every index. The PostgreSQL 17 docs, section 65.7, "Heap-Only Tuples", give two conditions for HOT. The update must not modify any columns referenced by the table's indexes. And there must be sufficient free space on the page that holds the old row. Then "New index entries are not needed". Since PostgreSQL 16, a change to a column that only BRIN indexes cover still allows HOT. The 16.0 release notes say so. The docs call BRIN a summarizing index. Uber's 2016 post "Why Uber Engineering Switched from Postgres to MySQL" described one such update. For it, "we had to issue at least four physical updates". Its example changed an indexed column, so HOT could not apply. The post gives no measured byte counts. It is a design argument, and its conditions matter.
 
 PostgreSQL has lowered that index cost since 2016, in three releases. Each line is verified from the release notes:
 
 - **12.0.** "Improve performance and space utilization of btree indexes with many duplicates". Before, duplicates were "stored unordered within their duplicate groups". Now they are "sorted in heap-storage order". So equal keys are ordered by their TID. That reading is inferred from the quote.
-- **13.0.** "More efficiently store duplicates in B-tree indexes". This deduplication keeps one key with a list of TIDs. The 18 docs, section 65.1.4.3, say when it runs. It "occurs lazily, when a new item is inserted that cannot fit on an existing leaf page".
-- **14.0.** "Allow btree index additions to remove expired index entries to prevent page splits". The docs, section 65.1.4.2, call it bottom-up deletion. A pass "is triggered in reaction to an anticipated 'version churn page split'".
+- **13.0.** "More efficiently store duplicates in B-tree indexes". This deduplication keeps one key with a list of TIDs. The 17 docs, section 64.1.4.3, say when it runs. It "occurs lazily, when a new item is inserted that cannot fit on an existing leaf page".
+- **14.0.** "Allow btree index additions to remove expired index entries to prevent page splits". The 17 docs, section 64.1.4.2, call it bottom-up deletion. A pass "is triggered in reaction to an anticipated 'version churn page split'".
 
-So on version 14 and later, non-HOT updates grow an index less than they did when Uber wrote. That is inferred from the dates, and the size of the change is not measured here. `pg_stat_user_tables` shows how often HOT happens, in `n_tup_upd` and `n_tup_hot_upd`. Since PostgreSQL 16, `n_tup_newpage_upd` counts updates whose new version went to another page. The 18 docs say: "These are always non-HOT updates". Phase 4, section 4.5, explains the table `fillfactor` that leaves room for HOT.
+So on version 14 and later, non-HOT updates grow an index less than they did when Uber wrote. That is inferred from the dates, and the size of the change is not measured here. `pg_stat_user_tables` shows how often HOT happens, in `n_tup_upd` and `n_tup_hot_upd`. Since PostgreSQL 16, `n_tup_newpage_upd` counts updates whose new version went to another page. The 17 docs say: "These are always non-HOT updates". Phase 4, section 4.5, explains the table `fillfactor` that leaves room for HOT.
 
-**The failure: random keys.** Suppose the order id is a random value, such as a version 4 UUID. `gen_random_uuid()` has been in core since PostgreSQL 13, per its release notes. Each insert lands on a random leaf. Every leaf is then part of the working set, so the buffer pool must hold the whole index or miss. Each leaf collects few changes before it is written, so c is near 1. Almost every insert then pays a full page image. Splits in the middle leave pages half full, and in InnoDB they split the table itself. A key that grows with time avoids all of this. PostgreSQL 18 adds `uuidv7()`, "for generating timestamp-ordered UUIDs", per its release notes.
+**InnoDB in MySQL 8.4: three defaults that touch this section.** MySQL 8.4 changed defaults that move the write and lookup costs above. Verified from the MySQL 8.4 manual, "What Is New in MySQL 8.4 since MySQL 8.0", fetched 2026-10-20:
+
+| Setting | 8.0 default | 8.4 default | What it does |
+|---|---|---|---|
+| `innodb_change_buffering` | `all` | `none` | the change buffer "caches changes to secondary index pages when those pages are not in the buffer pool", and merges them later when a read loads the page |
+| `innodb_adaptive_hash_index` | `ON` | `OFF` | a hash index that InnoDB builds "on demand for the pages of the index that are accessed often", so a lookup can skip the tree walk |
+| `innodb_io_capacity` | 200 | 10000 | how fast InnoDB flushes dirty pages, which bounds how many changes a page collects |
+
+The change buffer was InnoDB's answer to the random-leaf writes of this section. It let an uncached secondary leaf collect changes before InnoDB read it, so c rose. With `none`, each such change reads its leaf first, as PostgreSQL does. That consequence is inferred from the manual's description. The manual names the costs of the two features. A change buffer merge "may take several hours" when many rows and many secondary indexes are affected. And "Access to the adaptive hash index can sometimes become a source of contention under heavy workloads". The effect of `innodb_io_capacity` on c is inferred. After an upgrade from 8.0, compare secondary-index reads before and after, on a copy of production. The sql-mysql course, Phase 1, section 1.1, teaches the InnoDB B+tree in more depth.
+
+**The failure: random keys.** Suppose the order id is a random value, such as a version 4 UUID. A UUID is a 128-bit identifier. A version 4 UUID is random, so two inserts in a row get unrelated values. `gen_random_uuid()` has been in core since PostgreSQL 13, per its release notes. Each insert lands on a random leaf. Every leaf is then part of the working set, so the buffer pool must hold the whole index or miss. Each leaf collects few changes before it is written, so c is near 1. Almost every insert then pays a full page image. Splits in the middle leave pages half full, and in InnoDB they split the table itself. A key that grows with time avoids all of this. PostgreSQL 18 adds `uuidv7()`, "for generating timestamp-ordered UUIDs", per its release notes. PostgreSQL 17 has no such function, so on 17 generate a version 7 UUID in the application, or use a bigint identity column. Python 3.14 adds `uuid.uuid7()`, per its uuid docs.
+
+**Where the random key comes from.** Your ORM often chooses it for you. The Django 5.2 docs show a UUID primary key as `models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)`. Python's docs say "uuid4() creates a random UUID". The Rails guide for PostgreSQL shows `create_table :devices, id: :uuid`, and says that `gen_random_uuid()` "is assumed if no" `:default` option was passed. All three are verified from the pages, fetched 2026-10-20. So a model that switches to UUID keys with the documented example gets the random-key write cost of this section. Check your migrations for `UUIDField(` and `id: :uuid` before a table grows large.
+
+**A case of sorted inserts.** Stripe moves data between shards of DocDB, its database built on MongoDB Community. Its bulk loads were slow at first. The team then sorted the data "based on the most common index attributes in the collections". It inserted the data in that order, "taking advantage of the fact that DocDB arranges its data using a B-tree". The result was "boosting write throughput by 10x". Verified from the stripe.dev post of 2024-06-06 on zero-downtime data migrations. The mechanism is this section's c: sorted inserts land on the same few leaves, so each leaf collects many changes before it is written. The post itself says DocDB is "an extension of MongoDB Community".
 
 The next section keeps the sorted order and writes the way the Phase 1 log does: by appending.
 
@@ -330,13 +488,21 @@ The next section keeps the sorted order and writes the way the Phase 1 log does:
 
 **The trap:** a random key on a large, write-heavy table. Every leaf becomes hot, pages split half full, and Vondra measured about 20 times the WAL of a sequence key.
 
-**Try this now:** predict the height and the memory above the leaves for a billion keys. Then run `uv run python phase02_structures/btree_model.py --keys 1000000000 --indexes 2`, and compare. Then run `psql -h /tmp -p 5432 -d storage_lab -c "select relname, n_tup_upd, n_tup_hot_upd, n_tup_upd - n_tup_hot_upd as not_hot from pg_stat_user_tables order by n_tup_upd desc limit 5"`. Each `not_hot` update wrote a new entry in every index of its table. E13 shows a real page and the WAL per insert.
+**Try this now:** predict the height and the memory above the leaves for a billion keys. Then run `uv run python phase02_structures/btree_model.py --keys 1000000000 --indexes 2`, and compare. Then run `psql -h /tmp -p 5432 -d storage_lab -c "select relname, n_tup_upd, n_tup_hot_upd, n_tup_newpage_upd, n_tup_upd - n_tup_hot_upd as not_hot from pg_stat_user_tables order by n_tup_upd desc limit 5"`. Each `not_hot` update wrote a new entry in every index of its table. E13 shows a real page and the WAL per insert.
 
 ---
 
 ## 2.3 — LSM trees (memtable, sorted runs and compaction: why they write fast and read across levels)
 
-Why this matters: a log-structured merge tree appends every write like the Phase 1 log, and keeps keys sorted like the B-tree. RocksDB is built this way, and so are Cassandra, ScyllaDB and Pebble, the engine under CockroachDB. A read pays for this design, because it may have to look in several places.
+Why this matters: a log-structured merge tree appends every write like the Phase 1 log, and keeps keys sorted like the B-tree. A read pays for this design, because it may have to look in several places.
+
+Several systems in this phase are built this way:
+
+- **RocksDB** is a key-value storage library that a program links in. Facebook built it, and MyRocks is MySQL on top of it.
+- **Cassandra** and **ScyllaDB** are distributed databases that store each node's data in an LSM tree. Discord ran both, section 2.4.
+- **Pebble** is the storage engine under **CockroachDB**, a distributed SQL database. The 2020 post of section 2.4 describes CockroachDB on RocksDB, with the fix in Pebble.
+
+You may never run one of them directly. You meet an LSM tree when a system you depend on is built on one, as in the cases of sections 2.4 and 2.7. The questions of this section then decide its latency.
 
 **Answer this first.** An LSM store has a memtable, three runs in level 0, and one run in level 1. It has no Bloom filters. The index of each run is in memory. How many data blocks does a get read for a key that sits in level 1? And for a key that does not exist?
 
@@ -448,7 +614,7 @@ Here is the arithmetic for the question above. A put entry is 1,230 bytes, and a
 - Live data: 190 orders, each a 10-byte key and a 1,200-byte value, 190 × 1,210 = 229,900 bytes.
 - After the merge: 190 entries × 1,230 = 233,700 bytes of data. Add 190 hint entries × 38 = 7,220 bytes of hints.
 
-So after the merge the disk holds 233,700 + 7,220 = 240,920 bytes. A restart that uses the hints reads 7,220 bytes, 32 times fewer than the 233,700 bytes of merged data. That is because a hint entry is 38 bytes and a data entry is 1,230. A restart reads keys, not values. These numbers are worked out by hand and were not run. The self-test of `bitcask_merge.py` asserts each of them, so its first run checks this arithmetic.
+So after the merge the disk holds 233,700 + 7,220 = 240,920 bytes. A restart that uses the hints reads 7,220 bytes, 32 times fewer than the 233,700 bytes of merged data. That is because a hint entry is 38 bytes and a data entry is 1,230. A restart reads keys, not values. These numbers are worked out by hand. The self-test of `bitcask_merge.py` asserts each of them, and it passes, as E1 records.
 
 **The merge must be crash-safe.** A merge replaces files, so the order of its steps matters. The Phase 1 checkpoint had the same problem. The new files must be durable before the old ones are removed. Here is the right order and the wrong one, from `bitcask_merge.py:314`:
 
@@ -507,7 +673,25 @@ An LSM tree compacts runs, not log files, and it does it by levels. The RocksDB 
 
 The wiki describes leveled compaction this way. Its per-level write amplification "is equal to the fanout in the worst case, but it tends to be less than the fanout in practice". For tiered compaction, the wiki says "The per-level write amplification is 1 which is much less than for leveled where it was fanout". It also notes that RocksDB merges only the overlapping part of each level. It calls this "some-to-some". The original LSM paper merged all of it.
 
-**A worked example from the RocksDB tuning guide.** L1 is 512 MB and the fanout is 10. The database is 500 GB. Then L2 is 5 GB, L3 is 51 GB and L4 is 512 GB. Each byte is written once to L0. L0 to L1 writes it again, with about the same amount of L1, so that step counts 2. Each deeper step merges it with 10 times its size. The guide's total: "Total write amplification is therefore approximately `1 + 2 + 10 + 10 + 10 = 33`". The WAL write comes on top of that. That is inferred, because the guide counts from L0. The same guide gives the space: "`(512 MB + 512 MB + 5GB + 51GB + 512GB) / (500GB) = 1.14`". Dong and others, CIDR 2017, section 3, compute a worst case of 1.111. It assumes a full last level and a fanout of 10. The levels above the last then hold 11.1% of its size. Universal compaction has two space numbers, and they measure different things. The first is a limit on old versions. The option `max_size_amplification_percent` defaults to 200. That is at `include/rocksdb/universal_compaction.h` lines 45 to 48 and 137, tag v11.8.1. The header says this "means that a 100 byte database could require up to 300 bytes of storage". The tuning guide says the same. When the estimated space amplification passes this limit, RocksDB compacts all files into one sorted run. That is from the wiki page "Universal Compaction", section "Compaction Triggered by Space Amplification". This limit is the tripled disk of this phase's opening situation. The second number is the room a merge needs while it runs. The same wiki page says that during a full compaction, the input files and the output file both stay. So "the DB will be temporarily double the disk space usage". The tuning guide warns that a compaction "may temporarily increase size amplification by a factor of two". So a large merge needs free space up to the size of the files it rewrites.
+**A worked example from the RocksDB tuning guide.** L1 is 512 MB and the fanout is 10. The database is 500 GB. So L2 is 5 GB, L3 is 51 GB and L4 is 512 GB.
+
+Write amplification, step by step:
+
+1. Each byte is written once to L0. That counts 1.
+2. L0 to L1 writes it again, with about the same amount of L1. That counts 2.
+3. Each deeper step merges it with 10 times its size. Each counts 10.
+
+The guide's total: "Total write amplification is therefore approximately `1 + 2 + 10 + 10 + 10 = 33`". The guide counts from L0, so the WAL write comes on top. That is inferred.
+
+Space amplification has three numbers:
+
+| Number | Value | Source |
+|---|---|---|
+| leveled, this example | "`(512 MB + 512 MB + 5GB + 51GB + 512GB) / (500GB) = 1.14`" | tuning guide |
+| leveled, worst case | 1.111, with a full last level and fanout 10. The upper levels hold 11.1% of the last | Dong and others, CIDR 2017, section 3 |
+| universal, old versions | `max_size_amplification_percent` defaults to 200. "a 100 byte database could require up to 300 bytes of storage" | `include/rocksdb/universal_compaction.h` lines 45 to 48 and 137, v11.8.1, and the tuning guide |
+
+Universal compaction has a fourth number: the room a merge needs while it runs. Past the 200% limit, RocksDB compacts all files into one sorted run. The wiki page "Universal Compaction", section "Compaction Triggered by Space Amplification", says so. During that full compaction, the input files and the output file both stay. So "the DB will be temporarily double the disk space usage". The tuning guide says a compaction "may temporarily increase size amplification by a factor of two". So a large merge needs free space up to the size of the files it rewrites. The 300 bytes is the tripled disk of this phase's opening.
 
 **The lab's two levels.** The lab LSM has only L0 and L1. Each compaction merges the L0 runs with the whole of L1, so it rewrites all the live data each time. Its write amplification therefore grows with the data, because L1 grows while the L0 batch does not. More levels with one fanout keep the cost per level fixed. That is why real LSM trees have them, as O'Neil's Theorem 3.1 says. E5 gives the lab's numbers.
 
@@ -526,7 +710,15 @@ RocksDB decides this in one function, `ColumnFamilyData::GetWriteStallConditionA
 | 5 | L0 runs ≥ `level0_slowdown_writes_trigger`, 20 | writes slow down |
 | 6 | pending compaction bytes ≥ `soft_pending_compaction_bytes_limit`, 64 GB | writes slow down |
 
-Conditions 2, 3, 5 and 6 apply only when automatic compaction is on. With the default of 2 memtables, condition 4 can never apply. So a flush that falls behind stops writes without slowing them first. That is inferred from the order of the checks, and was not tested. In a slowdown, writes are held to `delayed_write_rate`. Its default of 0 means 16 MB per second, unless a rate limiter is set. That is at `options.h` lines 1367 to 1383. The Write Stalls wiki page says each delayed write sleeps "typically 1ms". This course did not find that sleep in the source. The same page warns that a stall in one column family stalls the whole database. A column family is RocksDB's name for a separate key space inside one database. Flushes and compactions also share a pool of background threads, `max_background_jobs`, 2 by default at `options.h` line 900. The wiki writes the two pending-bytes options without the `_limit` suffix. The names in the table are the ones in the source.
+Notes on the table:
+
+- Conditions 2, 3, 5 and 6 apply only when automatic compaction is on.
+- With the default of 2 memtables, condition 4 can never apply. So a flush that falls behind stops writes without slowing them first. That is inferred from the order of the checks, and was not tested.
+- In a slowdown, writes are held to `delayed_write_rate`. Its default of 0 means 16 MB per second, unless a rate limiter is set. That is at `options.h` lines 1367 to 1383.
+- The Write Stalls wiki page says each delayed write sleeps "typically 1ms". This course did not find that sleep in the source.
+- The same page warns that a stall in one column family stalls the whole database. A column family is RocksDB's name for a separate key space inside one database.
+- Flushes and compactions share a pool of background threads, `max_background_jobs`, 2 by default at `options.h` line 900.
+- The wiki writes the two pending-bytes options without the `_limit` suffix. The table uses the names in the source.
 
 **What a stall looks like in production.** RocksDB writes each stall to its LOG file. The wiki page "Write Stalls" gives these lines. The file counts are from the wiki's own example, not from the defaults:
 
@@ -562,7 +754,14 @@ So the `Sum` row's `W-Amp` is the measured write amplification of compaction. Se
 
 **Pacing compaction in production.** The lab's `--compaction paced` flag has a real counterpart. `rate_limiter` is null by default, at `options.h` line 734, v11.8.1. You set it with `NewGenericRateLimiter(rate_bytes_per_sec)`. The wiki page "Rate Limiter" says this "controls the total write rate of compaction and flush in bytes per second". It adds that RocksDB "does not enforce rate limit for anything other than flush and compaction, e.g. write to WAL". A limit below the rate that compaction must keep only moves the problem into L0 and the stall table above. That is inferred from the stall conditions. A write that must never wait can set `no_slowdown = true` in `WriteOptions`. It then returns `Status::Incomplete()` instead of blocking, per the Write Stalls page.
 
-**Two production reports.** Bilal Akhtar and David Taylor described a compaction storm in a 2020 CockroachDB post. Its title is "Faster bulk-data loading in CockroachDB". Imports filled L0 faster than RocksDB could compact it. RocksDB then started "a giant compaction from L0 to LBase". The post defines LBase as the highest level below L0 that holds data. It "could take it minutes, sometimes ten or more, to complete". While it ran, no other L0 compaction could start. Once L0 reached its limit, the write backpressure would "bring the entire job to a standstill". The fix, in Pebble, arranged L0 runs into sublevels. A sublevel is a set of L0 runs whose key ranges do not overlap. So a read checks at most one run in each. 847 L0 runs fit into 13 sublevels, so a read checks 13 places instead of 847. The test was an import of TPC-C, a standard order-processing benchmark whose size is set in warehouses. It loaded 50,000 warehouses, about 5 TB, on 10 AWS c5d.4xlarge nodes with local SSDs. Before the fix, it took 6.5 to 10 hours plus 3 to 6 hours of compaction. After the fix, it took 1 hour 15 minutes to 1 hour 30 minutes, plus 30 minutes. A 2022 CockroachDB post by Sumeer Bhola describes admission control. It keeps read amplification at or below a threshold, 20 by default. It notes overload situations where read amplification reached 1,000.
+**Two production reports.** Bilal Akhtar and David Taylor described a compaction storm in a 2020 CockroachDB post, "Faster bulk-data loading in CockroachDB". Cockroach Labs wrote it about its own product, so it is a vendor source.
+
+- **The problem.** Imports filled L0 faster than RocksDB could compact it. RocksDB then started "a giant compaction from L0 to LBase". LBase is the highest level below L0 that holds data. The compaction "could take it minutes, sometimes ten or more, to complete". While it ran, no other L0 compaction could start. When L0 reached its limit, the write backpressure would "bring the entire job to a standstill".
+- **The fix, in Pebble.** Pebble arranged L0 runs into sublevels. A sublevel is a set of L0 runs whose key ranges do not overlap. So a read checks at most one run in each. 847 L0 runs fit into 13 sublevels, so a read checks 13 places instead of 847.
+- **The test.** It imported TPC-C, a standard order-processing benchmark whose size is set in warehouses. It loaded 50,000 warehouses, about 5 TB, on 10 AWS c5d.4xlarge nodes with local SSDs.
+- **The result.** Before the fix: 6.5 to 10 hours, plus 3 to 6 hours of compaction. After it: 1 hour 15 minutes to 1 hour 30 minutes, plus 30 minutes.
+
+A 2022 CockroachDB post by Sumeer Bhola describes admission control. It keeps read amplification at or below a threshold, 20 by default. It notes overload situations where read amplification reached 1,000.
 
 Bo Ingram's 2023 post "How Discord Stores Trillions of Messages" describes its Cassandra cluster. "We were prone to falling behind on compactions", it says. Nodes then showed "cascading latency as a node tried to compact". The team's workaround took a node "out of rotation to let it compact without taking traffic". The same post found ranges full of tombstones "that were never compacted away in Cassandra". Those tombstones held the data migration at 99.9999% for a while. Section 2.7 gives what Discord measured after it moved.
 
@@ -571,6 +770,8 @@ Bo Ingram's 2023 post "How Discord Stores Trillions of Messages" describes its C
 - **`DeleteRange`** deletes a whole key range with one entry. The wiki says it "creates a range tombstone represented as a single kv".
 - **`SingleDelete`** removes a key's entry and its tombstone together when compaction lines them up. It is correct only for a key written once since its last delete, per the page "Single Delete".
 - **`CompactOnDeletionCollectorFactory`** starts a compaction for key ranges dense with tombstones. The tuning guide says this "helped to reduce range scan performance skews caused by scanning excessed number of tombstones".
+
+**The same shape in PostgreSQL.** A queue table in PostgreSQL meets the same problem through its B-tree. A worker claims the oldest job by walking the index from the head of the queue. It steps over entries of jobs that are done but that VACUUM has not removed yet. Brandur Leach measured this in 2015, with about 50 jobs a second and one long transaction open. The time to lock a job grew "until it's 15x that level at times of 0.1 s and above". Verified from his post "Postgres Job Queues & Failure By MVCC". VACUUM can remove those entries only when no open snapshot can still see the rows. A B-tree page goes back for reuse only when it is completely empty, section 2.2. Phase 3, section 3.7, gives the claim query and the rest of that measurement. Phase 4, section 4.5, explains the cleanup horizon. Agent runners and background-job libraries that keep their jobs in PostgreSQL have this shape.
 
 The opening situation's event store deletes old events in key order, and Phase 3's outbox has the same queue shape. So for those stores, retention deletes are normal daily work. That judgement is inferred. Section 2.7 adds a decision-table row for this shape.
 
@@ -636,13 +837,17 @@ So "10 bits per key is about 1%" is true for RocksDB's filter. And 0.82% is true
 | `partition_filters` | false, `table.h` line 519 | true splits a run's filter into small blocks that are cached one at a time |
 | `optimize_filters_for_hits` | false, `advanced_options.h` line 816 | true stores no filters for the last level |
 
-The `max_open_files` row is inferred from the wiki's sentence and the default. The last row is a shipped form of Monkey's point above. The last level holds most keys. The source comment says: "For keys which are hits, the filters in this level are not useful because we will search for the data anyway". So a store whose gets almost always find their key can drop most of its filter memory. The wiki measured partitioned filters on two old setups, from about RocksDB 5.x. On an 86 GB database on HDD with a 60 MB block cache, "Partitioning improves throughput by 11x from 5 op/s to 55 op/s". In LinkBench on 300 GB of SSD with 2 GB of cache, it was 30k tps with partitions. Without them it was 23k. The wiki pages have no release tag, so treat these numbers as old.
+The `max_open_files` row is inferred from the wiki's sentence and the default. The last row is a shipped form of Monkey's point above. The last level holds most keys. The source comment says: "For keys which are hits, the filters in this level are not useful because we will search for the data anyway". So a store whose gets almost always find their key can drop most of its filter memory. The wiki measured partitioned filters on two old setups, from about RocksDB 5.x. On an 86 GB database on HDD with a 60 MB block cache, "Partitioning improves throughput by 11x from 5 op/s to 55 op/s". LinkBench is a benchmark from Facebook that models a social-graph workload. In LinkBench on 300 GB of SSD with 2 GB of cache, it was 30k tps with partitions. Without them it was 23k. The wiki pages have no release tag, so treat these numbers as old.
 
 **What this does to the lab LSM.** With filters, an absent key costs a block only on a false positive. It checks 1 to 4 runs, L1 and up to 3 L0 runs, so 2.5 runs on average. At 0.82% each, that is about 2.5 × 0.0082 = 0.02 blocks per get. Without filters, the same get reads one block in each run that covers the key: about 2.5 blocks on average. These numbers are worked out from the code and were not run. A get for a present key in L1 reads 1 block. Now and then it adds a false positive in an L0 run above it. E7 removes the filters and shows the difference.
 
 **The failure: a filter without the tombstones.** After a delete, a new run holds the tombstone. An older run holds the old value. A get must find the tombstone first. If the filter of the new run leaves out deleted keys, it answers "no" for the tombstone's key. The get then skips that run and returns the old value from the run below. The deleted order is back. The lab keeps every key in the filter, tombstones included, at `lsm.py:268`. The self-test turns that rule off and shows the deleted key coming back.
 
-A whole-key filter does not help a range scan, because a range does not name single keys. A prefix Bloom filter does help a range inside one key prefix. The wiki page "Prefix Seek" says that if "many sorted runs don't contain any entry for this prefix, it can be filtered out by a bloom filter". An event store keyed by stream id and sequence number reads ranges inside one stream, so it fits that case. That use is inferred. A filter helps every point read, and it costs memory in proportion to the number of keys. Each structure now has its costs in reads, writes, space and memory. The next section turns those costs into three ratios that can be compared.
+A whole-key filter does not help a range scan, because a range does not name single keys. A prefix Bloom filter does help a range inside one key prefix. The wiki page "Prefix Seek" says that if "many sorted runs don't contain any entry for this prefix, it can be filtered out by a bloom filter". An event store keyed by stream id and sequence number reads ranges inside one stream, so it fits that case. That use is inferred. A filter helps every point read, and it costs memory in proportion to the number of keys.
+
+**Where you see a filter at work.** RocksDB counts filter results in its statistics. The wiki page "RocksDB Bloom Filter" names them: `rocksdb.bloom.filter.useful` counts "[true] negatives", `rocksdb.bloom.filter.full.positive` counts "positives", and `rocksdb.bloom.filter.full.true.positive` counts "true positives". It gives the observed FPR of point lookups as "(positives - true positives) / (positives - true positives + true negatives)". A rate well above the table's value for your bits per key means the setting in production is not the one you think. PostgreSQL has Bloom filters too, in other places. The `bloom` extension is an index access method "based on Bloom filters". BRIN indexes have bloom operator classes, which "build a Bloom filter for all values in the range". Both are verified from the PostgreSQL 17 docs, F.6 and section 64.5. Neither is the per-run filter of an LSM tree.
+
+Each structure now has its costs in reads, writes, space and memory. The next section turns those costs into three ratios that can be compared.
 
 **The sentence to remember:** at 10 bits per key, a Bloom filter says "maybe" for about 1% of absent keys. It never says "no" for a present one. The FPR falls by 10 for each 4.8 more bits per key.
 
@@ -735,12 +940,12 @@ For the question above, the logical bytes of an order are its 10-byte key and 1,
 
 So in that test, InnoDB wrote 4.9 to 8.9 times as many bytes per insert as MyRocks. It also inserted about half as fast. The author adds a warning: "Be wary about drawing too many conclusions from an insert-only workload."
 
-Part of InnoDB's bytes is its doublewrite buffer, its answer to torn pages from Phase 1, section 1.4. The MySQL 8.4 manual says pages flushed from the buffer pool go there "before writing the pages to their proper positions". The page says it "is enabled by default in most cases". So InnoDB writes each flushed page twice. The page adds that this "does not require twice as much I/O overhead or twice as many I/O operations". The copies go out "in a large sequential chunk". Whether it was on in Callaghan's 2017 runs is not checked.
+Part of InnoDB's bytes is its doublewrite buffer, its answer to torn pages from Phase 1, section 1.4. The MySQL 8.4 manual says pages flushed from the buffer pool go there "before writing the pages to their proper positions". The page says it "is enabled by default in most cases". MySQL 8.4 also changed two of its defaults: `innodb_doublewrite_files` is now 2, and `innodb_doublewrite_pages` is now 128. Verified from the 8.4 "What Is New" page. So InnoDB writes each flushed page twice. The page adds that this "does not require twice as much I/O overhead or twice as many I/O operations". The copies go out "in a large sequential chunk". Whether it was on in Callaghan's 2017 runs is not checked.
 
 Two more sources point the same way, under their own conditions:
 
-- **Dong and others, CIDR 2017.** The paper reviewed Facebook production databases. It found that "the amount of data written to storage by RocksDB is between 10% and 15% of what InnoDB writes out". The space used by RocksDB was about 50% lower than compressed InnoDB. LinkBench is a benchmark from Facebook that models a social-graph workload. In LinkBench with 1 billion vertices and 50 GB of DRAM, RocksDB was "3%-16% better than InnoDB" in throughput. It wrote less than 20% of InnoDB's bytes per transaction. The hardware was a 24-core Xeon E5-2678v3 with 256 GB of RAM and about 5 TB of NVMe SSD. The authors work at Facebook, and the workload is Facebook's.
-- **Yoshinori Matsunobu, Facebook engineering blog, 2016.** He ran LinkBench for more than 24 hours on PCI-Express flash. The MyRocks instance "was 3.5 times smaller than InnoDB uncompressed, and two times smaller than InnoDB compressed". On spinning disks, "MyRocks was more than six times faster than InnoDB". The post shows write volume only in a chart image, so this course does not quote a number for it.
+- **Dong and others, CIDR 2017.** The paper reviewed Facebook production databases. It found that "the amount of data written to storage by RocksDB is between 10% and 15% of what InnoDB writes out". The space used by RocksDB was about 50% lower than compressed InnoDB. In LinkBench, section 2.5, with 1 billion vertices and 50 GB of DRAM, RocksDB was "3%-16% better than InnoDB" in throughput. It wrote less than 20% of InnoDB's bytes per transaction. The hardware was a 24-core Xeon E5-2678v3 with 256 GB of RAM and about 5 TB of NVMe SSD. The authors work at Facebook, and the workload is Facebook's.
+- **Yoshinori Matsunobu, Facebook engineering blog, 2016.** Facebook built MyRocks, so this is a vendor source. He ran LinkBench for more than 24 hours on PCI-Express flash. The MyRocks instance "was 3.5 times smaller than InnoDB uncompressed, and two times smaller than InnoDB compressed". On spinning disks, "MyRocks was more than six times faster than InnoDB". The post shows write volume only in a chart image, so this course does not quote a number for it. It also gives one cause of InnoDB's space: "A 16 KB in-memory page compressed to 5 KB still uses 8 KB on storage". That is space amplification from a fixed compressed page size.
 
 **The lab's expected numbers.** E6 runs two layouts and two workloads on 20,000 keys with 100-byte values. It lists the expected values. Both layouts read about 4,096 bytes to return 100. So their read amplification in bytes is about 41 for the LSM and 42 for the log. The difference between them is in writes and space, not in reads. These values are worked out from the code and its seed, and were not run.
 
@@ -771,8 +976,20 @@ Then compare each load with what the device can do. A structure that needs more 
 
 **The worked answer.** The user writes 10,000 × 100 bytes = 1 MB per second. Take PostgreSQL for the B-tree side, and MyRocks, MySQL on RocksDB, for the LSM side.
 
-- **PostgreSQL.** Each update first finds its row. The leaf misses, and so does the heap page that the TID names, because the heap is larger still. At the M2 SSD cost, that is 10,000 × 2 × 89 µs = 1.78 seconds of device time each second. Each page collects about one change before it is written, so c is near 1. A HOT update changes only the heap page. Section 2.2's model then gives up to 16,534 bytes per update, 165 MB per second. An update that is not HOT can change the old heap page, a new heap page and the primary-key leaf. That is up to 3 × 16,534 = 49,602 bytes, about 496 MB per second. Half of those bytes are full page images, appended to the WAL. The other half are random 8 kB page writes.
-- **MyRocks, a leveled LSM.** A raw RocksDB `Put` is a blind write. The new version hides the old one. A SQL row update is not. The MyRocks wiki page "Read Free Replication" says INSERT, UPDATE and DELETE "all need GetForUpdate() to read by primary keys". "On cache miss, GetForUpdate() reads RocksDB data block from storage, and decompresses it". The engine needs the old row to check unique keys. It also needs it to remove old secondary index entries, which is inferred from the page's examples. The page has no release tag, and was read on 2026-10-18. So each update reads one data block, which misses: 10,000 × 89 µs = 0.89 seconds per second. Then it writes a new version of the whole row, not of the 100 changed bytes. That is inferred from the same page. It says the binary log's row images hold all that is needed to compose the RocksDB write calls. With the running case's 1,230-byte entry, the new versions are 10,000 × 1,230 bytes = 12.3 MB per second. The tuning guide's 33 then gives about 406 MB per second of writes, before compression, in large sequential runs. Compaction also reads about as many bytes.
+**PostgreSQL.**
+
+- **The read.** Each update first finds its row. The leaf misses. So does the heap page that the TID names, because the heap is larger still. At the M2 SSD cost: 10,000 × 2 × 89 µs = 1.78 seconds of device time each second.
+- **A HOT update.** Each page collects about one change before it is written, so c is near 1. A HOT update changes only the heap page. Section 2.2's model gives up to 16,534 bytes per update, 165 MB per second.
+- **An update that is not HOT.** It can change the old heap page, a new heap page and the primary-key leaf. That is up to 3 × 16,534 = 49,602 bytes, about 496 MB per second.
+- **What kind of bytes.** Half of those bytes are full page images, appended to the WAL. The other half are random 8 kB page writes.
+
+**MyRocks, a leveled LSM.** A raw RocksDB `Put` is a blind write: the new version hides the old one. A SQL row update is not blind.
+
+- **The read.** The MyRocks wiki page "Read Free Replication" says INSERT, UPDATE and DELETE "all need GetForUpdate() to read by primary keys". "On cache miss, GetForUpdate() reads RocksDB data block from storage, and decompresses it". The engine needs the old row to check unique keys. It likely also needs it to remove old secondary index entries. That second reason is inferred from the page's examples. So each update reads one data block, which misses: 10,000 × 89 µs = 0.89 seconds per second.
+- **The write.** Each update writes a new version of the whole row, not of the 100 changed bytes. This is inferred from the same page, which says the binary log's row images hold all that is needed to compose the RocksDB write calls. With the 1,230-byte entry, that is 10,000 × 1,230 bytes = 12.3 MB per second.
+- **Compaction.** The tuning guide's 33 turns 12.3 MB into about 406 MB per second of writes, before compression, in large sequential runs. Compaction also reads about as many bytes.
+
+The page has no release tag. This course read it on 2026-10-18.
 
 The read-free mode on that wiki page works only on replicas. It gives up "almost all real time consistency checks", and "Primary still checks uniqueness". Verified from the page. InnoDB, the third design, reads one clustered leaf per update, because the leaf holds the row. That is 0.89 seconds per second, like the LSM. That last figure is inferred from section 2.2's layout.
 
@@ -800,16 +1017,26 @@ Neither design removes the reads. Both need about one device second or more per 
 
 A first draft of this answer multiplied 33 by the 100 changed bytes, not by the row. So it gave the LSM five times fewer bytes. That was wrong, because an LSM writes a new version of the whole row.
 
+**The same workload on a cloud volume.** The device model above is one laptop SSD that serves one read at a time. Move the PostgreSQL side to a gp3 volume:
+
+1. It makes 20,000 random reads a second, the leaf and the heap page for each of 10,000 updates.
+2. That is about 6.7 times the 3,000 IOPS baseline of section 2.1. So you must buy at least 20,000 IOPS.
+3. On plain EBS, gp3 allows 500 IOPS per GiB, so that needs a volume of at least 40 GiB. On RDS for PostgreSQL, 20,000 IOPS needs a gp3 volume of at least 400 GiB, section 2.1.
+4. The reads move 20,000 × 8 KiB = 156 MiB per second. That is more than the gp3 baseline of 125 MiB per second, so you must also buy throughput. The writes of the model above need more.
+5. At about 1 ms each, 20,000 reads are 20 seconds of waiting per second. So about 20 reads must be in flight at once.
+
+The MyRocks side makes half as many reads. On Aurora Standard, each PostgreSQL read that misses the pool is a billed storage I/O, counted in `VolumeReadIOPs`, so the read load is also a line on the bill. The IOPS arithmetic is this course's, from the EBS numbers of section 2.1. `amplification.py --layouts lsm --latency --read-us 1000` reruns the lab's latency model at a 1 ms miss, as section 2.1 shows.
+
 Now change one fact: the keys always grow, as a timestamp does. The B-tree then writes to its rightmost leaf, which collects many changes. So c is large. The write amplification falls toward the 3.1 that section 2.2 gives for c = 100, or lower. The RocksDB wiki page "Compaction" notes that leveled compaction is also cheaper for keys inserted in order. RocksDB has an optimization for that case. So with growing keys, neither structure writes much, and any write advantage of the LSM mostly goes away. Only the reads and the space then decide.
 
-**Fix the B-tree first.** A move to an LSM is the last lever, not the first. These PostgreSQL levers lower the write cost of section 2.2 without a migration. Each default is verified from the PostgreSQL 18 docs or from `postgresql.conf.sample` at REL_18_6:
+**Fix the B-tree first.** A move to an LSM is the last lever, not the first. These PostgreSQL levers lower the write cost of section 2.2 without a migration. Each default is verified from the PostgreSQL 17 docs or from `postgresql.conf.sample` at REL_17_11:
 
 | Lever | Default | What it lowers |
 |---|---|---|
-| a key that grows with time: a sequence, or `uuidv7()` since PostgreSQL 18 | `gen_random_uuid()` gives random version 4 UUIDs | full page images per insert, about 20 times in Vondra's test |
+| a key that grows with time: a sequence or an identity column. `uuidv7()` exists only from PostgreSQL 18 | `gen_random_uuid()` gives random version 4 UUIDs, and so do the Django and Rails examples of section 2.2 | full page images per insert, as Vondra measured in section 2.2 |
 | fewer indexes, and room for HOT with a table `fillfactor` below 100 | `fillfactor` 100, per the CREATE TABLE docs | index leaves written per update. Phase 4, section 4.5 |
-| checkpoints further apart: `max_wal_size` and `checkpoint_timeout` | 1GB and 5min, lines 271 and 267 | raises c. Recovery then replays more, as Phase 1, section 1.5, showed |
-| `wal_compression` | off, line 252 | page image bytes: 8.6 times smaller in Rogov's test, Phase 1, section 1.5 |
+| checkpoints further apart: `max_wal_size` and `checkpoint_timeout` | 1GB and 5min, lines 262 and 258 | raises c. Recovery then replays more, as Phase 1, section 1.5, showed |
+| `wal_compression` | off, line 243. It accepts `pglz`, `lz4` or `zstd`, and `on` means `pglz`. In 14 it was only on or off | page image bytes: 8.6 times smaller in Rogov's test, Phase 1, section 1.5 |
 
 Measure each lever with `wal_fpi` and `wal_bytes` in `pg_stat_wal`, which E13 uses. The opening situation moved the event store without trying any of them.
 
@@ -827,8 +1054,20 @@ Measure each lever with `wal_fpi` and `wal_bytes` in `pg_stat_wal`, which E13 us
 | tight disk budget | leveled LSM | space amp 1.1 against B-tree's over 1.5 | bytes on disk over live bytes after a week |
 | all keys fit in RAM, large values, no ranges | Bitcask log with merge | keydir bytes per key | resident memory per million keys |
 | strict p99 during heavy writes | B-tree, or LSM with paced compaction and spare device time | compaction share of device time | p99 while a compaction runs |
+| similarity search over embeddings, section 2.9 | HNSW in PostgreSQL while the index fits in the pool, or a smaller quantized index with re-ranking | index pages against `shared_buffers`, and the build's memory against `maintenance_work_mem` | buffers read per query in `EXPLAIN (ANALYZE, BUFFERS)`, and `pg_relation_size` of the index |
+| analytics: sums and counts over a few columns of many rows | a column store, outside the OLTP database | bytes read per report: rows × row width in a row store, against rows × column width | bytes read per report, from `EXPLAIN (ANALYZE, BUFFERS)` |
 
-The queue row is inferred from the RocksDB sources of section 2.4, not measured. Two rules apply to every row. Estimate the loads before you trust any row. And measure on a copy of your own data, with your read mix and your key order. Run long enough for compaction or checkpoints to reach a steady state.
+The queue row is inferred from the RocksDB sources of section 2.4, not measured. The embeddings row is inferred from section 2.9. Two rules apply to every row. Estimate the loads before you trust any row. And measure on a copy of your own data, with your read mix and your key order. Run long enough for compaction or checkpoints to reach a steady state.
+
+**Columnar storage, at the depth of one number.** Every structure in this phase is a row store: it keeps all the columns of a row together. The CMU 15-445 Fall 2025 notes for lecture #06 describe the other layout. In the decomposition storage model, "the DBMS stores a single attribute (column) for all tuples contiguously in a block of data. Thus, it is also known as a column store." The notes give its gain: it "Reduces the amount of I/O wasted per query". They also give its cost: it is "Slow for point queries, inserts, updates, and deletes".
+
+Here is the number for the running case. A report sums one 8-byte amount over 10 million orders.
+
+- The heap holds about 6 orders per page, section 2.2. So the scan reads 10,000,000 / 6 = 1,666,667 pages, about 13.7 GB.
+- A column store reads 10,000,000 × 8 bytes = 80 MB of that column, before compression.
+- That is about 170 times fewer bytes.
+
+The arithmetic is this course's. It leaves out compression and the column store's own metadata. So a report of this shape belongs in a column store, or in a summary table, not in a larger buffer pool. The nosql course, Phase 5, section 5.3, teaches analytical stores.
 
 **Where "ten times" comes from.** This phase's question asked why one workload can run ten times faster on one structure. The sources in this phase show several such factors, each with a different cause:
 
@@ -885,7 +1124,7 @@ The paper gives these sizes in its words:
 
 > "Kin should be 25% of the page slots and Kout should hold identifiers for as many pages as would fit on 50% of the buffer."
 
-A page enters Am only when it is requested again while its number is still in A1out. So it must be used twice, with time between the two uses. A scan page is used once, goes through A1in and A1out, and never reaches Am. A second access while a page is still in A1in does not count. It is often part of the same short burst, such as several rows read from one page. `cache_sim.py:180` follows the paper's pseudocode, and E10 runs it.
+A page enters Am only when it is requested again while its number is still in A1out. So it must be used twice, with time between the two uses. A scan page is used once, goes through A1in and A1out, and never reaches Am. A second access while a page is still in A1in does not count. It is often part of the same short burst, such as several rows read from one page. `cache_sim.py:181` follows the paper's pseudocode, and E10 runs it.
 
 The paper measured 2Q against LRU on traces, by hit rate. 2Q helped most when the pool was small compared with the data. One test mixed one third scan references into Zipf references, where a few pages get most of the accesses. The result: "The hit rate of 2Q is about 70% of its no-scan hit rate, while the hit rate of LRU is about 60% of its no-scan hit rate". Verified from the paper, Tables 1 to 4 and page 443. The PDF is a scanned image, and the research read the tables from the page images.
 
@@ -895,10 +1134,10 @@ The paper's Table VI uses SPC1, a trace with long sequential scans, and a cache 
 
 ### What real buffer pools use
 
-**PostgreSQL: clock sweep and a ring.** PostgreSQL uses neither LRU nor 2Q. Each buffer has a usage count. Each access raises it by one, up to `BM_MAX_USAGE_COUNT`, which is 5 at `buf_internals.h` line 87. A clock hand moves around the buffers. It lowers each count it passes by one. It takes the first buffer whose count is 0 and that nobody has pinned. From `freelist.c` at REL_18_6, copied with the locking and statistics lines cut:
+**PostgreSQL: clock sweep and a ring.** PostgreSQL uses neither LRU nor 2Q. Each buffer has a usage count. Each access raises it by one, up to `BM_MAX_USAGE_COUNT`, which is 5 at `buf_internals.h` line 79, REL_17_11. A clock hand moves around the buffers. It lowers each count it passes by one. It takes the first buffer whose count is 0 and that nobody has pinned. From `freelist.c` at REL_17_11, copied with the locking and statistics lines cut. The same lines are identical at REL_18_6:
 
 ```c
-/* src/backend/storage/buffer/freelist.c, StrategyGetBuffer(), REL_18_6, lines 314 to 353. Cut lines marked ... */
+/* src/backend/storage/buffer/freelist.c, StrategyGetBuffer(), REL_17_11, lines 314 to 353. Cut lines marked ... */
 	/* Nothing on the freelist, so run the "clock sweep" algorithm */
 	trycounter = NBuffers;
 	for (;;)
@@ -930,38 +1169,197 @@ The paper's Table VI uses SPC1, a trace with long sequential scans, and a cache 
 
 A page used often keeps a count near 5. So the hand must pass it five times before it can be taken. A page used once has a count of 1. The next pass lowers it to 0, and the pass after that takes it. The comment above the cap explains why it is only 5: "A large value (comparable to NBuffers) would approximate LRU semantics". But a large cap could make the hand go round many times before it finds a buffer.
 
-The clock alone does not stop a large scan from flooding the pool. PostgreSQL handles sequential scans with a separate rule. A sequential scan of a table larger than a quarter of `shared_buffers` uses a ring. A ring is a small, fixed set of buffers that the scan reuses. Verified at `heapam.c` lines 392 to 404, REL_18_6. Two details keep the ring from hurting other queries. A page read through the ring gets a usage count of at most 1. The source says: "Ring buffers shouldn't evict others from pool. Thus we don't make usagecount more than 1". And the scan takes back a ring buffer only if its count is still 0 or 1. A higher count means another query used the page. So the scan leaves it and takes a new buffer from the clock. Verified at `freelist.c` line 769.
+The clock alone does not stop a large scan from flooding the pool. PostgreSQL handles sequential scans with a separate rule. A sequential scan of a table larger than a quarter of `shared_buffers` uses a ring. A ring is a small, fixed set of buffers that the scan reuses. Verified at `heapam.c` lines 445 to 452, REL_17_11. Two details keep the ring from hurting other queries. A page read through the ring gets a usage count of at most 1. The source says: "Ring buffers shouldn't evict others from pool. Thus we don't make usagecount more than 1". And the scan takes back a ring buffer only if its count is still 0 or 1. A higher count means another query used the page. So the scan leaves it and takes a new buffer from the clock. Verified at `freelist.c` line 727, REL_17_11.
 
-The ring's size depends on the version. In PostgreSQL 16 and 17 it is 256 kB, which is 32 buffers of 8 kB. The code of PostgreSQL 18 starts at 256 kB and adds room for its asynchronous reads. That code is at `freelist.c` lines 557 to 601. It caps the result by the number of buffers one process may pin. The added room is 8 kB × 16 × 16 = 2,048 kB. The two 16s are the defaults of `io_combine_limit` and `effective_io_concurrency`. So the code wants 2,304 kB. With 128 MB of `shared_buffers`, the pin cap is 16,384 buffers / 174 processes = 94 buffers. That is 752 kB. The 174 is 136 backends plus 38 auxiliary processes, from the default settings. The 752 kB is inferred from the code and was not measured. The README in the same source tree still says "For sequential scans, a 256KB ring is used". For PostgreSQL 14, the version on your laptop, Rogov gives 256 kB, or 32 standard pages, on page 156. E12 shows the ring's effect on your own server.
+The ring's size depends on the version.
 
-**Which operations use a ring.** The ring protects the pool only from operations that ask for one. A bitmap heap scan does not. A bitmap heap scan collects the matching rows from an index, then reads their table pages in physical order. Phase 4, section 4.3, explains when the planner picks it. In `tableam.h` at REL_18_6, lines 920 to 927, `table_beginscan_bm` sets no `SO_ALLOW_STRAT` flag. `heapam.c` gives a scan the ring only when that flag is set, at the lines above. Rogov showed the index scan case on PostgreSQL 14, page 158. After a Seq Scan of his table, it held 32 buffers. After an Index Scan of the same table, "the buffer cache ends up containing the whole table and the whole index". Here is the whole picture, for PostgreSQL 14 from Rogov, pages 156 and 157, unless the row says otherwise:
+| Version | Ring for a large Seq Scan | Evidence |
+|---|---|---|
+| 14 | 256 kB, 32 pages | Rogov, page 156 |
+| 15 to 17 | 256 kB, 32 buffers of 8 kB | `GetAccessStrategy` in `freelist.c`, lines 541 to 573 at REL_17_11. The same 256 in REL_15_14 and REL_16_10 |
+| 18 | about 752 kB with default settings | arithmetic below, inferred, not measured |
+
+On 17 the same function gives the bulk write ring 16 MB and the VACUUM ring 2,048 kB. The README at REL_17_11, line 218, says "For sequential scans, a 256KB ring is used".
+
+The 18 code is at `freelist.c` lines 557 to 601, REL_18_6. It starts at 256 kB. It adds room for its asynchronous reads: 8 kB × 16 × 16 = 2,048 kB. The two 16s are the 18 defaults of `io_combine_limit`, 128kB or 16 pages, and `effective_io_concurrency`. On 17, `io_combine_limit` is also 128kB, but `effective_io_concurrency` is 1, at `postgresql.conf.sample` lines 211 and 209. So the 18 code wants 2,304 kB. It caps the ring at the number of buffers one process may pin. With 128 MB of `shared_buffers`, that cap is 16,384 buffers / 174 processes = 94 buffers, or 752 kB. The 174 is 136 backends plus 38 auxiliary processes, from the default settings. The README in the 18 tree still says 256 kB. E12 shows the ring's effect on your own server.
+
+**Which operations use a ring.** The ring protects the pool only from operations that ask for one. A bitmap heap scan does not. A bitmap heap scan collects the matching rows from an index, then reads their table pages in physical order. Phase 4, section 4.3, explains when the planner picks it. In `tableam.h` at REL_17_11, lines 959 to 967, `table_beginscan_bm` sets `SO_TYPE_BITMAPSCAN | SO_ALLOW_PAGEMODE`, and `SO_NEED_TUPLES` when the scan needs the tuples. It sets no `SO_ALLOW_STRAT` flag. REL_14_24 sets the same flags. `heapam.c` gives a scan the ring only when that flag is set, at the lines above. Rogov showed the index scan case on PostgreSQL 14, page 158. After a Seq Scan of his table, it held 32 buffers. After an Index Scan of the same table, "the buffer cache ends up containing the whole table and the whole index". Here is the whole picture. Rogov, pages 156 and 157, gives it for PostgreSQL 14, unless the row says otherwise. The ring sizes and the cap of 1/8 of the pool are the same in the 17 source, `freelist.c` lines 541 to 599:
 
 | Uses a ring | Uses the normal pool |
 |---|---|
 | Seq Scan of a table larger than `shared_buffers` / 4: the bulk read ring, 256 kB | Index Scan, Rogov p. 158 |
-| a second Seq Scan of the same table, which joins the first scan's ring | Bitmap Heap Scan, `tableam.h` at REL_18_6 |
+| a second Seq Scan of the same table. A synchronized scan starts where the first scan is, so it finds those pages in the first scan's ring buffers. It still has its own 256 kB ring, `heapam.c` lines 453 to 458 | Bitmap Heap Scan, `tableam.h` at REL_14_24 and REL_17_11 |
 | COPY FROM, CREATE TABLE AS SELECT and other table rewrites: the bulk write ring, 16 MB, at most 1/8 of the pool | UPDATE or DELETE of many rows. The scan uses a ring, but changed pages leave it, so rings "virtually become useless" |
-| VACUUM: 256 kB in 14. Since 16 it is `vacuum_buffer_usage_limit`, 2MB in the 18 sample file | TOAST values, which "are always accessed via an index, so they bypass buffer rings" |
+| VACUUM: 256 kB in 14 and 15. 256 kB by default in 16, set by the new `vacuum_buffer_usage_limit`, at `postgresql.conf.sample` line 161 of REL_16_10. 2 MB since 17, at line 160 of REL_17_11 | TOAST values, which "are always accessed via an index, so they bypass buffer rings" |
 
-Two limits apply. The bitmap row is verified in the PostgreSQL 18 source only, and PostgreSQL 14 is inferred to match. Rogov's PDF prints digits as special glyphs, which this course's research decoded by context. A nightly report with a date filter often runs as a Bitmap Heap Scan. So it can flood the pool even on PostgreSQL. That is inferred from the table. Read the report's plan first, in `EXPLAIN (ANALYZE, BUFFERS)`. On version 16 and later, `pg_stat_io` rows with the context `bulkread` count ring reads. Their `reuses` column counts buffers reused inside a ring. Verified from the PostgreSQL 18 docs, section 27.2.
+Two notes apply. The bitmap row is verified in the 14, 17 and 18 sources. The 16 default of `vacuum_buffer_usage_limit` is verified from the REL_16_10 sample file. Rogov's PDF prints digits as special glyphs, which this course's research decoded by context. A nightly report with a date filter often runs as a Bitmap Heap Scan. So it can flood the pool even on PostgreSQL. That is inferred from the table. Read the report's plan first, in `EXPLAIN (ANALYZE, BUFFERS)`. On version 16 and later, `pg_stat_io` rows with the context `bulkread` count ring reads. Their `reuses` column counts buffers reused inside a ring. Verified from the PostgreSQL 17 docs, section 27.2.13.
+
+`pg_buffercache_usage_counts()`, from section 2.1, shows the other side. Run it before and after the report. A report that flooded the pool leaves many buffers of its own table, at low usage counts, where the hot tables were. The per-relation query of section 2.1 names that table. That reading is inferred from the clock rules above. To log the report's real plan each night, load `auto_explain` and set `auto_explain.log_min_duration`, `log_analyze` and `log_buffers`. The 17 docs, F.3, say the module does nothing by default. `log_min_duration` is -1 by default, which disables logging, and `log_analyze` and `log_buffers` are off by default. On RDS, `shared_preload_libraries` is a static parameter, so this needs a custom parameter group and a reboot. Phase 4, section 4.1, teaches auto_explain. On Aurora the morning's misses go to the storage service. On Aurora Standard they count as billed reads, section 2.1. E14 runs both checks.
 
 **InnoDB: an LRU with a midpoint.** MySQL 8.4's InnoDB keeps one LRU list in two parts. The MySQL 8.4 manual says "3/8 of the buffer pool is devoted to the old sublist". It also says: "When `InnoDB` reads a page into the buffer pool, it initially inserts it at the midpoint (the head of the old sublist)". A page moves to the young part only when it is accessed again. The setting `innodb_old_blocks_time` adds a condition. It is a time window in milliseconds after the first access. During it, a page "can be accessed without being moved to the front". The default is 1000. `innodb_old_blocks_pct` defaults to 37, which is 100 × 3 / 8 rounded down. Both defaults are verified in `ha_innodb.cc` at tag mysql-8.4.11, lines 23017 to 23027.
 
 This design is close to 2Q, but it is not the same. The old part plays the role of A1in, and the young part plays the role of Am. The time window plays the role of 2Q's rule that a second access inside A1in does not count. InnoDB has no ghost list like A1out. So a page that leaves the old part is forgotten, and its next access starts from the old part again. This comparison is inferred from the two designs. The InnoDB manual does not cite 2Q.
 
-**The failure: a time window of zero.** Set `innodb_old_blocks_time` to 0. A scan that reads several rows per page touches each page twice in a row. The second touch moves the page to the young part. So every scan page is promoted, and the scan pushes the hot pages out, as LRU would. The lab's self-test traces this by hand in a pool of 10 frames. With a window of 5 references, three hot pages survive a 15-page scan. With a window of 0, all three are evicted. Both traces are worked out from the code and were not run. E11 runs the same case at full size.
+**The failure: a time window of zero.** Set `innodb_old_blocks_time` to 0. A scan that reads several rows per page touches each page twice in a row. The second touch moves the page to the young part. So every scan page is promoted, and the scan pushes the hot pages out, as LRU would. The lab's self-test traces this by hand in a pool of 10 frames. With a window of 5 references, three hot pages survive a 15-page scan. With a window of 0, all three are evicted. The self-test asserts both traces, and it passes, as E1 records. E11 runs the same case at full size.
 
 **The sentence to remember:** LRU loses every hot page to a scan larger than the pool. 2Q, ARC, InnoDB's midpoint and PostgreSQL's ring all keep a page used once from pushing out a page used often. PostgreSQL's ring guards against sequential scans, not index or bitmap scans.
 
-**The trap:** setting `innodb_old_blocks_time` to 0. Or trusting PostgreSQL's ring with a report that runs as a Bitmap Heap Scan or an Index Scan. Each nightly report then empties the buffer pool, and the morning's reads all miss.
+**The trap:** setting `innodb_old_blocks_time` to 0. Or trusting PostgreSQL's ring with a report that runs as a Bitmap Heap Scan or an Index Scan. Each nightly report can then flood the buffer pool, and the morning's reads miss until the hot pages return.
 
 **Try this now:** first predict which keeps a larger share of its no-scan hit rate. Then run `uv run python phase02_structures/cache_sim.py --policies lru,2q` and read the `kept` column.
 
 ---
 
+## 2.9 — Vectors as a storage workload (pgvector: value size, TOAST, index size, build cost and vacuum)
+
+Why this matters: agent features keep embeddings in PostgreSQL with pgvector. The retrieval-internals and advanced-retrieval courses teach search quality: recall, filters and quantization. This section teaches what the same table costs the database. Every tool it uses comes from sections 2.1 to 2.8.
+
+**Answer this first.** A table holds 1 million embeddings of 1,536 dimensions, one per row, with a bigint id. How many bytes is one value? Does it stay in the heap row? How large is an HNSW index on the column: under 1 GB, about 8 GB, or about 60 GB? How much WAL does the index build write?
+
+**The mental model.** pgvector is an extension. It adds the types `vector`, `halfvec` and `sparsevec`, and two index types, HNSW and IVFFlat. Its indexes also accept PostgreSQL's built-in `bit` type. HNSW is a graph index. Each vector links to its nearest neighbours, and a search walks the links. IVFFlat splits the vectors into lists around centres, and a search reads the closest lists. Two facts decide the storage cost. A row over 2,032 bytes moves its value to TOAST, section 2.2. And each index stores its own copy of every vector. So the vector bytes are paid at least twice, once in the table and once in the index.
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ One row of items, with a vector(1536). Sizes from vector_storage.py      │
+├──────────────────────────────────────────────────────────────────────────┤
+│ HEAP page of items   row = 24 header + 8 id + 18 TOAST pointer = 50      │
+│         │ the pointer names the value in the TOAST table                 │
+│         ▼                                                                │
+│ TOAST table          4 chunk rows: 1,996 + 1,996 + 1,996 + 160 bytes,    │
+│                      which fill most of one 8 kB TOAST page              │
+│                      = the 6,148 data bytes of a 6,152-byte value        │
+│                                                                          │
+│ HNSW index page      element tuple 6,224 = 72 header + 6,152 value copy  │
+│                      neighbour tuple 200 = 4 header + 32 links of 6,     │
+│                      aligned to 8. m = 16                                │
+│                      so one element fits on each 8 kB page               │
+├──────────────────────────────────────────────────────────────────────────┤
+│ 1 million rows: TOAST about 8.2 GB, index at least 1,000,001 pages,      │
+│ 7.6 GiB. The vector bytes are paid twice. Inferred from the source       │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### The value and the row
+
+**Value sizes.** The pgvector README at v0.8.7 gives the size of each type, at lines 960, 998 and 1036, and the largest indexable value, at lines 252 to 254:
+
+| Type | Bytes per value | At 1,536 dimensions | Largest value an index takes |
+|---|---|---|---|
+| `vector`, 4-byte floats | 4 × dimensions + 8 | 6,152 | 2,000 dimensions |
+| `halfvec`, 2-byte floats | 2 × dimensions + 8 | 3,080 | 4,000 dimensions |
+| `bit` | dimensions / 8 + 8 | 200 | 64,000 dimensions |
+
+**TOAST.** pgvector declares `vector` and `halfvec` with `STORAGE = external`, at `sql/vector.sql` lines 39 and 483. External means out of line without compression, per the PostgreSQL 17 docs, section 65.2. A row of a bigint and a vector(1536) is 24 + 8 + 6,152 = 6,184 bytes. That is over the threshold, which `heapam.c` tests at line 2359, REL_17_11. So the value moves to the TOAST table in 4 chunks, and the heap row keeps an 18-byte pointer. The 4 chunk rows take 6,312 bytes of an 8,168-byte page. The 1,856 bytes left are too few for the next value's first chunk, so each value fills one TOAST page, from `hio.c`. A million rows then need about 1,000,000 TOAST pages, about 8.2 GB. The largest vector that stays inline next to a bigint has 498 dimensions. These numbers come from `vector_storage.py`. They are inferred from the source and were not measured.
+
+Two things follow from TOAST:
+
+1. **Reads.** Reading an embedding means a lookup in the TOAST table's index, then reads of its chunk pages. TOAST reads "bypass buffer rings", section 2.8. So a scan over the embeddings fills the normal pool. That is inferred.
+2. **Plans.** The README says: "The planner doesn't consider out-of-line storage in cost estimates, which can make a serial scan look cheaper." It gives two fixes. The first lowers `min_parallel_table_scan_size` and `parallel_setup_cost` for one transaction, with `SET LOCAL`. The second is `ALTER TABLE items ALTER COLUMN embedding SET STORAGE PLAIN`.
+
+**What PLAIN costs.** PLAIN keeps the value in the heap row. Each point below is inferred from the source, and `vector_storage.py` computes it:
+
+- A vector(1536) row is then 6,184 bytes, so one row fits on each 8 kB heap page. A million rows are a million heap pages, 7.6 GiB, and every sequential scan reads them all.
+- A halfvec(1536) row fits twice on a page.
+- A vector(3072) row is 12,328 bytes. That is over `MaxHeapTupleSize`, 8,160 bytes. So an insert fails with `row is too big: size 12328, maximum size 8160`, from `hio.c` lines 532 to 536. Not run.
+- The PostgreSQL 17 docs for ALTER TABLE say that "SET STORAGE doesn't itself change anything in the table". It only sets the strategy for future writes. So old rows stay in TOAST until they are written again.
+
+**A real case.** Instacart moved its semantic search from FAISS, a vector search library, to pgvector. Its post of 29 May 2025, "How Instacart Built a Modern Search Infrastructure on Postgres", lists its index design changes. One is a storage change. It "Updated the embedding column to use inline storage instead of TOAST". Another is a tuning change. It raised `max_parallel_workers_per_gather` and `max_parallel_workers` to 8, which "speeds up the scans where Postgres decides not to use a pgvector index". The same post reports "a 10x reduction in write workload" from a normalized data model, against its earlier denormalized Elasticsearch model. Verified from the post. It does not give the table's size or the embedding's dimension count.
+
+### The index
+
+**Index size.** An HNSW element tuple holds a 72-byte header with ten heap TIDs, then a copy of the vector. That is `HnswElementTupleData`, `src/hnsw.h` lines 373 to 383, v0.8.7. Its neighbour tuple holds (level + 2) × m links of 6 bytes each, `HNSW_NEIGHBOR_TUPLE_SIZE` at line 82. `m` is 16 by default, at line 54. The build keeps an element and its neighbours on one page when both fit, at `hnswbuild.c` lines 192 to 229. So for a million vectors of 1,536 dimensions:
+
+| Index | Elements per 8 kB page | Index size, lower bound |
+|---|---|---|
+| HNSW on `vector(1536)`, m = 16 | 1 | 1,000,001 pages, 7.6 GiB |
+| HNSW on the expression `embedding::halfvec(1536)` | 2 | 500,001 pages, 3.8 GiB |
+| HNSW on `binary_quantize(embedding)::bit(1536)` | 17 | 58,825 pages, 0.45 GiB |
+
+Upper-level elements have larger neighbour tuples, so these sizes are lower bounds. They are inferred from the struct sizes. The self-test of `vector_storage.py` checks the first two. For bit it measures over 1,000 elements and gets 59 pages, so it prints 16.9 per page, where whole pages hold 17. They were not measured on a server.
+
+The index is at least as large as the vectors, so section 2.1 decides its speed. Each graph step loads the unvisited neighbours of one candidate, up to 2 × m = 32 at the lowest level, at `hnswutils.c` lines 891 to 933. At one element per page, each neighbour is a page read when it misses the pool: 89 µs on the laptop, about 1 ms on gp3. So one search can pay hundreds of reads. That count is inferred from the code and the layout. The README gives two ways to shrink the working set. The first is "Use the halfvec type instead of vector for a smaller working set". The second is "Use binary quantization with re-ranking to keep indexes in-memory at scale". The retrieval-internals course, Phase 2, section 2.2, and Phase 4, section 4.4, measure memory per vector and the recall that quantization costs.
+
+### The build: memory and WAL
+
+**Build memory.** The comment at the top of `hnswbuild.c` says the build "happens in two phases". In the first, "the graph is held completely in memory". When it runs out of the memory "determined by maintenance_work_mem", it writes the graph to disk. Then it inserts each remaining vector "one by one, just like on INSERT". That second phase is much slower, and the README shows the notice it prints:
+
+```text
+NOTICE:  hnsw graph no longer fits into maintenance_work_mem after 100000 tuples
+DETAIL:  Building will take significantly more time.
+HINT:  Increase maintenance_work_mem to speed up builds.
+```
+
+The graph holds each vector plus a list of 2 × m candidate neighbours of 16 bytes each. So it needs at least 6,152 + 512 = 6,664 bytes per element for vector(1536), and at least 6.7 GB for a million. That is a lower bound inferred from the structs. `maintenance_work_mem` is 64MB by default, at `postgresql.conf.sample` line 142, REL_17_11. Two AWS pages disagree for RDS. The memory page says 64 MB. The autovacuum page gives `GREATEST({DBInstanceClassMemory/63963136*1024},65536)` in kB, about 500 MB on 32 GiB. Check yours with `show maintenance_work_mem`.
+
+Since pgvector 0.8.4, IVFFlat fails instead of slowing down. Older versions, such as 0.8.2 on RDS 17.11, use more memory than `maintenance_work_mem` and do not stop, per the 0.8.4 CHANGELOG entry. Its build holds the list centres and 50 samples per list, at least 10,000 samples. Since 0.8.5 the samples are also capped at the heap's pages times 291, at `ivfbuild.c` lines 400 and 456 to 466. When that passes `maintenance_work_mem`, `ivfutils.c` lines 126 to 133 raise an error. A million vectors with the README's starting point of 1,000 lists need 51,000 × 6,152 bytes, about 300 MB. So at the default:
+
+```text
+ERROR:  memory required is 300 MB, maintenance_work_mem is 64 MB
+```
+
+That message is computed by `vector_storage.py` from the source. It was not run. Raise the memory for one session only, as the README does with `SET maintenance_work_mem = '8GB'`. The README also warns: "Do not set `maintenance_work_mem` so high that it exhausts the memory on the server". On Aurora, about 75% of memory already belongs to `shared_buffers`, section 2.1. So less room is left for a build. That is inferred. A parallel HNSW build holds its graph in shared memory, per the same comment in `hnswbuild.c`. In Docker, the README says to make `--shm-size` at least `maintenance_work_mem` "to avoid an error with parallel HNSW index builds".
+
+**WAL of a build.** After the graph is built, the comment says, "we perform one more scan through the index and write all the pages to the WAL". The call is `log_newpage_range`, at `hnswbuild.c` lines 1142 to 1143. IVFFlat registers each new page with `GENERIC_XLOG_FULL_IMAGE`, at `ivfutils.c` line 166. Each page image leaves out the page's free space, at `xloginsert.c` lines 655 to 669, REL_17_11. A vector(1536) HNSW page has about 1,728 free bytes, so its image is about 6,464 bytes. So a build writes about 79% of the index size into the WAL, about 6.0 GiB for 1M vector(1536) rows. For HNSW most of it comes at the end, at once. The total is inferred from the code, and it ignores compression and record headers.
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ What a vector index build does to the server, 1M vector(1536) rows       │
+├──────────────────────────────────────────────────────────────────────────┤
+│ t=0     CREATE INDEX starts. The graph grows in maintenance_work_mem     │
+│         at least 6,664 bytes per vector: 6,152 value + 512 links         │
+│ t=1     past 64 MB, about 10,000 vectors in: the NOTICE. The rest of     │
+│         the vectors go in one by one, as INSERTs do, and run slower      │
+│ t=end   log_newpage_range writes every index page into the WAL,          │
+│         without its free space: about 6.0 GiB in one burst               │
+│ after   checkpoints come early, replicas replay 6.0 GiB, archive grows   │
+├──────────────────────────────────────────────────────────────────────────┤
+│ times are steps, not seconds. 10,000 is 64 MiB / 6,664 bytes, from a     │
+│ lower bound on memory, so the real count is lower. All inferred          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+What that burst does to a server, each point inferred from the WAL volume:
+
+- With `max_wal_size` at 1GB, the burst requests checkpoints early, as Phase 1, section 1.5, explained.
+- Every streaming replica must receive and replay the same bytes, so replica lag rises. Phase 5, section 5.1, measures that lag in bytes and in seconds.
+- The WAL archive and the next backup grow by the same amount. Phase 5, section 5.6, covers the archive and base backups.
+
+Measure it with `pg_current_wal_lsn()` before and after the build, as E16 does. The README also says: "In production environments, create indexes concurrently to avoid blocking writes", with `CREATE INDEX CONCURRENTLY`.
+
+### Deletes, VACUUM and versions
+
+**Deletes and VACUUM.** A delete leaves a dead heap tuple and a dead element in the index. HNSW's VACUUM makes four passes, at `hnswvacuum.c` lines 785 to 792. It removes heap TIDs, repairs the graph, then confirms the repair and marks elements deleted. The repair pass finds new neighbours for every element that lost some, so it runs graph searches, not only page writes. Its page scans read through a 256 kB bulk-read ring, set at `hnswvacuum.c` line 747. The graph searches of the repair pass use the normal pool, at `hnswutils.c` line 546. So a large repair can still fill the pool. The README says: "Vacuuming can take a while for HNSW indexes. Speed it up by reindexing first", with `REINDEX INDEX CONCURRENTLY` and then `VACUUM`.
+
+A deleted element's slot is reused by a later insert, at `hnswinsert.c` line 212. So the index file keeps its size, as a B-tree does in section 2.2. VACUUM VERBOSE prints the page line of section 2.2 for this index too. pgvector's cleanup function fills in only the page count, at `hnswvacuum.c` line 815. So the other three numbers print as 0. That is inferred from the code.
+
+**Versions.** pgvector 0.8.3 "Fixed possible index corruption with HNSW vacuuming". 0.8.4 "Fixed `hnsw graph not repaired` error with HNSW vacuuming". 0.8.4 also "Fixed memory exceeding `maintenance_work_mem` with IVFFlat index builds", and 0.8.7 "Fixed buffer overflow with IVFFlat index build". All are verified from the CHANGELOG at v0.8.7. RDS for PostgreSQL 17.11 lists pgvector 0.8.2 on the AWS extension versions page, read on 2026-10-20. So that RDS version has none of these fixes. That follows from the version order. Check yours with `select extversion from pg_extension where extname = 'vector';`. The retrieval-internals course, Phase 7, sections 7.1 and 7.3, covers deletes from the search side.
+
+**SERIALIZABLE.** HNSW and IVFFlat set `ampredlocks = false`, at `src/hnsw.c` line 348 and `src/ivfflat.c` line 265. For such an index, PostgreSQL 17 takes a predicate lock on the whole index at the start of a scan, `indexam.c` lines 319 to 320. It checks the whole index for conflicts on every insert, lines 225 to 228. So a serializable vector search conflicts with every concurrent insert into that index by another serializable transaction, `predicate.c` line 4330. Each conflict is one rw-dependency, not an abort. An abort needs the dangerous structure of section 3.5. The code is verified. The abort rate is inferred and not measured. Phase 3, section 3.5, explains predicate locks.
+
+**Where you see it.** The signals for this workload:
+
+| Question | Command or signal | Expected for 1M vector(1536) rows |
+|---|---|---|
+| how large is one value | `select pg_column_size(embedding) from items limit 1` | 6,148 bytes. For a TOASTed value it counts the stored bytes without the 4-byte header, `detoast.c` lines 606 to 616, REL_17_11. A PLAIN row shows 6,152 |
+| where do the bytes sit | `select pg_size_pretty(pg_relation_size('items')), pg_size_pretty(pg_table_size('items'))` | a small heap, and a table size that includes about 8.2 GB of TOAST |
+| how large is the index | `select pg_size_pretty(pg_relation_size('items_embedding_idx'))` | at least 7.6 GiB for HNSW |
+| does the build fit | the NOTICE above, and `pg_stat_progress_create_index` | the NOTICE at 64 MB |
+| does a search miss the pool | `EXPLAIN (ANALYZE, BUFFERS)` of one search, as the README advises | `read` counts close to the graph steps |
+| on RDS or Aurora | Performance Insights `IO:DataFileRead` during searches | rises when the index outgrows the pool |
+
+The expected column is inferred from this section and was not run. The 8.2 GB of TOAST is this course's arithmetic. Three full chunk rows of 2,032 bytes, one short row of about 200, and four line pointers are about 6,312 bytes per vector. The rest of the page cannot hold the next value's first chunk, so each vector takes one 8 kB page.
+
+**The sentence to remember:** a pgvector table pays for every vector twice, once in TOAST or the heap and once in the index. An HNSW index of vector(1536) holds one element per page, so it is at least as large as the vectors.
+
+**The trap:** building an HNSW index on a large table at the default `maintenance_work_mem` of 64 MB. The build leaves memory after about 10,000 vectors, or fewer, and runs much slower. Its end then writes the whole index into the WAL at once, and every replica must replay it, Phase 5, section 5.1.
+
+**Try this now:** run `uv run python phase02_structures/vector_storage.py --rows 4000000`, then the same with `--type halfvec`. Compare each index size with your `shared_buffers`. Then say which of the three index rows above you would build, and what recall test you would run first.
+
+---
+
 ## 🧪 Hands-on lab
 
-The labs below are written and reviewed, but were not run by the author. Each script was checked with `python3 -m py_compile` only. Every "Expected" line says "Not run by the author yet." and then gives the expected shape. Each number in it comes from arithmetic in this phase or from a cited source. Some come from working through the code and its seed by hand. None of them is a measurement. The byte and block counts have no randomness that depends on time. With the same flags and seed, they should match the arithmetic exactly or closely, as each exercise says. The latency numbers come from a model, not from your SSD.
+**Run status, 2026-10-20.** The author ran every self-test of Phases 1 and 2, and the commands of E15, on an Apple M4 Pro with macOS 26.6 and Python 3.12.14 under uv. Those outputs are real, and E1 and E15 quote them. The first run of the self-tests failed in `cache_sim.py`, and E1 gives the cause and the fix. Every other exercise was written and reviewed, but not run by the author. Its "Expected" line says "Not run by the author yet." and then gives the expected shape. Each number in it comes from arithmetic in this phase or from a cited source. Some come from working through the code and its seed by hand. None of them is a measurement. The byte and block counts have no randomness that depends on time. With the same flags and seed, they should match the arithmetic exactly or closely, as each exercise says. The latency numbers come from a model, not from your SSD.
 
 **What you build.** The lab extends the Phase 1 store in two directions. `bitcask_merge.py` adds segments, merge and hint files to the Phase 1 log. `lsm.py` builds an LSM tree on the Phase 1 entry format. Both run on the simulated file system of Phase 1, `fsim.py`, through a wrapper that counts every byte:
 
@@ -974,6 +1372,7 @@ The labs below are written and reviewed, but were not run by the author. Each sc
 | `phase02_structures/bloom.py` | the standard and the blocked Bloom filter, theory and measurement | the FPR formula against section 2.5, no false negatives |
 | `phase02_structures/amplification.py` | the two layouts under two workloads, the range demo, the latency model | log write amplification 133 / 113, LSM against log, at-once against paced |
 | `phase02_structures/cache_sim.py` | LRU, LFU, 2Q, ARC, PostgreSQL's clock and ring, InnoDB's midpoint | hand-worked traces of section 2.8, ARC's invariants |
+| `phase02_structures/vector_storage.py` | the storage arithmetic of section 2.9: value sizes, TOAST, PLAIN rows per page, HNSW elements per page, build memory, the IVFFlat error | the PostgreSQL 17 and pgvector 0.8.7 constants, the sizes of section 2.9, and the keep-together rule, which a mutant without it fails |
 
 The demonstration of this phase is four exercises. E6 gives read, write and space amplification for two layouts under two workloads. E9 shows the compaction storm in the latency histogram. E8 gives the Bloom filter's measured FPR against its memory. E10 gives the LRU and 2Q hit rates under a scan.
 
@@ -981,7 +1380,8 @@ All commands run from `elite-storage/code/`.
 
 - [ ] **E1 (offline).** Run every self-test of this phase and of Phase 1. This phase imports Phase 1's code.
   - Run: `for f in phase02_structures/*.py phase01_durability/*.py shared/durable.py; do echo "$f"; uv run python "$f" --self-test; done`
-  - Expected: Not run by the author yet. `self-test passed` after each of the 12 files. The Phase 2 self-tests assert the numbers of sections 2.2, 2.4 and 2.5, so a pass also checks that arithmetic.
+  - Expected, run by the author on 2026-10-20: `self-test passed` after each of the 13 files. The Phase 2 self-tests assert the numbers of sections 2.2, 2.4, 2.5 and 2.9, so a pass also checks that arithmetic.
+  - The first run failed. `cache_sim.py --self-test` stopped with `KeyError: 99` in `TwoQ.access`, on the mixed trace near its end. The cause: when a page whose number is in A1out comes back, `_reclaimfor` may first page out the tail of A1in and trim A1out. If the returning page's own number was the oldest entry of a full A1out, that trim dropped it, and the next line's `del` failed. The fix keeps the paper's order, reclaim and then add to Am, and removes the number only if it is still there. It is at `cache_sim.py:191`. The earlier "every self-test passes" was never run, so this bug sat in a file that only `py_compile` had checked.
   - If it fails: the assertion message names the number that differs. Compare it with the section that the test names before you change any code.
   - Teaches: each rule the text calls important has a check that fails without it.
 
@@ -1041,7 +1441,7 @@ All commands run from `elite-storage/code/`.
   - First predict which keeps the larger share of its no-scan hot hit rate.
   - Run: `uv run python phase02_structures/cache_sim.py --policies lru,2q`.
   - Expected: Not run by the author yet. A header line with scans at 33% of 450,000 references. Two rows. LRU's `kept` value is lower than 2Q's. The 2Q paper's own test kept about 60% for LRU and about 70% for 2Q. Its trace was different, so expect the same direction, not the same numbers.
-  - The code is `TwoQ.access` at `cache_sim.py:180`. `_reclaimfor`, at `cache_sim.py:165`, frees a frame. It takes the oldest page of A1in when A1in is over Kin, and puts its number into A1out. Otherwise it takes the oldest page of Am, without a ghost entry. The self-test traces a pool of 4 frames by hand. A hot page reaches Am. Then a scan of 6 new pages passes through A1in and A1out, and the hot page still hits afterwards. That trace is worked out from the code and was not run.
+  - The code is `TwoQ.access` at `cache_sim.py:181`. `_reclaimfor`, at `cache_sim.py:166`, frees a frame. It takes the oldest page of A1in when A1in is over Kin, and puts its number into A1out. Otherwise it takes the oldest page of Am, without a ghost entry. The self-test traces a pool of 4 frames by hand. A hot page reaches Am. Then a scan of 6 new pages passes through A1in and A1out, and the hot page still hits afterwards. The self-test asserts that trace, and it passes, as E1 records.
   - Teaches: a policy that waits for a second access keeps hot pages through a scan.
 
 - [ ] **E11 (break-it, offline).** All seven policies, and two ways to break scan resistance.
@@ -1050,21 +1450,22 @@ All commands run from `elite-storage/code/`.
   - Expected: Not run by the author yet. In the first table, `clock-ring` keeps more of its hit rate than `clock`, because the scan cycles through 32 buffers. `arc` and `2q` keep more than `lru`. In the midpoint pair, the window of 1,000 references keeps the hot hit rate near its no-scan value. With `--old-time 0`, every scan page is promoted on its second touch, and `kept` falls toward LRU's.
   - Teaches: InnoDB's time window and PostgreSQL's ring are the parts that make each system resist scans.
 
-- [ ] **E12 (local, PostgreSQL 14).** See PostgreSQL's ring with `EXPLAIN`, and the scan that does not use it.
+- [ ] **E12 (local, PostgreSQL 17).** See PostgreSQL's ring with `EXPLAIN`, and the scan that does not use it.
   - If `storage_lab` does not exist, run `createdb -h /tmp -p 5432 storage_lab` first.
   - Run: `psql -h /tmp -p 5432 -d storage_lab -c "create table scan_big as select g as id, repeat('x', 200) as pad from generate_series(1, 400000) g" -c "create table scan_small as select g as id, repeat('x', 200) as pad from generate_series(1, 50000) g"`.
   - Then run: `psql -h /tmp -p 5432 -d storage_lab -c "show shared_buffers" -c "select relname, pg_relation_size(oid) / 8192 as pages from pg_class where relname in ('scan_big', 'scan_small')"`.
   - Then run this twice, and read the second output: `psql -h /tmp -p 5432 -d storage_lab -c "explain (analyze, buffers) select count(*) from scan_big" -c "explain (analyze, buffers) select count(*) from scan_small"`.
-  - Expected: Not run by the author yet. With the default 128 MB, the ring threshold is a quarter of 16,384 buffers: 4,096 pages. A row here is about 236 bytes, so about 34 rows fit on a page. That is an estimate from the row layout of section 2.2, not checked. So `scan_big` has about 11,800 pages, and `scan_small` about 1,500. On the second run, `scan_small` should show `shared hit` for almost every page and no `read`. `scan_big` should show mostly `read`, although its 92 MiB would fit in the 128 MB pool. The ring keeps the scan to a few buffers. Its reads come from the OS page cache, so the scan is still fast. That last point is inferred, not measured.
+  - Expected: Not run by the author yet. With the default 128 MB, the ring threshold is a quarter of 16,384 buffers: 4,096 pages. A row here is about 236 bytes, so about 34 rows fit on a page. That is an estimate from the row layout of section 2.2, not checked. So `scan_big` has about 11,800 pages, and `scan_small` about 1,500. On the second run, `scan_small` should show `shared hit` for almost every page and no `read`. `scan_big` should show mostly `read`, although its 92 MiB would fit in the 128 MB pool. Expect up to about 2,000 `shared hit` pages too. CREATE TABLE AS writes through a 16 MB ring, and its last pages stay in the pool. That is inferred from `freelist.c` lines 541 to 599. The ring keeps the scan to a few buffers. Its reads come from the OS page cache, so the scan is still fast. That last point is inferred, not measured.
+  - The planner may choose a `Parallel Seq Scan` for `scan_big`. Each worker then gets its own ring, because the ring rule runs for each process that scans. That is inferred from `heapam.c` lines 445 to 452, REL_17_11. Read the plan before you read the counts. On 18, the ring is about 94 buffers, and a fresh 18 cluster has data checksums on. So if a checkpoint runs between `create table ... as` and the first scan, that scan writes hint-bit page images. Either way, only the second run is clean. Both 18 points are inferred.
   - Then break the ring: `psql -h /tmp -p 5432 -d storage_lab -c "create index on scan_big (id)" -c "vacuum analyze scan_big"`. Run this twice, and read the second output: `psql -h /tmp -p 5432 -d storage_lab -c "set enable_seqscan = off" -c "set enable_indexscan = off" -c "explain (analyze, buffers) select count(pad) from scan_big where id <= 300000"`.
   - Expected: Not run by the author yet. The plan is a `Bitmap Heap Scan` over about 300,000 / 34 = 8,800 heap pages. On the second run, it should show `shared hit` for almost all of them. The Seq Scan of the same table did not. So the bitmap scan kept its pages in the normal pool, as section 2.8's table says. The page count is the estimate above, not checked.
   - Clean up: `psql -h /tmp -p 5432 -d storage_lab -c "drop table scan_big, scan_small"`.
   - Teaches: PostgreSQL protects its buffer pool from large sequential scans with a ring. A bitmap heap scan of the same table fills the normal pool.
 
-- [ ] **E13 (local, PostgreSQL 14).** A real B-tree page, and the WAL of inserts with a sequence key and a random key.
-  - Run: `psql -h /tmp -p 5432 -d storage_lab -c "create extension if not exists pageinspect" -c "create extension if not exists pgstattuple"`. Both ship with PostgreSQL. The pageinspect docs say: "All of these functions may be used only by superusers". Your local role is normally a superuser, which is not checked.
+- [ ] **E13 (local, PostgreSQL 17).** A real B-tree page, and the WAL of inserts with a sequence key and a random key.
+  - Run: `psql -h /tmp -p 5432 -d storage_lab -c "create extension if not exists pageinspect" -c "create extension if not exists pgstattuple"`. Both ship with PostgreSQL. The PostgreSQL 17 pageinspect docs say: "All of these functions may be used only by superusers". Your local role is normally a superuser, which is not checked.
   - Run: `psql -h /tmp -p 5432 -d storage_lab -c "create table k_seq (id bigint generated always as identity primary key, pad text)" -c "create table k_uuid (id uuid primary key default gen_random_uuid(), pad text)"`. Both tables have only a primary key, as in Vondra's test.
-  - Load each table in 20 batches of 50,000 rows, with a checkpoint after each batch. So every batch starts a new cycle of full page images, and each leaf a batch touches pays one. This shell loop does it, and prints `pg_stat_wal`, verified in the PostgreSQL 14 docs, Table 28.22:
+  - Load each table in 20 batches of 50,000 rows, with a checkpoint after each batch. So every batch starts a new cycle of full page images, and each leaf a batch touches pays one. This shell loop does it, and prints `pg_stat_wal`, verified in the PostgreSQL 17 docs, Table 27.26. The reset target `wal` is accepted at `pgstatfuncs.c` line 1746, REL_17_11:
 
     ```bash
     for t in k_seq k_uuid
@@ -1081,9 +1482,52 @@ All commands run from `elite-storage/code/`.
     ```
 
   - Then read both indexes: `psql -h /tmp -p 5432 -d storage_lab -c "select 'seq' as k, level from bt_metap('k_seq_pkey') union all select 'uuid', level from bt_metap('k_uuid_pkey')" -c "select 'seq' as k, leaf_pages, avg_leaf_density from pgstatindex('k_seq_pkey') union all select 'uuid', leaf_pages, avg_leaf_density from pgstatindex('k_uuid_pkey')" -c "select live_items, avg_item_size, free_size from bt_page_stats('k_seq_pkey', 1)" -c "select itemoffset, ctid from bt_page_items('k_seq_pkey', 1) limit 3"`.
-  - Expected: Not run by the author yet. `wal_fpi` for `k_uuid` should be many times that of `k_seq`, because each batch touches nearly every UUID leaf. The heap pages cost both tables about the same, since both fill the heap in arrival order. The direction is inferred from section 2.2 and Vondra's result, and the counts are not predicted. `pg_stat_wal` counts the whole cluster, so other activity on the server adds to both rows. `pg_stat_reset_shared('wal')` also clears it for the whole cluster, so run E13 only on your laptop. The `pg_sleep` gives the statistics a moment to arrive, which is inferred, not checked. `bt_metap` should show level 2, a height of 3, for both. `k_seq_pkey` should show an `avg_item_size` of 16, as the docs' example does for a 4-byte key. Its leaf density should be near 90. `k_uuid_pkey` has 24-byte items and a lower density, because random keys split pages in the middle. `bt_page_items` shows each entry's `ctid`, the heap TID that the leaf points to.
+  - Expected: Not run by the author yet. `wal_fpi` for `k_uuid` should be many times that of `k_seq`, because each batch touches nearly every UUID leaf. The heap pages cost both tables about the same, since both fill the heap in arrival order. The direction is inferred from section 2.2 and Vondra's result, and the counts are not predicted. `pg_stat_wal` counts the whole cluster, so other activity on the server adds to both rows. `pg_stat_reset_shared('wal')` also clears it for the whole cluster, so run E13 only on your laptop. The `pg_sleep` gives the statistics a moment to arrive. Since PostgreSQL 15 a backend sends its statistics when it exits, at `pgstat.c` lines 504 to 518, REL_17_11. So on 17 the sleep is only a margin. On 18, data checksums are on in a new cluster, so hint-bit changes from other activity can add page images to both rows. That is inferred from the 18 default. `bt_metap` should show level 2, a height of 3, for both. `k_seq_pkey` should show an `avg_item_size` of 16, as the docs' example does for a 4-byte key. Its leaf density should be near 90. `k_uuid_pkey` has 24-byte items and a lower density, because random keys split pages in the middle. `bt_page_items` shows each entry's `ctid`, the heap TID that the leaf points to.
   - Clean up: `psql -h /tmp -p 5432 -d storage_lab -c "drop table k_seq, k_uuid"`.
   - Teaches: one schema decision, the key type, changes the WAL volume of the same inserts. The counters to watch are `wal_fpi` and `wal_bytes`.
+
+- [ ] **E14 (local, PostgreSQL 17).** Look inside the pool, and at the I/O of one scan.
+  - Needs `scan_big` from E12, with its index. Create them again if you cleaned up. Then restart your server, so that the pool no longer holds the pages that E12's bitmap scan and CREATE TABLE AS left there. Without the restart, `scan_big` holds thousands of buffers, not the ring.
+  - Run: `psql -h /tmp -p 5432 -d storage_lab -c "create extension if not exists pg_buffercache" -c "select pg_stat_reset_shared('io')" -c "explain (analyze, buffers) select count(*) from scan_big"`.
+  - Then run: `psql -h /tmp -p 5432 -d storage_lab -c "select * from pg_buffercache_usage_counts()" -c "select c.relname, count(*) as buffers from pg_buffercache b join pg_class c on b.relfilenode = pg_relation_filenode(c.oid) where c.relname like 'scan_big%' group by 1" -c "select backend_type, context, reads, hits, reuses from pg_stat_io where object = 'relation' and reads > 0 order by reads desc"`.
+  - Expected: Not run by the author yet. `scan_big` holds about 32 buffers, the ring of section 2.8. Rogov saw 32 after a Seq Scan on 14, page 158. A Parallel Seq Scan can hold up to 32 per process. In `pg_stat_io`, a row with context `bulkread` holds most of the scan's 11,800 reads, and its `reuses` is close to that count minus the ring. With parallel workers, `background worker` rows share the reads.
+  - Then run the bitmap scan of E12 again, and repeat the second command. Expected: `scan_big` now holds about 8,800 buffers, and the reads appear under context `normal`. That is the flood of section 2.8, seen from inside the pool.
+  - If `pg_stat_statements` is in `shared_preload_libraries`, run `create extension if not exists pg_stat_statements`, then the top-reads query of section 2.1. Expected: the two `explain (analyze, buffers) select count(*) ...` entries lead by `shared_blks_read`. They are tracked as utility statements, at `pg_stat_statements.c` line 1106, REL_17_11. If the module is not loaded, the query fails with `pg_stat_statements must be loaded via "shared_preload_libraries"`, from `pg_stat_statements.c` line 1657, REL_17_11.
+  - If it fails: `pg_buffercache` needs a superuser or `pg_monitor`. `pg_stat_reset_shared` needs a superuser or a grant, because `system_functions.sql` line 674, REL_17_11, revokes it from public.
+  - Teaches: which table holds the pool, which kind of read filled it, and which statement caused it.
+
+- [ ] **E15 (offline).** What one embedding costs, in heap pages, TOAST, index pages, build memory and WAL.
+  - First predict for 1 million vector(1536) rows: the value size, whether it is TOASTed, and the HNSW index size.
+  - Run: `uv run python phase02_structures/vector_storage.py`, then the same with `--dims 3072`, then with `--rows 4000000`, then with `--rows 4000000 --type halfvec`.
+  - Expected, run by the author on 2026-10-20. The first command prints, among its lines:
+
+    ```
+    value: 6,152 bytes. row before TOAST: 6,184 bytes, threshold 2,032
+    TOAST: the value moves out of line in 4 chunks of up to 1,996 bytes. The heap row keeps 50 bytes
+    largest vector that stays inline here: 498 dimensions
+    SET STORAGE PLAIN: rows per heap page 1, 1,000,000 pages = 7.6 GiB of heap
+    HNSW m=16: element tuple 6,224 bytes, neighbour tuple 200 bytes, 1.0 elements per page
+    HNSW index: at least 1,000,001 pages = 7.6 GiB. The end of the build writes every page to the WAL once, so about 7.6 GiB of WAL
+    HNSW graph in memory: at least 6.7 GB against maintenance_work_mem 64 MB, does not fit: expect the notice
+    IVFFlat lists=1,000: build memory 299 MiB. ERROR: "memory required is 300 MB, maintenance_work_mem is 64 MB"
+    ```
+
+  - With `--dims 3072`, the PLAIN line says `inserts fail with "row is too big: size 12328, maximum size 8160"`, and the index line says `column cannot have more than 2000 dimensions for hnsw index`. With 4 million rows, the HNSW index is at least 30.5 GiB, and at least 15.3 GiB as halfvec. The script's WAL line overstates the WAL: a page image leaves out the page's free space, so expect about 6.0 GiB for the first command, section 2.9.
+  - Where the numbers stop matching a server: the model counts only level-0 neighbour tuples, and only the lower bound of the build's memory. Section 2.9 lists what it leaves out.
+  - Teaches: the vector bytes are paid in the table and again in the index, and the build's memory and WAL follow from the index size.
+
+- [ ] **E16 (break-it, local, PostgreSQL 17 with pgvector).** Build an index past `maintenance_work_mem`, measure its WAL, and break an IVFFlat build.
+  - First install pgvector in `storage_lab`, and print the version that your server has: `psql -h /tmp -p 5432 -d storage_lab -c "create extension if not exists vector" -c "select extversion from pg_extension where extname = 'vector'"`. Expected: 0.8.7, or at least 0.8.4. If it is older than 0.8.4, the HNSW vacuum fixes and the IVFFlat memory check of section 2.9 are missing. 0.8.7 fixes a buffer overflow in IVFFlat index builds, which this exercise runs.
+  - Load 20,000 random vectors. The `where g > 0` makes the inner query run once per row: `psql -h /tmp -p 5432 -d storage_lab -c "create table items (id bigint generated always as identity primary key, embedding vector(1536))" -c "insert into items (embedding) select (select array_agg(random()) from generate_series(1, 1536) where g > 0)::vector from generate_series(1, 20000) g"`.
+  - Then run: `psql -h /tmp -p 5432 -d storage_lab -c "select pg_column_size(embedding) from items limit 1" -c "select pg_size_pretty(pg_relation_size('items')) as heap, pg_size_pretty(pg_table_size('items')) as with_toast"`.
+  - Expected: Not run by the author yet. `pg_column_size` prints 6148, the stored bytes without the header. The heap is about 150 pages, about 1.2 MB, because each row keeps only a 50-byte pointer. The table with TOAST is about 160 MiB: about 20,000 TOAST pages, one per value, plus the heap and the TOAST index. Both sizes are this course's arithmetic from section 2.9.
+  - Build the index with the default memory, and measure its WAL. This needs `psql` variables, so use one session: `psql -h /tmp -p 5432 -d storage_lab`, then `select pg_current_wal_lsn() as before \gset`, then `set maintenance_work_mem = '64MB';`, then `create index items_embedding_idx on items using hnsw (embedding vector_l2_ops);`, then `select pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), :'before')) as wal, pg_size_pretty(pg_relation_size('items_embedding_idx')) as index;`.
+  - Expected: Not run by the author yet. The build prints `NOTICE:  hnsw graph no longer fits into maintenance_work_mem after N tuples`, with N below 10,000. The index is at least 20,001 pages, about 156 MiB. The WAL is about 125 MiB, because the build logs every page once, without its free space. Run it again with `set maintenance_work_mem = '512MB'`, after `drop index items_embedding_idx`. Expected: no notice, and a shorter build. The times are not predicted.
+  - Then break IVFFlat. Run `set maintenance_work_mem = '64MB';` again, then `create index on items using ivfflat (embedding vector_l2_ops) with (lists = 300);`. Expected: `ERROR:  memory required is 90 MB, maintenance_work_mem is 64 MB`. That is 15,300 vectors of 6,152 bytes, from `vector_storage.py --rows 20000 --lists 300`. With `lists = 20`, the README's starting point for 20,000 rows, it needs about 59 MiB and fits.
+  - Then delete half and vacuum: `delete from items where id % 2 = 0;` then `vacuum (verbose) items;`. Expected: a line `index "items_embedding_idx": pages: 20001 in total, 0 newly deleted, 0 currently deleted, 0 reusable`. The index keeps its size, as section 2.9 says. The page count is from the model, not run.
+  - Clean up: `drop table items;`.
+  - If it fails: `create extension vector` needs pgvector installed for your server's version. On Homebrew it is a separate package, which is not checked here.
+  - Teaches: an index build has a memory cliff and a WAL burst, and both follow from the index size.
 
 ---
 
@@ -1095,15 +1539,19 @@ All commands run from `elite-storage/code/`.
 
 - **Check 3.** Open `phase02_structures/bitcask_merge.py:202`. Open keeps the entry with the highest sequence number when two files hold the same key. After a crash in the middle of a merge, the old and the new copy have equal sequence numbers. Explain why it does not matter which copy wins. Then suppose the merge gave each copied entry a new, higher sequence number. The store's own counter stays where it was. An order is deleted after the merge. What does the next restart return for that order, and why?
 
-- **Check 4.** Open `phase02_structures/cache_sim.py:322` and compare it with PostgreSQL's `GetBufferFromRing` at `freelist.c` line 769, REL_18_6. Both reuse a ring buffer only if its usage count is 0 or 1. Suppose the condition allowed any count up to 5. Which pages would a large scan then evict? What would the hit rate look like on the morning after a nightly report?
+- **Check 4.** Open `phase02_structures/cache_sim.py:327` and compare it with PostgreSQL's `GetBufferFromRing` at `freelist.c` line 727, REL_17_11. Both reuse a ring buffer only if its usage count is 0 or 1. Suppose the condition allowed any count up to 5. Which pages would a large scan then evict? What would the hit rate look like on the morning after a nightly report?
 
-- **Check 5.** In any repository you own that configures a database, run `grep -rn "fillfactor\|shared_buffers\|innodb_old_blocks\|innodb_buffer_pool\|level0_\|write_buffer_size\|bloom\|gen_random_uuid\|wal_compression\|rate_limiter" <your repo>/`. For each hit, name the amplification it changes, and the measurement that would show whether the value is right.
+- **Check 5.** In any repository you own that configures a database, run `grep -rn "fillfactor\|shared_buffers\|innodb_old_blocks\|innodb_buffer_pool\|innodb_change_buffering\|level0_\|write_buffer_size\|bloom\|gen_random_uuid\|UUIDField(\|id: :uuid\|wal_compression\|rate_limiter" <your repo>/`. For each hit, name the amplification it changes, and the measurement that would show whether the value is right.
+
+- **Check 6.** Open `phase02_structures/vector_storage.py` and find `hnsw_elements_per_page`. Compare its loop with `hnswbuild.c` lines 192 to 229 at pgvector v0.8.7. The self-test shows that the keep-together rule changes the count for vector(100). Explain why it changes nothing for vector(1536). Then, in any repository with pgvector, run `grep -rn "vector(\|halfvec\|hnsw\|ivfflat\|maintenance_work_mem\|SET STORAGE" <your repo>/`. For each index, compute its size with the script, and compare it with `shared_buffers` on the server that runs it.
 
 ---
 
 ## ✅ Checkpoint 2 — answer in your own words
 
 The first three questions are the phase's Test-out. Passing all three, with the lab, lets you skip the phase.
+
+### Part A: the structures, sections 2.1 to 2.8
 
 1. **Test-out, explain.** Walk through one put and one get on a B-tree and on a leveled LSM tree. For each, list what is read from the device and what is written, now and later. Use these words: leaf, heap page, page, checkpoint, WAL, memtable, run, compaction, filter. Then explain in two sentences why the LSM tree writes faster and reads slower.
 
@@ -1117,7 +1565,7 @@ The first three questions are the phase's Test-out. Passing all three, with the 
 
 6. **Show the arithmetic.** You need a Bloom filter for 500 million keys at an FPR of 0.1%. Compute the bits per key and the memory with the textbook formula. Then compute the memory with RocksDB's figure of 15.5 bits per key for 0.1%. What does each 4.8 more bits per key buy?
 
-7. **Given these constraints, design.** A PostgreSQL server has 16 GB of `shared_buffers`. Its OLTP hot set is about 10 GB. Each night a report reads most of a 60 GB table, filtered by a date range. A colleague wants to raise `shared_buffers` to 64 GB "so the report fits". Explain what protects the hot set, when it does not, and what the larger setting would change. Then say what you would measure the next morning. Then answer the same question for MySQL with InnoDB, and name the setting that matters there.
+7. **Given these constraints, design.** A PostgreSQL server has 16 GB of `shared_buffers`. OLTP, online transaction processing, is the short reads and writes of the application. Its OLTP hot set is about 10 GB. Each night a report reads most of a 60 GB table, filtered by a date range. A colleague wants to raise `shared_buffers` to 64 GB "so the report fits". Explain what protects the hot set, when it does not, and what the larger setting would change. Then say what you would measure the next morning. Then answer the same question for MySQL with InnoDB, and name the setting that matters there.
 
 8. **Show the arithmetic.** An index holds a billion 8-byte keys, with the layout of section 2.2. The server's buffer pool has 4 GB for it. Lookups are uniform over all keys, at 20,000 per second. Compute the height, the memory above the leaves, and the leaves' total size. Then compute the hit rate on leaves, and the device time per second at 89 µs per miss. Does one SSD with one queue keep up?
 
@@ -1136,9 +1584,38 @@ The first three questions are the phase's Test-out. Passing all three, with the 
 
 6. Bits per key = −ln(0.001) / (ln 2)² = 6.908 / 0.4805 = 14.4. Memory = 500,000,000 × 14.4 / 8 = 900 MB. With RocksDB's 15.5 bits: 500,000,000 × 15.5 / 8 = 969 MB. Each 4.8 more bits per key divides the FPR by 10, because 0.6185^4.8 = 0.1. So 1% needs 9.6 bits, 600 MB, and 0.01% needs 19.2 bits, 1.2 GB.
 
-7. Read the report's plan first. If it is a Seq Scan, PostgreSQL reads a table larger than a quarter of `shared_buffers` through a small ring. Then the report does not flood the pool. The ring is 256 kB in versions 14, 16 and 17. The arithmetic of the 18 code gives about 752 kB. Its pages get a usage count of at most 1. At 64 GB, a quarter is 16 GB, so the 60 GB table still uses the ring. But a date filter often gives a Bitmap Heap Scan, and an Index Scan is also possible. Neither uses a ring. So either can push the 10 GB hot set out of 16 GB of `shared_buffers`. The morning's reads then miss. A 64 GB pool would leave room for the hot set and much of the report. But it takes that memory from the OS page cache, which every miss goes through. That trade is inferred. Measure the next morning: `EXPLAIN (ANALYZE, BUFFERS)` of the report, and the hit rate of the hot tables in `pg_statio_user_tables` beside `iostat`. On 16 or later, read the `bulkread` rows of `pg_stat_io`. With InnoDB, the report's pages enter the old sublist at the midpoint. `innodb_old_blocks_time`, 1000 ms by default, keeps a page read several times in quick succession from moving to the young part. Keep it above 0.
+7. Read the report's plan first. If it is a Seq Scan, PostgreSQL reads a table larger than a quarter of `shared_buffers` through a small ring. Then the report does not flood the pool. The ring is 256 kB in versions 14 to 17. The arithmetic of the 18 code gives about 752 kB. Its pages get a usage count of at most 1. At 64 GB, a quarter is 16 GB, so the 60 GB table still uses the ring. But a date filter often gives a Bitmap Heap Scan, and an Index Scan is also possible. Neither uses a ring. So either can push the 10 GB hot set out of 16 GB of `shared_buffers`. The morning's reads then miss. A 64 GB pool would leave room for the hot set and much of the report. But it takes that memory from the OS page cache, which every miss goes through. That trade is inferred. Measure the next morning: `EXPLAIN (ANALYZE, BUFFERS)` of the report, and the hit rate of the hot tables in `pg_statio_user_tables` beside `iostat`. On 16 or later, read the `bulkread` rows of `pg_stat_io`. Run `pg_buffercache_usage_counts()` and the per-relation query of section 2.1 in the evening and in the morning, to see which table took the pool. With InnoDB, the report's pages enter the old sublist at the midpoint. `innodb_old_blocks_time`, 1000 ms by default, keeps a page read several times in quick succession from moving to the young part. Keep it above 0.
 
 8. Height 4, and 9,622 pages above the leaves, about 75 MiB, from section 2.2. Leaves: 2,732,241 × 8 KiB = about 20.8 GiB. The inner pages fit in the 4 GB, which leaves about 3.9 GB for leaves. Hit rate on leaves = 3.9 / 20.8 = about 19%, so 81% miss. Device time: 20,000 × 0.81 × 89 µs = 1.44 s per second. That is more than one device's second, so one SSD with one queue cannot keep up. If the query needs the row, PostgreSQL also reads the heap page that the TID names. The heap is at least as large as the index, so its pages miss at least as often. That is inferred. Then the device time is at least 2 × 1.44 = 2.9 s per second. An index-only scan, Phase 4, section 4.3, can skip the heap read. In InnoDB, a primary-key lookup ends at the leaf that holds the row. Real SSDs serve many reads in parallel, which this model does not include. Measure the device's throughput at your queue depth before you buy memory or disks.
+
+</details>
+
+### Part B: managed PostgreSQL, the pool from inside, vectors and columns
+
+Part B tests the real-systems parts of sections 2.1, 2.2, 2.7, 2.8 and the new section 2.9.
+
+9. **Show the arithmetic, on managed PostgreSQL.** Your service moves from PostgreSQL 17 on a VM with 64 GB of memory to Aurora PostgreSQL with 64 GB. On the VM, `shared_buffers` was 16 GB, its hit rate was 99%, and most misses found the page cache at 1.5 µs. A colleague sets `shared_buffers` to 16 GB on Aurora too, "because 25% is the rule". (a) What does Aurora's default give, and why does the rule not hold there? (b) Keep the 99% hit rate, and take 1 ms per storage read as an example. How much do the misses add to the average read, against the VM? (c) Which two metrics and which wait event do you watch in the first week?
+
+10. **Given these constraints, design.** An agent memory table on RDS for PostgreSQL 17.11 holds 4 million embeddings of 1,536 dimensions, with an HNSW index. The instance has 32 GB of memory and default parameters. (a) Compute the value size, where the value is stored, and the index size. (b) Does the index fit in `shared_buffers`? What does a search pay when it does not? (c) What does a rebuild of the index need in memory, and what does it write to the WAL? (d) Propose two changes, and say what each gives up. (e) Which version check do you run first, and why?
+
+11. **This is broken.** Each night a job deletes the embeddings of deleted documents, about 30% of 2 million rows. Since then, autovacuum on `items` runs for hours, and the HNSW index never gets smaller. What is the cause, and how do you check it? What would you change in the design?
+
+12. **A colleague says:** "The finance dashboard sums `amount` over all 50 million orders every minute. Let's raise `shared_buffers` until the orders table fits." The rows are the running case's orders, about 6 to a heap page. Argue for or against, with numbers. Which structure fits this query?
+
+13. **Walk through what happens when** you look for the cause of a slow morning on RDS for PostgreSQL 17. You have SQL access only. Last night a batch job ran, and since then the hit rate of the orders tables is low. Name the three views or functions you query, the query for each, and what each result would show if the batch job flooded the pool.
+
+<details>
+<summary>Answer sketches, part B</summary>
+
+9. (a) AWS calls it about 75% of memory. The formula gives about 68% of `DBInstanceClassMemory`, minus about 390 MiB, so at most about 43 GiB on 64 GiB. AWS sets `SUM({DBInstanceClassMemory/12038},-50003)`, because Aurora has "no file system or secondary level of caching for tables or indexes". So the page cache that caught the VM's misses does not exist. A 16 GB pool is less than half of the default. AWS's own test at 15% of memory lost 14% of throughput and added 14% to the volume read I/O. (b) VM: 0.01 × 1.5 = 0.015 µs per read. Aurora, still at 99%: 0.01 × 1,000 = 10 µs, about 670 times more. The hit rate is also likely to fall with less than half of the pool, which is inferred. (c) `BufferCacheHitRatio` and `VolumeReadIOPs` in CloudWatch, and `IO:DataFileRead` in Performance Insights. On Aurora Standard the read count is also on the I/O bill.
+
+10. (a) 4 × 1,536 + 8 = 6,152 bytes. The row is 6,184 bytes, over 2,032, so the value goes to TOAST in 4 chunks, and the heap row keeps 50 bytes. HNSW at one element per page: at least 4,000,001 pages, 30.5 GiB, from `vector_storage.py --rows 4000000`. (b) RDS gives `shared_buffers` 25% of `DBInstanceClassMemory`, a little under 8 GiB. The index needs at least 30.5 GiB, about 95% of the instance's 32 GiB, so most of it stays out of the pool. Each graph step can read up to 32 element pages. So one search can pay hundreds of reads of about 1 ms on gp3. That count is inferred from section 2.9. (c) The graph needs at least 26.7 GB. The RDS default `maintenance_work_mem` is 64 MB by one AWS page and about 500 MB on this instance by another, so check it. Either way the build prints the notice and runs slowly. It ends by writing about 24 GiB of WAL, the page images without their free space, which every replica replays, Phase 5, section 5.1. Both sizes are inferred. (d) An HNSW index on `embedding::halfvec(1536)`: 2 per page, at least 15.3 GiB, at the price of half-precision distances. Or `binary_quantize` to bit with re-ranking: 17 per page, at least about 1.8 GiB, at the price of recall and extra TOAST reads to re-rank. Test recall first, as the retrieval-internals course does. Partitioning by tenant or time also makes each index smaller, Phase 4, section 4.6. (e) `select extversion from pg_extension where extname = 'vector'`. RDS 17.11 lists 0.8.2, which is older than the HNSW vacuum fixes of 0.8.3 and 0.8.4, the IVFFlat memory check of 0.8.4 and the IVFFlat overflow fix of 0.8.7.
+
+11. Cause: HNSW's VACUUM does four passes over the index, and its repair pass runs a graph search for every element that lost neighbours. 30% of 2 million is 600,000 deleted elements, so many survivors need repair. The index keeps its size because deleted slots are reused by inserts, not returned to the file system. Check: `pg_stat_progress_vacuum` shows the phase and the dead items. On 17 the columns are `dead_tuple_bytes` and `num_dead_item_ids`, at `system_views.sql` lines 1223 to 1224, REL_17_11. `pg_stat_activity` shows the autovacuum worker and its wait events. VACUUM VERBOSE prints the index's page line, with 0 reusable pages, which is inferred from the code. `extversion` shows whether you have the 0.8.3 and 0.8.4 vacuum fixes. The README's advice is `REINDEX INDEX CONCURRENTLY`, then `VACUUM`. Design: this is the queue shape of section 2.4. Partition the table by time or by tenant, so that a whole partition and its index can be dropped instead of deleted row by row. That design is inferred from sections 2.4 and 2.9.
+
+12. Against. The table is 50,000,000 / 6 = 8,333,334 heap pages, about 68 GB. A Seq Scan of a table larger than a quarter of `shared_buffers` uses the 256 kB ring, section 2.8. So the pool would need more than 4 × 68 = 273 GB before the scan stops using the ring and keeps its pages. Each minute the dashboard reads 68 GB, which is about 1.1 GB per second of reads. A column store reads 50,000,000 × 8 bytes = 400 MB of `amount`, about 170 times less, before compression. Better still, a summary table that the order path keeps up to date, so the dashboard reads one row. Measure the bytes per run with `EXPLAIN (ANALYZE, BUFFERS)`.
+
+13. First `pg_buffercache`: the per-relation query of section 2.1 shows which relations hold the most buffers now. If the batch job's table holds a large share, it took the pool. `pg_buffercache_usage_counts()` shows many buffers at count 1 or 0, which pages used once leave. Second `pg_stat_statements`, ordered by `shared_blks_read`: the batch job's statement leads, with a high `miss_pct`. Third `pg_stat_io`: if its reads sit in context `normal`, not `bulkread`, the job did not use a ring. Its plan was then an Index Scan or a Bitmap Heap Scan, section 2.8. Confirm with `EXPLAIN (ANALYZE, BUFFERS)` of that statement. In Performance Insights the morning shows `IO:DataFileRead` waits, and the per-statement metric `db.sql_tokenized.stats.shared_blks_read_per_sec` points at the same statement. The reading is inferred from sections 2.1 and 2.8.
 
 </details>
 
@@ -1146,7 +1623,7 @@ The first three questions are the phase's Test-out. Passing all three, with the 
 
 ## References & Further Learning
 
-This course's research fetched every URL below on 2026-10-17. The depth revision of this phase fetched the new entries on 2026-10-18. Each was checked again with `check_urls.py`. Primary sources come first in each group.
+This course's research fetched the first URLs below on 2026-10-17, and the depth revision added more on 2026-10-18. The PostgreSQL 17 revision of 2026-10-20 fetched every new entry, and `check_urls.py` checked all of them again on 2026-10-20. Primary sources come first in each group.
 
 ### The original designs
 
@@ -1176,34 +1653,58 @@ This course's research fetched every URL below on 2026-10-17. The depth revision
 - **Read, write & space amplification - pick 2, Mark Callaghan, Small Datum, 2015** — https://smalldatum.blogspot.com/2015/11/read-write-space-amplification-pick-2_23.html
   Focus on: the definitions. No numbers. A short read before section 2.6.
 
-### PostgreSQL source, tag REL_18_6, and docs
+### PostgreSQL source, tag REL_17_11, and docs
 
 - **PostgreSQL 14 Internals, Egor Rogov, Postgres Professional, 2023** — https://edu.postgrespro.com/postgresql_internals-14_en.pdf
-  Focus on: chapter 3, pages 62 to 66, for pages, line pointers and TIDs. Chapter 9, sections 9.1 and 9.5, for buffered I/O and the rings. Chapter 25, pages 425 to 431, for a real B-tree page, no merging and deduplication. The PDF prints digits as special glyphs.
-- **tableam.h** — https://github.com/postgres/postgres/blob/REL_18_6/src/include/access/tableam.h
-  Focus on: `table_beginscan_bm` at lines 920 to 927, which asks for no ring.
-- **nbtxlog.h** — https://github.com/postgres/postgres/blob/REL_18_6/src/include/access/nbtxlog.h
-  Focus on: lines 89 to 94, what a split's WAL record holds.
-- **itup.h** — https://github.com/postgres/postgres/blob/REL_18_6/src/include/access/itup.h
+  Focus on: chapter 3, pages 62 to 66, for pages, line pointers and TIDs. Chapter 9, sections 9.1 and 9.5, for buffered I/O and the rings. Chapter 25, pages 425 to 431, for a real B-tree page, no merging and deduplication. The PDF prints digits as special glyphs. The book is about 14. This phase checks each fact it uses against 17.
+- **PostgreSQL 17.0 release notes** — https://www.postgresql.org/docs/release/17.0/
+  Focus on: `buffers_backend` removed from `pg_stat_bgwriter`, `pg_stat_checkpointer`, `io_combine_limit` and streaming reads, `vacuum_buffer_usage_limit` at 2MB, the rename to `shared_blk_read_time`, and `pg_buffercache_evict()`.
+- **tableam.h** — https://github.com/postgres/postgres/blob/REL_17_11/src/include/access/tableam.h
+  Focus on: `table_beginscan_bm` at lines 959 to 967, which asks for no ring.
+- **nbtxlog.h** — https://github.com/postgres/postgres/blob/REL_17_11/src/include/access/nbtxlog.h
+  Focus on: lines 90 to 95, what a split's WAL record holds.
+- **nbtree README** — https://github.com/postgres/postgres/blob/REL_17_11/src/backend/access/nbtree/README
+  Focus on: "Deleting entire pages during VACUUM" at lines 232 to 240, and "Placing deleted pages in the FSM" at line 383. They correct the belief that an index needs regular rebuilds.
+- **itup.h** — https://github.com/postgres/postgres/blob/REL_17_11/src/include/access/itup.h
   Focus on: `IndexTupleData` at lines 35 to 51, the 8-byte index tuple header with its heap TID.
-- **postgresql.conf.sample** — https://github.com/postgres/postgres/blob/REL_18_6/src/backend/utils/misc/postgresql.conf.sample
-  Focus on: `io_method` at line 211, `wal_compression` at 252, `checkpoint_timeout` at 267, `max_wal_size` at 271 and `track_io_timing` at 664.
-- **66.6 Database Page Layout, PostgreSQL 18** — https://www.postgresql.org/docs/18/storage-page-layout.html
-  Focus on: Table 66.2 and section 66.6.1: the 24-byte page header, the 4-byte line pointer and the 23-byte tuple header.
-- **27.2 The Cumulative Statistics System, PostgreSQL 18** — https://www.postgresql.org/docs/18/monitoring-stats.html
-  Focus on: section 27.2.2 on the kernel page cache, the `pg_stat_io` contexts and `reuses`, and `n_tup_newpage_upd`.
+- **heaptoast.h** — https://github.com/postgres/postgres/blob/REL_17_11/src/include/access/heaptoast.h
+  Focus on: lines 23 to 26 and 46 to 48 for the 2,032-byte threshold, and 84 to 89 for the 1,996-byte chunk.
+- **postgresql.conf.sample** — https://github.com/postgres/postgres/blob/REL_17_11/src/backend/utils/misc/postgresql.conf.sample
+  Focus on: `shared_buffers` at line 129, `maintenance_work_mem` at 142, `vacuum_buffer_usage_limit` at 160 and `subtransaction_buffers` at 170. Then `effective_io_concurrency` at 209, `io_combine_limit` at 211, `wal_compression` at 243, `checkpoint_timeout` at 258, `max_wal_size` at 262 and `track_io_timing` at 645.
+- **system_views.sql** — https://github.com/postgres/postgres/blob/REL_17_11/src/backend/catalog/system_views.sql
+  Focus on: `pg_stat_bgwriter`, `pg_stat_checkpointer` and `pg_stat_io` at lines 1134 to 1173, and `pg_stat_progress_vacuum` at 1223 to 1224. They show which columns exist on 17.
+- **vacuumlazy.c** — https://github.com/postgres/postgres/blob/REL_17_11/src/backend/access/heap/vacuumlazy.c
+  Focus on: line 726, the per-index line of VACUUM VERBOSE and of the autovacuum log.
+- **hio.c** — https://github.com/postgres/postgres/blob/REL_17_11/src/backend/access/heap/hio.c
+  Focus on: lines 520 and 532 to 536, the `row is too big` check.
+- **detoast.c** — https://github.com/postgres/postgres/blob/REL_17_11/src/backend/access/common/detoast.c
+  Focus on: `toast_datum_size` at lines 601 to 616, which explains what `pg_column_size` returns for a TOASTed value.
+- **65.6 Database Page Layout, PostgreSQL 17** — https://www.postgresql.org/docs/17/storage-page-layout.html
+  Focus on: Table 65.2 and section 65.6.1: the 24-byte page header, the 4-byte line pointer and the 23-byte tuple header.
+- **27.2 The Cumulative Statistics System, PostgreSQL 17** — https://www.postgresql.org/docs/17/monitoring-stats.html
+  Focus on: section 27.2.2 on the kernel page cache, 27.2.13 for `pg_stat_io` with its contexts and `reuses`, and `n_tup_newpage_upd`.
 - **28.2 The Statistics Collector, PostgreSQL 14** — https://www.postgresql.org/docs/14/monitoring-stats.html
-  Focus on: Tables 28.21, 28.22 and 28.27, for `pg_stat_bgwriter`, `pg_stat_wal` and `pg_statio_all_tables`.
-- **pageinspect, PostgreSQL 14** — https://www.postgresql.org/docs/14/pageinspect.html
+  Focus on: Table 28.21, for the 14 `pg_stat_bgwriter` columns that 17 removed. Read only if you still run 14.
+- **F.25 pg_buffercache, PostgreSQL 17** — https://www.postgresql.org/docs/17/pgbuffercache.html
+  Focus on: `pg_buffercache_usage_counts()`, the access rule, and the per-relation sample query.
+- **F.30 pg_stat_statements, PostgreSQL 17** — https://www.postgresql.org/docs/17/pgstatstatements.html
+  Focus on: `shared_blks_read`, `shared_blk_read_time`, `wal_fpi`, and the `shared_preload_libraries` rule.
+- **F.28 pg_prewarm, PostgreSQL 17** — https://www.postgresql.org/docs/17/pgprewarm.html
+  Focus on: the autoprewarm worker that reloads the pool after a restart.
+- **F.23 pageinspect, PostgreSQL 17** — https://www.postgresql.org/docs/17/pageinspect.html
   Focus on: `bt_metap`, `bt_page_stats` and `bt_page_items`. Superusers only.
-- **pgstattuple, PostgreSQL 14** — https://www.postgresql.org/docs/14/pgstattuple.html
-  Focus on: `pgstatindex`, with `leaf_pages` and `avg_leaf_density`.
-- **B-Tree Indexes, PostgreSQL 18** — https://www.postgresql.org/docs/18/btree.html
-  Focus on: section 65.1.4.2, bottom-up deletion, and 65.1.4.3, deduplication.
-- **TOAST, PostgreSQL 18** — https://www.postgresql.org/docs/18/storage-toast.html
-  Focus on: the 2 kB threshold, the chunk size, and the UPDATE rule.
-- **CREATE TABLE, PostgreSQL 18** — https://www.postgresql.org/docs/18/sql-createtable.html
+- **F.31 pgstattuple, PostgreSQL 17** — https://www.postgresql.org/docs/17/pgstattuple.html
+  Focus on: `pgstatindex`, with `leaf_pages`, `empty_pages`, `deleted_pages` and `avg_leaf_density`.
+- **64.1 B-Tree Indexes, PostgreSQL 17** — https://www.postgresql.org/docs/17/btree.html
+  Focus on: section 64.1.4.2, bottom-up deletion, and 64.1.4.3, deduplication.
+- **65.2 TOAST, PostgreSQL 17** — https://www.postgresql.org/docs/17/storage-toast.html
+  Focus on: the 2 kB threshold, the chunk size, the four strategies, and the UPDATE rule.
+- **ALTER TABLE, PostgreSQL 17** — https://www.postgresql.org/docs/17/sql-altertable.html
+  Focus on: SET STORAGE, which changes only future writes.
+- **CREATE TABLE, PostgreSQL 17** — https://www.postgresql.org/docs/17/sql-createtable.html
   Focus on: the table `fillfactor`, default 100.
+- **F.6 bloom and 64.5 BRIN Indexes, PostgreSQL 17** — https://www.postgresql.org/docs/17/bloom.html
+  Focus on: the first paragraph. Read with https://www.postgresql.org/docs/17/brin.html for the bloom operator classes.
 - **PostgreSQL 12.0 release notes** — https://www.postgresql.org/docs/release/12.0/
   Focus on: B-tree indexes with many duplicates.
 - **PostgreSQL 13.0 release notes** — https://www.postgresql.org/docs/release/13.0/
@@ -1212,37 +1713,91 @@ This course's research fetched every URL below on 2026-10-17. The depth revision
   Focus on: B-tree additions that remove expired entries, which the docs call bottom-up deletion.
 - **PostgreSQL 16.0 release notes** — https://www.postgresql.org/docs/release/16.0/
   Focus on: `pg_stat_io`, `n_tup_newpage_upd`, and HOT with BRIN.
-- **PostgreSQL 17.0 release notes** — https://www.postgresql.org/docs/release/17.0/
-  Focus on: `buffers_backend` removed from `pg_stat_bgwriter`.
 - **PostgreSQL 18.0 release notes** — https://www.postgresql.org/docs/release/18.0/
-  Focus on: `uuidv7()`.
+  Focus on: `uuidv7()`, asynchronous I/O, and checksums on by default.
 
-- **freelist.c** — https://github.com/postgres/postgres/blob/REL_18_6/src/backend/storage/buffer/freelist.c
-  Focus on: the clock sweep at lines 314 to 353, and the ring sizes at lines 557 to 601. `GetBufferFromRing` is at line 737. In tag REL_19_RC1 the free list is gone and the sweep uses one atomic compare-and-swap. The cap is still 5. Version 19 is a release candidate.
-- **bufmgr.c** — https://github.com/postgres/postgres/blob/REL_18_6/src/backend/storage/buffer/bufmgr.c
-  Focus on: the usage count rule at lines 3122 to 3132, and the WAL flush in `FlushBuffer` at line 4371.
-- **Buffer manager README** — https://github.com/postgres/postgres/blob/REL_18_6/src/backend/storage/buffer/README
-  Focus on: line 221, which still says the ring is 256 kB. The code at the same tag computes more.
-- **buf_internals.h** — https://github.com/postgres/postgres/blob/REL_18_6/src/include/storage/buf_internals.h
-  Focus on: `BM_MAX_USAGE_COUNT` and the comment above it, lines 80 to 87.
-- **nbtree.h** — https://github.com/postgres/postgres/blob/REL_18_6/src/include/access/nbtree.h
-  Focus on: `BTPageOpaqueData` at lines 63 to 70, and the fill factors at lines 190 to 203.
-- **bufpage.h** — https://github.com/postgres/postgres/blob/REL_18_6/src/include/storage/bufpage.h
-  Focus on: the slotted page drawing at lines 28 to 48, and `PageHeaderData`.
-- **heapam.c** — https://github.com/postgres/postgres/blob/REL_18_6/src/backend/access/heap/heapam.c
-  Focus on: lines 392 to 404. A scan of a table larger than a quarter of `shared_buffers` gets the ring there. Lines 2191 to 2196 log the first insert on a fresh page with no page image.
-- **nbtinsert.c** — https://github.com/postgres/postgres/blob/REL_18_6/src/backend/access/nbtree/nbtinsert.c
-  Focus on: lines 1984 to 1990, the pages a split registers in its WAL record.
-- **19.4 Resource Consumption, PostgreSQL 18** — https://www.postgresql.org/docs/18/runtime-config-resource.html
+- **freelist.c** — https://github.com/postgres/postgres/blob/REL_17_11/src/backend/storage/buffer/freelist.c
+  Focus on: the clock sweep at lines 314 to 353, `GetAccessStrategy` at 541 to 573, and the ring reuse rule at line 727. In tag REL_19_RC1 the free list is gone and the sweep uses one atomic compare-and-swap. The cap is still 5. Version 19 is a release candidate.
+- **freelist.c at REL_18_6** — https://github.com/postgres/postgres/blob/REL_18_6/src/backend/storage/buffer/freelist.c
+  Focus on: lines 557 to 601, the ring that 18 sizes from the pin limit. Only for the 18 line of section 2.8.
+- **bufmgr.c** — https://github.com/postgres/postgres/blob/REL_17_11/src/backend/storage/buffer/bufmgr.c
+  Focus on: the usage count rule at lines 2703 to 2713, and the WAL flush in `FlushBuffer` at lines 3909 to 3927.
+- **Buffer manager README** — https://github.com/postgres/postgres/blob/REL_17_11/src/backend/storage/buffer/README
+  Focus on: line 218, the 256 kB ring for sequential scans.
+- **buf_internals.h** — https://github.com/postgres/postgres/blob/REL_17_11/src/include/storage/buf_internals.h
+  Focus on: `BM_MAX_USAGE_COUNT` and the comment above it, lines 72 to 79.
+- **nbtree.h** — https://github.com/postgres/postgres/blob/REL_17_11/src/include/access/nbtree.h
+  Focus on: `BTPageOpaqueData` at lines 62 to 69, and the fill factors at lines 189 to 202.
+- **bufpage.h** — https://github.com/postgres/postgres/blob/REL_17_11/src/include/storage/bufpage.h
+  Focus on: the slotted page drawing at lines 29 to 42, and `PageHeaderData`.
+- **heapam.c** — https://github.com/postgres/postgres/blob/REL_17_11/src/backend/access/heap/heapam.c
+  Focus on: lines 445 to 452, where a scan of a table larger than a quarter of `shared_buffers` gets the ring. Lines 2218 to 2222 log the first insert on a fresh page with no page image. Line 2359 tests the TOAST threshold.
+- **nbtinsert.c** — https://github.com/postgres/postgres/blob/REL_17_11/src/backend/access/nbtree/nbtinsert.c
+  Focus on: lines 1978 to 1990, the pages a split registers in its WAL record.
+- **19.4 Resource Consumption, PostgreSQL 17** — https://www.postgresql.org/docs/17/runtime-config-resource.html
   Focus on: `shared_buffers`, its default and the 25% and 40% advice.
-- **Heap-Only Tuples, PostgreSQL 18** — https://www.postgresql.org/docs/18/storage-hot.html
+- **65.7 Heap-Only Tuples, PostgreSQL 17** — https://www.postgresql.org/docs/17/storage-hot.html
   Focus on: the two conditions. Read it with the Uber post.
-- **CREATE INDEX, PostgreSQL 18** — https://www.postgresql.org/docs/18/sql-createindex.html
+- **CREATE INDEX, PostgreSQL 17** — https://www.postgresql.org/docs/17/sql-createindex.html
   Focus on: `fillfactor` for B-trees, default 90, and `deduplicate_items`, default on.
 - **PostgreSQL 8.0.2 release notes** — https://www.postgresql.org/docs/release/8.0.2/
   Focus on: "New cache management algorithm 2Q replaces ARC", done "to avoid a pending US patent on ARC". History, not needed for the lessons.
 - **PostgreSQL 8.1.0 release notes** — https://www.postgresql.org/docs/release/8.1.0/
   Focus on the line: "The buffer manager has also been changed to use a "clock sweep" replacement policy." With the 8.0.2 notes, it shows two replacements. First 2Q replaced ARC, and then the clock sweep replaced 2Q. History, not needed for the lessons.
+
+### Managed PostgreSQL and cloud storage
+
+All AWS pages were fetched on 2026-10-20. They are vendor sources.
+
+- **Amazon Aurora PostgreSQL parameters, Part 1: Memory and query plan management, Kumar and Subramanian, AWS Database Blog, 2021-04-12** — https://aws.amazon.com/blogs/database/amazon-aurora-postgresql-parameters-part-1-memory-and-query-plan-management/
+  Focus on: the `shared_buffers` section: no file system cache, the 75% formula, the pgbench test at 15%, and the volume read I/O. Also the line that Aurora keeps the pool through restarts.
+- **RDS for PostgreSQL memory, Amazon RDS User Guide** — https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/PostgreSQL.Tuning.concepts.memory.html
+  Focus on: the `{DBInstanceClassMemory/32768}` default, and the 64 MB `maintenance_work_mem`.
+- **Amazon RDS DB instance storage** — https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Storage.html
+  Focus on: the two storage types, and the gp3 table for PostgreSQL: 3,000 IOPS below 400 GiB, 12,000 to 64,000 from 400 GiB.
+- **Working with parameters on RDS for PostgreSQL** — https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.PostgreSQL.CommonDBATasks.Parameters.html
+  Focus on: "the default PostgreSQL units for all parameters", and `shared_buffers` in 8 KB.
+- **Aurora PostgreSQL Optimized Reads** — https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.optimized.reads.html
+  Focus on: the tiered cache on local NVMe, and which instances and clusters get it.
+- **Amazon Aurora pricing** — https://aws.amazon.com/rds/aurora/pricing/
+  Focus on: Aurora Standard, billed per I/O, against I/O-Optimized, with no I/O charge.
+- **Amazon Aurora metrics** — https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.AuroraMonitoring.Metrics.html
+  Focus on: `VolumeReadIOPs`, billed read I/O per 5 minutes, and `BufferCacheHitRatio`.
+- **Autovacuum memory on RDS for PostgreSQL** — https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.PostgreSQL.CommonDBATasks.Autovacuum.html
+  Focus on: the `maintenance_work_mem` default formula, which differs from the memory page's 64 MB.
+- **Amazon EBS General Purpose SSD volumes** — https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html
+  Focus on: gp3 latency, the 3,000 IOPS baseline, and 500 IOPS per GiB up to 80,000.
+- **Amazon EBS Provisioned IOPS SSD volumes** — https://docs.aws.amazon.com/ebs/latest/userguide/provisioned-iops.html
+  Focus on: io2 Block Express, under 500 microseconds for 16 KiB.
+- **IO:DataFileRead, Aurora PostgreSQL wait events** — https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/apg-waits.iodatafileread.html
+  Focus on: the context and the likely causes. The RDS page of the same name is at https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/wait-event.iodatafileread.html
+- **SQL statistics for RDS PostgreSQL, Performance Insights** — https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PerfInsights.UsingDashboard.AnalyzeDBLoad.AdditionalMetrics.PostgreSQL.html
+  Focus on: `pg_stat_statements` loaded by default from 11, and the `shared_blks_read` metric names.
+- **Parameter groups for Amazon RDS** — https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/parameter-groups-overview.html
+  Focus on: static parameters need a reboot, and default groups cannot be changed.
+- **Extension versions for Amazon RDS for PostgreSQL** — https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html
+  Focus on: the PostgreSQL 17 table: `pg_buffercache` 1.5 and `pgvector` 0.8.2 on 17.11. The table changes with each release.
+
+### pgvector, tag v0.8.7
+
+- **pgvector README** — https://github.com/pgvector/pgvector/blob/v0.8.7/README.md
+  Focus on: "Index Build Time" for HNSW, the IVFFlat lists rule, "Storing", "Approximate Search", "Vacuuming", the FAQ on parallel scans and `SET STORAGE PLAIN`, and the value sizes of each type.
+- **pgvector CHANGELOG** — https://github.com/pgvector/pgvector/blob/v0.8.7/CHANGELOG.md
+  Focus on: 0.8.3 and 0.8.4, the HNSW vacuum fixes.
+- **hnsw.h** — https://github.com/pgvector/pgvector/blob/v0.8.7/src/hnsw.h
+  Focus on: lines 54 and 69 for `m` and the heap TIDs, 81 to 82 for the tuple sizes, and 364 to 393 for the page and tuple structs.
+- **hnswbuild.c** — https://github.com/pgvector/pgvector/blob/v0.8.7/src/hnswbuild.c
+  Focus on: the comment at lines 1 to 35, the placement loop at 192 to 229, the notice at 533 to 545, and `log_newpage_range` at 1142 to 1143.
+- **hnswvacuum.c** — https://github.com/pgvector/pgvector/blob/v0.8.7/src/hnswvacuum.c
+  Focus on: the four passes at lines 785 to 792, the ring at line 747, and the zeroed vector at line 688.
+- **hnswutils.c** — https://github.com/pgvector/pgvector/blob/v0.8.7/src/hnswutils.c
+  Focus on: line 546, where each element is read from its page, and lines 891 to 933, the neighbours a search step loads.
+- **hnsw.c and ivfflat.c** — https://github.com/pgvector/pgvector/blob/v0.8.7/src/hnsw.c
+  Focus on: `ampredlocks = false` at line 348. The same flag is at line 265 of https://github.com/pgvector/pgvector/blob/v0.8.7/src/ivfflat.c
+- **sql/vector.sql** — https://github.com/pgvector/pgvector/blob/v0.8.7/sql/vector.sql
+  Focus on: `STORAGE = external` for `vector` at line 39 and for `halfvec` at line 483.
+- **ivfbuild.c** — https://github.com/pgvector/pgvector/blob/v0.8.7/src/ivfbuild.c
+  Focus on: the centres and samples at lines 400 and 456 to 466. Read with `ivfutils.c` lines 126 to 133 and 166, at https://github.com/pgvector/pgvector/blob/v0.8.7/src/ivfutils.c
 
 ### RocksDB source, tag v11.8.1, and wiki
 
@@ -1302,6 +1857,12 @@ This course's research fetched every URL below on 2026-10-17. The depth revision
   Focus on: `innodb_old_blocks_pct` and `innodb_old_blocks_time`.
 - **ha_innodb.cc, tag mysql-8.4.11** — https://github.com/mysql/mysql-server/blob/mysql-8.4.11/storage/innobase/handler/ha_innodb.cc
   Focus on: lines 23017 to 23027, the two defaults and their ranges.
+- **What Is New in MySQL 8.4 since MySQL 8.0, MySQL 8.4 manual** — https://dev.mysql.com/doc/refman/8.4/en/mysql-nutshell.html
+  Focus on: Table 1.1 of changed InnoDB defaults: `innodb_change_buffering`, `innodb_adaptive_hash_index` and `innodb_io_capacity`.
+- **Change Buffer, MySQL 8.4 manual** — https://dev.mysql.com/doc/refman/8.4/en/innodb-change-buffer.html
+  Focus on: the first three paragraphs, and the warning about long merges.
+- **Adaptive Hash Index, MySQL 8.4 manual** — https://dev.mysql.com/doc/refman/8.4/en/innodb-adaptive-hash.html
+  Focus on: when it helps, and the contention warning.
 
 ### Production reports
 
@@ -1316,7 +1877,19 @@ This course's research fetched every URL below on 2026-10-17. The depth revision
 - **Why Uber Engineering Switched from Postgres to MySQL, Evan Klitzke, Uber, 2016** — https://www.uber.com/blog/postgres-to-mysql-migration/
   Focus on: the write amplification argument. No measured byte counts, and the example changes an indexed column.
 - **MyRocks: A space- and write-optimized MySQL database, Yoshinori Matsunobu, Facebook, 2016** — https://engineering.fb.com/2016/08/31/core-infra/myrocks-a-space-and-write-optimized-mysql-database/
-  Focus on: the LinkBench size results. The write results are only in a chart image.
+  Focus on: the LinkBench size results, and the fixed compressed page size. The write results are only in a chart image.
+- **GitHub availability this week, Jesse Newland, GitHub, 2012-09-14** — https://github.blog/news-insights/the-library/github-availability-this-week/
+  Focus on: the failover to a server with a cold InnoDB buffer pool, and the failback it caused.
+- **From Zero to 50 Million Uploads per Day: Scaling Media at Canva, Chen and Sharp, Canva, 2022-11-29** — https://www.canva.dev/blog/engineering/from-zero-to-50-million-uploads-per-day-scaling-media-at-canva/
+  Focus on: the list of MySQL on RDS limits, including the hot buffer pool.
+- **Roblox Return to Service 10/28-10/31 2021, Roblox, 2022** — https://about.roblox.com/newsroom/2022/01/roblox-return-to-service-10-28-10-31-2021
+  Focus on: the BoltDB section: a file that never shrinks, the freelist, and the 4.2 GB file with 489 MB of data.
+- **How Stripe's document databases supported 99.999% uptime with zero-downtime data migrations, Morzaria and Narkhede, Stripe, 2024-06-06** — https://stripe.dev/blog/how-stripes-document-databases-supported-99.999-uptime-with-zero-downtime-data-migrations
+  Focus on: the bulk import step, where sorted inserts raised write throughput 10 times.
+- **How Instacart Built a Modern Search Infrastructure on Postgres, Mittal and others, Instacart, 2025-05-29** — https://company.instacart.com/tech-innovation/how-instacart-built-a-modern-search-infrastructure-on-postgres
+  Focus on: "ANN Index Design in Postgres", with inline storage instead of TOAST and the parallel workers. The tech.instacart.com copy returned 403.
+- **Postgres Job Queues & Failure By MVCC, Brandur Leach, 2015-05-18** — https://brandur.org/postgres-queues
+  Focus on: "Slow lock time" and "Dead tuples". Phase 3, section 3.7, uses the rest of the post.
 
 ### Lectures and notes
 
@@ -1326,7 +1899,8 @@ This course's research fetched every URL below on 2026-10-17. The depth revision
   Focus on: section 4, "Index-Organized Storage". The course schedule uses this title. The video titles below may differ, which was not checked.
 - **CMU 15-445/645 Fall 2025 notes, #08 "Indexes & Filters I"** — https://15445.courses.cs.cmu.edu/fall2025/notes/08-indexes1.pdf
   Focus on: "Clustered Indexes", and the merge threshold.
-
+- **CMU 15-445/645 Fall 2025 notes, #06 "Storage Models & Compression"** — https://15445.courses.cs.cmu.edu/fall2025/notes/06-storage3.pdf
+  Focus on: section 2, the row store and the column store with their advantages and disadvantages. Read it before the columnar paragraph of section 2.7.
 - **CMU 15-445/645 Fall 2025, Lecture 04: Memory Management and Buffer Pools, Andy Pavlo** — https://www.youtube.com/watch?v=8-2yv4z0VZc
   Focus on these times:
     - 0:04:29 buffer pool overview, auto-chapter
@@ -1348,6 +1922,24 @@ This course's research fetched every URL below on 2026-10-17. The depth revision
 - **CMU 15-445/645 Fall 2025, Lecture 08: B+Trees, Andy Pavlo** — https://www.youtube.com/watch?v=u7ii_Lvm9rM
   Focus on: 0:17:02 introduction, 0:37:11 insertion, 0:45:35 deletion, 1:07:57 optimizations. Auto-chapters only, because the captions did not load.
 
+### ORMs and drivers
+
+- **Model field reference, Django 5.2** — https://docs.djangoproject.com/en/5.2/ref/models/fields/
+  Focus on: `UUIDField` and its `default=uuid.uuid4` example.
+- **uuid, Python 3 standard library** — https://docs.python.org/3/library/uuid.html
+  Focus on: the line that `uuid4()` creates a random UUID.
+- **Active Record and PostgreSQL, Rails Guides** — https://guides.rubyonrails.org/active_record_postgresql.html
+  Focus on: "UUID Primary Keys", where `gen_random_uuid()` is the default.
+
+### The owner's other courses
+
+These are files in `study-material/`, not URLs.
+
+- **retrieval-internals, Phase 2, section 2.2, and Phase 4, section 4.4.** Memory per vector and quantization. Phase 7, sections 7.1 and 7.3, for deletes.
+- **advanced-retrieval, Phase 7, section 7.3.** The planner's choice between a B-tree and HNSW under a filter.
+- **nosql, Phase 5, section 5.3.** Analytical stores, for the columnar paragraph of section 2.7.
+- **sql-mysql, Phase 1, section 1.1.** The InnoDB B+tree in more depth.
+
 ---
 
 ## Cheatsheet
@@ -1361,7 +1953,29 @@ A MISS
   WAL rule          FlushBuffer forces WAL up to the page's pd_lsn first
   PG miss           1.5 us page cache or 89 us SSD. The counters cannot tell which
   PG read counters  EXPLAIN BUFFERS read, pg_statio *_blks_read, pg_stat_io reads (16+)
-  tell them apart   iostat, or track_io_timing: blk_read_time / blks_read
+  tell them apart   iostat, or track_io_timing: blk_read_time / blks_read per block
+                    (on 17 a seq scan reads 16 blocks per call: use index lookups)
+  17 seq scans      streaming reads, up to io_combine_limit 128kB = 16 pages per call
+
+MANAGED POSTGRESQL (AWS docs and blog, vendor sources)
+  RDS               shared_buffers {DBInstanceClassMemory/32768} x 8 kB = 25%, page cache below
+  Aurora            SUM({DBInstanceClassMemory/12038},-50003): "about 75%" per AWS,
+                    about 68% minus 390 MiB by the formula; no OS page cache below
+  Aurora at 15%     14% less throughput, 14% more volume read I/O (pgbench, db.r5.2xlarge)
+  Aurora billing    reads billed per I/O on Standard, not on I/O-Optimized (VolumeReadIOPs)
+  EBS gp3           single-digit ms; 3,000 IOPS base; 500 IOPS/GiB up to 80,000
+  RDS gp3           3,000 IOPS below 400 GiB; 12,000 to 64,000 from 400 GiB
+  EBS io2 BE        under 500 us for 16 KiB
+  99% hits at 1 ms  misses add 10 us per read, against 0.89 us on the M2 SSD
+  wait event        IO / DataFileRead in pg_stat_activity = IO:DataFileRead in Perf. Insights
+
+LOOK INSIDE (PostgreSQL 17)
+  pool contents     pg_buffercache_usage_counts(); per relation: join on relfilenode
+  per statement     pg_stat_statements shared_blks_hit, shared_blks_read,
+                    shared_blk_read_time (blk_read_time before 17), wal_fpi
+  per process       pg_stat_io backend_type, context (normal, bulkread, bulkwrite,
+                    vacuum), reads, hits, writes, evictions, reuses
+  reset             pg_stat_reset_shared('io')  or  ('wal')
 
 WHERE THE ROW LIVES
   PostgreSQL        heap of pages + line pointers. Every index, primary key too,
@@ -1370,7 +1984,7 @@ WHERE THE ROW LIVES
                     entries hold the primary key. Merges pages below 50%
   heap tuple        23-byte header + 4-byte line pointer. TOAST above 2 kB
 
-B-TREE (PostgreSQL 18 layout, 20-byte entries: 8 header + 8 key + 4 pointer)
+B-TREE (PostgreSQL 17 layout, same in 18. 20-byte entries: 8 header + 8 key + 4 pointer)
   per page          leaf 366 at 90% fill, inner 285 at 70%
   10 million keys   3 levels, 776 KiB above the leaves
   1 billion keys    4 levels, about 75 MiB above the leaves
@@ -1379,10 +1993,16 @@ B-TREE (PostgreSQL 18 layout, 20-byte entries: 8 header + 8 key + 4 pointer)
   random keys       pages split in half, 1/2 to 2/3 full (Dong, CIDR 2017)
   row change        heap page + one leaf per index; HOT: heap page only
   UUID vs sequence  Vondra 2016: >40 GB vs ~2 GB WAL, 1 h at 5,000 inserts/s
-  no merge          PostgreSQL never merges split pages; REINDEX shrinks
+  no merge          PostgreSQL never merges half-empty pages. VACUUM deletes
+                    empty pages for reuse. The file keeps its size; REINDEX shrinks
+  who wrote, 17     pg_stat_checkpointer.buffers_written; pg_stat_io writes of
+                    client backend, context normal (buffers_backend is gone)
   watch             pg_stat_wal wal_fpi, wal_bytes; n_tup_hot_upd; pgstatindex
-  levers first      sequence or uuidv7(), fewer indexes, fillfactor, max_wal_size,
-                    wal_compression
+  levers first      sequence or identity, uuidv7() only from 18, fewer indexes,
+                    fillfactor, max_wal_size, wal_compression
+  ORM UUID keys     Django default=uuid.uuid4 and Rails id: :uuid are random keys
+  MySQL 8.4         innodb_change_buffering none, adaptive_hash_index OFF,
+                    innodb_io_capacity 10000
 
 LSM TREE (RocksDB v11.8.1 defaults)
   write_buffer_size 64 MB    max_write_buffer_number 2
@@ -1419,14 +2039,35 @@ AMPLIFICATION (RUM, EDBT 2016)
   write             bytes written / bytes changed
   space             bytes stored / live bytes
   decide by         rate x ratio = device seconds per second
+  cloud volume      20,000 random reads/s = 6.7 x the gp3 baseline, 156 MiB/s > 125 MiB/s
+  columnar          sum of 8 bytes over 10 M orders: 13.7 GB row store, 80 MB column
 
 EVICTION
   LRU               one scan larger than the pool removes every hot page
   2Q                A1in 25% FIFO, A1out 50% page numbers, Am LRU
   ARC               T1, T2, ghosts B1, B2, target p adapts
   PostgreSQL        clock sweep, usage count cap 5. Ring for Seq Scans of
-                    tables > 1/4 shared_buffers, 256 kB in 14, 16 and 17
+                    tables > 1/4 shared_buffers, 256 kB in 14 to 17, ~752 kB in 18
+  VACUUM ring       2 MB since 17 (vacuum_buffer_usage_limit)
   no ring           Index Scan, Bitmap Heap Scan, TOAST reads
   InnoDB            old sublist 37%, insert at midpoint,
                     innodb_old_blocks_time 1000 ms; no ghost list
+
+VECTORS (pgvector 0.8.7 on PostgreSQL 17. HNSW sizes and HNSW build memory are lower bounds,
+         inferred from struct sizes. The IVFFlat memory is what the code checks)
+  value bytes       vector 4d+8, halfvec 2d+8, bit d/8+8; 1,536 dims: 6,152 / 3,080 / 200
+  TOAST             row > 2,032 bytes moves the value out, STORAGE external, 1,996-byte
+                    chunks; vector(1536): 4 chunks; inline only up to 498 dims
+  PLAIN             vector(1536): 1 row per heap page; vector(3072): "row is too big"
+  HNSW element      72 + value bytes; neighbours 4 + 6 x (level+2) x m, aligned to 8; m = 16
+  index size        vector(1536) 1 per page, halfvec 2, bit 17; 1M rows >= 7.6 GiB
+  TOAST             vector(1536): about one 8 kB TOAST page per value, 1M rows about 8.2 GB
+  search reads      up to 32 neighbour pages per graph step at the lowest level
+  build memory      HNSW: graph >= value + 512 B per vector, else NOTICE, slow
+                    IVFFlat: (lists + max(50 x lists, 10,000)) x value bytes, else ERROR
+                    (the ERROR since 0.8.4; samples capped at heap pages x 291 since 0.8.5)
+  build WAL         every index page once, without free space: about 79% of the index
+  VACUUM            4 passes with graph repair; slots reused, file keeps its size
+  versions          HNSW vacuum fixes 0.8.3, 0.8.4; IVFFlat memory check 0.8.4;
+                    IVFFlat overflow fix 0.8.7; RDS 17.11 lists 0.8.2
 ```
