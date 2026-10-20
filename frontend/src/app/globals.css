@@ -210,6 +210,39 @@
     --pane-width: 18rem;
   }
 
+  /* Phone reader library (/read): the shelf column (courses, articles) and
+   * the playlist of the shelf he picked. On a phone it is one column and the
+   * shelves are a row of chips above the list. The page scrolls as a whole,
+   * so the rows stay auto height here, unlike `.console-split`. */
+  .reader-library {
+    display: grid;
+    gap: 1.25rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @media (width >= 48rem) {
+    .reader-library {
+      grid-template-columns: 16rem minmax(0, 1fr);
+      align-items: start;
+      gap: 2.5rem;
+    }
+  }
+
+  /* One lesson in the reader: the playlist beside the lesson frame, on a
+   * wide screen only. A phone gives the whole width to the lesson. */
+  .reader-lesson {
+    display: grid;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  @media (width >= 64rem) {
+    .reader-lesson {
+      grid-template-columns: 18rem minmax(0, 1fr);
+    }
+  }
+
   /* Three-pane reading workspace (Courses): the syllabus, the lesson itself,
    * and a side drawer. `.console-split` only knows two columns, and a course
    * is read a phase at a time, so where he is in the course, what he is

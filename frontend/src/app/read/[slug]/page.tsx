@@ -1,13 +1,22 @@
 "use client";
 
-import { use, useRef, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, ChevronLeft } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 import { ErrorState } from "@/components/error-state";
+import { Marker } from "@/components/features/reader/playlist";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  isRead as isShelfItemRead,
+  progressOf,
+  shelfOf,
+  type Shelf,
+} from "@/lib/reader-shelves";
+import { cn } from "@/lib/utils";
 import { useConceptTaps } from "@/hooks/use-concept-taps";
 import { useReaderSync } from "@/hooks/use-reader-sync";
 import {
@@ -15,7 +24,7 @@ import {
   VERDICT_LABEL,
   type ConceptVerdict,
 } from "@/lib/concept-taps";
-import { loadTaps, readerApi, readerKeys, saveTap } from "@/lib/reader";
+import { loadTaps, pageSlug, readerApi, readerKeys, saveTap } from "@/lib/reader";
 import {
   markedReadHere,
   READER_SYNC_URL,
@@ -93,17 +102,26 @@ export default function ReadLessonPage({
     track(sendTap(file, concept, verdict));
   });
   const answered = Object.keys(verdicts).sort(byConcept);
+  const shelf = index.data ? shelfOf(index.data, file) : null;
+  const at = shelf ? shelf.items.findIndex((i) => i.file === file) : -1;
+  const prev = shelf && at > 0 ? shelf.items[at - 1] : null;
+  const next = shelf && at >= 0 && at < shelf.items.length - 1 ? shelf.items[at + 1] : null;
 
   return (
     <div className="flex h-dvh flex-col">
       <div className="flex shrink-0 items-center gap-1 border-b px-2 py-2">
         <Link
-          href="/read"
-          className="hover:bg-accent text-muted-foreground flex items-center gap-1 rounded-md px-2 py-1.5 text-sm"
+          href={shelf ? `/read#${encodeURIComponent(shelf.key)}` : "/read"}
+          className="hover:bg-accent text-muted-foreground flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-sm"
         >
           <ChevronLeft aria-hidden className="size-4" />
           Library
         </Link>
+        {shelf ? (
+          <p className="text-muted-foreground min-w-0 truncate px-1 text-xs lg:hidden">
+            {shelf.title} · {at + 1} of {shelf.items.length}
+          </p>
+        ) : null}
         {page.data && answered.length ? (
           <p
             className="text-muted-foreground ml-auto truncate px-2 text-xs"
@@ -116,49 +134,114 @@ export default function ReadLessonPage({
         ) : null}
       </div>
 
-      {page.isPending ? (
-        <Skeleton className="m-4 flex-1" />
-      ) : page.isError ? (
-        <div className="p-4">
-          <ErrorState
-            message={(page.error as Error).message}
-            onRetry={() => void page.refetch()}
-            retrying={page.isRefetching}
-          />
+      <div className="reader-lesson flex-1">
+        {shelf ? <PlaylistRail shelf={shelf} file={file} readHere={readHere} /> : <div className="hidden lg:block" />}
+        <div className="flex min-h-0 flex-col lg:col-start-2">
+          {page.isPending ? (
+            <Skeleton className="m-4 flex-1" />
+          ) : page.isError ? (
+            <div className="p-4">
+              <ErrorState
+                message={(page.error as Error).message}
+                onRetry={() => void page.refetch()}
+                retrying={page.isRefetching}
+              />
+            </div>
+          ) : (
+            <>
+              <iframe
+                ref={frame}
+                title="Lesson"
+                srcDoc={page.data}
+                sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+                className="bg-background w-full flex-1 border-0"
+              />
+              <div className="flex shrink-0 items-center gap-2 border-t px-3 py-2">
+                {prev ? (
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={`/read/${pageSlug(prev.file)}`} title={prev.title}>
+                      <ChevronLeft aria-hidden data-icon="inline-start" />
+                      Previous
+                    </Link>
+                  </Button>
+                ) : null}
+                {next ? (
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={`/read/${pageSlug(next.file)}`} title={next.title}>
+                      Next
+                      <ChevronRight aria-hidden data-icon="inline-end" />
+                    </Link>
+                  </Button>
+                ) : null}
+                <span className="flex-1" />
+                {sync ? (
+                  <p
+                    className="text-muted-foreground text-xs"
+                    title={SYNC_HINT[sync]}
+                    aria-live="polite"
+                  >
+                    {sync}
+                  </p>
+                ) : null}
+                <Button
+                  variant={isRead ? "outline" : "default"}
+                  onClick={() => {
+                    setReadHere(true);
+                    track(sendRead(file));
+                  }}
+                >
+                  {isRead ? <Check aria-hidden /> : null}
+                  {isRead ? "Read" : "Mark read"}
+                </Button>
+              </div>
+            </>
+          )}
         </div>
-      ) : (
-        <>
-          <iframe
-            ref={frame}
-            title="Lesson"
-            srcDoc={page.data}
-            sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-            className="bg-background w-full flex-1 border-0"
-          />
-          <div className="flex shrink-0 items-center justify-end gap-3 border-t px-3 py-2">
-            {sync ? (
-              <p
-                className="text-muted-foreground text-xs"
-                title={SYNC_HINT[sync]}
-                aria-live="polite"
-              >
-                {sync}
-              </p>
-            ) : null}
-            <Button
-              variant={isRead ? "outline" : "default"}
-              onClick={() => {
-                setReadHere(true);
-                track(sendRead(file));
-              }}
-            >
-              {isRead ? <Check aria-hidden /> : null}
-              {isRead ? "Read" : "Mark read"}
-            </Button>
-          </div>
-        </>
-      )}
+      </div>
     </div>
+  );
+}
+
+/** The course this lesson belongs to, as a playlist beside it. Wide screens only. */
+function PlaylistRail({ shelf, file, readHere }: { shelf: Shelf; file: string; readHere: boolean }) {
+  const current = useRef<HTMLAnchorElement>(null);
+  useEffect(() => {
+    current.current?.scrollIntoView({ block: "nearest" });
+  }, [file]);
+  const { done, total, percent } = progressOf(shelf, readHere ? file : undefined);
+  return (
+    <aside className="hidden min-h-0 flex-col border-r lg:flex">
+      <div className="shrink-0 space-y-2 border-b px-4 py-3">
+        <p className="text-sm leading-snug font-semibold">{shelf.title}</p>
+        <div className="flex items-center gap-2">
+          <Progress value={percent} />
+          <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+            {done}/{total}
+          </span>
+        </div>
+      </div>
+      <ol className="min-h-0 flex-1 overflow-y-auto py-1">
+        {shelf.items.map((item) => {
+          const here = item.file === file;
+          return (
+            <li key={item.file}>
+              <Link
+                ref={here ? current : undefined}
+                href={`/read/${pageSlug(item.file)}`}
+                aria-current={here ? "page" : undefined}
+                className={cn(
+                  "flex items-start gap-2.5 px-4 py-2.5 text-sm leading-snug transition-colors",
+                  here ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50",
+                )}
+              >
+                <Marker item={item} read={isShelfItemRead(item) || (here && readHere)} current={here} />
+                <span className="min-w-0 pt-1">{item.title}</span>
+              </Link>
+            </li>
+          );
+        })}
+      </ol>
+    </aside>
   );
 }
 
