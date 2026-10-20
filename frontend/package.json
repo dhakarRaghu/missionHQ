@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "reader": "node scripts/build-reader.mjs",
+    "prebuild": "node scripts/build-reader.mjs",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint"

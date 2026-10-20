@@ -1,8 +1,8 @@
 /**
  * The phone reader's data layer: static files, no API.
  *
- * `backend/src/hq/reader_export.py` writes `public/reader/` on his machine and
- * he commits it. Everything here therefore reads the deployment's own files.
+ * `scripts/build-reader.mjs` writes `public/reader/` from `learning/lessons`
+ * before every build. Everything here therefore reads the deployment's own files.
  * Nothing in this module may call `/api`: the point of the reader is that it
  * works when the Mac that runs the backend is asleep. What he sends back
  * (mark read, concept taps) is `lib/reader-sync.ts`, which queues it for
@@ -61,7 +61,7 @@ async function readFile(path: string, as: "json" | "text") {
   if (!response.ok) {
     throw new Error(
       response.status === 404
-        ? "That lesson is not in this deployment. Run `hq.cli export-reader`, commit and push."
+        ? "That lesson is not in this deployment. Push its file in learning/lessons to main."
         : `Could not load ${path} (${response.status})`,
     );
   }

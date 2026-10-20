@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agents at Anthropic merged 30,000 changes a day. Can a human-scale pipeline survive that?</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">frontier · inference internals, batching · what breaks when write volume rises 12x</div><h1>Agents at Anthropic merged 30,000 changes a day. Can a human-scale pipeline survive that?</h1><p class="subtitle">Why a serial verification pipeline has a hard ceiling and what Anthropic did 600x past it</p></header>
+<p>In your batching phase you computed the service rate of a queue of requests, and you saw that when the arrival rate passes it the queue never drains. Your Mission HQ agents write to the same shared files under a writer-at-a-time convention, so one agent waits while another holds the file, and that convention is cheap because your agents write a few times a day. This week Anthropic published the same story one level up: their coding agents pushed merges from 2,500 a day in May 2026 to 30,000 a day in September, and their git and CI pipeline, built for humans, hit its ceiling.</p>
+
+<p>The question this lesson answers is what happens to a check-before-write pipeline when the writes grow past what that check can carry in a day. You will compute the ceiling of a serial queue like yours, see why adding more machines does not raise it, and see why a system that far past the ceiling has no choice but to check after the write instead of before it.</p>
+<p>This lesson teaches one idea. It is stated here so you can see where the lesson is going. It will read more clearly once it has been explained below, so come back to it at the end.</p>
+<ol class="concepts"><li id="c1"><b>A serial verification pipeline lands at most one change per check duration, so any system whose write rate passes that ceiling verifies after the write, not before.</b> <span>Compute when his own CI, review or shared-file locking stops working as agent output grows, and predict which design a system past the ceiling must have.</span></li></ol>
+<h2 data-concept="c1">What a queue&#x27;s ceiling is, in one calculation</h2>
+<p class="why">A serial checker's daily ceiling is one line of arithmetic, and it predicts the whole design.</p>
+
+<p>Your Mission HQ agents share the job ledger and ideas.md under one rule, one writer at a time. That shape has a name: a <dfn>queue</dfn> is a line of items waiting for one worker. The worker's <dfn>service rate</dfn> is how many items it finishes per unit of time. There, <dfn>batching</dfn>, serving several items in one pass, raised that rate. This week Anthropic pushed a merge pipeline past the same limit. So this section turns the shape into a ceiling you can compute for any checker.</p>
+
+<p>Put a queue in front of a CI suite. Each merge waits in line. The checker runs the full suite on one merge, then takes the next. If the suite takes 30 minutes, every other merge waits for that half hour.</p>
+
+<div class="lanes" id="s1-ceiling" data-play>
+  <h4>One 30-minute CI suite, one merge at a time</h4>
+  <div class="lane" data-label="merges arriving">
+    <i class="decode" style="--w:5" data-t="merge 1"></i><i class="decode" style="--w:5" data-t="merge 2"></i>
+    <i class="decode" style="--w:5" data-t="merge 3"></i><i class="decode" style="--w:5" data-t="merge 4"></i>
+    <i class="decode" style="--w:5" data-t="merge 5"></i><i class="decode" style="--w:5" data-t="merge 6"></i>
+  </div>
+  <div class="lane" data-label="CI worker">
+    <i class="prefill" style="--w:5" data-t="checking merge 1"></i><i class="prefill" style="--w:5" data-t="checking merge 1"></i>
+    <i class="prefill" style="--w:5" data-t="checking merge 1"></i><i class="prefill" style="--w:5" data-t="checking merge 1"></i>
+    <i class="prefill" style="--w:5" data-t="checking merge 1"></i><i class="prefill" style="--w:5" data-t="checking merge 1"></i>
+  </div>
+  <div class="lane" data-label="waiting behind">
+    <i class="idle" style="--w:5" data-t="0 waiting"></i><i class="wait" style="--w:5" data-t="1 waiting"></i>
+    <i class="wait" style="--w:5" data-t="2 waiting"></i><i class="wait" style="--w:5" data-t="3 waiting"></i>
+    <i class="wait" style="--w:5" data-t="4 waiting"></i><i class="wait" style="--w:5" data-t="5 waiting"></i>
+  </div>
+  <p class="at" data-step="3">A merge arrives every five minutes, and merge 1 still has 20 minutes of checking left.</p>
+  <p class="at" data-step="6">After 30 minutes one merge has landed and five are waiting.</p>
+  <p class="at" data-step="all">Illustration, not measured: the service rate is one merge per 30 minutes, whatever the arrival rate is.</p>
+</div>
+
+<details class="predict"><summary>Predict: A serial merge queue runs a 30-minute CI suite per change. How many merges can it land in one day, however many machines you give it?</summary>
+<p>48. A day has 1,440 minutes, and the checker finishes one merge per 30 minutes. So its service rate is 48 merges a day. More machines do not raise it. Running two checks at once means the second merge is tested against a base that does not contain the first. The check then proves nothing about what main will look like.</p>
+</details>
+
+<p>The ceiling is the day divided by one check's duration.</p>
+
+<pre><code data-lang="text">minutes in a day                1,440
+CI time per merge                     30 min
+ceiling  = 1,440 / 30         =       48 merges per day</code></pre>
+
+<div class="calc" id="s1-rate">
+  <h4>Merges per day, by CI duration</h4>
+  <label>One CI run (minutes) <input type="range" name="ci" min="5" max="120" value="30">
+    <span class="val" data-val="ci"></span></label>
+  <div class="result">Ceiling <b data-out="rate"></b></div>
+  <script>kit.calc('#s1-rate', function(v){ return {rate: kit.fmt(1440/v.ci, 0)+' merges per day'}; });</script>
+</div>
+
+<p>Above the ceiling the queue never drains. If a merge arrives every two minutes, fifteen arrive during each 30-minute check and only one leaves. So the backlog grows by fourteen merges per check. The wait grows with it, and engineers start merging with an old base.</p>
+
+<p>Tian Pan's July 2026 analysis computes the same cap, roughly 48 merges a day for a 30-minute suite. Batching raises it, because one CI run can check several merges together. Pan's warning is that flaky tests, not bad code, are what cascade in batched queues. One unrelated failure fails the whole batch, the batch re-runs, and wait times double. Yelp hit this wall in 2023. It added binary search over the batch to find the one bad merge without re-running everything.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Tian Pan, "The Merge Queue Is the New Bottleneck", 2026-07-02: <q>a serial queue with 30-minute CI caps at roughly 48 merges/day</q> and argues flaky tests, not code quality, are what cascade in batched queues. Yelp's engineering blog, 2023, documents the same wall at human scale and the binary-search isolation fix.</p>
+</details>
+
+<p>The same arithmetic runs on your own files. One Mission HQ agent holds the job ledger for about 30 seconds while it reads, computes and writes back. So that ledger can take 86,400 / 30 ≈ 2,880 writes a day. Time one real hold, divide, and you know exactly how far your writer-at-a-time rule reaches.</p>
+
+<div class="keypoints">
+  <p class="remember">A serial checker's daily ceiling is the day divided by one check's duration.</p>
+  <p class="trap">More machines do not raise a serial ceiling, because parallel checks test unverified bases.</p>
+  <p class="try">Time how long one cron agent holds the job ledger, then divide 86,400 seconds by it.</p>
+</div>
+
+<p>48 a day is a comfortable ceiling for humans, but Anthropic reports 30,000 merges a day, roughly 600x past it. So the next section shows the design that lets those changes land anyway.</p>
+<h2 data-concept="c1">What Anthropic&#x27;s pipeline looks like at 600x past the ceiling</h2>
+<p class="why">Anthropic lands 30,000 merges a day against a 48-merge ceiling, so the safety check must have moved.</p>
+
+<p>The math above says no serial gate passes 30,000 changes a day. So this section shows the design that lets them land anyway. Anthropic reports its monorepo was around 2,500 merges a day in May 2026. By September 2026 it was over 30,000 a day. That number is self-reported, and every performance number in this section is.</p>
+
+<details class="predict"><summary>Predict: they buy 1,000 CI runners. How many merges land per day?</summary>
+<p>Still 48, because the serial lock, not the hardware, sets the cap. The runners can test one change at a time. So the queue's <em>service rate</em> does not move. That rate is how many items one worker finishes per day. Something in the design itself must change.</p>
+</details>
+
+<p>What changed is where correctness runs. A <dfn>serial merge queue</dfn> is a gate where each change waits. It passes the full test run, and merges only if it passes. Past the ceiling, that gate must go. Anthropic's pipeline uses <dfn>post-merge testing</dfn> instead: changes merge as they arrive and the tests run on main afterwards.</p>
+
+<div class="toggle-fig">
+  <button data-show="before">Serial queue</button><button data-show="after">Post-merge</button>
+  <div class="views">
+    <div data-view="before">
+      <ol class="flow" data-dir="down">
+        <li><b>change waits</b><span>behind every change ahead of it</span></li>
+        <li class="hot"><b>CI runs, 30 min</b><span>one change at a time, one global lock</span></li>
+        <li class="ok"><b>merge</b><span>48 a day at most</span></li>
+      </ol>
+    </div>
+    <div data-view="after">
+      <ol class="flow" data-dir="down">
+        <li class="ok"><b>change merges</b><span>as soon as it is ready, no wait</span></li>
+        <li class="hot"><b>tests run on main</b><span>post-merge and pre-deploy, off the write path</span></li>
+        <li class="bad"><b>fast revert</b><span>a bad main is caught after, fixed fast, costs a conflict</span></li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<p>The decisions behind it, in order:</p>
+
+<ol>
+  <li>Git's human-scale assumptions broke first. It expects an offline human with a full local copy, but Anthropic's clients were agents and CI jobs that are always online, and the numbers made that stop working.</li>
+  <li>So they rebuilt the server, not the lock. Scion stores only the files a change touched plus content-addressed blobs, where each blob is named by a hash of its contents, so identical content gets one name and any server can cache it. Write cost scales with the change, not the 100 GB repo.</li>
+  <li>With no global lock left to respect, pre-merge gating stopped making sense. Their own question: what does CI even mean when hundreds of changes merge while one test run is still going?</li>
+</ol>
+
+<table>
+  <tr><th>load git carried</th><th>value</th></tr>
+  <tr><td>history size</td><td>almost 100 GB</td></tr>
+  <tr><td>CI checkouts</td><td>25 million a day</td></tr>
+  <tr><td>naive git traffic</td><td>over 600 PB a day</td></tr>
+  <tr><td>git mirrors at peak</td><td>several hundred</td></tr>
+</table>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>All numbers are Anthropic's own, from the Scion engineering post, with no independent measurement. Anthropic calls Scion unsuitable for general use and says it fits only truly enormous monorepos.</p>
+</details>
+
+<p>The design is not new, and that is the strongest evidence it works. Meta's Mononoke has run the same changeset model, under the name Bonsai, for Meta's monorepo for years. Google's Piper has served tens of thousands of developers a centralized client-server repo since well before 2016. Anthropic is the agent-scale case of a proven pattern, not a risky first.</p>
+
+<div class="keypoints">
+  <p class="remember">Past the serial ceiling, verification moves after the write, because it cannot stay before it.</p>
+  <p class="trap">A post-merge pipeline trades a bad commit on main for throughput, so reverting must be fast.</p>
+  <p class="try">List which of your own project's checks could run after the merge, and which truly cannot.</p>
+</div>
+
+<p>Anthropic's scale is far from yours, but the ceiling law is the same. So the next section asks where your own stack already faces it.</p>
+<h2 data-concept="c1">Where his own stack hits the same law</h2>
+<p>Anthropic's scale is far from yours, but the ceiling law and the design choice are the same. Mission HQ already faces them.</p>
+
+<p>Your cron agents write to the same shared files: the job ledger and ideas.md. The convention is one writer at a time, a serial lock, so each agent's write is checked and finished before the next one starts. That lock is your serial gate, exactly like Anthropic's old merge queue. Its <dfn>service rate</dfn>, the number of items one checker finishes per unit of time, sets a hard ceiling on writes per day.</p>
+
+<p>The ceiling applies to your evening scale too. A 30 second lock hold caps throughput at 2 writes a minute.</p>
+
+<pre><code data-lang="text">1,440 minutes a day / 0.5 minutes per write = 2,880 writes a day</code></pre>
+
+<p>That sounds like plenty, but the queue breaks long before the ceiling. A lock that is busy half the time already makes a cron job wait on average for half a hold. With six agents firing on the same minute, the last one waits minutes. Jobs that run every five minutes start missing their window.</p>
+
+<details class="predict"><summary>Predict: you grow from three to six cron agents, each holding the ledger 30 seconds. Under the serial lock, which breaks first as you add agents: conflicting writes or missed cron windows?</summary>
+<p>Missed windows break first. Conflicts between two writes are rare at six agents, because each write touches the file for seconds in an hour. But every added agent stretches the average wait behind the lock. A wait of a few minutes is enough for a five-minute cron job to start late or run twice. The queue fails from waiting, not from corruption.</p>
+</details>
+
+<p>That is the same fork Anthropic faced, at smaller stakes. You have two designs for shared files:</p>
+
+<div class="compare">
+  <div class="wrong"><b>Serial lock.</b> One writer at a time, correctness checked before the write lands. Safe and simple. Costs every agent a wait, and the waits grow with each agent you add. At some point the cron schedule, not the lock, is what breaks.</div>
+  <div class="right"><b>Optimistic writes.</b> Agents write whenever they are ready, and conflicts are fixed after the write. This is <dfn>post-merge testing</dfn> moved to your scale: verification runs after the write, not before. No agent waits, but you sometimes repair the ledger after two writes crossed.</div>
+</div>
+
+<p>The choice turns on how expensive a conflict is. Two agents appending to the job ledger rarely touch the same line, so a conflict costs one repair pass. So optimistic writes win. A file where a bad state is costly to undo keeps the serial lock. That includes a file an agent reads to decide what to do next. A wrong read costs more than a wait.</p>
+
+<p>Anthropic reported the same logic at 600x your scale. They accepted that concurrent changes conflict and leaned on fast fixing after the write. The alternative was a queue that could never keep up (self-reported).</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Anthropic's Scion post says they dropped pre-merge gating for post-merge and pre-deploy testing, accepting conflicts and fixing them fast. Yelp's 2023 merge-queue post and Tian Pan's 2026 analysis show the same serial-versus-batched fork at human scale.</p>
+</details>
+
+<div class="keypoints">
+  <p class="remember">My serial file lock has the same ceiling math as Anthropic's merge queue, at smaller numbers.</p>
+  <p class="trap">Adding agents feels safe because conflicts are rare, but the queue fails from waiting first.</p>
+  <p class="try">Time one full ledger write from one agent, and divide 1,440 minutes by it.</p>
+</div>
+
+<p>This section covered who may write and when. What it did not cover is what the agents write. Anthropic found agents satisfy patterns rather than constraints, so the next section asks how you review intent, not lines.</p>
+<h2 data-kind="lab">Lab</h2>
+<div class="lab">
+<h4>E1: Measure your own ceiling</h4>
+<p class="tag"><span class="badge">offline</span> about ten minutes</p>
+<p>Time one full pass of the slowest serial check in an evening project. That is a full CI run, or one end-to-end run of your eval pipeline. Then divide the minutes in a day by that number.</p>
+<pre><code data-lang="bash">$ time python -m pytest            # or: one full eval run
+# ceiling = 1440 / minutes-per-pass</code></pre>
+<pre><code data-lang="text">real    12m10s
+→ 1440 / 12 = 120 passes a day, at best</code></pre>
+<p>Write that ceiling next to the job ledger, in one line. The number you wrote is the most your pipeline can ever land in a day. That holds if every write waits for that check, no matter how many machines you buy. If your cron agents currently produce far fewer writes than that, your ceiling is idle capacity, not a problem. The exercise changes nothing yet; it gives you the number you will check each time you add an agent.</p>
+</div>
+
+<div class="lab">
+<h4>E2: Sort your checks by where they must run</h4>
+<p class="tag"><span class="badge">offline</span> about five minutes</p>
+<p>List every check your agent jobs run before a result is written. Split it into two groups.</p>
+<ul>
+<li><b>Must run before the write:</b> checks whose failure corrupts shared state, like writing a malformed ledger row that later jobs parse.</li>
+<li><b>Can run after the write:</b> checks whose failure is fixable, like an intent check that each open job still has a row, which a cron job can run and repair on the next pass.</li>
+</ul>
+<p>The first group is your serial checker and owns the ceiling you measured in E1. Every check you move to the second group shortens the time each write holds the lock. So the ceiling rises without any new hardware.</p>
+<p>You should end with at least one check in the second group. If every check lands in the first, look again for one whose failure another job could detect and undo. That is the role post-merge testing and fast revert play in Anthropic's pipeline.</p>
+</div>
+
+<p>It asks you to compute where it breaks and pick a design.</p>
+<h2 data-kind="checkpoint">Checkpoint</h2>
+<p>The lesson said a serial checker lands at most one change per check duration. Here you apply that law to a repo much like the one you might build next, before it exists.</p>
+
+<div class="callout note">
+<p><b>Scenario.</b> Your evening project grows to three agents. CI takes 45 minutes per change.</p>
+</div>
+
+<ol>
+<li><b>What is the ceiling of a serial merge queue on this repo, and does the load pass it?</b>
+<details class="answer" id="s5-a1"><summary>Answer sketch</summary>
+<p>1,440 minutes ÷ 45 minutes = 32 merges a day. The three agents propose 60 changes a day, so the load is nearly double the ceiling. The queue never drains. Each added agent makes the waiting line longer, and no extra CI runner helps because the check itself is serial.</p>
+</details></li>
+
+<li><b>At which agent count does the queue first break?</b>
+<details class="answer" id="s5-a2"><summary>Answer sketch</summary>
+<p>At 32 merges a day the queue saturates, so two agents proposing 40 changes a day already pass it. Even one agent at 20 a day leaves only 12 merges of headroom, which means the queue works today and breaks with the first agent you add.</p>
+</details></li>
+
+<li><b>You can batch merges or verify after merge. Pick one and name its cost.</b>
+<details class="answer" id="s5-a3"><summary>Answer sketch</summary>
+<p><b>Batching</b> raises throughput by testing several changes per 45-minute pass, and its cost is the cascade: when a batch fails, one flaky or bad change fails the whole batch and you must bisect to find it, as Yelp found. <b>Post-merge testing</b> lets changes land at once and checks them behind main, and its cost is that main can carry a broken change between the write and the check, so you need fast detection and a cheap revert. Either choice beats the serial queue past 32 merges a day. The first keeps correctness before the write and pays in complexity. The second pays in a window where main is untrusted.</p>
+</details></li>
+</ol>
+
+<p>Next, two post ideas turn this same calculation and the intent-review lesson into something you could publish.</p>
+<h2 data-kind="post">Posts</h2>
+<ul class="cards">
+<li style="list-style:none"><b>The queue has a ceiling, in one line of math.</b> A serial merge queue with 30-minute CI lands at most 48 changes a day, because 1,440 minutes divided by 30 is 48, and more machines cannot raise it. Tian Pan showed this with queueing math, and Anthropic's 30,000 merges a day put them 600x past it. What makes it yours: compute the ceiling of your own CI tonight and write it next to the job ledger.</li>
+<li style="list-style:none"><b>When agents write the code, review intent, not lines.</b> Anthropic found multiple agent-built systems that read the whole commit log linearly to learn when a change merged, because "scan the log" is a familiar pattern, while asking the review tool's API was the constraint they missed. What makes it yours: you run a fleet of agents on shared files, so you have already seen an agent satisfy a pattern and skip the constraint.</li>
+</ul>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+<li><a href="https://www.anthropic.com/engineering/redesigning-source-control">Anthropic, "Redesigning source control"</a> is the Scion post behind Sections 2 and 3. Every performance number in this lesson (2,500 to 30,000 merges a day, 200x smaller checkout infrastructure, 99% cache hits) comes from Anthropic and has no independent measurement.</li>
+<li><a href="https://raw.githubusercontent.com/facebook/sapling/main/eden/mononoke/docs/1.2-key-concepts.md">Meta's Mononoke "Key Concepts" doc</a> in the facebook/sapling repository confirms the changeset and derived-data design is proven prior art that has served Meta's monorepo for years. This is the strongest corroboration in the lesson.</li>
+<li><a href="https://engineeringblog.yelp.com/2023/07/speeding-up-delivery-with-merge-queues.html">Yelp Engineering, "Speeding Up Delivery With Merge Queues" (2023)</a> shows the same ceiling at human scale and the batched-merge design with binary-search isolation.</li>
+<li><a href="https://tianpan.co/blog/2026/07/02/the-merge-queue-is-the-new-bottleneck">Tian Pan, "The Merge Queue Is the New Bottleneck" (2026)</a> is the queueing analysis behind the 48 merges a day figure and the claim that flaky tests, not code quality, cascade in batched queues.</li>
+<li><a href="https://research.google/pubs/why-google-stores-billions-of-lines-of-code-in-a-single-repository/">Potvin and Levenberg, "Why Google Stores Billions of Lines of Code in a Single Repository" (2016)</a> shows the centralized monorepo design predates Scion by a decade. The study note could read only the abstract page; cacm.acm.org refused the full text with HTTP 403.</li>
+</ul>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

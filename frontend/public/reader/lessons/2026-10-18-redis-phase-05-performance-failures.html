@@ -1,0 +1,1553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why Redis is slow, and why it is full</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Redis · Phase 5</div><h1>Why Redis is slow, and why it is full</h1><p class="subtitle">Given &#x27;Redis is slow&#x27; or &#x27;Redis is out of memory&#x27; on a shared cluster, which command names the cause, and what does that command not see?</p></header>
+<p>This phase follows one shared Redis cluster. The platform of Phase 0 runs about 34 services on several shared, managed clusters. This cluster is one of them, and it uses the provider's default eviction policy. One of the services is an AI agent, and it keeps the memory of each chat session in Redis. That chat memory is this lesson's own example. In Phase 4 you learned how such a cluster saves its data, copies it to replicas and fails over. This phase covers the two pages that an on-call engineer gets for it: "Redis is slow" and "Redis is out of memory".</p>
+
+<figure class="diagram"><ol class="timeline">
+  <li><time>Monday</time> The p99 of the tenant-settings read jumps from 1 ms to 150 ms for about one second, every few minutes. <code>SLOWLOG GET</code> is empty.</li>
+  <li><time>Tuesday</time> One shard runs at 100% CPU and the other five at about 30%. The team adds six shards, and the hot shard stays at 100%.</li>
+  <li><time>Day 9</time> Every service on the cluster gets <code>OOM command not allowed</code> on writes. Reads still work.</li>
+  <li><time>Night</time> During the nightly <code>BGSAVE</code>, the operating system kills the Redis process, although <code>used_memory</code> was under <code>maxmemory</code>.</li>
+</ol><figcaption>The running case. The days and numbers are an illustration, not measured. Each concept below explains one line of it.</figcaption></figure>
+
+<p>None of these four lines is a bug in Redis. Each one comes from the way the services use Redis, and each one shows up in a command that a person can run in minutes. The hard part is to know what each command measures, and what it cannot see. The table maps each symptom to its cause and to the first tool you run.</p>
+
+<table>
+<tr><th>What you see</th><th>The cause</th><th>The first tool</th><th>Where</th></tr>
+<tr><td>Many fast calls per request, no slow command</td><td>Too many round trips</td><td>Count calls per request, then <code>MGET</code> or a pipeline</td><td>Phase 0, recap below</td></tr>
+<tr><td>Every client freezes for tens of milliseconds</td><td>A slow O(N) command</td><td><code>SLOWLOG GET</code>, <code>INFO latencystats</code></td><td>c1</td></tr>
+<tr><td>Spikes, and <code>SLOWLOG</code> is empty</td><td>Main-thread work that is not a command</td><td><code>LATENCY LATEST</code>, <code>LATENCY DOCTOR</code></td><td>c1</td></tr>
+<tr><td>One key holds millions of elements</td><td>A big key</td><td><code>--memkeys</code>, <code>--bigkeys</code>, <code>MEMORY USAGE</code></td><td>c2</td></tr>
+<tr><td>One shard is hot and the others are idle</td><td>A hot key</td><td><code>--hotkeys</code>, <code>HOTKEYS START</code>, <code>CLUSTER SLOT-STATS</code></td><td>c3</td></tr>
+<tr><td>Writes fail with OOM, reads work</td><td>The eviction policy meets keys without a TTL</td><td><code>INFO memory</code>, <code>INFO errorstats</code></td><td>c4</td></tr>
+<tr><td>Throughput drops at the memory cap, or the process is killed</td><td>Eviction work and memory outside <code>used_memory</code></td><td><code>INFO memory</code>, <code>INFO persistence</code></td><td>c5</td></tr>
+</table>
+
+<p>What you must know, in five claims. Each one is taught below, in this order.</p>
+<ol class="concepts">
+  <li id="c1"><b>Latency is round trip plus waiting behind all main-thread work plus your command, and SLOWLOG sees only your command.</b> <span>Find the cause of a p99 spike, also when SLOWLOG is empty.</span></li>
+  <li id="c2"><b>A big key costs O(N) in every whole-key operation, even expiry and eviction, and UNLINK protects only your own delete.</b> <span>Predict which operation on a big key will freeze the server, and remove the key safely.</span></li>
+  <li id="c3"><b>Sharding spreads keys, not requests, so a hot key loads one thread on one shard however many shards you add.</b> <span>Find the hot key and stop its requests before they reach that thread.</span></li>
+  <li id="c4"><b>Volatile policies evict only keys with a TTL, so keys without one turn a full cache into noeviction for everyone.</b> <span>Choose a policy and audit TTLs before a shared cluster fills.</span></li>
+  <li id="c5"><b>Reaching maxmemory is a latency event, and memory outside used_memory, such as fork copies, decides if Redis survives.</b> <span>Size a node from peak RSS, and read the memory fields that matter.</span></li>
+</ol>
+<p>The tables, the sections and the lab tags call these five claims c1 to c5, in this order.</p>
+
+<h2 data-kind="orientation">What you bring from Phases 0 to 4</h2>
+<p>This phase uses six ideas from earlier phases. Each card says it again in plain words.</p>
+<div class="cards" data-cols="2">
+  <div class="card"><h4>One main thread (Phase 0)</h4><p>Redis runs every command on one <dfn>main thread</dfn>, one command at a time. So one slow command makes every other client wait. Redis 8 and Valkey have I/O threads that read sockets and parse requests, but the commands still run on the main thread.</p></div>
+  <div class="card"><h4>The round trip (Phase 0)</h4><p>A <code>GET</code> runs in about 1 µs on the server. Your client waits far longer for the network <dfn>round trip</dfn>. That is the time for the request to reach Redis and the reply to come back. Phase 0 measured 94 µs at p50 on loopback, and about 300 to 600 µs on Docker Desktop. So 500 calls in a loop cost about 500 round trips. Phase 0 found a pipeline ceiling near 120x on loopback, and 224x for 500 keys on Docker Desktop.</p></div>
+  <div class="card"><h4>Encodings (Phase 1)</h4><p>Redis stores a small hash, set or list in a compact <code>listpack</code>, and a large one in a hash table. A hash of 200 small fields in one listpack costs several times less memory than 200 String keys. Phase 1 measured 6.2 times less, with hashes of up to 100 fields.</p></div>
+  <div class="card"><h4>TTLs and cache misses (Phase 2)</h4><p>A TTL is the time a key has left before Redis deletes it. A cache multiplies load, because every miss sends a request to the source behind it.</p></div>
+  <div class="card"><h4>Fork and copy-on-write (Phase 4)</h4><p>For a <code>BGSAVE</code> or a replica's full sync, Redis forks a child process that writes a snapshot. Parent and child share memory pages, and the operating system copies a page when the parent changes it.</p></div>
+  <div class="card"><h4>Hash slots and replicas (Phase 4)</h4><p>In a cluster, each key maps to one of 16,384 hash slots, and each slot lives on one primary. Replicas copy a primary and can serve reads.</p></div>
+</div>
+<p>Phase 0 already taught the round trip as the first thing to check. This phase starts where that check finds nothing: every call is batched, and the p99 still jumps.</p>
+
+<h2 data-concept="c1">Why does one slow command delay every client?</h2>
+<p class="why">One O(N) command holds the main thread, so every client waits behind it.</p>
+<p>The cards above say that commands run one at a time on the main thread. On Monday, the tenant-settings read in the running case is a single <code>GET</code>, and it still takes 150 ms at the p99. So the time went somewhere other than the <code>GET</code> itself.</p>
+<p>Every request to a Redis node joins one line in front of the main thread. A command whose work grows with the size of a key or of the whole keyspace is an <dfn>O(N) command</dfn>. While it runs, the line does not move. A fast <code>GET</code> that arrives during that time waits for the whole run, and its client sees the wait as its own latency.</p>
+
+<details class="predict"><summary>Predict: a client sends PING every 1 ms for a minute. Another client runs KEYS on 1,000,000 keys, which takes about 140 ms. What are the PING p50 and the PING maximum?</summary>
+<p>The p50 stays at about 0.17 ms, and the maximum is about 94 ms. Almost every PING arrives when KEYS is not running, so the median does not move. The PINGs that arrive during KEYS wait for the rest of its run. So a slow command shows up in the tail of other clients' latency, and a dashboard that shows only the mean or the median hides it. The guess "every client gets a little slower" is reasonable for a multi-threaded server. Redis has one command thread, so most clients see nothing and a few see the whole freeze.</p>
+</details>
+
+<div class="lanes" id="s2-keys" data-play>
+  <h4>A PING every 1 ms while another client runs KEYS on 1,000,000 keys</h4>
+  <div class="lane" data-label="PING client">
+    <i class="decode" style="--w:12" data-t="0.17 ms"></i><i class="decode" style="--w:12" data-t="0.17 ms"></i><i class="frozen" style="--w:280" data-t="waits up to 94 ms"></i><i class="decode" style="--w:12" data-t="0.17 ms"></i></div>
+  <div class="lane" data-label="KEYS client">
+    <i class="idle" style="--w:12"></i><i class="idle" style="--w:12"></i><i class="prefill" style="--w:280" data-t="KEYS k:* runs 133 to 148 ms"></i><i class="idle" style="--w:12"></i></div>
+  <p class="at" data-step="1">Steps 1 and 2: each PING gets its reply in about 0.17 ms.</p>
+  <p class="at" data-step="3">Step 3: KEYS holds the main thread, and a PING that arrives now waits until KEYS ends.</p>
+  <p class="at" data-step="4">Step 4: KEYS is done, and PINGs return to 0.17 ms.</p>
+  <p class="at" data-step="all">Measured in one run of the course research on Homebrew Redis 8.10.1, an x86_64 build under Rosetta with libc malloc, on an Apple M4 Pro, over loopback. Widths are to scale only roughly.</p>
+</div>
+
+<p>The commands that do this share one trait. They touch every element of a large collection, or every key in the keyspace, in one call. Each has a safe form that does the same work in small pieces.</p>
+<table>
+<tr><th>Blocking command</th><th>Cost</th><th>Safe form</th></tr>
+<tr><td><code>KEYS &lt;pattern&gt;</code></td><td>O(N), the whole keyspace</td><td><code>SCAN</code> with a cursor</td></tr>
+<tr><td><code>SMEMBERS</code> on a big set</td><td>O(N)</td><td><code>SSCAN</code></td></tr>
+<tr><td><code>HGETALL</code> on a big hash</td><td>O(N)</td><td><code>HSCAN</code>, or <code>HMGET</code> with the fields you need</td></tr>
+<tr><td><code>LRANGE key 0 -1</code> on a big list</td><td>O(N)</td><td><code>LRANGE</code> with a bounded range</td></tr>
+<tr><td><code>ZRANGE</code> over a huge range</td><td>O(log N + M)</td><td>A bounded range, or <code>LIMIT offset count</code></td></tr>
+<tr><td><code>DEL</code> on a big key</td><td>O(N) to free the memory</td><td><code>UNLINK</code>, which frees in a background thread</td></tr>
+<tr><td><code>FLUSHALL</code> or <code>FLUSHDB</code>, synchronous</td><td>O(N)</td><td><code>FLUSHALL ASYNC</code>, or do not run it in production</td></tr>
+<tr><td>A long Lua script</td><td>The whole script</td><td>Keep scripts small, with no loop over a big key</td></tr>
+</table>
+
+<p>The phase's <code>slow_commands</code> program measured the gap on 200,000 keys and a hash of 200,000 fields.</p>
+<div class="bars">
+  <div class="bar" style="--v:62" data-label="HGETALL, 200,000 fields" data-value="62 ms"></div>
+  <div class="bar" style="--v:33" data-label="KEYS k:*, 200,000 keys" data-value="33 ms"></div>
+  <div class="bar" style="--v:1.1" data-label="HSCAN, one batch" data-value="1.1 ms"></div>
+  <div class="bar" style="--v:0.65" data-label="SCAN, one batch of 501 keys" data-value="0.65 ms"></div>
+  <div class="bar" style="--v:0.4" data-label="HMGET f1 f2 f3" data-value="0.4 ms"></div>
+</div>
+
+<p>The SCAN family works with a <dfn>cursor</dfn>, a number that marks where the last call stopped. You call it again with the returned cursor until the cursor comes back as 0, and each call returns a small batch. A key that exists for the whole scan comes back at least once. A key that is added or removed during the scan may or may not appear, and the same key can come back more than once. So your code must accept duplicates. This weaker promise is the reason SCAN is safe, because it never builds the whole keyspace in one blocking call.</p>
+
+<p><code>SLOWLOG</code> is the tool that finds these commands. Redis records every command that runs longer than <code>slowlog-log-slower-than</code> in an in-memory ring buffer. The default is 10,000 µs, which is 10 ms, in Redis 8.10.2. <code>SLOWLOG GET 10</code> shows the last ten entries, each with its duration and its arguments.</p>
+<pre><code data-lang="text">127.0.0.1:6379&gt; SLOWLOG GET 2
+1) duration: 29.781ms  args: [hgetall bighash]
+2) duration: 23.194ms  args: [keys k:*]</code></pre>
+<div class="callout warn"><p>The phase shows this output with 29.8 ms and 23.2 ms, but its own measured values above it are 62 ms and 33 ms. Read the example for its format. The durations in it are not a measurement.</p></div>
+
+<p><b>A real case.</b> A cache library for Java called <code>KEYS</code> to clear a cache. In production, Redis reached 100% CPU and stopped serving other requests. <code>SLOWLOG</code> showed <code>KEYS</code>, so the team found the cause there. The application code never called <code>KEYS</code> itself. The call was inside the library.</p>
+<details class="evidence"><summary>Evidence</summary>
+<p>PING and KEYS numbers: one run each in the course research, Redis 8.10.1 from Homebrew, an x86_64 build under Rosetta with <code>malloc=libc</code>, Apple M4 Pro, 24 GB RAM, loopback client, no persistence. The 200,000-key numbers are the phase's own <code>slow_commands</code> run, with no host stated. The 40 ms figure is from the KEYS page, https://redis.io/docs/latest/commands/keys/. The SCAN promise, including duplicates, is from https://redis.io/docs/latest/commands/scan/. The library case is Spring Data Redis issue 1413, opened in 2018: https://github.com/spring-projects/spring-data-redis/issues/1413.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">One O(N) command freezes every client on the node for its whole run.</p>
+<p class="trap"><code>KEYS</code> in application code passes review and freezes a 40-million-key production node.</p>
+<p class="try">Run E3, then find <code>KEYS *</code> and its duration in <code>SLOWLOG GET 3</code>.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: the round-trip arithmetic, the three ways to batch, and two teams that measured it</summary>
+<p>This block holds the phase's section on pipelining, because Phase 0 already taught it. It is the first check when latency is high and no single command is slow.</p>
+<pre><code data-lang="text">   N sequential GETs:                    N pipelined GETs:
+   latency ≈ N × RTT                     latency ≈ 1 × RTT + N × ~1µs
+   500 × 400µs = 200ms                   1 × 400µs + 500µs ≈ 0.9ms
+                                         → measured 224x speedup (Phase 0, Docker Desktop)</code></pre>
+<p>A pipeline sends N commands in one write and reads the N replies in one pass. The server does the same work, and only the number of network trips changes. Use the three ways in this order, when they apply:</p>
+<ol>
+<li><b>A multi-key command.</b> <code>MGET</code>, <code>MSET</code>, <code>HMGET</code> and <code>SADD</code> with many members do N operations in one command and one round trip. In cluster mode, a multi-key command needs all keys in one slot, so the keys need a hash tag, such as <code>{user42}</code>.</li>
+<li><b>A pipeline.</b> Use <code>rdb.Pipeline()</code> in go-redis when the commands differ, such as <code>GET</code>, <code>INCR</code> and <code>EXPIRE</code>.</li>
+<li><b>A Lua script or <code>MULTI</code>.</b> Use these when the batch must also be atomic. Phase 3's compare-and-delete is a Lua example.</li>
+</ol>
+<p>The N+1 Redis problem is a Redis call inside a loop over a collection. It costs nothing in development at N=3, and 200 ms in production at N=500. A loop such as <code>for _, id := range ids { rdb.Get(ctx, key(id)) }</code> passes review and slows the request as <code>ids</code> grows. When latency is high and no command is in <code>SLOWLOG</code>, look for this loop before anything else.</p>
+<p>The gain depends on the round trip. The course research ran one client over loopback, where the round trip is about 0.1 ms. It measured 10,051 requests per second with no pipeline, 129,282 with 16 commands per pipeline and 414,079 with 100. That is 41 times. Over a real network the round trip is longer, so the gain is larger. That is inferred, and it was not measured here.</p>
+<p><b>Swiggy</b> found that 50% to 70% of the time of its feature-store write jobs went to Redis writes, one round trip per command. The team sent the writes in pipelines of a fixed batch size, with retries and backoff. On a few write-heavy jobs, this cut the Redis write time by 90% and the cost by about 60%. Very large batches filled socket buffers, so each workload had its own best batch size. A second Swiggy change batched feature reads with <code>MGET</code> and pipelines. The p99 of order assignment fell from 144 ms to 71 ms, at batch size 30 and over 5,000 predictions per second.</p>
+<details class="evidence"><summary>Evidence</summary>
+<p>The 224x and the 300 to 600 µs come from the Phase 0 demo on Docker Desktop. The 94 µs and the ceiling near 120x come from the local run of Phase 0, over TCP loopback outside Docker. Phase 0 states the build and the network for both runs. The loopback numbers are the course research's <code>redis-benchmark -t get -c 1</code> run at <code>-P 1</code>, <code>-P 16</code> and <code>-P 100</code>, on Homebrew Redis 8.10.1 under Rosetta with libc malloc, Apple M4 Pro, loopback. Swiggy write case: https://bytes.swiggy.com/optimizing-batch-writes-to-redis-using-pipelining-d480ebaf4653 (2023). Swiggy read case: https://medium.com/swiggy-bytes/2x-improvement-in-latency-in-swiggy-data-science-platform-6101b7607530 (2022).</p>
+</details>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: KEYS at 1 million keys, Lua scripts, ZRANGE LIMIT, Valkey's command logs, I/O threads, and a KEYS warning from Stack Overflow</summary>
+<ul>
+<li><b>Lua scripts.</b> A script runs on the main thread, and no other command runs during it. After <code>busy-reply-threshold</code> ms, 5,000 by default and formerly <code>lua-time-limit</code>, Redis logs "Slow script detected". Other clients then get <code>-BUSY</code>, and the script keeps running. <code>SCRIPT KILL</code> works only if the script has not written. Otherwise the reply is <code>-UNKILLABLE</code>, and the only exit is <code>SHUTDOWN NOSAVE</code>, which loses the data since the last save. Source: <code>src/script.c</code> and <code>src/config.c</code> at tag 8.10.2.</li>
+<li><b>ZRANGE and LIMIT.</b> <code>LIMIT offset count</code> applies only with <code>BYSCORE</code> or <code>BYLEX</code>. This is inferred from the earlier audit, and the ZRANGE page was not opened. For a rank range, bound the start and stop instead.</li>
+<li><b>KEYS on 1,000,000 keys.</b> The course research measured <code>KEYS k:*</code> at 133 to 148 ms over three runs, and one <code>SCAN 0 COUNT 1000</code> at 0.25 to 0.30 ms. The <code>KEYS</code> documentation gives 40 ms for 1 million keys on an entry-level laptop. So the cost per key differed by about three times. The pattern, the libc build and the x86_64 emulation under Rosetta may explain the gap, but its cause was not isolated. Phase 0 timed <code>KEYS key:*</code> over 1,000,000 keys at 92.6 to 93.6 ms on the same build. The two runs used other key names, and this page does not record how either run created its keys. So that gap is not explained either.</li>
+<li><b>Valkey <code>COMMANDLOG</code>.</b> On Valkey 8.1 and later, <code>SLOWLOG</code> is part of a wider tool. Its threshold is <code>commandlog-execution-slower-than</code>, also 10,000 µs by default, and the old <code>slowlog-*</code> settings are deprecated there. Since Valkey 8.1.0 it keeps three logs. The first is slow execution. The second is large requests, with a default threshold of 1,048,576 bytes. The third is large replies, which finds <code>HGETALL</code> and <code>SMEMBERS</code> on big keys directly. Source: valkey.conf at 9.1.2, lines 2135 to 2200, and https://valkey.io/commands/commandlog-get/.</li>
+<li><b>I/O threads.</b> In Redis 8, an I/O thread reads and parses a request, then hands the client to the main thread to run the command. Pub/sub, <code>MONITOR</code>, blocked and tracking clients stay on the main thread. <code>io-threads</code> is 1, which means off, by default. In Valkey 9.1, the main thread owns all clients and sends read, write and poll jobs to a shared queue. Threads start when the main thread is busy more than 30% of the time. In both, a slow command still blocks every client. Source: <code>src/iothread.c</code> at 8.10.2 and <code>src/io_threads.c</code> at Valkey 9.1.2.</li>
+<li><b>AWS ElastiCache multiplexing</b> shows what I/O threads buy. At 5,200 clients on an r6g.xlarge, with 80% GET and 20% SET, throughput rose from 202,770 to 349,239 operations per second, a 72% gain. At 400 clients the gain was 26%. The commands still ran on one engine thread.</li>
+<li><b>Stack Overflow</b> wrote that <code>KEYS</code> "can cause a production blockage in a hurry", and at their scale it always does.</li>
+</ul>
+<details class="evidence"><summary>Evidence</summary>
+<p>ElastiCache multiplexing post (2023): https://aws.amazon.com/blogs/database/enhanced-io-multiplexing-for-amazon-elasticache-for-redis. Stack Overflow post: https://nickcraver.com/blog/2019/08/06/stack-overflow-how-we-do-app-caching/.</p>
+</details>
+</details>
+
+<p>This section found the slow commands that <code>SLOWLOG</code> can see. The next section answers what slows a node when <code>SLOWLOG</code> is empty.</p>
+
+<h2 data-concept="c1">What does SLOWLOG not see?</h2>
+<p class="why">SLOWLOG times only execution, so main-thread housekeeping stays invisible there.</p>
+<p>The section above found slow commands in <code>SLOWLOG</code>. On Monday in the running case, <code>SLOWLOG GET 128</code> is empty, and the p99 still jumps to 150 ms. So the main thread was busy with work that is not a command.</p>
+<p><code>SLOWLOG</code> measures only the execution stage of a command. Its time does not include talking with the client, sending the reply or waiting in the line. The main thread also runs housekeeping between commands, and a client waits behind that work in the same way. So a client's latency is the sum of four parts, and <code>SLOWLOG</code> shows only the last one.</p>
+
+<div class="stack">
+  <h4>One client's 150 ms at the p99, split into its parts</h4>
+  <div class="whole">
+    <i style="--w:1;--c:var(--muted)" data-label="round trip" data-value="about 0.5 ms" data-note="network, not on the server"></i>
+    <i style="--w:20;--c:var(--warn)" data-label="waiting behind other commands" data-value="about 20 ms" data-note="SLOWLOG shows these commands, not your wait"></i>
+    <i style="--w:128;--c:var(--bad)" data-label="waiting behind housekeeping" data-value="about 128 ms" data-note="expiry, eviction, frees, fork: never in SLOWLOG"></i>
+    <i style="--w:1;--c:var(--accent)" data-label="your own command" data-value="under 1 ms" data-note="the only part SLOWLOG can time"></i>
+  </div>
+</div>
+<p>The split is an illustration, not measured. The order of the parts is the mechanism, and the next list names the work in the large red part.</p>
+
+<p>The main thread runs these jobs that are not commands. Each one can hold it for many milliseconds:</p>
+<ol>
+<li><b>Active expiry.</b> A cron job, <code>serverCron</code>, runs <code>hz</code> times per second, 10 by default. It samples keys with a TTL and deletes the expired ones, for up to 25 ms per run at <code>hz 10</code>. A shorter fast cycle of up to 1 ms also runs between events. Many keys that expire in the same second keep this job at its limit.</li>
+<li><b>Freeing a big value.</b> When an expired or evicted key is a collection, Redis frees every element on the main thread by default. The next concept covers this in full.</li>
+<li><b>Eviction.</b> Above <code>maxmemory</code>, Redis evicts keys in the command path before it runs commands. Concept c5 covers this.</li>
+<li><b>The <code>fork()</code> call.</b> The fork for <code>BGSAVE</code> itself runs in the main thread, and it takes longer for a larger process. The latency documentation gives about 9 to 13 ms per GB on physical machines and on VMware.</li>
+<li><b>The operating system.</b> Transparent huge pages make copy-on-write slower after a fork, and swapping moves Redis memory to disk. Redis turns off transparent huge pages for itself by default, with <code>disable-thp yes</code>.</li>
+</ol>
+
+<p>Each part of the sum has its own tool. Run them in this order when <code>SLOWLOG</code> is empty:</p>
+<table>
+<tr><th>Tool</th><th>What it measures</th><th>Default</th></tr>
+<tr><td><code>redis-cli --intrinsic-latency 100</code></td><td>The host's own latency floor over 100 seconds, with no Redis work</td><td>Run on the Redis host</td></tr>
+<tr><td><code>INFO latencystats</code></td><td>p50, p99 and p99.9 for each command type, including the wait</td><td>On, <code>latency-tracking yes</code></td></tr>
+<tr><td><code>LATENCY LATEST</code>, <code>LATENCY DOCTOR</code></td><td>Events that are not commands, such as <code>expire-cycle</code>, <code>expire-del</code> and <code>fork</code></td><td>Off, <code>latency-monitor-threshold 0</code></td></tr>
+<tr><td><code>INFO stats</code>: <code>latest_fork_usec</code></td><td>How long the last fork held the main thread</td><td>Always reported</td></tr>
+<tr><td><code>redis-cli --latency</code></td><td>Round trips of PING from your client, live</td><td>Run from the client side</td></tr>
+</table>
+<p>The latency monitor is off by default, so it has no history from before an incident. Turn it on with <code>CONFIG SET latency-monitor-threshold 10</code> before you need it. It then records every event that takes 10 ms or longer.</p>
+
+<p>The course research measured the invisible part directly. It built a set of 1,000,000 members, set <code>PEXPIRE 200</code> on it and let active expiry delete it. <code>LATENCY LATEST</code> recorded <code>expire-del</code> at 176 ms, and <code>SLOWLOG</code> had no entry for it. With <code>lazyfree-lazy-expire yes</code>, the same test recorded no latency event at all, because a background thread freed the set. So one key that expired froze every client for 176 ms, and the tool that most engineers check first showed nothing.</p>
+<details class="evidence"><summary>Evidence</summary>
+<p>One run, Redis 8.10.1 from Homebrew, an x86_64 build under Rosetta with <code>malloc=libc</code>, Apple M4 Pro, 24 GB RAM, loopback, no persistence, <code>--enable-debug-command yes</code>. That SLOWLOG excludes I/O is quoted from https://redis.io/docs/latest/commands/slowlog-get/. The main-thread jobs and the fork table come from https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/. The fork table has no Redis version and is old. The defaults are from redis.conf at 8.10.2 (lines 2132 and 2142) and the expiry constants from <code>src/expire.c</code> at 8.10.2.</p>
+</details>
+
+<div class="callout warn"><p>The phase says that an empty <code>SLOWLOG</code> means the cause is round trips or a hot key. That list is too short. The official latency checklist also names fork latency, transparent huge pages, swapping, AOF fsync stalls, many keys that expire in the same second, and the host's own latency.</p></div>
+
+<p>In the running case, the Monday spikes came every few minutes and lasted about a second. That shape fits a mass expiry or an eviction burst better than a slow command, because a command would show up in <code>SLOWLOG</code>. <code>LATENCY LATEST</code>, turned on before the next spike, names which one it is.</p>
+
+<div class="keypoints">
+<p class="remember">An empty SLOWLOG clears the commands, not the server.</p>
+<p class="trap">Stopping at an empty SLOWLOG hides mass expiry, eviction bursts and fork stalls.</p>
+<p class="try">Set the latency monitor to 10 ms, expire a big set, then read <code>LATENCY LATEST</code>.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: the expiry constants, the commands for the extra check, a real latency line, and a host-level case</summary>
+<p><b>Active expiry in numbers.</b> These are constants in <code>src/expire.c</code> at tag 8.10.2:</p>
+<table>
+<tr><th>Constant</th><th>Value</th><th>Meaning</th></tr>
+<tr><td><code>ACTIVE_EXPIRE_CYCLE_KEYS_PER_LOOP</code></td><td>20</td><td>Keys sampled per database loop</td></tr>
+<tr><td><code>ACTIVE_EXPIRE_CYCLE_FAST_DURATION</code></td><td>1,000 µs</td><td>Time limit of the fast cycle</td></tr>
+<tr><td><code>ACTIVE_EXPIRE_CYCLE_SLOW_TIME_PERC</code></td><td>25</td><td>CPU limit of the slow cycle, in %</td></tr>
+<tr><td><code>ACTIVE_EXPIRE_CYCLE_ACCEPTABLE_STALE</code></td><td>10</td><td>The cycle repeats while more than 10% of sampled keys were expired</td></tr>
+</table>
+<p>The slow cycle's time limit is <code>25% × 1,000,000 / hz</code> µs, so 25 ms at <code>hz 10</code>. The fast cycle runs only when the stale estimate is above the limit, and at most every 2 ms. <code>active-expire-effort</code> goes from 1 to 10, and the default is 1. Each step adds 25% more keys per loop and lowers the stale target by 1%. With <code>dynamic-hz yes</code>, the default, Redis raises <code>hz</code> while it has many clients, up to 500.</p>
+<p><b>The extra check, as the course research ran it.</b> It is not an exercise of the phase, so it has no E-number:</p>
+<pre><code data-lang="bash">CONFIG SET latency-monitor-threshold 10
+EVAL "for i=1,ARGV[1] do redis.call('SADD',KEYS[1],'member:'..i) end" 1 bigset 1000000
+PEXPIRE bigset 200
+LATENCY LATEST        # expect an expire-del event near 176 ms on a laptop
+CONFIG SET lazyfree-lazy-expire yes
+# build the set again, PEXPIRE it, and LATENCY LATEST shows no new event</code></pre>
+<p><b>A real latency line.</b> In the course research's KEYS test, <code>INFO latencystats</code> printed <code>latency_percentiles_usec_keys:p50=137363.455</code>. That is the p50 of the KEYS command itself, 137 ms, in microseconds.</p>
+<p><b>The host can be the cause.</b> At <b>Stack Overflow</b>, a monitoring process moved Redis off its CPU core, and clients timed out. The fix was to pin Redis to its cores. <code>--intrinsic-latency</code> on the host is the check for this kind of cause.</p>
+<p><b>AOF.</b> With <code>appendfsync everysec</code>, a slow disk can make Redis postpone the AOF <code>write(2)</code> for up to two seconds, and <code>aof_delayed_fsync</code> in <code>INFO persistence</code> counts those delays. Phase 4 explains the AOF itself.</p>
+</details>
+
+<p>This section showed that one key's expiry can freeze the node for 176 ms. The next section answers which other operations cost that much on a big key, and which setting decides it.</p>
+
+<h2 data-concept="c2">What does a big key cost, and when?</h2>
+<p class="why">A big key turns routine operations, even its own expiry, into freezes.</p>
+<p>The 176 ms freeze in the section above came from one key with 1,000,000 members. In the running case, the AI agent keeps the message IDs of each chat session in one set. The shared session of one large tenant has grown to 2,000,000 members, and it has a 24-hour TTL.</p>
+<p>A <dfn>big key</dfn> is a hash, set, list or sorted set with millions of elements, or a string of many megabytes. It grows slowly over months, so no single deploy creates it. Any operation on the whole key does work for each element, on the main thread. Some of those operations come from your code, and some come from Redis itself.</p>
+
+<details class="predict"><summary>Predict: your team deletes every big key with UNLINK. The 2,000,000-member session set has a 24-hour TTL. What happens tomorrow at the moment it expires, and which setting decides it?</summary>
+<p>Active expiry deletes the key on the main thread and frees all 2,000,000 members there. Every client waits for that free. The course research measured a <code>DEL</code> of a 1,000,000-member set at 198,838 µs, so a linear scale gives about 400 ms for 2,000,000 members. In that run <code>DEL</code> grew faster than linear, so the real time may be longer. Both figures are inferred, not measured. <code>lazyfree-lazy-expire</code> decides it. It is <code>no</code> in Redis 8.10.2, so the free blocks. It is <code>yes</code> in Valkey 9.1.2, so a background thread frees the set there. The team's rule protects only the deletes it calls itself.</p>
+</details>
+
+<table>
+<tr><th>Whole-key operation</th><th>Who starts it</th><th>On Redis 8.10.2 by default</th><th>The setting that moves it to a background thread</th></tr>
+<tr><td>Read all: <code>SMEMBERS</code>, <code>HGETALL</code>, <code>LRANGE 0 -1</code></td><td>Your code</td><td class="bad">Blocks</td><td>None. Read in pieces with the SCAN family</td></tr>
+<tr><td><code>DEL</code></td><td>Your code</td><td class="bad">Blocks</td><td><code>lazyfree-lazy-user-del</code></td></tr>
+<tr><td><code>UNLINK</code></td><td>Your code</td><td class="ok">Background</td><td>Background when the free effort is above 64</td></tr>
+<tr><td>Expiry of the key</td><td>Redis</td><td class="bad">Blocks</td><td><code>lazyfree-lazy-expire</code></td></tr>
+<tr><td>Eviction of the key</td><td>Redis</td><td class="bad">Blocks</td><td><code>lazyfree-lazy-eviction</code></td></tr>
+<tr><td>Overwrite by <code>SET</code> or <code>RENAME</code></td><td>Your code, as a side effect</td><td class="bad">Blocks</td><td><code>lazyfree-lazy-server-del</code></td></tr>
+<tr><td>Flush of the old data on a replica's full sync</td><td>Redis</td><td class="bad">Blocks</td><td><code>replica-lazy-flush</code></td></tr>
+</table>
+
+<p>The mechanism has three steps:</p>
+<ol>
+<li>Freeing a collection walks every element and returns each one to the allocator. So the cost of a free grows with the element count, not with the byte size alone.</li>
+<li><code>UNLINK</code> removes the key from the keyspace at once. If the free effort is above 64, it gives the value to a background thread. For a set, a sorted set or a hash in its hash-table encoding, the effort is the element count. For a list, it is the number of quicklist nodes, the blocks of up to 8 KB that hold its elements. A value in a compact encoding, such as a small listpack, counts as 1.</li>
+<li>Redis also deletes keys without a user call, in the four rows of the table that it starts itself. By default each of these frees the value as if <code>DEL</code> was called, until you set the matching setting to <code>yes</code>. The settings are all <code>no</code> in Redis 8.10.2 and all <code>yes</code> in Valkey 9.1.2.</li>
+</ol>
+
+<p>The course research timed each operation from <code>SLOWLOG</code>, with the threshold at 0, so the numbers are server execution time only.</p>
+<table>
+<tr><th>Set size, hash-table encoding</th><th><code>MEMORY USAGE</code></th><th><code>DEL</code></th><th><code>UNLINK</code></th><th><code>SMEMBERS</code></th><th>One <code>SSCAN COUNT 500</code></th></tr>
+<tr><td>100,000 members</td><td>4,561,840 B</td><td class="bad">7,313 µs</td><td class="ok">12 µs</td><td class="bad">5,193 µs</td><td class="ok">148 µs</td></tr>
+<tr><td>1,000,000 members</td><td>39,277,585 B</td><td class="bad">198,838 µs</td><td class="ok">9 µs</td><td class="bad">86,439 µs</td><td class="ok">155 µs</td></tr>
+</table>
+<p>Notice two things. <code>DEL</code> grows about 27 times for 10 times more members, so the cost is worse than linear in this run. <code>UNLINK</code> and one <code>SSCAN</code> batch stay flat, because neither touches all members on the main thread.</p>
+<details class="evidence"><summary>Evidence</summary>
+<p>One run, Redis 8.10.1 from Homebrew, an x86_64 build under Rosetta with <code>malloc=libc</code>, Apple M4 Pro, loopback, <code>slowlog-log-slower-than 0</code>. The threshold of 64 is <code>#define LAZYFREE_THRESHOLD 64</code> in <code>src/lazyfree.c</code> at tag 8.10.2, line 226: https://raw.githubusercontent.com/redis/redis/8.10.2/src/lazyfree.c. The list of deletes "independently of a user call" and the defaults are in redis.conf at 8.10.2, lines 1340 to 1386: https://raw.githubusercontent.com/redis/redis/8.10.2/redis.conf. The Valkey defaults are in valkey.conf at 9.1.2, lines 1448 to 1458: https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/valkey.conf. The overwrite case is inferred from the redis.conf text and was not measured.</p>
+</details>
+
+<div class="callout warn"><p>The phase gives "delete with <code>UNLINK</code>, not <code>DEL</code>" as a general rule. It depends on the engine now. Valkey 8.0 and later turn on all lazy-free settings by default, so <code>DEL</code> acts like <code>UNLINK</code> there. Redis 8.10.2 keeps them off, so <code>DEL</code> on a big key still blocks.</p></div>
+
+<div class="keypoints">
+<p class="remember">A big key costs O(N) whenever anything touches it whole, including Redis itself.</p>
+<p class="trap">Using UNLINK everywhere still leaves expiry, eviction and overwrite blocking on Redis.</p>
+<p class="try">Run <code>CONFIG GET lazyfree-lazy-*</code> on your cluster and note which deletes block.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: the three harms of a big key, how lazyfree counts effort, the phase's own measurements, and managed defaults</summary>
+<p><b>The three harms of a big key.</b> The phase names three, and the table above covers the first:</p>
+<ul>
+<li><b>It blocks.</b> An O(N) read or free on 5,000,000 elements runs for hundreds of milliseconds on the main thread, and no other client is served.</li>
+<li><b>It makes a hot shard.</b> A key lives in one slot on one shard. That shard holds all of the key's memory and serves all of its traffic, and a reshard cannot split one key.</li>
+<li><b>It stalls a move.</b> Moving the key to another shard, or freeing it on failover or expiry, is one large piece of work at a bad time.</li>
+</ul>
+<ul>
+<li><b>Effort.</b> <code>src/lazyfree.c</code> at 8.10.2, lines 168 to 235, computes the free effort. For sets, sorted sets and hashes in a hash-table encoding it is the element count. For a list it is the number of quicklist nodes, not of elements. A small value is freed at once, even by <code>UNLINK</code>, because a hand-off to a thread costs more than the free.</li>
+<li><b>The phase's numbers.</b> Its <code>bigkey_scan</code> program found a 100,000-member set at 5,412,968 B, against 4,561,840 B in the course research's run. The two runs used different builds, so the difference is inferred to come from the allocator and was not checked. The phase measured <code>SMEMBERS</code> on 100,000 members at 11.4 ms and one <code>SSCAN</code> batch at 1.1 ms, measured from the client. It also gives 0.78 ms for <code>UNLINK</code>, measured from the client. The earlier audit found that the program never times <code>DEL</code>, so the phase has no <code>DEL</code> number of its own.</li>
+<li><b>ElastiCache.</b> AWS lists the lazy-free settings under "Removed parameter groups in Valkey 8.0" and does not say which value they run with. Run <code>CONFIG GET lazyfree-lazy-user-del</code> on a node to find out. Source: https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/ParameterGroups.Engine.html.</li>
+<li><b>The trade-off of a background free.</b> With lazy free on, the memory comes back a little later, in a background thread. On a node close to <code>maxmemory</code>, that delay can mean a few more evictions. This is inferred from how the background thread works, and it was not measured.</li>
+<li><b>Migration.</b> When resharding uses <code>MIGRATE</code>, a big key moves as one unit, so its whole value must be read, sent and freed. Phase 4 explains slot moves and the <code>ASK</code> reply.</li>
+</ul>
+</details>
+
+<p>This section showed what a big key costs and when it costs it. The next section answers how to find big keys on a live node and remove them without a freeze.</p>
+
+<h2 data-concept="c2">How do you find a big key and remove it safely?</h2>
+<p class="why">Find big keys with SCAN, read them in pieces, and bound them by design.</p>
+<p>The section above showed that the 2,000,000-member session set will freeze the node when it expires. You still have to find such keys on a live node with millions of keys, and remove them without the freeze you are trying to avoid.</p>
+
+<ol class="flow">
+  <li><b>find</b><span><code>--memkeys</code> or <code>--bigkeys</code>, both built on SCAN</span></li>
+  <li><b>measure</b><span><code>MEMORY USAGE key</code> for exact bytes</span></li>
+  <li class="hot"><b>read in pieces</b><span><code>SSCAN</code>, <code>HSCAN</code>, bounded <code>LRANGE</code></span></li>
+  <li><b>delete</b><span><code>UNLINK</code>, or lazy free for Redis's own deletes</span></li>
+  <li class="ok"><b>reshape</b><span>bound the collection or split it into buckets</span></li>
+</ol>
+
+<p>Each step has a reason:</p>
+<ol>
+<li><b>Find.</b> <code>redis-cli --bigkeys</code> walks the keyspace with SCAN and reports the largest key of each type by element count. <code>--memkeys</code> ranks keys by bytes. <code>--keystats</code> gives both, with a size distribution. All three use SCAN, so they are safe on a busy node. In a cluster, each run covers one node, so you run it once per primary.</li>
+<li><b>Measure.</b> <code>MEMORY USAGE &lt;key&gt;</code> returns the bytes of one key. The phase's <code>bigkey_scan</code> program does the same thing in Go with SCAN, then <code>TYPE</code>, then the length for each type, then <code>MEMORY USAGE</code>.</li>
+<li><b>Read in pieces.</b> Never call <code>SMEMBERS</code>, <code>HGETALL</code> or <code>LRANGE 0 -1</code> on a big key. The SCAN family returns the same data in small batches, each of a few hundred microseconds.</li>
+<li><b>Delete.</b> Use <code>UNLINK</code>. For the deletes that Redis starts itself, set <code>lazyfree-lazy-expire</code>, <code>lazyfree-lazy-eviction</code> and <code>lazyfree-lazy-server-del</code> to <code>yes</code> on Redis. On Valkey they are already <code>yes</code>.</li>
+<li><b>Reshape.</b> This is the real fix. Do not create the big key at all.</li>
+</ol>
+
+<pre><code data-lang="text">   bigset    type=set   members=100,000  mem=5,412,968B   ← BIG KEY (5.4MB, one shard)
+   smallset  type=set   members=10       mem=120B</code></pre>
+<p>That is the output of the phase's <code>bigkey_scan -big 100000</code>.</p>
+
+<div class="callout warn"><p>The phase says <code>--bigkeys</code> finds the largest keys. It ranks them by element count, not by bytes. So a hash of 10 members with 1 MB values can be missing from its report. Use <code>--memkeys</code> for bytes, or <code>--keystats</code> for both.</p></div>
+
+<p>The reshape comes from the data modeling of Phase 1. Instead of one hash <code>company:c7:allusers</code>, split it into buckets such as <code>company:c7:users:{bucket}</code>, or choose a structure that stays small. A collection with no upper bound will become a big key one day. In an AI agent service, the common big keys are a chat history that grows with every message, and large vector or semantic-cache entries. That list is inferred from the general rule, and no public incident in the course research shows it. In the running case, the session set can hold only the last N messages, or one key per day of the session.</p>
+
+<div class="compare">
+  <div class="wrong"><p><b>Unbounded</b></p><pre><code data-lang="text">SADD session:42:msgs &lt;id&gt;      # every message, forever
+SMEMBERS session:42:msgs       # O(N) read
+(24 h TTL) → expiry frees N    # blocks on Redis</code></pre></div>
+  <div class="right"><p><b>Bounded</b></p><pre><code data-lang="text">SADD session:42:msgs:{day} &lt;id&gt;  # one key per day
+SSCAN session:42:msgs:{day} 0     # read in pieces
+lazyfree-lazy-expire yes          # expiry frees in background</code></pre></div>
+</div>
+<p>The key names are an illustration of the running case. The bounded form still needs a size limit per day, chosen from the traffic.</p>
+
+<div class="keypoints">
+<p class="remember">Find big keys by bytes and count, then bound the model against them.</p>
+<p class="trap">An unbounded "append every event" collection is fine at launch, then an incident later.</p>
+<p class="try">Run E4, but seed <code>bigset</code> again before <code>--bigkeys</code>, because the program deletes it.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: Valkey's large-reply log, two real costs that grew with the data, and what to run on a cluster</summary>
+<ul>
+<li><b>Valkey's large-reply log.</b> <code>COMMANDLOG GET</code> can read the large-reply log, which lists the commands whose replies were largest. A <code>HGETALL</code> on a big hash appears there when its reply is larger than <code>commandlog-reply-larger-than</code>, 1,048,576 bytes by default, even when it runs under the slow threshold. That makes it a direct finder of big-key reads. Source: https://valkey.io/commands/commandlog-get/.</li>
+<li><b>Cloudflare</b> kept sliding-window counts in Redis with HyperLogLog and <code>PFMERGE</code>. The first launch could not keep up with about 10,000 requests per second, because the cost of <code>PFMERGE</code> grew with the number of features times the window size. Running detection less often raised throughput about ten times. Binary key names instead of readable ones saved about 30% of memory.</li>
+<li><b>bsport</b> moved its data to new clusters with a live replication tool. The tool scanned the whole source and ran <code>DUMP</code> on each key. After cutover it was the only client, so it ran at full speed. Some <code>DUMP</code> calls took over 1 second each and filled the source's CPU, and application requests timed out. Killing the tool brought the services back in 2 minutes. Staging traffic was 500 times lower than production, so the tests missed it.</li>
+<li><b>On a cluster.</b> <code>--bigkeys</code> samples only the node it connects to. So a big key on another primary is missing from the report until you run it there too. This follows from SCAN being a per-node command, and it is inferred from the CLI page.</li>
+</ul>
+<details class="evidence"><summary>Evidence</summary>
+<p>Cloudflare: https://blog.cloudflare.com/lessons-learned-from-scaling-up-cloudflare-anomaly-detection-platform/ (2021). bsport: https://engineering.bsport.io/how-we-eliminated-redis-as-a-single-point-of-failure-2729c22008b5 (2026), read from the blog's feed. The CLI flags: https://redis.io/docs/latest/develop/tools/cli/. The course research found no public postmortem of a big-key <code>DEL</code> that caused a failover.</p>
+</details>
+</details>
+
+<p>Big keys concentrate work in one key's size. The next section answers what happens when one key concentrates the request rate instead, and why more shards do not help.</p>
+
+<h2 data-concept="c3">Why do more shards not fix a hot key?</h2>
+<p class="why">One key lives on one shard, so its requests share one thread.</p>
+<p>A big key puts a lot of work into one key's size. On Tuesday in the running case, the problem is the request rate instead. Every request of the largest tenant reads one key, its tenant settings, and one shard runs at 100% CPU while five run at about 30%.</p>
+<details class="predict"><summary>Predict: one key gets 200,000 reads per second on a 6-shard cluster. You double the cluster to 12 shards. What happens to the CPU of the shard that owns the key, and why?</summary>
+<p>It stays the same. The key maps to one hash slot, and a reshard moves whole slots, so the slot and all 200,000 reads per second still land on one primary. That primary still runs them on one thread. The other shards get less load, and the bill doubles. The guess "twice the shards, half the load per shard" is right for keys spread evenly, and that is the case sharding was built for. A hot key is the case it cannot split.</p>
+</details>
+
+<p>A <dfn>hot key</dfn> is one key that receives a large share of all requests. Sharding spreads keys across nodes, but every request for one key goes to the node that owns it. That node runs the commands on one main thread, so the key's request rate is capped by one CPU core. Adding nodes moves other keys away from the hot shard, and the hot key stays where it is.</p>
+
+<div class="toggle-fig">
+  <button data-show="six">6 shards</button><button data-show="twelve">12 shards</button>
+  <div class="views">
+    <div data-view="six">
+      <div class="bars">
+        <div class="bar" style="--v:30" data-label="shard 1" data-value="30% CPU"></div>
+        <div class="bar" style="--v:30" data-label="shard 2" data-value="30% CPU"></div>
+        <div class="bar" style="--v:100" data-label="shard 3, owns the hot key" data-value="100% CPU"></div>
+        <div class="bar" style="--v:30" data-label="shards 4 to 6" data-value="30% CPU each"></div>
+      </div>
+    </div>
+    <div data-view="twelve">
+      <div class="bars">
+        <div class="bar" style="--v:15" data-label="shards 1 and 2" data-value="15% CPU each"></div>
+        <div class="bar" style="--v:100" data-label="shard 3, still owns the hot key" data-value="100% CPU"></div>
+        <div class="bar" style="--v:15" data-label="shards 4 to 12" data-value="15% CPU each"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<p>The CPU values are an illustration, not measured. Doubling the shards halves the load on the cold shards and leaves the hot shard at 100%.</p>
+
+<p>The path of one request shows why. Each step has one owner, and no step can spread one key:</p>
+<ol>
+<li>The client hashes the key name with CRC16 and takes the result modulo 16,384. That gives the key's hash slot.</li>
+<li>The cluster map says which primary owns that slot. The client sends the request there.</li>
+<li>That primary runs the command on its main thread. Its replicas only copy writes, unless your client sends reads to them.</li>
+<li>A reshard moves whole slots between primaries. So the hot key's slot moves as one unit, with all its traffic, to one new owner.</li>
+</ol>
+<p>So the ceiling for one key is what one core can run. More shards raise the ceiling for the whole keyspace, but they leave the ceiling for each key where it was.</p>
+
+<p><b>Salesforce Marketing Cloud</b> moved its cache from Memcached to Redis Cluster, at about 1.5 million cache events per second across more than 50 services. After the move, heavily read keys caused CPU spikes on single shards. The team wrote that a hot key "can saturate a single CPU core" per shard. The fix was a local in-memory cache in each application, backed by Redis, with read replicas as a short-term step. During the migration, the p50 was near 1 ms and the p99 near 20 ms. The post gives no CPU numbers from before and after the fix.</p>
+<details class="evidence"><summary>Evidence</summary>
+<p>Salesforce engineering, 2026: https://engineering.salesforce.com/migration-at-scale-moving-marketing-cloud-caching-from-memcached-to-redis-at-1-5m-rps-without-downtime/. Hash slots: Phase 4 and the cluster specification. The one-thread ceiling follows from the latency page's "Single threaded nature of Redis" section. The course research searched twice for a public postmortem with hot-shard CPU numbers and found none.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">More shards raise the keyspace's ceiling, never one key's ceiling.</p>
+<p class="trap">Adding shards for a hot key doubles the bill and leaves it at 100%.</p>
+<p class="try">Compare CPU across your primaries and look for one far above the rest.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: hot keys at Twitter and Alibaba, and a cluster where more nodes made it worse</summary>
+<ul>
+<li><b>Twitter timelines.</b> Each timeline was a Redis list. One overloaded server, from a popular user's timeline or a bad bot, made timeouts spread to other requests. The fix counted recent keys in a time window inside Redis and flagged a key above a threshold share as hot. Checking every key added latency, so they sampled. New command forms such as <code>LRANGE_HK</code> returned a hot flag with the result, and the API layer then cached hot results locally. The post is a former engineer's personal blog and gives no production numbers.</li>
+<li><b>Alibaba at Double 11.</b> Flash sales make access very skewed, and one hot item can overload one node and crash it. The earlier fixes were a client-side cache of hot data and copies of hot keys on several nodes. The page reports a peak of 992 million requests per second for Tair, with no conditions given.</li>
+<li><b>Figma</b> moved Pub/Sub onto a cluster-mode ElastiCache instance, and one node's engine CPU went to 100%. The team moved to a larger cluster with more nodes, and that made it worse. The cause was a bug in Pub/Sub on clustered ElastiCache. Messages travel on the cluster bus, and a growing send buffer made each send cost more CPU. More nodes lowered the load needed to start the loop. The mechanism differs from a hot key, but in both cases more nodes did not help. So find the cause before you add nodes.</li>
+</ul>
+<details class="evidence"><summary>Evidence</summary>
+<p>Twitter: https://matthewtejo.substack.com/p/handling-hotkeys-in-timeline-storage (2023). Alibaba: https://www.alibabacloud.com/blog/596493 (2020). Figma postmortem: https://www.figma.com/blog/postmortem-service-disruptions-on-june-6-and-7-2022/.</p>
+</details>
+</details>
+
+<p>Adding shards does not help a hot key. The next section answers how to find which key is hot, and how to stop its requests before they reach that one thread.</p>
+
+<h2 data-concept="c3">How do you find a hot key and take the load off it?</h2>
+<p class="why">Name the key first, then stop its reads before they reach Redis.</p>
+<p>The section above showed that the hot shard stays hot whatever the shard count. Before you can fix it, you need the key's name, because one shard holds about 2,700 slots and maybe millions of keys.</p>
+
+<p>Four tools can name the key. They differ in what they need and in what they measure:</p>
+<table>
+<tr><th>Tool</th><th>What it needs</th><th>What it ranks by</th></tr>
+<tr><td><code>redis-cli --hotkeys</code></td><td>An LFU policy, <code>allkeys-lfu</code> or <code>volatile-lfu</code></td><td>The LFU access counter of each key, read with SCAN</td></tr>
+<tr><td><code>HOTKEYS START METRICS count [CPU] [NET]</code></td><td>Redis 8.6.0 or later, any policy</td><td>CPU time and network bytes per key</td></tr>
+<tr><td><code>CLUSTER SLOT-STATS</code></td><td>Valkey 8.0.0 or later, and Redis 8.2 and later. CPU and network need <code>cluster-slot-stats-enabled yes</code></td><td>Key count, CPU and network bytes per slot</td></tr>
+<tr><td><code>MONITOR</code>, for a few seconds</td><td>Nothing, but it costs throughput while it runs</td><td>Count the keys in the stream yourself</td></tr>
+</table>
+<p>Per-shard CPU in your metrics tells you which shard to look at. Then one of these tools tells you which key on it.</p>
+
+<p><code>--hotkeys</code> reads the LFU counter, which is logarithmic, so it ranks keys but does not give a request rate. <code>HOTKEYS START</code> ranks by real cost in CPU and bytes, so it shows how much of the thread one key takes.</p>
+
+<div class="callout warn"><p>The phase gives <code>--hotkeys</code> as the hot-key tool, and it still needs an LFU policy. Since Redis 8.6.0, <code>HOTKEYS START</code> works under any policy and ranks keys by CPU and network. <code>CLUSTER SLOT-STATS</code> finds the hot slot with per-slot CPU and network. Valkey has it since 8.0.0, and Redis since 8.2.0, from <code>src/commands/cluster-slot-stats.json</code> at tag 8.10.2.</p></div>
+
+<p>Once you have the key, stop its requests before they reach the one thread. The fixes, in order of effect:</p>
+<ol class="flow" data-dir="down">
+  <li class="ok"><b>Local in-process cache</b><span>Keep the value inside each application process with a short TTL, so most reads never reach Redis.</span></li>
+  <li class="ok"><b>Server-assisted client-side caching</b><span>With <code>CLIENT TRACKING</code>, Redis remembers which keys a client read and sends it an invalidation message when one changes.</span></li>
+  <li><b>Reads from replicas</b><span>Spread the reads over the shard's replicas. They can return stale data, and in cluster mode a client must send <code>READONLY</code> first.</span></li>
+  <li class="hot"><b>N copies of the key</b><span>Store <code>hotkey:0</code> to <code>hotkey:N</code> in different slots and read a random copy. Writes must update every copy.</span></li>
+</ol>
+<p>The first fix removes the most load, because a read served inside the process costs no network and no Redis CPU. A short TTL bounds how stale the local copy can be. <code>CLIENT TRACKING</code> removes that limit, because Redis tells the client when to drop its copy. Replicas help only with reads. A key that is hot for writes still lands on the primary, so only a change in the data model helps it. The copies technique is common practice, but the course research found no primary source for it, so treat it as not checked.</p>
+
+<p>In the running case, the tenant-settings key changes a few times a day and is read on every request. A local cache with a TTL of a few seconds, or <code>CLIENT TRACKING</code>, takes nearly all of those reads off shard 3. The six extra shards can then go. A well-cached value with a high hit rate is not hot at Redis, so the best hot-key fix is often a better cache.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The <code>--hotkeys</code> rule "only works when maxmemory-policy is *lfu" is from https://redis.io/docs/latest/develop/tools/cli/. HOTKEYS START is "Available since: Redis Open Source 8.6.0" on https://redis.io/docs/latest/commands/hotkeys-start/. CLUSTER SLOT-STATS: https://valkey.io/commands/cluster-slot-stats/. CLIENT TRACKING: https://redis.io/docs/latest/develop/reference/client-side-caching/. The <code>READONLY</code> rule and the stale reads are in the cluster specification, section "Scaling reads using replica nodes": https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/. The FREQ and HOTKEYS numbers are one run on Homebrew Redis 8.10.1 under Rosetta with libc malloc, Apple M4 Pro, loopback. </p>
+</details>
+
+<div class="keypoints">
+<p class="remember">Name the hot key first, then serve its reads from a local cache.</p>
+<p class="trap"><code>--hotkeys</code> does not work under <code>volatile-lru</code>, and a <code>MONITOR</code> left on slows the node.</p>
+<p class="try">Run E11 with <code>redis-cli -r 5000 GET hot</code>, then <code>OBJECT FREQ hot</code>.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: the LFU counter and HOTKEYS numbers, the limits of client-side caching, Stack Overflow's stampede, and what Salesforce planned next</summary>
+<ul>
+<li><b>The counter in numbers.</b> In the course research's run, with <code>lfu-log-factor 10</code>, 5,000 <code>GET</code>s on one key gave <code>OBJECT FREQ</code> 36, and 50 <code>GET</code>s gave 8. So a hundred times more reads gave only about four and a half times the counter. Under <code>noeviction</code>, <code>HOTKEYS START</code> reported the key <code>hot</code> at 1,445 µs of CPU and 145,000 bytes, and the key <code>k:7</code> at 57 µs and 7,000 bytes.</li>
+<li><b>The LFU counter.</b> Redis keeps a logarithmic counter per key, which starts at 5 for a new key. <code>lfu-log-factor 10</code> sets how slowly it grows, and <code>lfu-decay-time 1</code> sets how fast it falls when the key is idle. Both are the Redis 8.10.2 defaults.</li>
+<li><b>Client-side caching races.</b> A local cache can serve stale data after the client reconnects, because invalidation messages sent while it was away are lost. A client should drop its local cache when its connection to Redis drops. This comes from the client-side caching page, and the course research did not test it.</li>
+<li><b>Tracking clients in Redis 8.</b> Tracking clients stay on the main thread, not on I/O threads. This is in <code>src/iothread.c</code> at 8.10.2, lines 292 to 299.</li>
+<li><b>What Salesforce planned.</b> Detection of hot keys with a Count-Min Sketch in the data access layer, and throttling per key. These were plans in the post, not results.</li>
+<li><b>Stack Overflow</b> saw the same pattern from the other side, at the source behind its cache. When a popular cache entry expired, "hundreds of simultaneous calls" went to the source to rebuild it. Their fix was a per-server lock table, so one caller rebuilds the entry and the others wait or use the old value. Phase 2 called this a cache stampede and fixed it with <code>singleflight</code>, the same idea in one process. It hits the source behind Redis, not Redis itself, but its cause is the same concentration of requests on one key. Source: https://nickcraver.com/blog/2019/08/06/stack-overflow-how-we-do-app-caching/.</li>
+<li><b>MONITOR.</b> It streams every command the server runs to your client. On a busy node that stream is itself load, so sample for a few seconds and stop it.</li>
+</ul>
+</details>
+
+<p>Hot keys and big keys are about CPU on the main thread. The next section answers what happens when the node runs out of memory, which is the "Day 9" line of the running case.</p>
+
+<h2 data-concept="c4">What does "full" mean under each eviction policy?</h2>
+<p class="why">One setting decides what a write does when memory is full.</p>
+<p>The concepts so far were about time on the main thread. On Day 9 in the running case, the problem is memory: every service gets <code>OOM command not allowed</code> on writes, while reads still work. The cluster runs the provider's default policy, <code>volatile-lru</code>.</p>
+<p><code>maxmemory</code> is the cap that Redis sets on <code>used_memory</code>, the bytes its allocator has handed out. When a write needs memory above the cap, Redis looks at <code>maxmemory-policy</code>. The policy says which keys Redis may remove to make room, which is called <dfn>eviction</dfn>. If the policy allows no key, the write fails. So the policy decides whether a full cache drops old data or refuses new data.</p>
+
+<table>
+<tr><th>Policy</th><th>Which keys it may evict</th><th>Which one first</th></tr>
+<tr><td><code>noeviction</code></td><td>None. Writes that need memory fail</td><td>Not used</td></tr>
+<tr><td><code>allkeys-lru</code></td><td>Any key</td><td>Least recently used</td></tr>
+<tr><td><code>allkeys-lfu</code></td><td>Any key</td><td>Least frequently used</td></tr>
+<tr><td><code>allkeys-random</code></td><td>Any key</td><td>A random key</td></tr>
+<tr><td><code>allkeys-lrm</code></td><td>Any key</td><td>Least recently modified</td></tr>
+<tr class="pick"><td><code>volatile-lru</code></td><td>Only keys with a TTL</td><td>Least recently used</td></tr>
+<tr><td><code>volatile-lfu</code></td><td>Only keys with a TTL</td><td>Least frequently used</td></tr>
+<tr><td><code>volatile-random</code></td><td>Only keys with a TTL</td><td>A random key</td></tr>
+<tr><td><code>volatile-ttl</code></td><td>Only keys with a TTL</td><td>The shortest TTL left</td></tr>
+<tr><td><code>volatile-lrm</code></td><td>Only keys with a TTL</td><td>Least recently modified</td></tr>
+</table>
+<p>LRU evicts the key that nobody touched for the longest time. LFU evicts the key with the fewest accesses, which suits skewed access. LRM updates its timestamp only on writes, so a key that is read often but never changed still counts as old. Open-source Redis defaults to <code>noeviction</code>. ElastiCache defaults to <code>volatile-lru</code>.</p>
+
+<div class="callout warn"><p>The phase lists "all 8" policies. Redis 8.6 and later have ten, adding <code>allkeys-lrm</code> and <code>volatile-lrm</code>. Valkey 9.1.2 still has the eight older ones.</p></div>
+
+<details class="predict"><summary>Predict: a shared cluster runs volatile-lru. One service writes session keys with no TTL, and the others write cache keys with a TTL. Which keys are evicted first, what does used_memory do over a week, which commands fail on the last day, and which services see it?</summary>
+<p>The cache keys with a TTL are evicted, because they are the only keys the policy may touch. The session keys stay, so <code>used_memory</code> stays at the cap while the no-TTL share grows. On the last day no key with a TTL is left. Then every write that needs memory fails, such as <code>SET</code>, <code>INCR</code>, <code>HSET</code> and <code>LPUSH</code>. <code>GET</code> and <code>DEL</code> still work. Every service on the cluster sees the failures, not only the one that wrote the session keys. The reasonable guess is "at worst it evicts some cold keys". That is true only while keys with a TTL are left.</p>
+</details>
+
+<p>The eviction documentation states the rule in one line: "The volatile-xxx policies behave like noeviction if no keys have an associated expiration." Step by step:</p>
+<ol>
+<li>A command arrives that may need memory, such as <code>SET</code>. Such commands carry the <code>denyoom</code> flag.</li>
+<li>Redis compares <code>used_memory</code> with <code>maxmemory</code>. If memory is over the cap, it looks for keys to evict.</li>
+<li>Under a <code>volatile-*</code> policy, Redis looks only in the set of keys that have a TTL. It samples some, picks the best candidate and evicts it, until memory is under the cap.</li>
+<li>If that set is empty, Redis has nothing it may evict. It refuses the command with <code>OOM command not allowed when used memory &gt; 'maxmemory'</code>.</li>
+<li>Commands without <code>denyoom</code>, such as <code>GET</code> and <code>DEL</code>, still run. So the node looks alive to health checks that only read.</li>
+</ol>
+
+<p>The course research ran the failure with <code>maxmemory 8mb</code> and <code>volatile-lru</code>. It sent 1,500 writes of 10 KB values, and every second write had no TTL.</p>
+<div class="stats">
+  <div class="stat"><b>1,355</b><span>writes OK</span></div>
+  <div class="stat"><b>145</b><span>writes refused with OOM</span></div>
+  <div class="stat"><b>0</b><span>keys with a TTL left</span></div>
+  <div class="stat"><b>678</b><span>keys without a TTL left</span></div>
+</div>
+<p><code>GET</code> and <code>DEL</code> on a surviving key still worked. <code>INFO commandstats</code> showed <code>cmdstat_set: ... rejected_calls=146</code>, and <code>INFO errorstats</code> showed <code>errorstat_OOM:count=146</code>. So those two fields count the refused writes directly, and an alert on them fires at the first refusal. The exact counts depend on the value size and the allocator.</p>
+<details class="evidence"><summary>Evidence</summary>
+<p>One run, Redis 8.10.1 from Homebrew, an x86_64 build under Rosetta with <code>malloc=libc</code>, Apple M4 Pro, loopback. The quote is from https://redis.io/docs/latest/develop/reference/eviction/. The error rule for writes that "require more memory" is in redis.conf at 8.10.2, lines 1257 to 1262. The <code>denyoom</code> flag of SET is on https://redis.io/docs/latest/commands/set/. The ten policies are in redis.conf at 8.10.2, lines 1233 to 1242, and the eight of Valkey in valkey.conf at 9.1.2, lines 1322 to 1329. The ElastiCache default "Default: volatile-lru" is on https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/ParameterGroups.Engine.html.</p>
+</details>
+
+<p>Choose the policy from what the data is:</p>
+<ul>
+<li><b>A pure cache where every key can be rebuilt.</b> Use <code>allkeys-lru</code>, or <code>allkeys-lfu</code> for skewed access. Any key can go, so writes do not fail for lack of a candidate.</li>
+<li><b>A mix of cache keys and keys you must keep.</b> <code>volatile-lru</code> works only if every cache key has a TTL. Every key without a TTL must be a key you can afford to keep. One service that forgets a TTL breaks that rule for all.</li>
+<li><b>Data you cannot lose.</b> Use <code>noeviction</code> with an alert on memory. A refused write is visible, and a silent eviction is not. This advice is inferred from the policy rules, and the eviction page does not give it. The page does advise a separate Redis instance for keys you must keep, so keep that data out of a shared cache.</li>
+</ul>
+<p>For the running case, the lasting fix is a TTL on every cache key, which is Phase 2's rule. The other fix is <code>allkeys-lru</code>, so that a forgotten TTL can no longer fill the cluster. Then a key you must keep can be evicted too, so that key must move to a store that does not evict.</p>
+
+<div class="keypoints">
+<p class="remember">Under volatile-lru, a key with no TTL can never be evicted.</p>
+<p class="trap">Trusting "volatile-lru evicts cold keys" until the last TTL key is gone and writes fail.</p>
+<p class="try">Run <code>INFO errorstats</code> and <code>INFO commandstats</code> and look for OOM and <code>rejected_calls</code>.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: the phase's three-policy run, how Redis picks a key to evict, the program's counting problem, and two queues that filled</summary>
+<p><b>The phase's program, three policies side by side.</b> The phase's own <code>eviction_policies</code> program fills an 8 MB instance with 1,500 keys, half with a TTL and half without:</p>
+<pre><code data-lang="text">   policy=noeviction    survived ttl=259 nottl=259 | OOM write errors=982
+   policy=allkeys-lru   survived ttl=258 nottl=255 | OOM=0 | evicted=987
+   policy=volatile-lru  survived ttl=0   nottl=515 | OOM write errors=471  ← !!</code></pre>
+<p>Read the <code>volatile-lru</code> row. All TTL keys were evicted, 515 keys without a TTL survived, and then 471 writes failed. A key written with no TTL cannot be evicted under this policy at all.</p>
+<ul>
+<li><b>Sampling, not exact LRU.</b> Redis samples <code>maxmemory-samples</code> keys, 5 by default and at most 64, into a pool of 16 candidates, and evicts the best one. So LRU and LFU are approximate. The ElastiCache valkey8 parameter family sets <code>maxmemory-samples</code> to 3. The LRU clock has 24 bits in units of 1 second.</li>
+<li><b>A time budget.</b> <code>maxmemory-eviction-tenacity</code>, 10 by default, sets how long one eviction pass may run. At 10 the budget is 500 µs, and after it a timer continues the work. Source: <code>src/evict.c</code> at 8.10.2.</li>
+<li><b>Replicas.</b> Replicas ignore <code>maxmemory</code> by default, with <code>replica-ignore-maxmemory yes</code>. The primary evicts and sends the deletes.</li>
+<li><b>The program's counting problem.</b> <code>evicted_keys</code> is cumulative, and the program never runs <code>CONFIG RESETSTAT</code>. So the <code>volatile-lru</code> run also counts the earlier <code>allkeys-lru</code> evictions. Add <code>CONFIG RESETSTAT</code> before each policy.</li>
+<li><b>Slack's job queue.</b> Jobs piled up in Redis during a database slowdown until Redis hit <code>maxmemory</code>, and new jobs could not be enqueued. Dequeue also needs free memory, because it moves a job into an in-flight list. So the queue stayed stuck after the database recovered. Slack put Kafka in front of Redis and kept Redis.</li>
+<li><b>Discord's indexing queue.</b> With too many queued messages, Redis CPU hit its limit and Redis dropped messages. The queue moved to a system with delivery guarantees.</li>
+</ul>
+<details class="evidence"><summary>Evidence</summary>
+<p>Sampling and pool size: <code>src/config.c</code> and <code>src/evict.c</code> at 8.10.2, and redis.conf at 8.10.2, line 1278. ElastiCache valkey8 sampling: the ParameterGroups.Engine page above. Program issue: the earlier audit, <code>main.go</code> lines 85 to 91. Slack: https://slack.engineering/scaling-slacks-job-queue/. Discord: https://discord.com/blog/how-discord-indexes-trillions-of-messages.</p>
+</details>
+</details>
+
+<p>The rule is clear, but every team believes it sets TTLs on every key. The next section answers how keys lose their TTL without anyone noticing, and what that did to one shared cluster.</p>
+
+<h2 data-concept="c4">How does a key lose its TTL, and what did that do to one shared cluster?</h2>
+<p class="why">A plain SET removes the TTL, so a correct first write is not enough.</p>
+<p>The section above showed that keys with no TTL fill a <code>volatile-lru</code> cluster. Most teams believe they set a TTL on every key. In practice a key often gets its TTL on the first write and loses it on a later one.</p>
+<p>A TTL belongs to the key, not to the value, and each <code>SET</code> replaces the key. A plain <code>SET</code> with no expiry option removes any TTL the key had. So an update path that rewrites a value with no TTL turns a cache key into a permanent key. Clients add a second way to lose it, because in go-redis a TTL of <code>0</code> means "no expiry".</p>
+
+<ol class="timeline">
+  <li><time>SET s v EX 86400</time> <code>TTL s</code> returns 86400. The key expires in 24 hours.</li>
+  <li><time>SET s v2</time> <code>TTL s</code> returns -1. The plain SET removed the TTL, and the key is now permanent.</li>
+  <li><time>SET s v3 EX 86400</time> <code>TTL s</code> returns 86400 again.</li>
+  <li><time>SET s v4 KEEPTTL</time> <code>TTL s</code> still returns 86400. <code>KEEPTTL</code> keeps the existing TTL.</li>
+</ol>
+<p>The course research ran these four steps on Redis 8.10.1. The SET page says the same: "Any previous time to live associated with the key is discarded on successful SET operation."</p>
+
+<p>In go-redis v9.5.1, <code>Set(ctx, k, v, 0)</code> sends no expiry, and the source says "Zero expiration means the key has no expiration time". So a caller that passes <code>0</code> because it has no TTL at hand makes a permanent key. A shared client library that requires a TTL argument, with no safe default, spreads that risk to every service that uses it. On the platform below, one such library had about 30 dependent repositories.</p>
+
+<p><b>The platform, the running case.</b> This is the real case behind the running case. It comes from the phase, in general terms. The platform ran about 34 services on several shared, managed Redis clusters, with the provider default <code>volatile-lru</code>. On one of these clusters, an LLM gateway service wrote its keys with no TTL. The TTL keys of the other services were evicted, and the gateway's keys stayed. Memory reached 100%, and writes then failed for every tenant on the cluster, including an unrelated admin upload feature. A memory alert fired, but it had no owner tag, so nobody acted on it. Customers were affected for about 3 hours 25 minutes, and about 4 hours 37 minutes from start to end.</p>
+<p>The fix had four parts:</p>
+<ol>
+<li>Delete the keys with no TTL, to free memory at once.</li>
+<li>Scale the node from 1 GB to 3 GB, to get headroom while the code changed.</li>
+<li>Add a TTL to every key of the gateway service.</li>
+<li>Fix the alert's owner, so the next memory alert reaches a team.</li>
+</ol>
+<p>The same platform later had a second, quieter case. A chat-session memory key was first written with a 24-hour TTL. An update path that condensed the session rewrote the key with TTL 0, which made it permanent. A unit test asserted the 0, so the test protected the bug. The key is per session, so the number of such keys grows with every session. On a <code>volatile-lru</code> cluster that is the first case again, only slower. The platform's alerts covered memory, CPU, connections, hit rate and replica lag, but nothing alerted on slow commands or hot keys.</p>
+<details class="evidence"><summary>Evidence</summary>
+<p>The SET quote is from https://redis.io/docs/latest/commands/set/. The go-redis line is <code>string_commands.go</code> line 163 at tag v9.5.1: https://raw.githubusercontent.com/redis/go-redis/v9.5.1/string_commands.go. The TTL steps are one run of the course research on Redis 8.10.1. The platform's dates, durations, node sizes, alert routing and the session-key bug come from the phase and are internal, so they are not checked. The mechanism matches the eviction page and the run in the section above.</p>
+</details>
+
+<p>Three checks find this before it fills a cluster. Each one targets a different way the TTL is lost:</p>
+<ul>
+<li><b>Audit the keyspace.</b> Walk it with SCAN and call <code>TTL</code> on each key. A result of <code>-1</code> means no expiry, and the key prefix names the service that wrote it. E12 does this.</li>
+<li><b>Audit the write paths.</b> Search the code for plain <code>SET</code> on keys that were created with a TTL, and for TTL arguments that can be <code>0</code>. Use <code>KEEPTTL</code> or pass the TTL again on every update.</li>
+<li><b>Give every alert an owner.</b> A memory alert at a safe level gives hours of warning, because a no-TTL fill is slow. That warning helps only if a team receives it.</li>
+</ul>
+
+<div class="keypoints">
+<p class="remember">Every write that creates or replaces a cache key must set its TTL again.</p>
+<p class="trap">Testing only the first write, so an update path with TTL 0 makes keys permanent.</p>
+<p class="try">Run <code>SET s v EX 86400</code>, then <code>SET s v2</code>, then <code>TTL s</code>.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: two more no-TTL outages, and an estimate of how many permanent keys a shared cluster can hold</summary>
+<ul>
+<li><b>Pendo.</b> A managed Redis was near its memory limit and evicting keys. CPU spikes caused slow replies and connection failures. The cause was two code paths that created cache keys with no expiry. The guides service had about a 60% error rate for the first 90 minutes. The team flushed all Redis instances, and CPU dropped. They then fixed the two code paths and added Redis monitoring.</li>
+<li><b>bsport.</b> One shared Redis served payments, bookings, auth, email and push. An audit found keys with no TTL, some of them years old, because teams used Redis as a database. Webhook spikes from one domain also slowed bookings. The fix was one cluster per domain, moved one domain at a time.</li>
+<li><b>An estimate for the running case.</b> Suppose each permanent session key holds 2 KB and the cluster has 3 GB. Then about 1.5 million permanent keys fill it. At 50,000 new sessions a day, that is about 30 days. These numbers are an illustration, not measured. What matters is the shape. The fill is slow and linear, so an alert on the no-TTL share warns weeks ahead.</li>
+</ul>
+<details class="evidence"><summary>Evidence</summary>
+<p>Pendo status page: https://status.pendo.io/incidents/g8nfbs1vdn69. bsport: https://engineering.bsport.io/how-we-eliminated-redis-as-a-single-point-of-failure-2729c22008b5.</p>
+</details>
+</details>
+
+<p>The concept so far explained which keys go when memory is full. The next section answers what the eviction work itself costs the main thread, and why a full cache can be slow even when every write succeeds.</p>
+
+<h2 data-concept="c5">Why is reaching maxmemory a latency event?</h2>
+<p class="why">Eviction runs on the main thread, in the path of every command.</p>
+<p>The concept above decided which keys go when memory is full. Under <code>allkeys-lru</code> every write succeeds, so a full cache looks healthy. But the eviction work runs somewhere, and in Redis that place is the main thread, between the commands of your clients.</p>
+<p>While <code>used_memory</code> is above <code>maxmemory</code>, Redis evicts keys before it runs commands. Each eviction samples keys, picks one, deletes it and frees its memory, all on the main thread. A cache that stays at its cap pays this cost all the time. When many writes arrive at once, eviction can take most of the thread, and the commands behind it wait. This is the other likely cause of the Monday spikes in the running case.</p>
+
+<details class="predict"><summary>Predict: an LRU cache runs allkeys-lru and serves 25,000 commands per second. Its memory reaches maxmemory and stays there. What happens to throughput during a burst of writes, and does SLOWLOG show it?</summary>
+<p>Throughput can fall to a fraction of normal for several seconds, and <code>SLOWLOG</code> shows nothing. At GitLab, the rate of eviction calls, and so of commands, fell to 20% of its norm, from 25,000 to 5,000 per second, for 6 to 8 seconds. No single command was slow, so <code>SLOWLOG</code> had no entry. The reasonable guess is that eviction is free, because it only drops data you agreed to lose. It is free only when the main thread has time to spare.</p>
+</details>
+
+<ol class="flow">
+  <li><b>memory at maxmemory</b><span>every write needs an eviction first</span></li>
+  <li class="hot"><b>eviction holds the thread</b><span>commands wait, and replies fall behind requests</span></li>
+  <li class="bad"><b>client buffers grow</b><span>unsent replies and unread requests use memory</span></li>
+  <li class="bad"><b>buffers count toward maxmemory</b><span>so Redis must evict even more</span></li>
+</ol>
+<p>The last step feeds back into the second, so the slowdown sustains itself. It ends only when the write burst ends and Redis catches up.</p>
+
+<p>The loop has four links, and each one is in the code or the documentation:</p>
+<ol>
+<li>Redis calls its eviction code in the command path while memory is over the cap. In Redis 8.10.2 the call sits inside <code>processCommand</code>, so it runs before the command.</li>
+<li>One eviction pass has a time budget. <code>maxmemory-eviction-tenacity</code> is 10 by default, which gives about 500 µs. After the budget, a timer continues the work, still on the main thread.</li>
+<li>Client input and output buffers count toward <code>maxmemory</code>. A slow main thread leaves more requests unread and more replies unsent, so buffer memory grows.</li>
+<li>More buffer memory means more keys to evict for the same writes. So the work per second grows exactly when the thread has the least time for it.</li>
+</ol>
+
+<p><b>GitLab</b> ran a Redis 6.2 instance used only as an LRU cache, which grew to about 64 GB. Every few minutes, requests took about 1 second and throughput fell, and the bursts were too short to trigger alerts. Each weekday, about 2 million requests took longer than 1 second. The cause was the loop above. Each burst had three phases: memory reached <code>maxmemory</code>, eviction saturated the main thread for 6 to 8 seconds, then recovery took 30 to 60 seconds.</p>
+<p>The fix was not a Redis setting. They cut the default cache TTL from 2 weeks to 8 hours, in steps, while they watched their service levels. Memory then stayed below <code>maxmemory</code>, the bursts stopped, and the hit rate barely changed. So the TTL was the real control of memory, and the cap was only the last line of defense.</p>
+<details class="evidence"><summary>Evidence</summary>
+<p>GitLab, "How we diagnosed and resolved Redis latency spikes with BPF and other tools", Matt Smiley, 2022: https://about.gitlab.com/blog/how-we-diagnosed-and-resolved-redis-latency-spikes/. The quote "dropped to 20% of its norm ... from 25K to 5K calls per second" and the count of about 2 million slow requests each weekday are from that post, about Redis 6.2. The call site in <code>processCommand</code> is <code>src/server.c</code> line 4656 at tag 8.10.2, and the time budget is in <code>src/evict.c</code> at 8.10.2. That client buffers count toward <code>maxmemory</code> is on https://redis.io/docs/latest/develop/reference/eviction/.</p>
+</details>
+
+<p>In the running case, a cache that sits at its cap all day shows the same shape. The p99 rises in short bursts, <code>SLOWLOG</code> stays empty, and <code>evicted_keys</code> climbs fastest during the bursts. Lower TTLs on the largest cache key families keep peak memory under the cap, and then eviction has no work to do.</p>
+
+<div class="keypoints">
+<p class="remember">A cache that lives at maxmemory pays for eviction on the main thread.</p>
+<p class="trap">Treating "evicting at the cap" as normal, while client buffers make the eviction worse.</p>
+<p class="try">Watch <code>evicted_keys</code> per second next to your p99, and look for bursts that line up.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: what GitLab ruled out, maxmemory-clients, output buffer limits, and the fields that show eviction pressure</summary>
+<ul>
+<li><b>What GitLab ruled out.</b> A lower <code>maxmemory-eviction-tenacity</code> helped only a little. <code>lazyfree-lazy-eviction</code> was not the cause. Replication buffers stayed small. Host contention and one large key were also ruled out. So the usual settings did not fix a cache that lived at its cap.</li>
+<li><b><code>maxmemory-clients</code></b> limits the total memory of client connections. Above the limit, Redis drops the connections that use the most memory, in <code>beforeSleep</code>. It is 0, which means off, in Redis 8.10.2, and commented out in redis.conf at lines 2489 to 2506. The setting arrived in Redis 7.0, whose release notes list it as a new setting: https://raw.githubusercontent.com/redis/redis/7.0.0/00-RELEASENOTES. The GitLab post was current for Redis 6.2, before this setting existed.</li>
+<li><b>Output buffer limits.</b> The default <code>client-output-buffer-limit</code> for normal clients is <code>0 0 0</code>, no limit. So a client that reads a big reply slowly, or a <code>KEYS *</code> reply, can grow its buffer without bound. Replicas default to <code>256mb 64mb 60</code> and pub/sub clients to <code>32mb 8mb 60</code>.</li>
+<li><b>What does not count.</b> Replication and AOF buffers do not count toward <code>maxmemory</code>. <code>INFO memory</code> reports them as <code>mem_not_counted_for_evict</code>. So they can push RSS above the cap without any eviction.</li>
+<li><b>Pressure fields.</b> <code>current_eviction_exceeded_time</code> shows how long memory has been over the cap in the current episode. <code>evicted_keys</code> is cumulative, so alert on its rate.</li>
+<li><b>Managed serverless.</b> ElastiCache Serverless evicts keys that have a TTL by LRU when memory is full, and throttles requests when compute is full.</li>
+</ul>
+</details>
+
+<p>Eviction explains slow commands at the cap. The next section answers the last line of the running case: why the operating system can kill Redis while <code>used_memory</code> is still under <code>maxmemory</code>.</p>
+
+<h2 data-concept="c5">Which memory numbers decide whether the process survives?</h2>
+<p class="why">The kernel kills by memory use, and RSS holds more than used_memory.</p>
+<p>The section above showed what the cap costs in time. The last line of the running case is worse. During the nightly <code>BGSAVE</code>, the operating system kills Redis, although <code>used_memory</code> was under <code>maxmemory</code>.</p>
+<p><code>used_memory</code> counts the bytes that Redis's allocator handed out. The operating system sees <dfn>RSS</dfn>, the resident set size, which is the physical memory the process really holds. When the machine runs out, the kernel's out-of-memory killer gives each process a score from its memory and swap use. It kills the process with the highest score. On a host that runs mainly Redis, that process is usually Redis. This last point is inferred, not measured. RSS includes memory that <code>used_memory</code> does not count, and during a fork the child's copied pages come on top of both.</p>
+
+<div class="stack">
+  <h4>An 8 GB node with maxmemory 7.5gb during a BGSAVE</h4>
+  <div class="whole">
+    <i style="--w:7000;--c:var(--accent)" data-label="dataset" data-value="7.0 GB" data-note="counted in used_memory"></i>
+    <i style="--w:500;--c:var(--violet)" data-label="client buffers" data-value="0.5 GB" data-note="counted in used_memory"></i>
+    <i style="--w:300;--c:var(--warn)" data-label="replication and AOF buffers" data-value="0.3 GB" data-note="mem_not_counted_for_evict"></i>
+    <i style="--w:400;--c:var(--warn)" data-label="fragmentation and process overhead" data-value="0.4 GB" data-note="in RSS, not in used_memory"></i>
+    <i style="--w:1500;--c:var(--bad)" data-label="pages copied for the fork child" data-value="1.5 GB" data-note="grows with writes during the save"></i>
+  </div>
+</div>
+<p>The sizes are an illustration, not measured. They add up to 9.7 GB on an 8 GB node, so the kernel kills a process, although <code>used_memory</code> never passed 7.5 GB.</p>
+
+<p>The fork is the part that teams forget. Parent and child share all pages at the start. Each page that the parent changes during the save is copied, so the copy grows with the write rate and the length of the save. In the worst case, every page changes and memory doubles. So the number to size a node from is peak RSS during a fork, not <code>used_memory</code>.</p>
+
+<div class="calc" id="s11-fork">
+  <h4>Peak memory during a fork</h4>
+  <label>Node RAM, GB <input type="range" name="ram" min="2" max="128" value="8"> <span class="val" data-val="ram"></span></label>
+  <label>maxmemory, % of RAM <input type="range" name="mm" min="40" max="100" value="94"> <span class="val" data-val="mm"></span></label>
+  <label>Pages changed during the save, % <input type="range" name="cow" min="0" max="100" value="20"> <span class="val" data-val="cow"></span></label>
+  <label>Buffers, fragmentation and overhead, % of maxmemory <input type="range" name="other" min="0" max="30" value="10"> <span class="val" data-val="other"></span></label>
+  <div class="result">Peak RSS of parent and child <b data-out="peak"></b>, which is <b data-out="verdict"></b></div>
+  <script>kit.calc('#s11-fork', function(v){ var m=v.ram*v.mm/100; var p=m*(1+v.other/100)+m*v.cow/100; return {peak: kit.fmt(p,1)+' GB', verdict: p>v.ram ? 'over the node: the kernel kills a process' : kit.fmt(100*p/v.ram,0)+'% of the node'}; });</script>
+</div>
+<p>The formula is an illustration of the mechanism, not a measured model. Measure the real share of changed pages on your own node with <code>current_cow_peak</code> during a save.</p>
+
+<p><b>Stack Overflow</b> lost its sites to this. Their cache was about 90 GB on servers with 96 GB of RAM. A planned failover started replication to a new primary, which needs a <code>BGSAVE</code>. The fork copied changed pages, and in their words "That 6GB went fast". Redis crashed, and "all of our websites promptly went offline". The sites came back on the new server with an empty cache. This was Redis 2.x, but the fork and its copies work the same way today.</p>
+<details class="evidence"><summary>Evidence</summary>
+<p>Stack Overflow, Nick Craver, 2019: https://nickcraver.com/blog/2019/08/06/stack-overflow-how-we-do-app-caching/. The same post says "the rate at which new changes rack up is your memory growth during a copy". The fields <code>current_cow_peak</code> and <code>latest_fork_usec</code> are in <code>src/server.c</code> and <code>src/childinfo.c</code> at 8.10.2. RSS and the fragmentation fields: https://redis.io/commands/info/. The out-of-memory score from memory and swap use is described in the kernel documentation, section 3.1 of https://docs.kernel.org/filesystems/proc.html.</p>
+</details>
+
+<p>The fields that matter most are <code>used_memory</code>, <code>used_memory_rss</code>, <code>mem_not_counted_for_evict</code>, <code>allocator_frag_ratio</code> and <code>current_cow_peak</code>. The Go deeper block below lists every field to read in an investigation, with what each one tells you.</p>
+
+<div class="callout warn"><p>The phase says a <code>mem_fragmentation_ratio</code> above 1.5 means fragmentation. The INFO page says that when total fragmentation bytes are low, a few megabytes, a high ratio "is not an indication of an issue". The course research's 8 MB test showed <code>mem_fragmentation_ratio:12.06</code> with <code>allocator_frag_ratio:1.00</code>. Use <code>allocator_frag_ratio</code>. A <code>used_memory</code> far above <code>used_memory_rss</code> still means part of Redis was swapped out.</p></div>
+
+<div class="callout warn"><p>The phase gives "<code>maxmemory</code> at about 75% of RAM" as the number. It is a rule of thumb, not a measured value. The headroom you need depends on how many pages change during a fork. ElastiCache reserves 25% by default with <code>reserved-memory-percent</code>. On your own nodes, measure peak RSS during <code>BGSAVE</code>.</p></div>
+
+<p>An alert set built from these fields catches each failure of this phase early. Every alert needs an owner, as the running case showed:</p>
+<ol>
+<li><b><code>used_memory</code> over <code>maxmemory</code>, as a share, above a warning level.</b> The slow fill of c4 shows here hours or weeks ahead. On ElastiCache this is the CloudWatch metric <code>DatabaseMemoryUsagePercentage</code>.</li>
+<li><b>A rising <code>evicted_keys</code> rate.</b> This is normal for a pure <code>allkeys-lru</code> cache, and a warning on a cluster where keys should stay.</li>
+<li><b>Any <code>errorstat_OOM</code> or <code>rejected_calls</code>.</b> One refused write means the policy has run out of candidates.</li>
+<li><b>CPU per shard.</b> One shard far above the others points to a hot key or a big key.</li>
+<li><b><code>allocator_frag_ratio</code> high, or swap in use.</b> Redis with swap has the latency of a disk.</li>
+<li><b>Peak RSS during the nightly save against node RAM.</b> This is the number behind the last line of the running case.</li>
+<li><b><code>SLOWLOG</code> length growing, and latency events.</b> O(N) commands are creeping in, or housekeeping is stalling the thread.</li>
+</ol>
+<p>When memory is high, also run <code>OBJECT ENCODING</code> on your biggest keys. As Phase 1 showed, a hash that fell out of its listpack encoding can cost several times more, and a small schema change can fix it.</p>
+
+<div class="keypoints">
+<p class="remember">Size a node from peak RSS during a fork, not from used_memory.</p>
+<p class="trap">A maxmemory of all RAM, or 0, can lose the process in the nightly save.</p>
+<p class="try">Run E10, then compute <code>used_memory_rss</code> minus <code>used_memory</code> on your node.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: every INFO field to read, fork cost measured by AWS, swap and kernel settings, active defrag, and MEMORY DOCTOR</summary>
+<p><b>Every field to read.</b> These are the fields to read in an investigation, from <code>INFO memory</code>, <code>INFO stats</code> and <code>INFO persistence</code>:</p>
+<table>
+<tr><th>Field</th><th>What it tells you</th></tr>
+<tr><td><code>used_memory</code></td><td>Bytes Redis allocated, including client buffers. Eviction compares this with <code>maxmemory</code>.</td></tr>
+<tr><td><code>used_memory_rss</code></td><td>Bytes the operating system gave the process. The kernel judges Redis by this one.</td></tr>
+<tr><td><code>maxmemory</code></td><td>The cap. 0 means no cap, so Redis can grow until the kernel kills it.</td></tr>
+<tr><td><code>mem_not_counted_for_evict</code></td><td>Replication and AOF buffers, which eviction ignores.</td></tr>
+<tr><td><code>mem_clients_normal</code></td><td>Memory of normal client buffers, which counts toward <code>maxmemory</code>.</td></tr>
+<tr><td><code>allocator_frag_ratio</code></td><td>The true external fragmentation, inside the allocator.</td></tr>
+<tr><td><code>mem_fragmentation_ratio</code></td><td>RSS divided by <code>used_memory</code>. It includes code and stack, so it misleads on small instances.</td></tr>
+<tr><td><code>evicted_keys</code></td><td>Cumulative evictions. A rising rate means memory pressure.</td></tr>
+<tr><td><code>keyspace_hits</code>, <code>keyspace_misses</code></td><td>The hit rate, which Phase 2 showed multiplies load on the source.</td></tr>
+<tr><td><code>connected_clients</code>, <code>instantaneous_ops_per_sec</code></td><td>Connection count, for leaks, and current throughput.</td></tr>
+<tr><td><code>latest_fork_usec</code>, <code>current_cow_peak</code></td><td>How long the last fork held the main thread, and the peak of copied bytes in the current child.</td></tr>
+</table>
+<ul>
+<li><b>Fork cost, measured.</b> AWS measured this for its MemoryDB design, on a node with 2 vCPUs, 16 GB of RAM, <code>maxmemory</code> 12 GB and 20 million keys of 500 bytes. The fork took about 12 ms per GB, and the maximum latency rose to 67 ms during <code>BGSAVE</code>. When copy-on-write pushed the machine into swap, the maximum latency went over 1 second. Throughput fell close to 0 once swap passed 8% of memory. AWS advises keeping the dataset at or below half of RAM, or taking snapshots off-peak. MemoryDB itself takes snapshots on separate machines.</li>
+<li><b>Fork time by platform.</b> The latency documentation gives about 9 to 13 ms per GB on physical machines and on VMware, and 23 ms per GB on one KVM host. Xen is much slower: 239 ms per GB on old EC2 instance types and 424 ms per GB on Linode. That table is old and names no Redis version. On Linux, read <code>latest_fork_usec</code> on your own nodes.</li>
+<li><b>Kernel settings.</b> Redis warns at start-up if <code>vm.overcommit_memory</code> is not 1, because a fork can fail without it. Transparent huge pages are off for Redis, as the c1 section said. Sources disagree on swap. One Redis course sets <code>vm.swappiness=0</code> to avoid swapping. The admin guide says to keep swap as large as memory, so the kernel does not kill Redis on overuse. Swap trades a kill for very slow replies, so choose by which failure your service can survive.</li>
+<li><b>Active defrag.</b> It is off by default, <code>activedefrag no</code>. When on, it starts above 10% allocator fragmentation and 100 MB of waste, and it uses 1% to 25% of CPU. Each step lasts about 500 µs.</li>
+<li><b>MEMORY DOCTOR</b> warns when total fragmentation is above 1.4 and above 10 MB, which is the small-instance rule of the callout above in code form.</li>
+<li><b>A caveat on the 12.06.</b> The course research ran on a build with the libc allocator, not jemalloc. On such a build the allocator fields may not be meaningful. The production default is jemalloc 5.3.0, bundled with Redis 8.10.2.</li>
+</ul>
+<details class="evidence"><summary>Evidence</summary>
+<p>MemoryDB paper, SIGMOD-Companion 2024: https://www.amazon.science/publications/amazon-memorydb-a-fast-and-durable-memory-first-cloud-database. Fork table: https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/. Kernel and defrag defaults: <code>src/syscheck.c</code>, <code>src/config.c</code> and <code>src/defrag.c</code> at 8.10.2. Memory guidance: https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/memory-optimization/. ElastiCache metrics: https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/CacheMetrics.WhichShouldIMonitor.html.</p>
+</details>
+</details>
+
+<p>That closes the four lines of the running case. The next section collects what you can now do with them.</p>
+
+<h2 data-kind="recall">What you can do now, and what comes next</h2>
+<ul>
+<li><b>Latency is a sum.</b> A client's latency is the round trip, the wait behind all main-thread work and its own command. <code>SLOWLOG</code> times only the last part, so an empty <code>SLOWLOG</code> sends you to <code>LATENCY LATEST</code> and <code>INFO latencystats</code>. Taught in "Why does one slow command delay every client?" and "What does SLOWLOG not see?".</li>
+<li><b>A big key costs O(N) whenever anything touches it whole.</b> That includes expiry, eviction, overwrite and a replica's flush, which <code>UNLINK</code> does not cover on Redis. Taught in "What does a big key cost, and when?" and "How do you find a big key and remove it safely?".</li>
+<li><b>Sharding spreads keys, not requests.</b> A hot key stays on one thread, so you name it and serve its reads from a local cache. Taught in "Why do more shards not fix a hot key?" and "How do you find a hot key and take the load off it?".</li>
+<li><b><code>volatile-*</code> policies evict only keys with a TTL.</b> Keys that lost their TTL turn a full shared cluster into <code>noeviction</code> for every service. Taught in "What does full mean under each eviction policy?" and "How does a key lose its TTL?".</li>
+<li><b>The memory cap is a latency event, and RSS decides survival.</b> Eviction runs on the main thread, and the fork's copied pages are outside <code>used_memory</code>. Taught in "Why is reaching maxmemory a latency event?" and "Which memory numbers decide whether the process survives?".</li>
+</ul>
+<p>You can now take "Redis is slow" or "Redis is out of memory" on a shared cluster and name the cause with the right command, in minutes. Phase 6 asks how one production service should use Redis from end to end, from its client settings to a review of every key it writes.</p>
+
+<h2 data-kind="lab">Lab: the exercises that teach Phase 5</h2>
+<p>Twelve exercises, copied from the phase in its own order. Nobody ran this lab for the lesson. The course research ran the same commands directly with <code>redis-cli</code> on Redis 8.10.1, and did not run the phase's Go programs. Where a step is broken, a note under it says what is wrong and what to expect instead. Each concept has its exercises:</p>
+<table>
+<tr><th>Concept</th><th>Exercises</th></tr>
+<tr><td>c1: latency is a sum, and SLOWLOG sees one part</td><td>E1, E2, E3, E5</td></tr>
+<tr><td>c2: big keys cost O(N) at every whole-key operation</td><td>E4, E5, E6</td></tr>
+<tr><td>c3: a hot key stays on one thread</td><td>E11</td></tr>
+<tr><td>c4: volatile policies and keys without a TTL</td><td>E7, E8, E12</td></tr>
+<tr><td>c5: the memory cap and the fields that matter</td><td>E9, E10</td></tr>
+</table>
+
+<details class="answer practice"><summary>Open the lab: setup, E1 to E12, and the notes on broken steps</summary>
+<p>Setup:</p>
+<pre><code data-lang="bash">cd /Users/raghvendradhakar/Desktop/code/verly/study-material/redis/code
+docker-compose up -d &amp;&amp; docker exec redis-study redis-cli PING   # → PONG</code></pre>
+<div class="callout note"><p>The earlier audit found that this path is wrong. The code lives under <code>/Users/raghvendra.dhakar/Desktop/project/code/study-material/redis/code</code>. The compose file pins <code>redis:7.2</code>. The current releases are Redis 8.10.2 and Valkey 9.1.2, so <code>HOTKEYS START</code>, the LRM policies and the Valkey defaults need a newer image. The Docker tags for them were not checked.</p></div>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1</b> <span class="tag">c1</span></label> <b>Pipelining vs sequential (the #1 lever).</b>
+<ul>
+<li>Run: <code>go run ./phase00_why_redis/pipeline_vs_roundtrip -keys 500</code> then <code>-keys 2000</code>.</li>
+<li>Expected: 30–224x speedup; gap widens with N.</li>
+<li>Teaches: the round-trip is the cost; batch it.</li>
+</ul>
+<div class="callout note"><p>Not run for this lesson. A check that needs no Go: <code>redis-benchmark -t get -c 1 -P 1</code>, then <code>-P 16</code> and <code>-P 100</code>. The course research measured 10,051, 129,282 and 414,079 requests per second on loopback.</p></div></li>
+
+<li><label><input type="checkbox"> <b>E2</b> <span class="tag">c1</span></label> <b>Slow commands + SLOWLOG.</b>
+<ul>
+<li>Run: <code>go run ./phase05_perf/slow_commands -n 200000</code></li>
+<li>Expected: KEYS ~33ms, HGETALL ~62ms, both in SLOWLOG; SCAN/HMGET sub-ms.</li>
+<li>Teaches: O(N) blockers, their SCAN swaps, and SLOWLOG as step #1.</li>
+</ul>
+<div class="callout note"><p>Not run. The program leaves <code>slowlog-log-slower-than</code> at 1000, so set it back to 10000 afterwards. Also read <code>INFO latencystats</code> after the run, to see the p99 of KEYS and HGETALL.</p></div></li>
+
+<li><label><input type="checkbox"> <b>E3</b> <span class="tag">c1</span></label> <b>Read SLOWLOG by hand.</b>
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli CONFIG SET slowlog-log-slower-than 1000; docker exec redis-study redis-cli DEBUG POPULATE 500000; docker exec redis-study redis-cli KEYS '*' &gt; /dev/null; docker exec redis-study redis-cli SLOWLOG GET 3</code></li>
+<li>Expected: the <code>KEYS *</code> shows up with its microsecond duration.</li>
+<li>Teaches: the exact command you run first in a latency page.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E4</b> <span class="tag">c2</span></label> <b>Find big keys.</b>
+<ul>
+<li>Run: <code>go run ./phase05_perf/bigkey_scan -big 100000</code> then <code>docker exec redis-study redis-cli --bigkeys</code> (after seeding).</li>
+<li>Expected: the 100k-member set flagged (~5.4MB); <code>--bigkeys</code> reports the biggest per type.</li>
+<li>Teaches: <code>--bigkeys</code> and <code>MEMORY USAGE</code> for big-key detection.</li>
+</ul>
+<div class="callout note"><p>The program deletes <code>bigset</code> with <code>UNLINK</code> at the end, at line 89 of <code>main.go</code>. So <code>--bigkeys</code> finds nothing unless you seed the set again. Also run <code>--memkeys</code>, because <code>--bigkeys</code> ranks by element count, not bytes.</p></div></li>
+
+<li><label><input type="checkbox"> <b>E5</b> <span class="tag">c1, c2</span></label> <b>(Break it) SMEMBERS a big key while watching latency.</b>
+<ul>
+<li>Run: seed <code>bigset</code> (100k), then <code>docker exec redis-study redis-cli --latency &amp;</code> and in another shell <code>docker exec redis-study redis-cli SMEMBERS bigset &gt; /dev/null</code>.</li>
+<li>Expected: the latency meter spikes during the SMEMBERS.</li>
+<li>Teaches: a big-key O(N) read blocks every client (Phase 0.3, made concrete).</li>
+</ul>
+<div class="callout note"><p>The phase gives no seed command, and E4 deleted the key. This seed worked in the course research with 1000000 members, and here it uses the phase's 100,000: <code>EVAL "for i=1,ARGV[1] do redis.call('SADD',KEYS[1],'member:'..i) end" 1 bigset 100000</code>.</p></div></li>
+
+<li><label><input type="checkbox"> <b>E6</b> <span class="tag">c2</span></label> <b>UNLINK vs DEL.</b>
+<ul>
+<li>Run: seed <code>bigset</code>, then time <code>docker exec redis-study redis-cli DEL bigset</code> vs (re-seed and) <code>docker exec redis-study redis-cli UNLINK bigset</code>.</li>
+<li>Expected: UNLINK returns instantly; DEL blocks proportional to size.</li>
+<li>Teaches: always UNLINK big keys.</li>
+</ul>
+<div class="callout note"><p>Timing a <code>docker exec</code> mostly measures the start of the <code>docker exec</code> process, which can hide a 7 ms <code>DEL</code>. Set <code>slowlog-log-slower-than 0</code> and read the time from <code>SLOWLOG GET 1</code> after each command. The course research measured 7,313 µs for <code>DEL</code> and 12 µs for <code>UNLINK</code> at 100,000 members, on Homebrew Redis 8.10.1 under Rosetta with libc malloc, outside Docker. Expect other numbers in the container. On Valkey, <code>DEL</code> is fast too, because lazy free is on there.</p></div></li>
+
+<li><label><input type="checkbox"> <b>E7</b> <span class="tag">c4</span></label> <b>Reproduce the no-TTL eviction outage.</b>
+<ul>
+<li>Run: <code>go run ./phase05_perf/eviction_policies</code></li>
+<li>Expected: <code>volatile-lru</code> → nottl keys survive, TTL keys evicted, then 471 OOM write errors.</li>
+<li>Teaches: no-TTL keys are unevictable under volatile-lru → the outage mechanism.</li>
+</ul>
+<div class="callout note"><p>The phase titles E7 with the former employer's internal incident ID, which this lesson does not repeat. The program does not run <code>CONFIG RESETSTAT</code>, and <code>evicted_keys</code> is cumulative, so the <code>volatile-lru</code> row also counts earlier evictions. Add <code>CONFIG RESETSTAT</code> before each policy, print <code>rejected_calls</code>, and on Redis 8.6 and later add <code>allkeys-lrm</code>. The program's comments at lines 1, 10 to 13 and 118 to 119 name the incident.</p></div></li>
+
+<li><label><input type="checkbox"> <b>E8</b> <span class="tag">c4</span></label> <b>(Break it) OOM under noeviction.</b>
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli CONFIG SET maxmemory 4mb; docker exec redis-study redis-cli CONFIG SET maxmemory-policy noeviction</code>, then <code>docker exec redis-study redis-cli DEBUG POPULATE 100000</code> (or write 10KB values in a loop).</li>
+<li>Expected: writes start returning <code>OOM command not allowed</code>.</li>
+<li>Teaches: what <code>noeviction</code> at the cap looks like. Reset: <code>CONFIG SET maxmemory 256mb</code>.</li>
+</ul>
+<div class="callout warn"><p>The expected result is wrong for <code>DEBUG POPULATE</code>. <code>DEBUG</code> has no <code>denyoom</code> flag, so Redis does not refuse it. In the course research it grew a 4 MB instance to 7.16 MB. The next <code>SET</code> is refused with OOM. The reset leaves <code>noeviction</code> on, so also run <code>CONFIG SET maxmemory-policy allkeys-lru</code> before E9.</p></div></li>
+
+<li><label><input type="checkbox"> <b>E9</b> <span class="tag">c5</span></label> <b>Watch eviction happen.</b>
+<ul>
+<li>Run: <code>CONFIG SET maxmemory-policy allkeys-lru; CONFIG SET maxmemory 8mb</code>, seed many 10KB keys, watch <code>INFO stats | grep evicted_keys</code> climb and <code>INFO memory | grep used_memory_human</code> hold near the cap.</li>
+<li>Teaches: eviction keeps writes flowing by discarding LRU data — the metric to alert on.</li>
+</ul>
+<div class="callout note"><p>Not run. Also read <code>current_eviction_exceeded_time</code> and <code>mem_not_counted_for_evict</code> while it evicts.</p></div></li>
+
+<li><label><input type="checkbox"> <b>E10</b> <span class="tag">c5</span></label> <b>Read INFO memory like an on-call.</b>
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli INFO memory | grep -E "used_memory_human|maxmemory_human|mem_fragmentation_ratio|evicted"</code> and <code>INFO stats | grep -E "keyspace_hits|keyspace_misses|evicted_keys"</code>.</li>
+<li>Compute: hit rate and fragmentation ratio. Are they healthy?</li>
+<li>Teaches: the exact fields you scan during a memory investigation.</li>
+</ul>
+<div class="callout note"><p>Not run. Add <code>allocator_frag_ratio</code> to the grep. On a small test instance, <code>mem_fragmentation_ratio</code> can read 12 while <code>allocator_frag_ratio</code> reads 1.00, as the c5 section explains.</p></div></li>
+
+<li><label><input type="checkbox"> <b>E11</b> <span class="tag">c3</span></label> <b>Detect a hot key.</b>
+<ul>
+<li>Run: <code>CONFIG SET maxmemory-policy allkeys-lfu</code>, hammer one key: <code>for i in $(seq 1 5000); do docker exec redis-study redis-cli GET hot &gt;/dev/null; done</code> (seed <code>hot</code> first), then <code>docker exec redis-study redis-cli --hotkeys</code>.</li>
+<li>Expected: <code>hot</code> reported as the most-accessed key.</li>
+<li>Teaches: <code>--hotkeys</code> needs an LFU policy; how to find the key saturating a shard.</li>
+</ul>
+<div class="callout note"><p>5,000 separate <code>docker exec</code> calls take minutes. Use <code>redis-cli -r 5000 GET hot</code> inside one exec instead. Expect <code>OBJECT FREQ hot</code> near 36. On Redis 8.6 and later, also try <code>HOTKEYS START METRICS 2 CPU NET</code>, which works under any policy.</p></div></li>
+
+<li><label><input type="checkbox"> <b>E12</b> <span class="tag">c4</span></label> <b>TTL audit (find the no-TTL eviction risk).</b>
+<ul>
+<li>Run: write some keys with and without TTL, then scan for no-TTL keys: for each key <code>docker exec redis-study redis-cli TTL &lt;key&gt;</code> → <code>-1</code> means no expiry.</li>
+<li>Teaches: no-TTL keys are the eviction risk; auditing for <code>-1</code> is how you find ballast before it fills the cluster.</li>
+</ul>
+<div class="callout note"><p>Not run. Add the step that loses a TTL: <code>SET s v EX 86400</code>, then <code>SET s v2</code>, then <code>TTL s</code>, which returns -1. The phase titles E12 with the former employer's incident ID, replaced here by what it describes.</p></div></li>
+</ul>
+
+<h4>Checks for a service you own</h4>
+<p>The phase ends with four checks in its author's codebase. Here they are in general terms:</p>
+<ol>
+<li><b>The no-TTL write path.</b> Find every write to a per-session or per-user key. Check that each update path passes the TTL again, and that no test asserts a TTL of 0. Ask why a 0 TTL on a per-session key is dangerous under <code>volatile-lru</code>, and write the one-line fix.</li>
+<li><b>The local caches you already have.</b> Find the in-process caches in front of Redis. For each one, name the hot key it protects Redis from.</li>
+<li><b>The N+1 hunt.</b> Pick a request path that reads several Redis keys. If it loops with single <code>GET</code>s over a collection, estimate the cost as the p95 collection size times the in-AZ round trip of about 0.5 ms. In the phase's codebase most reads were single-key, so the risk was any new loop.</li>
+<li><b>Monitoring.</b> Check that the memory alert exists and has an owner, and ask what is not alerted on. In the phase's codebase, nothing alerted on slow commands or hot keys.</li>
+</ol>
+</details>
+
+<h2 data-kind="checkpoint">Checkpoint questions</h2>
+<p>Eight questions. Answer each in your own words before you open the sketch.</p>
+<details class="answer practice"><summary>Open the questions</summary>
+
+<p><b>Q1.</b> A shared cluster runs <code>volatile-lru</code>. One service writes keys with no TTL. Walk through what happens to <code>used_memory</code>, why the policy cannot save the cluster, why writes fail while reads do not, and why a co-tenant service goes down. Then give two independent fixes, one per service and one for the whole cluster, and say which you would do first.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p><code>used_memory</code> stays at the cap while TTL keys are evicted and the no-TTL share grows. When no TTL key is left, the policy has no candidate and acts like <code>noeviction</code>. Commands with the <code>denyoom</code> flag, such as <code>SET</code>, fail with OOM. <code>GET</code> and <code>DEL</code> do not need memory, so they still run. The co-tenant fails because the cap and the policy belong to the whole cluster, not to one service. Per service: add a TTL on every write, including update paths. For the cluster: switch to <code>allkeys-lru</code>, after you move keys that must not be evicted. Do the TTL fix first, and delete the no-TTL keys to recover now.</p>
+</details>
+
+<p><b>Q2.</b> A service's p99 is 40 ms. <code>SLOWLOG GET 20</code> is empty, and no single command is slow. Walk through your diagnosis: the likely causes, how you confirm each, and the fix for each.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>First, round trips: count Redis calls per request, and batch a loop with <code>MGET</code> or a pipeline. Second, a hot key: compare per-shard CPU, then name the key with <code>HOTKEYS START</code> or <code>--hotkeys</code>, and add a local cache. Third, main-thread work that is not a command: turn on <code>latency-monitor-threshold</code>, read <code>LATENCY LATEST</code>, and look for <code>expire-del</code>, <code>fork</code> or eviction. The fixes there are lazy free, spread TTLs, smaller forks or more headroom. Run <code>--intrinsic-latency</code> on the host to rule out the machine.</p>
+</details>
+
+<p><b>Q3.</b> A grading flow does 40 sequential <code>HGET</code>s, one per rubric item, against an in-AZ managed Redis with a p50 round trip of 0.5 ms. What latency does this add? Rewrite it as one command and give the new latency. In cluster mode, what must be true of the keys for that one command to be legal, and how do you make sure of it?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<pre><code data-lang="text">40 × 0.5 ms = 20 ms of round trips
+one HMGET of 40 fields on one hash: about 1 × 0.5 ms</code></pre>
+<p>If the items are fields of one hash, use <code>HMGET</code>. If they are 40 keys, use <code>MGET</code> or a pipeline. A multi-key command in cluster mode needs all keys in one slot, so give them one hash tag, such as <code>{rubric:7}</code>.</p>
+</details>
+
+<p><b>Q4.</b> <code>redis-cli --bigkeys</code> finds a 4-million-member set <code>company:c7:all_viewers</code> at 240 MB. Explain the three problems this one key causes, why adding shards will not help, and how you would re-model it. Which command deletes the old key safely, and what still blocks on Redis after that?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>It blocks: any whole-key read or free walks 4 million members on the main thread. It makes a hot shard: its slot, its memory and its traffic sit on one primary. It stalls a move or a failover, because it moves or frees as one unit. A reshard moves whole slots, so one key never splits. Re-model it into buckets, such as <code>company:c7:viewers:{bucket}</code>, or bound it. Delete with <code>UNLINK</code>. On Redis, its expiry, its eviction and an overwrite still block unless the matching <code>lazyfree-lazy-*</code> setting is <code>yes</code>.</p>
+</details>
+
+<p><b>Q5.</b> A managed node has about 13 GB of RAM. What should <code>maxmemory</code> be, and why not the full 13 GB? What happens during a <code>BGSAVE</code> fork that makes headroom necessary, and what fails if you skip it?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>Leave headroom for memory that <code>used_memory</code> does not count. That memory is the pages copied for the fork child, replication and AOF buffers, fragmentation and process overhead. During the fork, each page the parent changes is copied, so the extra memory grows with the write rate and the save time. Without headroom, RSS passes the RAM, and the kernel kills Redis during the backup. Managed defaults reserve about 25%, which gives about 9.75 GB here. That is a rule of thumb, so confirm it with peak RSS during a save on your own write load.</p>
+</details>
+
+<p><b>Q6.</b> A colleague wants to switch the shared cluster from <code>volatile-lru</code> to <code>allkeys-lru</code> "so we stop having OOM incidents". Argue both sides. What does it fix, what does it risk, and what must be true first? What fixes the root cause instead?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>It fixes the no-TTL fill, because any key can now be evicted, so writes no longer fail for lack of a candidate. It risks the silent loss of keys that services expected to keep, such as locks, sessions or counters with no TTL. It is safe only if every key on the cluster can be rebuilt. The root-cause fix is a TTL on every cache key, an audit of write paths, and moving data that must stay to a store that does not evict.</p>
+</details>
+
+<p><b>Q7.</b> Design the alerts for a shared Redis cluster that has seen a no-TTL fill, a hot key and slow commands. Name four metrics, a threshold for each and the failure each catches early. Which single alert gives the most for its cost?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>Memory use as a share of <code>maxmemory</code> catches the slow fill, at a warning level well below the cap. <code>errorstat_OOM</code> or <code>rejected_calls</code> above 0 catches the first refused write. CPU per shard, far above the others, catches the hot key. <code>SLOWLOG</code> growth and latency events catch slow commands and housekeeping. Memory share has the best value, because the fill is slow and gives hours or weeks of warning. Every alert needs an owner, or it does not count.</p>
+</details>
+
+<p><b>Q8.</b> An LRU cache at <code>maxmemory</code> shows 1-second latency bursts every few minutes. <code>SLOWLOG</code> is empty, and lazy free and tenacity changes barely help. What is the loop, and what would you change first?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>Eviction at the cap runs on the main thread, so replies fall behind and client buffers grow. Buffers count toward <code>maxmemory</code>, so Redis must evict more, which keeps the thread busy. Lower the default TTL in steps, so peak memory stays under the cap and eviction has nothing to do. GitLab cut its default from 2 weeks to 8 hours this way, and the hit rate barely changed.</p>
+</details>
+</details>
+
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+<details class="answer practice"><summary>Open the cheatsheet</summary>
+<pre class="cheatsheet">SYMPTOM → CAUSE → FIRST TOOL
+  many fast calls, nothing slow    → round trips (N+1)     → count calls; MGET / pipeline
+  everyone freezes tens of ms      → O(N) command          → SLOWLOG GET 10, INFO latencystats
+  spikes, SLOWLOG empty            → housekeeping          → LATENCY LATEST / DOCTOR
+                                                              (latency-monitor-threshold 0 = off)
+  one huge collection              → big key               → --memkeys (bytes), --bigkeys (count),
+                                                              --keystats, MEMORY USAGE key
+  one shard hot, others idle       → hot key               → HOTKEYS START (Redis 8.6+, any policy)
+                                                              --hotkeys (LFU only), CLUSTER SLOT-STATS (Valkey 8.0+, Redis 8.2+)
+  writes OOM, reads fine           → no-TTL keys + volatile-* → INFO errorstats, commandstats rejected_calls
+  bursts at the cap / killed at BGSAVE → eviction, fork copies → INFO memory, latest_fork_usec, current_cow_peak
+
+LATENCY = round trip + wait behind ALL main-thread work + own execution
+  SLOWLOG times only own execution (default slowlog-log-slower-than 10000 µs)
+  main-thread work that is not a command: active expiry (hz 10, ≤25 ms/run),
+  big frees, eviction, fork(), THP, swap, AOF fsync
+  host floor: redis-cli --intrinsic-latency 100
+  Valkey 8.1+: COMMANDLOG (slow, large-request 1,048,576 B, large-reply)
+
+O(N) BLOCKERS → SAFE FORM
+  KEYS → SCAN   SMEMBERS → SSCAN   HGETALL → HSCAN / HMGET   LRANGE 0 -1 → bounded
+  DEL(big) → UNLINK   FLUSHALL → FLUSHALL ASYNC   long Lua → small scripts
+  SCAN: cursor until 0; a key present throughout comes back ≥1 time, maybe twice
+  measured: KEYS 1M keys 133–148 ms; SCAN COUNT 1000 0.25–0.30 ms (8.10.1 Rosetta, libc, M4 Pro)
+
+BIG KEYS
+  free = O(N) on main thread; UNLINK goes to background above a free effort of 64 (elements, or list nodes)
+  implicit deletes: expiry, eviction, overwrite (SET/RENAME), replica flush
+  lazyfree-lazy-{user-del,expire,eviction,server-del}: Redis 8.10.2 no / Valkey 9.1.2 yes
+  1M-member set: DEL 198,838 µs, UNLINK 9 µs, SMEMBERS 86,439 µs, SSCAN 155 µs
+    (one run, 8.10.1 Rosetta, libc, M4 Pro); 1M-member expiry blocked 176 ms
+  fix upstream: bound or bucket the model, key:{bucket}
+
+HOT KEYS (one key → one slot → one primary → one thread)
+  more shards do not help; reshard moves whole slots
+  fixes in order: local in-process cache (short TTL) → CLIENT TRACKING
+                  → replica reads (stale, READONLY) → N copies key:0..N
+  LFU counter is logarithmic: 5,000 GETs → FREQ 36, 50 GETs → FREQ 8
+
+EVICTION POLICIES (10 in Redis 8.6+, 8 in Valkey 9.1.2)
+  noeviction (Redis default)         → writes needing memory fail, reads/deletes work
+  allkeys-lru / lfu / random / lrm   → evict any key
+  volatile-lru / lfu / random / ttl / lrm → only keys WITH a TTL (ElastiCache default: volatile-lru)
+  volatile-* with no TTL keys left = noeviction
+  plain SET drops TTL; go-redis Set(ctx,k,v,0) = no expiry; use EX again or KEEPTTL
+  sampling: maxmemory-samples 5, pool 16; tenacity 10 ≈ 500 µs per pass
+
+MEMORY
+  kernel OOM score = memory + swap use; RSS = used_memory + not counted + fragmentation; fork copies on top
+  client buffers COUNT toward maxmemory; repl/AOF buffers do not (mem_not_counted_for_evict)
+  fragmentation: trust allocator_frag_ratio, not mem_fragmentation_ratio on small nodes
+  size from peak RSS during BGSAVE; ~75% of RAM is a rule of thumb, ElastiCache reserves 25%
+  maxmemory 0 = no cap = can grow until the kernel kills it
+  maxmemory-clients (0 = off) drops the biggest clients
+
+ALERTS (each with an owner)
+  memory share of maxmemory; errorstat_OOM > 0; evicted_keys rate;
+  CPU per shard; allocator_frag_ratio or swap; peak RSS at the nightly save;
+  SLOWLOG growth and latency events</pre>
+</details>
+
+<h2 data-kind="sources">Sources</h2>
+<p>Every source the lesson used, in groups. The phase's own must-read list comes first.</p>
+<details class="answer practice"><summary>Open the sources</summary>
+<p>The course research opened these pages on 2026-10-18. Its own measurements ran on Redis 8.10.1 from Homebrew, an x86_64 build under Rosetta, with the libc allocator, on an Apple M4 Pro with 24 GB of RAM, over loopback, with one run per number.</p>
+<h4>The phase's must-read list</h4>
+<ul class="sources">
+<li><b>Diagnosing latency issues</b> <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/">https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/</a><br>The checklist: intrinsic latency, slow commands, fork, transparent huge pages, swap, AOF, expires. The page to open during an incident.</li>
+<li><b>Key eviction</b> <a href="https://redis.io/docs/latest/develop/reference/eviction/">https://redis.io/docs/latest/develop/reference/eviction/</a><br>The ten policies, LRM, approximate LRU and LFU, "volatile-xxx ... behave like noeviction", client buffers counted.</li>
+<li><b>Memory optimization</b> <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/memory-optimization/">https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/memory-optimization/</a><br><code>used_memory</code>, fragmentation, listpack thresholds and <code>maxmemory</code> sizing.</li>
+<li><b>ElastiCache metrics to monitor</b> <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/CacheMetrics.WhichShouldIMonitor.html">https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/CacheMetrics.WhichShouldIMonitor.html</a><br><code>DatabaseMemoryUsagePercentage</code>, evictions, engine CPU and the alarms to set. The research also opened the newer copy at <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/CacheMetrics.WhichShouldIMonitor.html">https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/CacheMetrics.WhichShouldIMonitor.html</a>.</li>
+</ul>
+<h4>Redis command and tool pages</h4>
+<ul class="sources">
+<li><b>SLOWLOG GET</b> <a href="https://redis.io/docs/latest/commands/slowlog-get/">https://redis.io/docs/latest/commands/slowlog-get/</a> and <a href="https://redis.io/commands/slowlog-get/">https://redis.io/commands/slowlog-get/</a><br>Execution time only, no I/O.</li>
+<li><b>INFO</b> <a href="https://redis.io/commands/info/">https://redis.io/commands/info/</a><br>Every field, <code>allocator_frag_ratio</code> as the true fragmentation, latencystats, errorstats.</li>
+<li><b>KEYS</b> <a href="https://redis.io/docs/latest/commands/keys/">https://redis.io/docs/latest/commands/keys/</a><br>1 million keys in 40 ms on an entry-level laptop.</li>
+<li><b>SCAN</b> <a href="https://redis.io/docs/latest/commands/scan/">https://redis.io/docs/latest/commands/scan/</a> and <a href="https://redis.io/commands/scan/">https://redis.io/commands/scan/</a><br>The cursor contract, and that an element may come back more than once.</li>
+<li><b>SET</b> <a href="https://redis.io/docs/latest/commands/set/">https://redis.io/docs/latest/commands/set/</a><br>A successful SET discards the TTL. The <code>denyoom</code> flag.</li>
+<li><b>redis-cli</b> <a href="https://redis.io/docs/latest/develop/tools/cli/">https://redis.io/docs/latest/develop/tools/cli/</a><br><code>--bigkeys</code>, <code>--memkeys</code>, <code>--keystats</code>, <code>--hotkeys</code> and its LFU rule, <code>-r</code>.</li>
+<li><b>Client-side caching</b> <a href="https://redis.io/docs/latest/develop/reference/client-side-caching/">https://redis.io/docs/latest/develop/reference/client-side-caching/</a><br><code>CLIENT TRACKING</code> and invalidation messages.</li>
+<li><b>HOTKEYS START</b> <a href="https://redis.io/docs/latest/commands/hotkeys-start/">https://redis.io/docs/latest/commands/hotkeys-start/</a><br>Available since Redis Open Source 8.6.0, ranks keys by CPU and network.</li>
+<li><b>OBJECT ENCODING</b> <a href="https://redis.io/commands/object-encoding/">https://redis.io/commands/object-encoding/</a><br>Listpack against hash table when memory is high.</li>
+</ul>
+<h4>Source code and config files at release tags</h4>
+<ul class="sources">
+<li><b>redis.conf at 8.10.2</b> <a href="https://raw.githubusercontent.com/redis/redis/8.10.2/redis.conf">https://raw.githubusercontent.com/redis/redis/8.10.2/redis.conf</a><br>Policies, lazy-free defaults, latency settings, <code>maxmemory-clients</code>.</li>
+<li><b>lazyfree.c at 8.10.2</b> <a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/lazyfree.c">https://raw.githubusercontent.com/redis/redis/8.10.2/src/lazyfree.c</a><br><code>LAZYFREE_THRESHOLD 64</code>.</li>
+<li><b>Redis Cluster specification</b> <a href="https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/">https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/</a><br>Hash slots, and "Scaling reads using replica nodes": READONLY and stale reads.</li>
+<li><b>Redis 7.0 release notes</b> <a href="https://raw.githubusercontent.com/redis/redis/7.0.0/00-RELEASENOTES">https://raw.githubusercontent.com/redis/redis/7.0.0/00-RELEASENOTES</a><br>maxmemory-clients as a new setting in Redis 7.0.</li>
+<li><b>Linux kernel, /proc documentation</b> <a href="https://docs.kernel.org/filesystems/proc.html">https://docs.kernel.org/filesystems/proc.html</a><br>Section 3.1: the out-of-memory score from memory and swap use.</li>
+<li><b>redis.conf at 7.2.4</b> <a href="https://raw.githubusercontent.com/redis/redis/7.2.4/redis.conf">https://raw.githubusercontent.com/redis/redis/7.2.4/redis.conf</a><br>Used only to confirm the old defaults match.</li>
+<li><b>valkey.conf at 9.1.2</b> <a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/valkey.conf">https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/valkey.conf</a><br>Lazy free on by default, eight policies, COMMANDLOG settings.</li>
+<li><b>go-redis v9.5.1, string_commands.go</b> <a href="https://raw.githubusercontent.com/redis/go-redis/v9.5.1/string_commands.go">https://raw.githubusercontent.com/redis/go-redis/v9.5.1/string_commands.go</a><br>"Zero expiration means the key has no expiration time".</li>
+<li><b>Release lists</b> <a href="https://api.github.com/repos/redis/redis/releases">https://api.github.com/repos/redis/redis/releases</a> and <a href="https://api.github.com/repos/valkey-io/valkey/releases">https://api.github.com/repos/valkey-io/valkey/releases</a><br>Redis 8.10.2 and Valkey 9.1.2 as the current releases.</li>
+</ul>
+<h4>Valkey and managed services</h4>
+<ul class="sources">
+<li><b>CLUSTER SLOT-STATS</b> <a href="https://valkey.io/commands/cluster-slot-stats/">https://valkey.io/commands/cluster-slot-stats/</a><br>Per-slot keys, CPU and network, since Valkey 8.0.0.</li>
+<li><b>COMMANDLOG GET</b> <a href="https://valkey.io/commands/commandlog-get/">https://valkey.io/commands/commandlog-get/</a><br>Slow, large-request and large-reply logs, since Valkey 8.1.0.</li>
+<li><b>ElastiCache engine parameters</b> <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/ParameterGroups.Engine.html">https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/ParameterGroups.Engine.html</a><br>Default <code>volatile-lru</code>, <code>reserved-memory-percent</code> 25, valkey8 sampling of 3, removed lazy-free parameters.</li>
+<li><b>ElastiCache enhanced I/O multiplexing</b> <a href="https://aws.amazon.com/blogs/database/enhanced-io-multiplexing-for-amazon-elasticache-for-redis">https://aws.amazon.com/blogs/database/enhanced-io-multiplexing-for-amazon-elasticache-for-redis</a><br>72% more throughput at 5,200 clients, commands still on one engine thread.</li>
+<li><b>ElastiCache Serverless</b> <a href="https://aws.amazon.com/blogs/aws/amazon-elasticache-serverless-for-redis-and-memcached-now-generally-available/">https://aws.amazon.com/blogs/aws/amazon-elasticache-serverless-for-redis-and-memcached-now-generally-available/</a><br>Evicts keys with a TTL by LRU when memory is full.</li>
+<li><b>Amazon MemoryDB paper</b> <a href="https://www.amazon.science/publications/amazon-memorydb-a-fast-and-durable-memory-first-cloud-database">https://www.amazon.science/publications/amazon-memorydb-a-fast-and-durable-memory-first-cloud-database</a><br>Fork at about 12 ms per GB, 67 ms peak latency during BGSAVE, collapse past 8% swap.</li>
+</ul>
+<h4>Production cases</h4>
+<ul class="sources">
+<li><b>GitLab, eviction bursts on an LRU cache</b> <a href="https://about.gitlab.com/blog/how-we-diagnosed-and-resolved-redis-latency-spikes/">https://about.gitlab.com/blog/how-we-diagnosed-and-resolved-redis-latency-spikes/</a><br>25K to 5K calls per second, 2 million slow requests a weekday, TTL from 2 weeks to 8 hours. Redis 6.2.</li>
+<li><b>Stack Overflow app caching</b> <a href="https://nickcraver.com/blog/2019/08/06/stack-overflow-how-we-do-app-caching/">https://nickcraver.com/blog/2019/08/06/stack-overflow-how-we-do-app-caching/</a><br>The BGSAVE fork crash at 90 GB on 96 GB, KEYS, the stampede lock table, CPU pinning.</li>
+<li><b>Salesforce Marketing Cloud migration</b> <a href="https://engineering.salesforce.com/migration-at-scale-moving-marketing-cloud-caching-from-memcached-to-redis-at-1-5m-rps-without-downtime/">https://engineering.salesforce.com/migration-at-scale-moving-marketing-cloud-caching-from-memcached-to-redis-at-1-5m-rps-without-downtime/</a><br>Hot keys on single shards at 1.5 million events per second, fixed with local caches.</li>
+<li><b>Spring Data Redis issue 1413</b> <a href="https://github.com/spring-projects/spring-data-redis/issues/1413">https://github.com/spring-projects/spring-data-redis/issues/1413</a><br>KEYS inside a cache clear took Redis to 100% CPU.</li>
+<li><b>Pendo status incident</b> <a href="https://status.pendo.io/incidents/g8nfbs1vdn69">https://status.pendo.io/incidents/g8nfbs1vdn69</a><br>Two code paths with no expiry, about 60% errors for 90 minutes.</li>
+<li><b>bsport, Redis as a single point of failure</b> <a href="https://engineering.bsport.io/how-we-eliminated-redis-as-a-single-point-of-failure-2729c22008b5">https://engineering.bsport.io/how-we-eliminated-redis-as-a-single-point-of-failure-2729c22008b5</a><br>No-TTL keys in a shared Redis, and DUMP calls of over 1 second during a migration.</li>
+<li><b>Slack job queue</b> <a href="https://slack.engineering/scaling-slacks-job-queue/">https://slack.engineering/scaling-slacks-job-queue/</a><br>A full Redis could not enqueue or dequeue.</li>
+<li><b>Discord message indexing</b> <a href="https://discord.com/blog/how-discord-indexes-trillions-of-messages">https://discord.com/blog/how-discord-indexes-trillions-of-messages</a><br>A Redis queue hit its CPU limit and dropped messages.</li>
+<li><b>Twitter timeline hot keys</b> <a href="https://matthewtejo.substack.com/p/handling-hotkeys-in-timeline-storage">https://matthewtejo.substack.com/p/handling-hotkeys-in-timeline-storage</a><br>Hot-key counting in Redis and local caching. A former engineer's blog.</li>
+<li><b>Alibaba Tair at Double 11</b> <a href="https://www.alibabacloud.com/blog/596493">https://www.alibabacloud.com/blog/596493</a><br>Hot items overloading single nodes, and the fixes. A vendor page.</li>
+<li><b>Figma postmortem</b> <a href="https://www.figma.com/blog/postmortem-service-disruptions-on-june-6-and-7-2022/">https://www.figma.com/blog/postmortem-service-disruptions-on-june-6-and-7-2022/</a><br>More nodes made a cluster-bus CPU loop worse.</li>
+<li><b>Cloudflare anomaly detection</b> <a href="https://blog.cloudflare.com/lessons-learned-from-scaling-up-cloudflare-anomaly-detection-platform/">https://blog.cloudflare.com/lessons-learned-from-scaling-up-cloudflare-anomaly-detection-platform/</a><br>PFMERGE cost that grew with the data.</li>
+<li><b>Swiggy pipelining</b> <a href="https://bytes.swiggy.com/optimizing-batch-writes-to-redis-using-pipelining-d480ebaf4653">https://bytes.swiggy.com/optimizing-batch-writes-to-redis-using-pipelining-d480ebaf4653</a><br>Redis write time down 90% with batched pipelines.</li>
+<li><b>Swiggy batch reads</b> <a href="https://medium.com/swiggy-bytes/2x-improvement-in-latency-in-swiggy-data-science-platform-6101b7607530">https://medium.com/swiggy-bytes/2x-improvement-in-latency-in-swiggy-data-science-platform-6101b7607530</a><br>p99 from 144 ms to 71 ms at batch size 30.</li>
+</ul>
+<p>The phase also names <i>Redis in Action</i> by Josiah Carlson, chapter 9 "Reducing memory use" and chapter 11 "Scripting with Lua". It also suggests searching for Instagram and Twitter posts on Redis memory. That suggestion has no link or claim, so the cases above replace it. The Redis support article on salting hot keys returned HTTP 403 and was not read.</p>
+</details>
+
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

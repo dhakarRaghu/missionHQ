@@ -1,109 +1,469 @@
 {
-  "built_at": "2026-09-23T01:39:00.245976+05:30",
-  "courses": [
+ "built_at": "2026-10-20T12:06:19.848Z",
+ "courses": [
+  {
+   "slug": "elite-storage",
+   "title": "Storage and database internals",
+   "phases": [
     {
-      "slug": "inference-internals",
-      "title": "Inference and AI platform systems",
-      "phases": [
-        {
-          "slug": "inference-internals-phase-00-frame",
-          "title": "Inference Internals, Phase 0: Frame the problem",
-          "one_liner": "Every LLM request runs through one machine with two opposite physics phases: parallel compute-bound prefill and serial memory-bound decode (about 208 input tokens per decode step on an A100) and that split, not the model, explains TTFT, TPOT, the 5x output price, and why one timestamp line can quintuple a bill.",
-          "minutes": 20,
-          "date": "2026-09-14",
-          "read": true,
-          "file": "2026-09-14-inference-internals-phase-00-frame.html"
-        },
-        {
-          "slug": "inference-internals-phase-01-lifecycle",
-          "title": "Inference Internals \u2014 Phase 1: The Request Lifecycle",
-          "one_liner": "One request end to end: the uneven token exchange rate, queue+prefill inside TTFT, the KV formula that sizes provider capacity, why output tokens cost 3-8x, the determinism myth with its measured proof, and the streaming instrument that lets you verify every claim yourself.",
-          "minutes": 100,
-          "date": "2026-09-17",
-          "read": true,
-          "file": "2026-09-17-inference-internals-phase-01-lifecycle.html"
-        },
-        {
-          "slug": "inference-internals-phase-02a-scheduling-memory",
-          "title": "Scheduling and Memory \u2014 Inference Internals Phase 2A",
-          "one_liner": "How vLLM's scheduler loop, paged KV cache and prefix cache decide your latency, concurrency and bill \u2014 revised: unverifiable Orca Figure 10a claim removed per claims-run c3.",
-          "minutes": 150,
-          "date": "2026-09-20",
-          "read": true,
-          "file": "2026-09-20-inference-internals-phase-02a-scheduling-memory.html"
-        },
-        {
-          "slug": "inference-internals-phase-02b-decoding-context",
-          "title": "Phase 2B \u2014 Decoding and context: the stream freeze, the schema, and the 400",
-          "one_liner": "Chunked prefill and the inter-token gap, what strict schemas do and do not guarantee, and context budgets with constraint-pinning compaction.",
-          "minutes": 150,
-          "date": "2026-09-22",
-          "read": false,
-          "file": "2026-09-22-inference-internals-phase-02b-decoding-context.html"
-        }
-      ]
+     "slug": "elite-storage-phase-01-durability",
+     "title": "Durability and the write path",
+     "one_liner": "When the store says OK, what is on disk, and what can a crash one millisecond later still lose?",
+     "minutes": null,
+     "date": "2026-10-18",
+     "read": false,
+     "file": "2026-10-18-elite-storage-phase-01-durability.html"
     },
     {
-      "slug": "kubernetes",
-      "title": "Kubernetes",
-      "phases": [
-        {
-          "slug": "kubernetes-phase-00-why-k8s-exists",
-          "title": "Kubernetes Phase 0 \u2014 Why K8s Exists",
-          "one_liner": "Kubernetes in one sentence: a database of desired state plus idle loops that read it, and why that shape, not any feature, is what survives dead nodes and deleted pods.",
-          "minutes": 45,
-          "date": "2026-09-13",
-          "read": true,
-          "file": "2026-09-13-kubernetes-phase-00-why-k8s-exists.html"
-        },
-        {
-          "slug": "kubernetes-phase-01-core-concepts",
-          "title": "Kubernetes Phase 1 \u2014 Core Concepts (Pods to VPC CNI)",
-          "one_liner": "The load-bearing phase: pods, Deployments, probes, Services and the gRPC pinning problem, ConfigMap staleness, storage, and the EKS ENI layer, corrected against the live platform (native gRPC probes, EndpointSlices, unmaintained ingress-nginx).",
-          "minutes": 120,
-          "date": "2026-09-19",
-          "read": false,
-          "file": "2026-09-19-kubernetes-phase-01-core-concepts.html"
-        }
-      ]
+     "slug": "elite-storage-phase-02-structures",
+     "title": "Storage structures",
+     "one_liner": "Why does one workload run ten times faster on one storage structure, and how do you tell which one you need before you build the wrong one?",
+     "minutes": null,
+     "date": "2026-10-18",
+     "read": false,
+     "file": "2026-10-18-elite-storage-phase-02-structures.html"
+    },
+    {
+     "slug": "elite-storage-phase-03-transactions",
+     "title": "Transactions and concurrency control",
+     "one_liner": "Two transactions both commit without an error, and together they break a rule. Which level allowed it, and what stops it?",
+     "minutes": null,
+     "date": "2026-10-18",
+     "read": false,
+     "file": "2026-10-18-elite-storage-phase-03-transactions.html"
+    },
+    {
+     "slug": "elite-storage-phase-04-planning",
+     "title": "Query planning and production evolution",
+     "one_liner": "Why did the planner choose a sequential scan over your index, and what will your migration do to the table while it runs?",
+     "minutes": null,
+     "date": "2026-10-18",
+     "read": false,
+     "file": "2026-10-18-elite-storage-phase-04-planning.html"
+    },
+    {
+     "slug": "elite-storage-phase-05-replication",
+     "title": "Replication, failover, backups and pooling",
+     "one_liner": "When a replica, a slot, a backup or the pooler fails, which writes survive, how long do clients wait, and how far back can you restore?",
+     "minutes": null,
+     "date": "2026-10-20",
+     "read": false,
+     "file": "2026-10-20-elite-storage-phase-05-replication.html"
     }
-  ],
-  "articles": [
+   ]
+  },
+  {
+   "slug": "redis",
+   "title": "Redis",
+   "phases": [
     {
-      "title": "The decision before the lifecycle: does cache-aware routing actually pay?",
-      "one_liner": "On agentic traffic (43-turn sessions, 142K tokens in per turn), cache-aware sticky routing beats round-robin 2\u20133\u00d7 where prefill dominates and buys nothing where decode does, and the stickiness limit \u03c4 is derived from one calibration measurement, not tuned.",
-      "topic": "",
-      "kind": "",
-      "date": "2026-09-17",
-      "read": true,
-      "file": "2026-09-17-routing-before-the-lifecycle.html"
+     "slug": "redis-phase-00-why-redis",
+     "title": "Why Redis: one thread, one memory pool",
+     "one_liner": "What does one Redis call really cost, and how can one tenant's mistake stop every service on a shared cluster?",
+     "minutes": null,
+     "date": "2026-10-18",
+     "read": false,
+     "file": "2026-10-18-redis-phase-00-why-redis.html"
     },
     {
-      "title": "Why were the dashboards green while the model talked nonsense",
-      "one_liner": "Two real serving failures where throughput stayed green while the model was wrong: an FP8 KV-view bug that dropped GSM8K to 0.0099 and a disaggregated deploy with a 223-second TTFT from queue saturation. Put a correctness gate beside every performance gate, and follow the queue.",
-      "topic": "Inference internals: correctness gates and queue saturation",
-      "kind": "",
-      "date": "2026-09-16",
-      "read": true,
-      "file": "2026-09-16-healthy-throughput-broken-model.html"
+     "slug": "redis-phase-01-data-structures",
+     "title": "Data structures and what they cost",
+     "one_liner": "Which Redis type does the read-modify-write for you, and what does each choice cost in safety and memory?",
+     "minutes": null,
+     "date": "2026-10-18",
+     "read": false,
+     "file": "2026-10-18-redis-phase-01-data-structures.html"
     },
     {
-      "title": "Measure recall before you buy infrastructure",
-      "one_liner": "Retrieval owns recall and recall is the ceiling, so measure it per segment before buying any infrastructure; once an agent loop retries, persistence masks retriever weakness and you measure end to end instead.",
-      "topic": "Retrieval / RAG evaluation",
-      "kind": "",
-      "date": "2026-09-13",
-      "read": true,
-      "file": "2026-09-13-measure-recall-before-you-buy-infrastructure.html"
+     "slug": "redis-phase-02-caching-patterns",
+     "title": "Caching patterns: the miss path and the fill path",
+     "one_liner": "When Redis sits in front of a slow source, what breaks when the cache misses or fills, and how do you stop it?",
+     "minutes": null,
+     "date": "2026-10-18",
+     "read": false,
+     "file": "2026-10-18-redis-phase-02-caching-patterns.html"
     },
     {
-      "title": "Throughput is queue design",
-      "one_liner": "At any seam where a fast producer feeds a slow consumer you either buffer or refuse: MySQL buffers into a relay log and vLLM refuses admission without KV blocks, and every knob on top just picks which latency pays.",
-      "topic": "LLM serving internals and MySQL replication: backpressure and admission control",
-      "kind": "",
-      "date": "2026-09-12",
-      "read": true,
-      "file": "2026-09-12-throughput-is-queue-design.html"
+     "slug": "redis-phase-03-distributed-locking",
+     "title": "Distributed locking: wasted work or wrong data",
+     "one_liner": "Your lock passed every test. When can two workers still both act, and what stops them?",
+     "minutes": null,
+     "date": "2026-10-18",
+     "read": false,
+     "file": "2026-10-18-redis-phase-03-distributed-locking.html"
+    },
+    {
+     "slug": "redis-phase-04-architecture-ha",
+     "title": "Architecture and high availability",
+     "one_liner": "What does Redis lose when a node dies, how long do writes fail, and how does a request find its key in a cluster?",
+     "minutes": null,
+     "date": "2026-10-18",
+     "read": false,
+     "file": "2026-10-18-redis-phase-04-architecture-ha.html"
+    },
+    {
+     "slug": "redis-phase-05-performance-failures",
+     "title": "Why Redis is slow, and why it is full",
+     "one_liner": "Given 'Redis is slow' or 'Redis is out of memory' on a shared cluster, which command names the cause, and what does that command not see?",
+     "minutes": null,
+     "date": "2026-10-18",
+     "read": false,
+     "file": "2026-10-18-redis-phase-05-performance-failures.html"
+    },
+    {
+     "slug": "redis-phase-06-production-cases",
+     "title": "Reviewing Redis in production",
+     "one_liner": "For any Redis call, what does it lose when something fails, how long does the client wait, and how do servers recover messages they missed?",
+     "minutes": null,
+     "date": "2026-10-18",
+     "read": false,
+     "file": "2026-10-18-redis-phase-06-production-cases.html"
+    },
+    {
+     "slug": "redis-phase-07-ai-agents",
+     "title": "Redis for AI agents",
+     "one_liner": "Which agent data can Redis lose, and how do caches, vectors, memory, token streams, limits and tool queues fail when the data is probabilistic, long and paid per token?",
+     "minutes": null,
+     "date": "2026-10-19",
+     "read": false,
+     "file": "2026-10-19-redis-phase-07-ai-agents.html"
     }
-  ]
+   ]
+  },
+  {
+   "slug": "elite-performance",
+   "title": "Performance, concurrency and the machine",
+   "phases": [
+    {
+     "slug": "elite-performance-phase-01a-measure",
+     "title": "Performance, concurrency and the machine — Phase 1A: What one run shows",
+     "one_liner": "Your load test said p99 50 ms while the service stood still for 3 seconds. Which parts of one run can you trust?",
+     "minutes": null,
+     "date": "2026-10-14",
+     "read": false,
+     "file": "2026-10-14-elite-performance-phase-01a-measure.html"
+    }
+   ]
+  },
+  {
+   "slug": "inference-internals",
+   "title": "Inference and AI platform systems",
+   "phases": [
+    {
+     "slug": "inference-internals-phase-00-frame",
+     "title": "Inference Internals, Phase 0: Frame the problem",
+     "one_liner": "Every LLM request runs through one machine with two opposite physics phases: parallel compute-bound prefill and serial memory-bound decode (about 208 input tokens per decode step on an A100) and that split, not the model, explains TTFT, TPOT, the 5x output price, and why one timestamp line can quintuple a bill.",
+     "minutes": 20,
+     "date": "2026-09-14",
+     "read": true,
+     "file": "2026-09-14-inference-internals-phase-00-frame.html"
+    },
+    {
+     "slug": "inference-internals-phase-01-lifecycle",
+     "title": "The Request Lifecycle: tokens, prefill, the KV cache, decode, sampling, and how to measure it all",
+     "one_liner": "One request end to end: the uneven token exchange rate, queue+prefill inside TTFT, the KV formula that sizes provider capacity, why output tokens cost 3-8x, the determinism myth with its measured proof, and the streaming instrument that lets you verify every claim yourself.",
+     "minutes": 100,
+     "date": "2026-09-17",
+     "read": true,
+     "file": "2026-09-17-inference-internals-phase-01-lifecycle.html"
+    },
+    {
+     "slug": "inference-internals-phase-02a-scheduling-memory",
+     "title": "Scheduling and Memory",
+     "one_liner": "How vLLM's scheduler loop, paged KV cache and prefix cache decide your latency, concurrency and bill — revised: unverifiable Orca Figure 10a claim removed per claims-run c3.",
+     "minutes": 150,
+     "date": "2026-09-20",
+     "read": true,
+     "file": "2026-09-20-inference-internals-phase-02a-scheduling-memory.html"
+    },
+    {
+     "slug": "inference-internals-phase-02b-decoding-context",
+     "title": "Chunked Prefill, Constrained Decoding and Context Budgets",
+     "one_liner": "He can explain a mid-stream freeze as a scheduling choice and fix it with a metric and a budget, predict that a strict schema guarantees legal tokens but never a parseable answer, and design a context system where growth is capped before the window, constraints cross the boundary as copied text, and an overflow is answered with a smaller input rather than a repeated one.",
+     "minutes": 150,
+     "date": "2026-09-29",
+     "read": true,
+     "file": "2026-09-29-inference-internals-phase-02b-decoding-context.html"
+    },
+    {
+     "slug": "inference-internals-phase-03a-caching",
+     "title": "The Bill and the Cache",
+     "one_liner": "Read a real invoice from the usage object on both providers, lay out a prompt so the cache hits, prove the hit with one number, and decide from break-even arithmetic whether explicit caching pays.",
+     "minutes": 110,
+     "date": "2026-09-29",
+     "read": true,
+     "file": "2026-09-29-inference-internals-phase-03a-caching.html"
+    },
+    {
+     "slug": "inference-internals-phase-03b-routing-alerting",
+     "title": "Inference Internals — Phase 3B: Routing, Batch and the Cost Alarm",
+     "one_liner": "He can price a cascade against a router, prove an escalation signal with a random control, detect a billing-class regression within ten requests, and bound an agent loop's spend before it happens.",
+     "minutes": 110,
+     "date": "2026-10-01",
+     "read": true,
+     "file": "2026-10-01-inference-internals-phase-03b-routing-alerting.html"
+    },
+    {
+     "slug": "inference-internals-phase-04a-serving",
+     "title": "Serving It Yourself: The Rental Clock, the Flag Map and the Defensible Number",
+     "one_liner": "He can rent a GPU, serve a model on vLLM or SGLang with pinned flags, diagnose a startup failure before renting bigger hardware, and produce an engine comparison he could defend to a colleague.",
+     "minutes": 150,
+     "date": "2026-10-04",
+     "read": true,
+     "file": "2026-10-04-inference-internals-phase-04a-serving.html"
+    },
+    {
+     "slug": "inference-internals-phase-04b-optimizing",
+     "title": "Quantization, Speculation and the Self-Host Decision",
+     "one_liner": "Decide for any serving optimisation whether it needs an eval gate or a load check, pick the right quantization format for the traffic shape, size speculative decoding from the published formula, and answer the self-host question with four numbers.",
+     "minutes": 150,
+     "date": "2026-10-04",
+     "read": false,
+     "file": "2026-10-04-inference-internals-phase-04b-optimizing.html"
+    },
+    {
+     "slug": "inference-internals-phase-05a-client",
+     "title": "The Client Under Stress: Deadlines, Retries and the Signal That Leads",
+     "one_liner": "When the provider breaks, why does your own client decide whether a burst becomes an outage?",
+     "minutes": null,
+     "date": "2026-10-10",
+     "read": false,
+     "file": "2026-10-10-inference-internals-phase-05a-client.html"
+    },
+    {
+     "slug": "inference-internals-phase-05b-observability",
+     "title": "Measuring, Promising and Degrading Well",
+     "one_liner": "Your dashboards are green and the feature is wrong. What do you measure, and what page would have fired?",
+     "minutes": null,
+     "date": "2026-10-10",
+     "read": false,
+     "file": "2026-10-10-inference-internals-phase-05b-observability.html"
+    }
+   ]
+  },
+  {
+   "slug": "kubernetes",
+   "title": "Kubernetes",
+   "phases": [
+    {
+     "slug": "kubernetes-phase-00-why-k8s-exists",
+     "title": "Kubernetes Phase 0 — Why K8s Exists",
+     "one_liner": "Kubernetes in one sentence: a database of desired state plus idle loops that read it, and why that shape, not any feature, is what survives dead nodes and deleted pods.",
+     "minutes": 45,
+     "date": "2026-09-13",
+     "read": true,
+     "file": "2026-09-13-kubernetes-phase-00-why-k8s-exists.html"
+    },
+    {
+     "slug": "kubernetes-phase-01-core-concepts",
+     "title": "Kubernetes Phase 1 — Core Concepts (Pods to VPC CNI)",
+     "one_liner": "The load-bearing phase: pods, Deployments, probes, Services and the gRPC pinning problem, ConfigMap staleness, storage, and the EKS ENI layer, corrected against the live platform (native gRPC probes, EndpointSlices, unmaintained ingress-nginx).",
+     "minutes": 120,
+     "date": "2026-09-19",
+     "read": false,
+     "file": "2026-09-19-kubernetes-phase-01-core-concepts.html"
+    }
+   ]
+  }
+ ],
+ "articles": [
+  {
+   "title": "Why one agent port cost $120k and not a million",
+   "one_liner": "A long agent session recomputes everything it invalidates. Why does prompt assembly order decide how much of the conversation is ever computed twice?",
+   "topic": "",
+   "kind": "",
+   "date": "2026-10-16",
+   "read": false,
+   "file": "2026-10-16-why-one-agent-port-cost-120k-and-not.html"
+  },
+  {
+   "title": "Agents at Anthropic merged 30,000 changes a day. Can a human-scale pipeline survive that?",
+   "one_liner": "Why a serial verification pipeline has a hard ceiling and what Anthropic did 600x past it",
+   "topic": "",
+   "kind": "",
+   "date": "2026-10-16",
+   "read": false,
+   "file": "2026-10-16-agents-at-anthropic-merged-30-000-changes-a.html"
+  },
+  {
+   "title": "The always-ready future that starved every send",
+   "one_liner": "When a hot receive path and a flush timer share one event loop, why does the runtime's own fairness budget fail exactly at peak?",
+   "topic": "",
+   "kind": "",
+   "date": "2026-10-14",
+   "read": false,
+   "file": "2026-10-14-the-always-ready-future-that-starved-every-send.html"
+  },
+  {
+   "title": "Pinterest put a 4B model on 100 GPUs. Was 775 requests a second the model, or the workload?",
+   "one_liner": "When does prefix caching actually buy you throughput, and when is the serving number mostly a decision not to run inference?",
+   "topic": "",
+   "kind": "",
+   "date": "2026-10-12",
+   "read": false,
+   "file": "2026-10-12-pinterest-put-a-4b-model-on-100-gpus.html"
+  },
+  {
+   "title": "Why adding replicas did not fix the slowest replica: sticky routing has a variance floor",
+   "one_liner": "He can predict the load spread of any sticky-session router from two numbers (sessions per replica, replica count), explain why scaling out leaves the spread unchanged, and name the one load-aware fix he could add to his own multi-agent router this week.",
+   "topic": "",
+   "kind": "ai_latest",
+   "date": "2026-10-11",
+   "read": false,
+   "file": "2026-10-11-why-adding-replicas-did-not-fix-the-slowest.html"
+  },
+  {
+   "title": "Week in Review: Tails, Deadlines and What a Number Actually Measures",
+   "one_liner": "A short recall pass over the week's five lessons, three self-checks on older phases with worked arithmetic, and one decision about what comes next.",
+   "topic": "week review",
+   "kind": "",
+   "date": "2026-10-11",
+   "read": false,
+   "file": "2026-10-11-week-review-2026-w41.html"
+  },
+  {
+   "title": "Your eval cannot see the win you are tuning for",
+   "one_liner": "When does an eval score tell you anything, and when is it smaller than its own noise?",
+   "topic": "",
+   "kind": "",
+   "date": "2026-10-10",
+   "read": false,
+   "file": "2026-10-10-your-eval-cannot-see-the-win-you-are.html"
+  },
+  {
+   "title": "When the KV cache overflows, vLLM stops throwing it away",
+   "one_liner": "Does a real serving stack running today do what the phase's memory math says it should with a full KV cache?",
+   "topic": "",
+   "kind": "",
+   "date": "2026-10-10",
+   "read": false,
+   "file": "2026-10-10-when-the-kv-cache-overflows-vllm-stops-throwing.html"
+  },
+  {
+   "title": "Why Netflix's autoscaler could not see a busy job, and what that means for your model server",
+   "one_liner": "Does a production autoscaler confirm that utilization metrics lie about load, and what signal should an LLM serving stack watch instead?",
+   "topic": "",
+   "kind": "",
+   "date": "2026-10-09",
+   "read": false,
+   "file": "2026-10-09-why-netflix-s-autoscaler-could-not-see-a.html"
+  },
+  {
+   "title": "Week review: the freeze, the budget, and the rule that must survive",
+   "one_liner": "Ten minutes to make the week's lessons stick, then point at next week.",
+   "topic": "week review",
+   "kind": "",
+   "date": "2026-10-09",
+   "read": false,
+   "file": "2026-10-09-week-review-2026-w41.html"
+  },
+  {
+   "title": "The 2% Hack Rate and the 67% Leak",
+   "one_liner": "He can read any contamination rate, hack rate or red-team catch rate and state which checker's detection it reports, and he can predict from a Dockerfile whether an eval environment he builds leaks its own answer.",
+   "topic": "",
+   "kind": "ai_latest",
+   "date": "2026-10-09",
+   "read": false,
+   "file": "2026-10-09-the-2-hack-rate-and-the-67-leak.html"
+  },
+  {
+   "title": "Where does the KV cache go when the GPU runs out of room?",
+   "one_liner": "vLLM's answer: evicted KV is not lost, it spills to cheaper memory, and a cache hit from disk still beats one recompute",
+   "topic": "",
+   "kind": "",
+   "date": "2026-10-08",
+   "read": false,
+   "file": "2026-10-08-where-does-the-kv-cache-go-when-the.html"
+  },
+  {
+   "title": "Split the server in two. The median does not move. The p99 does.",
+   "one_liner": "He can predict which latency metric moves first when two different workloads share a GPU, explain why from the mechanism, and name the per-request cost that any split of a pipeline stage must charge.",
+   "topic": "",
+   "kind": "ai_latest",
+   "date": "2026-10-08",
+   "read": false,
+   "file": "2026-10-08-split-the-server-in-two-the-median-does.html"
+  },
+  {
+   "title": "Week review: the full inference machine, from first token to self-host",
+   "one_liner": "The week's mechanics recalled against his own numbers, three older ideas tested cold, and a pointed start on the Phase 4 lab",
+   "topic": "week review",
+   "kind": "",
+   "date": "2026-10-04",
+   "read": false,
+   "file": "2026-10-04-week-review-2026-w40.html"
+  },
+  {
+   "title": "The 408 that was never a timeout",
+   "one_liner": "He can look at a 500 storm or a timeout spike in his own stack and decide whether it is an engine failure or a routing and keepalive failure, reach for the operational fix first, and add the two checks (serving-ability probes, connection liveness) before he changes any code.",
+   "topic": "inference-internals",
+   "kind": "spine_incident",
+   "date": "2026-10-03",
+   "read": false,
+   "file": "2026-10-03-the-408-that-was-never-a-timeout.html"
+  },
+  {
+   "title": "Saturday lab — routing, control groups and the cost alarm",
+   "one_liner": "Two ledger artefacts, a tuned cache-floor threshold, and written numbers for cascade cost, detection latency and single-run variance.",
+   "topic": "inference-internals",
+   "kind": "",
+   "date": "2026-10-03",
+   "read": false,
+   "file": "2026-10-03-lab-inference-internals-phase-03b-routing-alerting.html"
+  },
+  {
+   "title": "The server said 200. It never enforced your constraint.",
+   "one_liner": "The caller set parallel_tool_calls=false, the server accepted it, the model sent two tool calls. Who kept the guarantee?",
+   "topic": "inference-internals",
+   "kind": "",
+   "date": "2026-09-30",
+   "read": true,
+   "file": "2026-09-30-the-server-said-200-it-never-enforced-your.html"
+  },
+  {
+   "title": "The cache hit that served the wrong model",
+   "one_liner": "He can recognize a class of cache bug no hit-rate metric shows, name the mechanism that produces it (clamping two state geometries to one length), and add a warm-versus-cold equality check to any cache he builds, including his own prompt-caching experiments.",
+   "topic": "inference-internals",
+   "kind": "spine_incident",
+   "date": "2026-09-29",
+   "read": true,
+   "file": "2026-09-29-the-cache-hit-that-served-the-wrong-model.html"
+  },
+  {
+   "title": "The decision before the lifecycle: does cache-aware routing actually pay?",
+   "one_liner": "On agentic traffic (43-turn sessions, 142K tokens in per turn), cache-aware sticky routing beats round-robin 2–3× where prefill dominates and buys nothing where decode does, and the stickiness limit τ is derived from one calibration measurement, not tuned.",
+   "topic": "",
+   "kind": "",
+   "date": "2026-09-17",
+   "read": true,
+   "file": "2026-09-17-routing-before-the-lifecycle.html"
+  },
+  {
+   "title": "Why were the dashboards green while the model talked nonsense?",
+   "one_liner": "Two real serving failures where throughput stayed green while the model was wrong: an FP8 KV-view bug that dropped GSM8K to 0.0099 and a disaggregated deploy with a 223-second TTFT from queue saturation. Put a correctness gate beside every performance gate, and follow the queue.",
+   "topic": "Inference internals: correctness gates and queue saturation",
+   "kind": "",
+   "date": "2026-09-16",
+   "read": true,
+   "file": "2026-09-16-healthy-throughput-broken-model.html"
+  },
+  {
+   "title": "Measure recall before you buy infrastructure",
+   "one_liner": "Retrieval owns recall and recall is the ceiling, so measure it per segment before buying any infrastructure; once an agent loop retries, persistence masks retriever weakness and you measure end to end instead.",
+   "topic": "Retrieval / RAG evaluation",
+   "kind": "",
+   "date": "2026-09-13",
+   "read": true,
+   "file": "2026-09-13-measure-recall-before-you-buy-infrastructure.html"
+  },
+  {
+   "title": "Throughput is queue design",
+   "one_liner": "At any seam where a fast producer feeds a slow consumer you either buffer or refuse: MySQL buffers into a relay log and vLLM refuses admission without KV blocks, and every knob on top just picks which latency pays.",
+   "topic": "LLM serving internals and MySQL replication: backpressure and admission control",
+   "kind": "",
+   "date": "2026-09-12",
+   "read": true,
+   "file": "2026-09-12-throughput-is-queue-design.html"
+  }
+ ]
 }

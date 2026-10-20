@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"><base target="_blank">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Request Lifecycle: tokens, prefill, the KV cache, decode, sampling, and how to measure it all</title>
@@ -277,7 +277,7 @@ h2:hover a.anchor,h3:hover a.anchor{opacity:1}
 </div>
 <h2><span class="num">1.1</span> Why does the same text cost different amounts of tokens?</h2>
 
-<p class="why">You know what a token is. Here is the part that costs you money: the tokenizer does not price all text equally. And your agent pays the difference again on every loop step. Not knowing this is how a cost model built on English test data goes wrong by 2–4x when real Hindi traffic arrives.</p>
+<p class="why">You know what a token is. Here is the part that costs you money: the tokenizer does not price all text equally. And your agent pays the difference again on every loop step. Not knowing this is how a cost model built on English test data goes wrong by 2–4.5x when real Hindi traffic arrives.</p>
 
 <h3>Pass 1 — the model: a fixed vocabulary with an uneven exchange rate</h3>
 
@@ -311,7 +311,7 @@ h2:hover a.anchor,h3:hover a.anchor{opacity:1}
 <div data-tab="Where the money goes">
 <ol class="steps">
 <li><b>Agent history multiplies the cost.</b> Your agent loop re-sends the whole conversation on each step. A tool that returns pretty-printed JSON on step 1 is not billed once. It is billed again on step 2, step 3, every step after. Ten steps later one verbose tool result has been billed ten times.</li>
-<li><b>Multilingual products pay a hidden multiplier.</b> The same support ticket in Hindi can cost 2–4x the tokens of its English translation. If support traffic is half Hindi and you only measured English, your per-conversation cost model is wrong.</li>
+<li><b>Multilingual products pay a hidden multiplier.</b> The same support ticket in Hindi can cost 2–4.5x the tokens of its English translation. That range is the table's English 4.0–4.5 chars/token against Hindi 1.0–2.0. If support traffic is half Hindi and you only measured English, your per-conversation cost model is wrong.</li>
 <li><b>Schema design is cost design.</b> Field names in your structured outputs are tokens. <code>"customer_sentiment_classification"</code> costs more than <code>"sentiment"</code>. Across millions of calls, that is a real, recurring price difference.</li>
 </ol>
 </div>

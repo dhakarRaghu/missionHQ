@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Measuring, Promising and Degrading Well</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Inference Internals · Phase 5B</div><h1>Measuring, Promising and Degrading Well</h1><p class="subtitle">Your dashboards are green and the feature is wrong. What do you measure, and what page would have fired?</p></header>
+<p>Phase 5A left you with a client that fails in seconds on a dead stream, sends less under overload, and writes one record per call into runs.jsonl. Last Tuesday those records contain a two-hour stretch where streams froze for 900ms between chunks and every tenth answer stopped mid-sentence. Your availability graph shows 99.9% green and TTFT p95 inside target for the whole stretch, and the first report of the freeze comes from a user, three days later.</p>
+
+<p>The records saw the incident and the dashboards did not, so the gap is not in the data but in what you chose to count. This phase asks four questions about that choice. Which failures does an availability-and-latency dashboard stay blind to, and what must become its own indicator before you can promise anything? How does an alert page while the incident is happening instead of three hours after it ended? When you record a call, whose names and whose numbers are you actually recording? And when the provider is down, which rescue designs make the day worse?</p>
+<p>This lesson teaches five ideas. They are listed here so you can see where the lesson is going. They will read more clearly once each has been explained below, so come back to this list at the end.</p>
+<ol class="concepts"><li id="c1"><b>A green availability-and-latency dashboard is consistent with a broken LLM feature, so quality and smoothness each need their own SLI as a ratio of good events, because only a ratio has an error budget.</b> <span>Predict which failures his dashboards cannot see and decide what must be its own indicator.</span></li><li id="c2"><b>An alert that fires at the right time must pair a long window that measures severity with a short window that asks whether the incident is still happening, because neither alone can do both.</b> <span>Compute burn by hand, see why one window must page on noise or on ended incidents, and spot when the math cannot run at all.</span></li><li id="c3"><b>The client sees chunks and the server sees tokens, and SDK retries happen inside the span, so by default the 429s never happened and every client-side &#x27;time to first token&#x27; lies.</b> <span>Name his own metrics honestly, and decide where retries become visible.</span></li><li id="c4"><b>Counting a truncated answer as an HTTP-level error corrupts both rates at once: it pumps the error rate and buries the truncation rate, neither of which then means anything.</b> <span>Predict what a one-line classifier change does to his availability and burn numbers, and classify the four failure kinds for the record.</span></li><li id="c5"><b>Failover changes the instance and fallback changes the mechanism: failover is usually safe, while fallback is untested code that runs first on the worst day, and an LLM fallback can succeed and be wrong.</b> <span>Classify any proposed resilience design as retry, failover or fallback, and require the continuous-exercise test before approving a fallback.</span></li></ol>
+<h2 data-kind="orientation">What the records you already have can promise</h2>
+<div class="cards" data-cols="2">
+<div class="card"><h4>One record per call</h4><p>Phase 5A's client writes a <dfn>run record</dfn>, one structured row per API call, through <code>run_recorder.py</code>. Each record holds what that call did: its latency, its outcome, its finish reason. This phase reads those records; it does not collect new data.</p></div>
+<div class="card"><h4>TTFT measures the queue</h4><p>Phase 1 showed that <dfn>TTFT</dfn> reads the provider's queue depth. It is the time from sending the request to the first chunk coming back. Your 5A client already uses it as the signal that says send less.</p></div>
+<div class="card"><h4>The gaps between chunks</h4><p>Phase 2 recorded the time between chunks of the <dfn>SSE stream</dfn>. That is the format that delivers one answer as many small chunks over one open connection. A frozen stream appears there as one very long gap, and the records already carry those gaps.</p></div>
+<div class="card"><h4>Measured operating points</h4><p>Phase 4B ended with targets you measured yourself, not vendor numbers. The same rule applies here: a promise about this feature is built from your own records. So the thresholds come from what your traffic actually does.</p></div>
+</div>
+
+<p>These four pieces are the raw material. The records hold latencies, gaps and outcomes. The earlier phases supply what each field means. What is missing is the step from having records to making a promise from them.</p>
+
+<p>The running case shows the cost of that missing step. For two hours, streams froze and answers arrived cut off, and the run records captured all of it. Availability stayed high because truncated and frozen answers still returned 200 OK. Nothing read the records, so nothing noticed. This phase is about reading them: turning them into indicators, promises, alerts and honest names. It starts with the question the incident raises: why was every dashboard green the whole time?</p>
+<h2 data-concept="c1">Why is every dashboard green during the incident?</h2>
+<p class="why">Green graphs and a broken feature agree with each other, because the graphs watch the wrong events.</p>
+
+<p>For two hours your run records held the freeze and the truncations, and nothing read them. The truncated and frozen answers each returned 200 OK, so the latency indicator stayed green. This section asks why, and it starts with the report your records already produce.</p>
+
+<h3>The report that saw the incident twice</h3>
+
+<p>Running <code>slo_report.py --demo</code> over the 2,000-record demo ledger gives four rows. The incident sits in two of them.</p>
+
+<table>
+<tr><th>indicator</th><th>target</th><th>actual</th><th>verdict</th><th>budget used</th></tr>
+<tr><td>availability</td><td>99.50%</td><td>99.30%</td><td class="bad">FAIL</td><td>140%</td></tr>
+<tr class="pick"><td>TTFT &le; 1000 ms</td><td>95.00%</td><td>99.60%</td><td class="ok">PASS</td><td>8%</td></tr>
+<tr><td>no freeze &gt; 500 ms</td><td>99.00%</td><td>89.93%</td><td class="bad">FAIL</td><td>1007%</td></tr>
+<tr><td>answer completed</td><td>99.00%</td><td>98.19%</td><td class="bad">FAIL</td><td>181%</td></tr>
+</table>
+
+<p>Read the TTFT row first. <dfn>TTFT</dfn> is the time from sending the request to the first token coming back. Phase 1 showed it reads the provider's queue depth. It passes at 99.60% during the incident, because a frozen stream still delivers its first token on time. The freeze row fails at 89.93% and spends ten times its budget in the same period. Two indicators measured the same hours, and they disagreed because they counted different events.</p>
+
+<p>Availability fails too, but for an unrelated reason. The demo adds a random 0.4% error rate against a 99.5% target. So of the four rows, only the smoothness row and the completeness row saw your running case. Those are the two rows a standard dashboard does not have.</p>
+
+<details class="predict"><summary>Predict: availability is 99.9% and TTFT p95 is 800 ms. Ten users say answers were cut off mid-sentence, and one says answers seem dumber. Which graph shows any of that?</summary>
+<p>Neither graph shows it. A truncated answer returns 200 OK, so availability stays high. It also gets its first token quickly, so TTFT stays low. "Dumber" appears on no graph here either, because nothing in these two indicators reads the answer's content at all. You learn about both failures from the users, weeks in, with little recorded to explain them.</p>
+</details>
+
+<h3>The vocabulary: indicator, target, budget</h3>
+
+<p>Three terms carry the rest of this phase, and each is a ratio or a number built from a ratio.</p>
+
+<ul>
+<li>An <dfn>SLI</dfn>, service level indicator, is the measured ratio of good events to all events of one kind. The smoothness row is a ratio: streams with no gap above 500 ms, over all streams.</li>
+<li>An <dfn>SLO</dfn>, service level objective, is the target you set for that ratio. 99.0% on the freeze row is a target, not a measurement.</li>
+<li>The <dfn>error budget</dfn> is 100% minus the target: the failure you are allowed. At 99.9% over 30 days the budget is about 43 minutes, and the freeze row spent 1007% of its own.</li>
+</ul>
+
+<p>The ratio form is the point. A count of failures tells you how many, and a ratio tells you how much of your allowance is gone. Alerting on budgets works only because each SLI is a proportion of good events.</p>
+
+<h3>Why the framework expected this failure</h3>
+
+<p>The Google SRE Workbook already names indicator types beyond availability and latency. It defines a <b>quality</b> type, the proportion of responses served in an undegraded state. It defines a <b>correctness</b> type, whether the right answer came back. These types exist because some systems can serve degraded results while staying up. An LLM feature is such a system, so each hidden failure mode needs its own indicator of good events.</p>
+
+<p>That gives the four rows of the report, each counting a different good event.</p>
+
+<table>
+<tr><th>indicator</th><th>good event</th><th>what it catches</th></tr>
+<tr><td>availability</td><td>the call returned</td><td>outages</td></tr>
+<tr><td>TTFT</td><td>first token inside the target</td><td>queueing, prompt bloat, cache regressions</td></tr>
+<tr><td>smoothness</td><td>no gap above the target</td><td>the stream freeze from your running case</td></tr>
+<tr><td>completeness</td><td>finish reason is not "length"</td><td>truncation, which an uptime metric counts as a win</td></tr>
+</table>
+
+<p>The wrong belief here is reasonable: if the answers turned systematically bad, some existing metric would move. The demo shows it does not, because 200 OK and fast first tokens are compatible with cut-off answers. The belief fails on the definition of the events being counted, not on the quality of the monitoring.</p>
+
+<h3>It happened to the provider, at full scale</h3>
+
+<p>Anthropic's postmortem of 17 September 2025 describes three overlapping infrastructure bugs that degraded Claude's output for weeks. A routing error hit 0.8% of Sonnet 4 requests and peaked at 16% on August 31 after a load-balancing change. A TPU misconfiguration corrupted tokens, and a compiler bug affected token selection. Availability dashboards were unaffected throughout. Anthropic's own evaluation suite missed what users reported, in part because Claude often recovers well from isolated mistakes. The provider ran weeks of degraded output that its own monitoring could not see. It had far more monitoring resources than you have.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Anthropic, "A postmortem of three recent issues", 17 September 2025, verified 2026-10-10. The routing bug: 0.8% of Sonnet 4 requests, 16% peak on August 31, active August 5 to September 18. The demo report numbers come from <code>slo_report.py --demo</code> on the 2,000-record ledger. The workbook quality and correctness SLI types: Google SRE Workbook, chapter on implementing SLOs, as cited in the phase's references.</p>
+</details>
+
+<p>The same report shape is what you build in the lab. Exercise E9 runs <code>slo_report.py --demo</code> and asks which row caught the incident, and E8 shows the gap percentiles it reads. The question E9 answers is the one this section opened with: which indicator saw the incident your availability graph missed.</p>
+
+<div class="keypoints">
+<p class="remember">A feature can be up, fast and wrong; quality and smoothness each need their own ratio SLI.</p>
+<p class="trap">Trusting availability and latency alone costs you weeks of user-reported failures that your records already contained.</p>
+<p class="try">Run <code>python phase05_operations/slo_report.py --demo</code> and find the indicator that passes while the freeze row fails at 89.93%.</p>
+</div>
+
+<p>Four indicators now exist, but the quality row is still a mean score in your head. The next section asks why a mean can never page you.</p>
+<h2 data-concept="c1">Why can a mean score never page you?</h2>
+<p class="why">A mean quality score cannot spend an error budget, so it can never page you.</p>
+
+<p>The section above gave you four ratio indicators, each a count of good events over all events. This is because only a ratio has an error budget. The quality row is still a score in your head. This section shows what must happen to that score before it can alert. It also shows how much trust the score itself has earned.</p>
+
+<p>Back in the running case: three of the four rows of <code>slo_report.py</code> are ratios by construction. A call either returned or it did not, a gap either exceeded 500 ms or it did not. Quality has no natural dividing line. A model graded one answer 0.82 out of 1.0. Is that good? Until you answer that question per record, you have no fourth row.</p>
+
+<h3>The threshold comes first, the number second</h3>
+
+<p>The fix is one step. A <dfn>judge</dfn> is a model that scores another model's output against a rubric. The judge's score is a continuous number. A continuous number has no error budget. This is because a budget is the difference between 100% and a target on a proportion. So you threshold the score into a per-record decision: good or bad. The SLI is then the proportion of records that reach the threshold. It sits next to availability and TTFT with the same arithmetic. Pydantic Logfire ships exactly this shape: an evaluation score over a threshold counts as a good event. The same burn tiers apply.</p>
+
+<div class="compare">
+<div class="wrong"><p><b>"The mean judge score is 0.87, target 0.85."</b> A mean has no budget. One terrible day moves it by 0.01, and there is no defined point at which anyone must act.</p></div>
+<div class="right"><p><b>"91.2% of records scored at least 0.8, target 99%."</b> A ratio has a budget: 1% allowed. The month it drops to 98.5%, burn is 1.5x, and the budget is gone after two-thirds of the period.</p></div>
+</div>
+
+<h3>Two limits on how tight the quality SLO can be</h3>
+
+<p>Once the threshold exists, two facts about judges bound how tight the target may be.</p>
+
+<ol>
+<li><b>The judge disagrees with people.</b> The best-known study of LLM judges reports about 85% agreement with human experts when ties are excluded, and 66% with ties counted; two humans agree with each other 81% on the same task. A tool that is wrong at least 15% of the time cannot certify 99.9% on a single request. What it supports is an aggregate rate over many records: you can say "the proportion above threshold fell three points this week", not "request 4,712 was good".</li>
+<li><b>Per-step quality multiplies down.</b> If each independent step of a multi-step task is good 75% of the time, three good steps in a row happen 0.75 × 0.75 × 0.75, about 42% of the time. A step-level target that looks acceptable composes into an outcome the user calls broken. Set the SLO on the outcome the user cares about, not on the step.</li>
+</ol>
+
+<div class="calc" id="s3-steps">
+<h4>Step quality compounds into outcome quality</h4>
+<label>Per-step good rate <input type="range" name="rate" min="50" max="99" value="75">
+<span class="val" data-val="rate"></span>%</label>
+<label>Steps <input type="range" name="steps" min="1" max="10" value="3">
+<span class="val" data-val="steps"></span></label>
+<div class="result">Outcome good <b data-out="outcome"></b> of the time</div>
+<script>kit.calc('#s3-steps', function(v){ return {outcome: (Math.pow(v.rate/100, v.steps)*100).toFixed(1)+'%'}; });</script>
+</div>
+
+<p>Move the slider to 99% per step and ten steps: the outcome is good only 90.4% of the time. This is why the judge's loose accuracy still yields a usable outcome SLO. It is also why a tight per-step promise was never on the table.</p>
+
+<h3>The floor under every quality metric</h3>
+
+<p>One more bound sits below the threshold, and it is not about the judge. Even with the same prompt, the same model and every sampling knob off, the output varies. In 2025, Thinking Machines Lab sent one prompt 1,000 times at temperature 0 to a shared endpoint serving Qwen3-235B. It produced 80 unique completions, all identical for 102 tokens and splitting at token 103. The cause is that GPU kernels are not batch-invariant. The batch size changes with server load, so the arithmetic changes with the batch size. This variation with zero intended change is the <dfn>noise floor</dfn> of the system.</p>
+
+<p>The noise floor ends a tempting idea: comparing answers text-for-text against a known-good output as a quality floor. Under this finding, exact-text comparison flags nearly every run as a regression. This is because the expected text is only one of 80 honest answers. Your quality metric has to tolerate the floor. The only way to know how much floor you have is to measure it. Send one fixed input many times, score each output with your quality metric, and read the spread. What sits above that spread is signal; what sits inside it is weather.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Judge agreement figures: "Judging LLM-as-a-Judge" (Zheng et al., arXiv 2306.05685), cited from the phase and not re-verified. Temperature-0 experiment: Thinking Machines Lab, "Defeating Nondeterminism in LLM Inference", verified 2026-10-10. The post confirms 80 unique completions and divergence at token 103. The threshold-based quality SLI is how Pydantic Logfire implements it.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">Threshold the judge score per record, then the proportion of good records is an SLI with a budget.</p>
+<p class="trap">Alerting on a mean score means the day your quality collapses, the mean drifts down gently and nobody is paged.</p>
+<p class="try">Send one fixed prompt five times at temperature 0 and diff the outputs; whatever differs is your noise floor showing.</p>
+</div>
+
+<p>You can now turn a score into a ratio and say how tight its target may be. What a ratio still cannot do is wake anyone tonight. So the next section asks who gets paged and when.</p>
+<h2 data-concept="c2">Does anyone get paged, and when?</h2>
+<p class="why">The report tells you the month will fail, and only burn rate tells you whether to wake anyone tonight.</p>
+
+<p>Your four indicators can now say how the month is going, but they read the whole period at once. A report run on day 20 counts the frozen streams from last week. It counts the healthy traffic from this morning in the same pile. That pile is a report, not an alert, because it cannot say whether the bad thing is happening right now.</p>
+
+<h3>The picture: one number for speed, two windows for the verdict</h3>
+
+<p>Your error budget, the failure the SLO allows, is a quantity of bad events spread over 30 days. <dfn>Burn rate</dfn> is how fast you are consuming that budget. It is computed as the observed bad rate divided by the allowed bad rate. A <dfn>long window</dfn> measures the bad rate over hours or days and answers how severe the incident is. A <dfn>short window</dfn>, one twelfth of the long one, measures the last few minutes. It answers whether the incident is still happening. An alert fires only when both windows are burning, so severity alone cannot page and noise alone cannot page.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 640 210">
+  <line x1="40" y1="170" x2="600" y2="170" stroke="currentColor" stroke-width="1"/>
+  <rect x="140" y="120" width="180" height="50" fill="var(--warn)" opacity="0.35"/>
+  <text x="150" y="112" fill="currentColor" font-size="11">freeze, hours 5 to 8</text>
+  <rect x="60" y="80" width="240" height="18" fill="var(--accent)" opacity="0.35"/>
+  <text x="60" y="74" fill="currentColor" font-size="11">long window at hour 8: still burning (10.07x)</text>
+  <rect x="290" y="150" width="26" height="20" fill="var(--ok)" opacity="0.5"/>
+  <text x="322" y="162" fill="currentColor" font-size="11">short window: quiet (0.17x)</text>
+  <text x="40" y="195" fill="currentColor" font-size="11">hour 0</text>
+  <text x="560" y="195" fill="currentColor" font-size="11">hour 10</text>
+  <text x="40" y="60" fill="currentColor" font-size="12">Illustration of the demo incident, not measured timing.</text>
+</svg>
+<figcaption>The long window still counts the freeze after it ended, and the short window shows the present is clean, so nobody pages.</figcaption>
+</figure>
+
+<details class="predict"><summary>Predict: the monthly report says the SLO will fail, but the freeze ended three hours ago. Does anyone get paged, and which number decides?</summary>
+<p>No one is paged, and the short window decides it. The long window still holds the frozen hours, so its burn rate stays high and says the incident was severe. The short window sees only the last few minutes, which are healthy, so its burn rate is near zero. Because the alert needs both windows burning, an ended incident produces a review note instead of a page. If you alert on the long window alone, your phone rings at 3 a.m. for a problem that fixed itself three hours earlier.</p>
+</details>
+
+<h3>What burn numbers mean</h3>
+
+<p>Burn 1 means the bad rate sits exactly on the SLO, so the budget lasts the whole 30 days. Burn 10 means you are failing ten times faster than allowed, so the budget is gone in 3 days. Burn 1000 empties a 99.9% budget in about 43 minutes. In the demo, the freeze indicator computed burn 10.07x over the full ledger. That prints as the budget gone after 10% of the period.</p>
+
+<div class="stats">
+<div class="stat"><b>burn 1</b><span>budget lasts 30 days</span></div>
+<div class="stat"><b>burn 10</b><span>budget gone in 3 days</span></div>
+<div class="stat"><b>burn 1000</b><span>budget gone in 43 min</span></div>
+</div>
+
+<p>The same demo over the last 300 minutes gives the freeze indicator a burn of 0.17x. One incident, two honest numbers, because each window answers a different question.</p>
+
+<h3>Why neither window works alone</h3>
+
+<p>The wrong belief here is reasonable. You would think one window sized between noise and delay could do both jobs. It cannot, because the two jobs pull the window in opposite directions.</p>
+
+<ul>
+<li>A pure long window moves slowly by design, so it keeps paging long after the incident resets. The workbook measured a 36-hour reset time for a single-window alert, versus about 5 minutes for the two-window rule.</li>
+<li>A pure short window reacts fast, so a few normal failures cross the threshold and you get paged on noise.</li>
+<li>Requiring both means the page comes only when something severe is happening now, and the two-window design measured a reset time of about 5 minutes.</li>
+</ul>
+
+<h3>The working recipe</h3>
+
+<p>The workbook publishes three tiers, and the short window is always one twelfth of the long one. These figures assume a 99.9% target over 30 days.</p>
+
+<table>
+<thead><tr><th>action</th><th>long window</th><th>short window</th><th>burn rate</th><th>budget consumed</th></tr></thead>
+<tbody>
+<tr><td class="bad">page</td><td>1 hour</td><td>5 minutes</td><td>14.4</td><td>2%</td></tr>
+<tr><td class="bad">page</td><td>6 hours</td><td>30 minutes</td><td>6</td><td>5%</td></tr>
+<tr><td class="ok">ticket</td><td>3 days</td><td>6 hours</td><td>1</td><td>10%</td></tr>
+</tbody>
+</table>
+
+<p>You can check the top row by hand, because burn multiplied by window length gives budget consumed:</p>
+
+<pre><code data-lang="text">14.4 x 1 hour / 720 hours = 2% of the monthly budget in one hour</code></pre>
+
+<div class="calc" id="s4-burn">
+<h4>Burn rate from a bad rate</h4>
+<label>Bad rate (%) <input type="range" name="bad" min="1" max="40" value="7"><span class="val" data-val="bad"></span></label>
+<div class="result">Burn against a 99.5% target <b data-out="burn"></b></div>
+<div class="result">Budget gone after <b data-out="time"></b></div>
+<script>kit.calc('#s4-burn', function(v){ var b=(v.bad/100)/0.005; return {burn: b.toFixed(2)+'x', time: (720/b).toFixed(0)+' hours'}; });</script>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Tier numbers, the one-twelfth short-window rule, and the 36-hour versus 5-minute reset measurement come from the Google SRE Workbook chapter "Alerting on SLOs", verified 2026-10-10. The demo figures, burn 10.07x over the whole period and 0.17x over the last 300 minutes, come from running <code>python phase05_operations/slo_report.py --demo --window-minutes 300</code> on 2026-09-17.</p>
+</details>
+
+<h3>When the math cannot run</h3>
+
+<p>This whole recipe assumes traffic, and your first production LLM feature will not have much. The workbook states it plainly: for low-traffic services a single failed request can read as burn rate 1,000. It can page spuriously. Three mitigations exist, and each costs you something different.</p>
+
+<ul>
+<li>Generate artificial traffic so the denominator is never tiny, at the cost of extra provider bill.</li>
+<li>Group several low-traffic services into one monitored group, at the cost of not knowing which one failed.</li>
+<li>Lower the SLO or lengthen the window, at the cost of slower detection.</li>
+</ul>
+
+<div class="keypoints">
+<p class="remember">Alert on burn rate over two windows: the long one says how bad, the short one says still happening.</p>
+<p class="trap">One window must choose between paging on noise and paging hours after the incident reset.</p>
+<p class="try">Run <code>python phase05_operations/slo_report.py --demo --window-minutes 300</code> and compare the freeze row across the two tables.</p>
+</div>
+
+<p>Your indicators and alerts are now honest about what you record. But the records themselves carry names. So the next section asks what your client is actually allowed to call a token.</p>
+<h2 data-concept="c3">What is your client actually allowed to call a token?</h2>
+<p class="why">The client sees chunks and the server sees tokens, so its field must say chunk.</p>
+
+<p>Your burn alerts now fire at the right time. Every number they read comes from a run record. Each field name in it claims something about what the client saw. In the running case, <code>run_recorder.py</code> writes one latency field per call. If that field says token while the code timed a chunk, every dashboard above it claims something false.</p>
+
+<p>The answer arrives as an SSE stream, the response format that delivers many small chunks over one open connection. A chunk is not a token, because one chunk may carry several tokens and the next may carry none. Only the server sees tokens leave the model. So only it can time TTFT, the wait from request to first token. What your client can time is the <dfn>time to first chunk</dfn>. It is the seconds from the request to the first chunk arriving.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" role="img" aria-label="Timeline of one streamed request. Chunks arrive at 120, 340 and 600 milliseconds. The first two carry no tokens. The third carries four tokens at once.">
+<defs>
+<marker id="s5-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+</marker>
+</defs>
+<text x="170" y="70" text-anchor="middle" font-size="12" fill="currentColor">gen_ai.response.time_to_first_chunk = 120 ms</text>
+<line x1="110" y1="84" x2="230" y2="84" stroke="currentColor" stroke-width="1" marker-start="url(#s5-arrow)" marker-end="url(#s5-arrow)"/>
+<text x="110" y="140" text-anchor="middle" font-size="12" fill="currentColor">request sent</text>
+<circle cx="110" cy="156" r="6" fill="var(--warn)"/>
+<rect x="221" y="134" width="18" height="22" rx="3" fill="var(--muted)" stroke="currentColor" stroke-opacity="0.35"/>
+<text x="230" y="122" text-anchor="middle" font-size="12" fill="currentColor">ping · 0 tokens</text>
+<rect x="441" y="134" width="18" height="22" rx="3" fill="var(--muted)" stroke="currentColor" stroke-opacity="0.35"/>
+<text x="450" y="122" text-anchor="middle" font-size="12" fill="currentColor">empty delta · 0 tokens</text>
+<rect x="672" y="134" width="76" height="22" rx="3" fill="var(--accent)" stroke="currentColor" stroke-opacity="0.35"/>
+<line x1="691" y1="134" x2="691" y2="156" stroke="currentColor" stroke-opacity="0.4"/>
+<line x1="710" y1="134" x2="710" y2="156" stroke="currentColor" stroke-opacity="0.4"/>
+<line x1="729" y1="134" x2="729" y2="156" stroke="currentColor" stroke-opacity="0.4"/>
+<text x="750" y="122" text-anchor="end" font-size="12" fill="currentColor">first text, 4 tokens</text>
+<line x1="80" y1="156" x2="752" y2="156" stroke="currentColor" stroke-width="1.2" marker-end="url(#s5-arrow)"/>
+<line x1="230" y1="156" x2="230" y2="166" stroke="currentColor"/>
+<line x1="450" y1="156" x2="450" y2="166" stroke="currentColor"/>
+<line x1="710" y1="156" x2="710" y2="166" stroke="currentColor"/>
+<text x="230" y="182" text-anchor="middle" font-size="12" fill="currentColor">120 ms</text>
+<text x="450" y="182" text-anchor="middle" font-size="12" fill="currentColor">340 ms</text>
+<text x="710" y="182" text-anchor="middle" font-size="12" fill="currentColor">600 ms</text>
+<text x="80" y="212" font-size="12.5" fill="currentColor">Four tokens share one arrival time at 600 ms, and the stream never says when token 1 was generated.</text>
+</svg>
+<figcaption>What the client can honestly name is 120 ms, the first chunk of any kind. Token births are invisible on the wire. Illustration, not measured.</figcaption>
+</figure>
+
+<details class="predict">
+<summary>Predict: the ping arrives at 120 ms and the first text at 600 ms. What number does a client-side "time to first token" record?</summary>
+<p>Nothing honest. If the code times the first chunk of any kind, it records 120 ms, the arrival of a ping with no text in it. If it waits for content, it records 600 ms, the arrival of one chunk carrying four tokens at once. Neither is the moment a token was generated. The client must record time to first chunk and leave token timing to the server.</p>
+</details>
+
+<p>Nothing in the stream marks a token's birth time, and three chunk behaviours make it unrecoverable on the client side:</p>
+
+<ul>
+<li>The server may buffer several tokens and send them as one chunk, so one arrival time covers several different generation times.</li>
+<li>Pings and empty deltas arrive with no content, so the first chunk can appear before any token exists.</li>
+<li>One provider pads chunks to similar sizes against side-channel attacks, so chunk bytes cannot stand in for a token count.</li>
+</ul>
+
+<p>So the OpenTelemetry GenAI conventions, the standard vocabulary of field names for LLM telemetry, split the measurement in two. In that vocabulary your call is one <dfn>span</dfn>, a single timed operation in a trace. A field on the span claims that the operation itself observed it. The client observes a chunk arrival, and the server observes a token leaving the model. So each side gets its own name.</p>
+
+<table>
+<tr><th>Name</th><th>Where it lives</th><th>Its own definition</th></tr>
+<tr><td><code>gen_ai.response.time_to_first_chunk</code></td><td>client span attribute, seconds</td><td>"time to receive the first chunk... in the response stream"</td></tr>
+<tr><td><code>gen_ai.server.time_to_first_token</code></td><td>server metric, seconds</td><td>"time to generate first token for successful responses"</td></tr>
+</table>
+
+<p>A client that records "time to first token" claims a server-side event it never saw. <code>run_recorder.py</code> follows the spec by naming the chunk. The matching histograms keep the same honesty. On the branch this course read, they are <code>gen_ai.client.inference.time_to_first_chunk</code> and <code>gen_ai.client.inference.time_per_output_chunk</code>, and the whole call is <code>gen_ai.client.inference.duration</code>.</p>
+
+<div class="callout warn"><b>These names move.</b> An earlier draft of this course recorded <code>gen_ai.client.operation.time_to_first_chunk</code>, and the same repository now says <code>gen_ai.client.inference.time_to_first_chunk</code>. There are no release tags and the stability is development, so pin the commit you read and expect renames.</div>
+
+<h3>The libraries do not record it for you</h3>
+
+<p>You cannot buy your way out of naming it yourself. The specification repository generates a conformance report. It runs 13 real client libraries against a mock server and validates their telemetry:</p>
+
+<table>
+<tr><th>Attribute</th><th>Libraries that emit it</th></tr>
+<tr><td><code>gen_ai.operation.name</code></td><td>12 to 13 of 13</td></tr>
+<tr><td><code>gen_ai.usage.input_tokens</code></td><td>12 to 13 of 13</td></tr>
+<tr><td><code>gen_ai.response.finish_reasons</code></td><td>12 to 13 of 13</td></tr>
+<tr class="pick"><td><code>gen_ai.response.time_to_first_chunk</code></td><td class="bad">0 of 13</td></tr>
+<tr><td><code>gen_ai.request.stream</code></td><td>1 of 13</td></tr>
+<tr><td><code>gen_ai.request.temperature</code></td><td>1 of 13</td></tr>
+</table>
+
+<p>The reference scenario for one provider does stream, with <code>stream=True</code> and usage included. It still never sets the first-chunk attribute, so the reference client does not follow its own recommendation. Measure chunk timing in your own code, as <code>run_recorder.py</code> does.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The two definitions are quoted from <code>registry.yaml</code> (span attribute) and <code>metrics.yaml</code> (server metric) in the <code>open-telemetry/semantic-conventions-genai</code> repository, main branch, read 2026-10-10. The repository has no release tags and every definition carries development stability. On the same date the client histograms were named <code>gen_ai.client.inference.*</code>, an earlier draft of this course used <code>gen_ai.client.operation.*</code>, and <code>gen_ai.client.operation.duration</code> carried a note not to report it for inference operations. The conformance counts are cited from the course phase's reading of the repository's generated report and were not re-verified in this run.</p>
+</details>
+
+<p>Run <code>python phase05_operations/run_recorder.py --self-test</code> and find the check "first-token uses the SPEC name, not an invented one". It exists because the recorder's first draft invented <code>app.gen_ai.ttft_ms</code> on the assumption that no standard name existed, and one did, in seconds. Check the spec before you invent a name. The lab then continues this: E12 finds the chunk and token names in code, and E13 records one real call through this recorder.</p>
+
+<div class="keypoints">
+<p class="remember">Clients see chunks, servers see tokens, and only servers can time a token.</p>
+<p class="trap">Trusting auto-instrumentation here means the first-chunk attribute is never recorded at all.</p>
+<p class="try">Run <code>python phase05_operations/run_recorder.py --self-test</code> and read the first-token check.</p>
+</div>
+
+<p>Your latency names are now honest, but the span that carries them still covers the whole retried operation. The rejections the previous lesson counted as load leave no trace in it. So the next section asks where your 429s went.</p>
+<h2 data-concept="c3">Where did your 429s go?</h2>
+<p>The names on your latency fields are honest now. The second half of the problem uses the same rule that gave you the span: the span is also the container that hides your rejections.</p>
+
+<p>Phase 5A taught you to treat a 429 as a capacity report you must read. The OpenTelemetry span guidance says a span should cover the whole <dfn>logical operation</dfn>, meaning the call as your code sees it, with every automatic retry inside it. Add the verified SDK default of two retries, and the common failure shape in a rate-limited month disappears from the record.</p>
+
+<p>Here is what one slow Tuesday afternoon call looks like on the wire, and what the span keeps of it.</p>
+
+<div class="lanes" id="s6-retryspan" data-play>
+  <h4>Three wire attempts inside one span (illustration, not measured)</h4>
+  <div class="lane" data-label="on the wire">
+    <i class="bad" style="--w:90" data-t="429, 40 ms"></i><i class="wait" style="--w:210" data-t="backoff 210 ms"></i>
+    <i class="bad" style="--w:90" data-t="429, 45 ms"></i><i class="wait" style="--w:420" data-t="backoff 420 ms"></i>
+    <i class="prefill" style="--w:300" data-t="success"></i>
+  </div>
+  <div class="lane" data-label="the span">
+    <i class="idle" style="--w:90"></i><i class="idle" style="--w:210"></i>
+    <i class="idle" style="--w:90"></i><i class="idle" style="--w:420"></i>
+    <i class="decode" style="--w:300" data-t="one clean success"></i>
+  </div>
+  <p class="at" data-step="1">Step 1: the provider rejects the request with a 429 after 40 ms. The SDK records nothing; it sleeps and tries again.</p>
+  <p class="at" data-step="3">Step 3: a second 429, a second backoff. Two capacity reports have arrived and the span shows an empty lane.</p>
+  <p class="at" data-step="5">Step 5: the third attempt succeeds. The span covers all three attempts and the two sleeps, and records one success.</p>
+  <p class="at" data-step="all">Illustration drawn from the span rule and the SDK default of two retries, not from a measured trace.</p>
+</div>
+
+<p>The mechanism, step by step:</p>
+
+<ol>
+  <li>The SDK sends your request and gets a 429. It waits, because 429 is on its retry list from Phase 5A.</li>
+  <li>The SDK retries up to twice inside the same call. From your code's view, one call is still running.</li>
+  <li>The third attempt succeeds. The span, which covers the whole logical operation, closes with a success status.</li>
+  <li>OpenTelemetry's guidance says not to record errors that were retried and handled, so the two rejections leave no record.</li>
+</ol>
+
+<p>The cost lands on the signals you built in Phase 5A. Your breaker trips on observed pressure, and your capacity review reads rejection counts. Both now read a month of heavy rate limiting as a month of clean successes. The provider's status page and your own bill will disagree with your traces, and your traces will look wrong for claiming it, because <b>the rejections happened while the span kept one success</b>.</p>
+
+<div class="callout warn"><p>A month of rate limiting under sustained pressure records zero rejections by default. Your 429-based signals are reading an empty set.</p></div>
+
+<p>Two escapes make rejections visible. Each has a price.</p>
+
+<ul>
+  <li><b>Set <code>max_retries=0</code> and retry in your own code.</b> Each attempt becomes its own call, so every 429 is a record you classify with the Phase 5A header-reading rules. The price is that you now own backoff and jitter, which the SDK did competently.</li>
+  <li><b>Instrument the HTTP layer below the SDK.</b> Every wire attempt gets its own low-level span, and the SDK span stays clean on top. The price is trace volume: one logical call now produces more spans, and a retry storm produces many.</li>
+</ul>
+
+<p>This is a real choice, not a bug to patch. If you keep the default, retry logic is tested code but your rejection counts are fiction. If you take either escape, the counts are honest and you own more machinery. The minimum useful record from the last section assumes an honest outcome field: a finish reason and a status per attempt you can see, and latency fields per call you can see. Choose which one that is, and write the choice next to the metric, the same discipline you applied to inter-chunk latency.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The span rule ("a span should cover the duration of the logical operation with all retries") is quoted in the phase from the OpenTelemetry span guidance; the hunter did not re-locate the exact passage this run, so treat the wording as phase-cited. The SDK default of two retries is verified from Phase 5A. The guidance not to record errors that were retried and handled is stated in the phase's reading of the OpenTelemetry documentation.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">A span covers one logical operation with all retries, so SDK retries make your 429s invisible.</p>
+<p class="trap">Trusting the default means testing your Phase 5A overload signals against a record with zero rejections in it.</p>
+<p class="try">Set <code>max_retries=0</code> on one call today and count how many attempts a busy hour actually costs you.</p>
+</div>
+
+<p>Your errors and rejections are now recorded honestly, but the failure that returns 200 OK with a finish reason is still one classifier line away from corrupting both of your rates, and the next section asks that question: when did a one-line change fabricate an incident?</p>
+<h2 data-concept="c4">When did a one-line change fabricate an incident?</h2>
+<p class="why">One classifier line decides whether truncation is a quality signal or a fabricated outage.</p>
+
+<p>Your errors and rejections are now recorded honestly. But one failure still returns 200 OK with a finish reason. It is one line away from corrupting both of your rates.</p>
+
+<p>Back to the running case. Your demo ledger holds 2,000 run records with 14 real errors and 36 truncated answers. Tonight someone on the team edits the recorder with one idea. The idea is that a truncated answer is a bad answer, so count it as an error. Nothing about the service changes, and tomorrow's report shows an incident.</p>
+
+<p>This phase introduces the <dfn>finish reason</dfn>, the provider's own label for why generation stopped. It uses that label to decide whether the answer completed, not the HTTP code. The new part here is only the monitoring consequence. Four failure kinds arrive in three HTTP shapes, and a single "did it raise?" bit cannot represent them.</p>
+
+<table>
+<tr><th>Failure kind</th><th>HTTP shape</th><th>What the record must say</th></tr>
+<tr><td>Timeout</td><td class="bad">No response</td><td><code>error.type</code> set, status <code>failed</code></td></tr>
+<tr><td>429 rejection</td><td class="bad">Usually invisible</td><td>Retried inside the SDK span, as the last section showed</td></tr>
+<tr class="pick"><td>Truncated answer</td><td>200 OK, finish reason <code>length</code></td><td>Status <code>incomplete</code>, never an error</td></tr>
+<tr><td>Filtered completion</td><td>200 OK, with a finish reason</td><td>Status <code>incomplete</code></td></tr>
+<tr><td>Filtered prompt</td><td class="bad">HTTP 400</td><td>An error, because the request itself was rejected</td></tr>
+</table>
+
+<p>The filter row shows the asymmetry. The same content policy produces a 400 when it rejects your prompt and a 200 when it cuts the completion. Only the finish reason separates the second case from a healthy answer.</p>
+
+<p>The OpenTelemetry GenAI spec gives this record its vocabulary through <code>gen_ai.response.status</code>: <code>completed</code>, <code>failed</code>, or <dfn>incomplete status</dfn>. The spec defines it as "the response stopped before generation completed". That happens, for example, because a token limit or content filter was reached. Truncation is a completed request with an incomplete answer. It is a quality defect, not an outage.</p>
+
+<details class="predict"><summary>Predict: The team doubles <code>max_tokens</code> to stop truncations, and the error rate suddenly halves. Nothing else changed. What just happened?</summary>
+<p>The error rate never measured errors. It measured truncations wearing the error label, because the classifier mapped <code>finish_reason == "length"</code> to a failure. Raising <code>max_tokens</code> removed truncations, so the false errors disappeared too. The corrected rates now show the opposite truth. Availability was always fine. Truncation, which nobody graphed, was the real defect the whole time.</p>
+</details>
+
+<p>The wrong version is one line different from the right one:</p>
+
+<div class="compare">
+<div class="wrong">
+<pre><code data-lang="python"># WRONG: truncation counted as a failure.
+if rec.error_kind or rec.finish_reason == "length":
+    attrs["error.type"] = rec.error_kind
+    attrs["gen_ai.response.status"] = "failed"</code></pre>
+</div>
+<div class="right">
+<pre><code data-lang="python"># RIGHT: truncation is incomplete, not failed.
+if rec.error_kind:
+    attrs["error.type"] = rec.error_kind
+    attrs["gen_ai.response.status"] = "failed"
+elif rec.finish_reason == "length":
+    attrs["gen_ai.response.status"] = "incomplete"
+else:
+    attrs["gen_ai.response.status"] = "completed"</code></pre>
+</div>
+</div>
+
+<p>Now the cost, on your demo ledger of 2,000 records, against the 99.5% availability target. The allowed bad rate is 0.5%, and burn rate is the observed bad rate divided by the allowed one:</p>
+
+<pre><code>right mapping   errors = 14 / 2,000          availability = 99.30%   burn = 0.7% / 0.5% = 1.40x
+wrong mapping   errors = 14 + 36 = 50 / 2,000 availability = 97.50%   burn = 2.5% / 0.5% = 5.00x</code></pre>
+
+<p>Notice what the one line did to each number. Burn 1.40x is a slow ticket at the workbook's tiers. 5.00x approaches the page tier at 6x, so one <code>sed</code> edit nearly fabricates a page. At the same time the truncation rate vanished. Truncations dissolved into the error count, so they no longer had a row of their own. Both rates now lie in opposite directions.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The ledger counts (2,000 records, 14 errors, 36 truncations) come from the phase's <code>slo_report.py</code> demo ledger. The availability and burn arithmetic is the author's, derived from those counts, not independently re-derived (inferred). The wrong-mapping run is dated. The phase's review ran it in a copy on 2026-09-17. The self-test printed <code>[FAIL] a truncated answer is 'incomplete', not an error</code>. The <code>gen_ai.response.status</code> enum and its <code>incomplete</code> definition are verified in <code>registry.yaml</code>, read 2026-10-10.</p>
+</details>
+
+<p>You reproduce this failure yourself in E15. You run the self-test with the wrong classifier in place and watch the <code>incomplete</code> check fail. On the demo ledger, that one line would fabricate an incident-level burn. The question it answers: can you spot this bug in a diff before it reaches the report?</p>
+
+<div class="keypoints">
+<p class="remember">Truncation is a completed request with an <code>incomplete</code> status, never an error.</p>
+<p class="trap">Mapping <code>finish_reason == "length"</code> to an error pumps the error rate and buries the truncation rate at once.</p>
+<p class="try">Compute both availability numbers on your own ledger today: with and without truncations counted as errors.</p>
+</div>
+
+<p>Your classification is now honest, so a quality failure can fire. When it fires, the record must answer what changed. The next section asks that question: what made the output worse when nothing was deployed?</p>
+<h2 data-concept="c1">What made the output worse when nothing was deployed?</h2>
+<p class="why">When quality fails, the record must say which of four things changed.</p>
+
+<p>Your classification is now honest, so a quality failure can fire an alert. Each record holds a span, one timed operation with attributes, and those attributes decide what the alert can tell you. An alert that only says "quality dropped" leaves you with a week of user reports and no suspect. The Anthropic postmortem from earlier in this lesson showed what that looks like at scale. Three infrastructure bugs degraded output for weeks, and nobody had the fields to localise it quickly.</p>
+
+<h3>The four suspects</h3>
+
+<p>When answers get worse and you deployed nothing, four things could have changed. The model could differ from what you asked for. The prompt could be an old version. The retrieved data could come from a stale corpus. The provider's serving stack could have changed around a pinned model.</p>
+
+<p>The OpenTelemetry standard names attributes for only the first two. You record the other two yourself.</p>
+
+<table>
+<thead><tr><th>Suspect</th><th>Attribute</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>The model</td><td><code>gen_ai.request.model</code> and <code>gen_ai.response.model</code></td><td class="ok">standard names exist</td></tr>
+<tr><td>The prompt</td><td><code>gen_ai.prompt.name</code> and <code>gen_ai.prompt.version</code></td><td class="ok">standard names exist</td></tr>
+<tr><td>The data</td><td>your own key, for example <code>app.corpus.version</code></td><td class="bad">no version attribute exists</td></tr>
+<tr><td>The serving stack</td><td>nothing reliable; one provider offers a fingerprint</td><td class="bad">no attribute exists</td></tr>
+</tbody>
+</table>
+
+<p>The model row carries the cheapest detector you will build. The request field is what you asked for. The <dfn>gen_ai.response.model</dfn> attribute is the model that actually answered. The two differ when the provider routes your call somewhere else, and one alert on "these two fields differ" catches a silent switch the day it starts.</p>
+
+<p>The prompt row matters because prompts change more often than code reviews suggest. The <dfn>prompt version</dfn> attribute ties each record to the exact prompt text that produced it. Without it, a bad answer three weeks after a prompt edit has no recorded cause.</p>
+
+<p>The data row has a gap. The spec defines a data-source identifier but no version field, so retrieval over a rebuilt index is invisible. Invent the key before you need it, because adding it after the incident recovers nothing.</p>
+
+<p>The fourth suspect is the one you cannot record directly, and Anthropic documents it in its own model docs. Model weights are fixed for a given ID, but the serving infrastructure around the model can change over time. Anthropic's postmortem is the proof that this reaches users. The 80 unique completions at temperature 0 from the earlier section sit on the same axis: a shared endpoint varies even with the same weights and the same prompt.</p>
+
+<div class="callout warn">
+<p>A pinned model ID pins the weights, not the behaviour. Record both model fields and alert when they differ. Expect drift you cannot attribute at all, and keep your own <dfn>noise floor</dfn>, the output variation you measure with no change, as the baseline any alert must exceed.</p>
+</div>
+
+<h3>What each recorded field costs</h3>
+
+<p>Recording everything is not free, and the cost splits cleanly by kind. Metadata attributes stay flat at about 1,450 uncompressed bytes per span at every prompt size. Only the prompt and completion content grows, and it grows fast.</p>
+
+<table>
+<thead><tr><th>Prompt size</th><th>Metadata only</th><th>With prompt and completion</th><th>Growth</th></tr></thead>
+<tbody>
+<tr><td>500 in / 150 out</td><td>107 B per span</td><td>1,210 B per span</td><td>11x</td></tr>
+<tr><td>4,000 in / 500 out</td><td>109 B per span</td><td>6,932 B per span</td><td>64x</td></tr>
+<tr class="pick"><td>30,000 in / 1,000 out</td><td>110 B per span</td><td>47,156 B per span</td><td>430x</td></tr>
+</tbody>
+</table>
+
+<p>The failure this table predicts is silent. The default OpenTelemetry Collector accepts 4 MiB per request, and the default export batch is 512 spans. At 4,000 input tokens with content, 512 spans total about 11 MB, so the batch exceeds the limit. The export fails without an error in your logs, and your records stop arriving while the feature looks green.</p>
+
+<p>The rule that survives the table is a split by kind. Sample the spans, because content makes them expensive. Keep the metrics complete, because counters and histograms ride on the flat 1,450 bytes of metadata. Your availability, TTFT, smoothness and completeness ratios cost the same at any prompt size.</p>
+
+<details class="evidence">
+<summary>Evidence</summary>
+<p>The attribute names <code>gen_ai.prompt.name</code>, <code>gen_ai.prompt.version</code> and <code>gen_ai.data_source.id</code> are verified in <code>registry.yaml</code>, read 2026-10-10. The Anthropic serving-infrastructure note is from its model documentation as quoted in the phase. The span-size measurements (107 B to 47 KB, gzipped, five seeds) are the author's numbers; the measuring script is not in the course repo, so they could not be re-run (unverified). The 4 MiB collector limit and 512-span batch are OpenTelemetry defaults.</p>
+</details>
+
+<p>In E13 you record a real call and read it back, and E14 prices the telemetry at your own request rate. The question both answer: can your ledger say which of the four suspects moved, at a cost you accepted on purpose?</p>
+
+<div class="keypoints">
+<p class="remember">Record the model asked for, the model that answered, the prompt version, and a data-version key you invent.</p>
+<p class="trap">Content in spans grows 430x while metadata stays flat, so one default batch setting drops your records silently.</p>
+<p class="try">Check your last run record for a response-model field; if it is absent, a silent model switch is unrecorded.</p>
+</div>
+
+<p>Attribution now catches a degraded model, and the natural next move is to route around it when it fails. The next section asks what separates failover from fallback, and which one ran for the first time on your worst day.</p>
+<h2 data-concept="c5">What is the difference between failover and fallback, and which one ran for the first time on your worst day?</h2>
+<p>Attribution can now catch a degraded model. So the natural reflex is to route to another model when the primary fails. This section takes that reflex apart.</p>
+
+<p class="why">A second model feels like insurance, but it is untested code that runs first on your worst day.</p>
+
+<p>Back to the running case. Your provider has a bad afternoon, and someone proposes routing the feature to a second model to keep it up. The decision you make in that meeting has a documented history, and most of it is bad.</p>
+
+<p>The Amazon Builders' Library names four strategies for surviving a failure. A retry is the same call again. A proactive retry is the same call again in parallel. <dfn>Failover</dfn> is the same call against a different copy of the endpoint, so only the instance changes. <dfn>Fallback</dfn> is a different mechanism for the same result, so the code path itself changes. Failover is usually safe, because the running code is identical. Fallback is a second product that stays idle until the day everything else is on fire.</p>
+
+<ol class="flow">
+<li><b>request fails</b><span>timeout, 500, or overload</span></li>
+<li class="ok"><b>failover</b><span>same prompt, another deployment of the same model</span></li>
+<li class="bad"><b>fallback</b><span>a cheaper model, a cache, a retrieval-only path</span></li>
+</ol>
+
+<details class="predict">
+<summary>Predict: the provider is down and someone proposes routing to a second model. Before you hear anything about testing, name two things that must already be true in production for that design to be safe.</summary>
+<p>First, the second-model path must already run continuously against real traffic, treated as an equally valid source. Otherwise it is untested code. Second, every run record must stamp which path answered, through <code>gen_ai.response.model</code>. Otherwise the degraded answers are invisible to every indicator you built in this phase. If either is missing, the design is a fallback promise, not a failover.</p>
+</details>
+
+<p>Why is fallback so reliably harmful? The Builders' Library article gives five reasons, and each is a property of the mechanism, not of the engineer:</p>
+
+<ul>
+<li><b>Fallback is harder to test</b>, because the failure it waits for is rare and its inputs are hard to fake.</li>
+<li><b>The fallback can fail too</b>, and it is usually less tested than the primary it replaces.</li>
+<li><b>It often makes the outage worse</b>, because it runs exactly when the system is weakest.</li>
+<li><b>It is often not worth the risk</b>, because a bounded error response serves the user nearly as well.</li>
+<li><b>It hides bugs</b>, which then surface years later in code nobody remembers writing.</li>
+</ul>
+
+<div class="callout warn">
+<p><b>Amazon, 2001.</b> Web servers cached shipping speeds per server, with a fallback to the database. All caches failed at about the same time, every web server hit the database, and the database locked up. "The fallback turned a partial website outage into a full-site outage. The partial outage meant not being able to display shipping speeds. The full-site outage meant no pages loaded at all. It took down the entire Amazon fulfillment network in the back end."</p>
+</div>
+
+<p>The article's escape hatch is a test, not a ban. A service must run both the fallback and the non-fallback logic continuously. It must treat the fallback as an equally valid source of data. A fallback that meets that bar is exercised code, and at that point it behaves like failover. A fallback that runs only during incidents has its first production run on your worst day.</p>
+
+<p>An LLM adds a failure mode the general case does not have. A classic fallback works or returns an error. An LLM fallback returns a fluent, confident, wrong answer with a clean 200 OK, so no indicator moves. Microsoft's documentation for its semantic cache states the same risk directly. A cache that answers by similarity "can return responses that are incorrect, outdated, or unsafe for the current request". Its guidance is to start the similarity threshold at 0.05, because mismatches become likely above 0.2. Every degraded answer also needs stamping in the record, or your own quality SLI cannot see it.</p>
+
+<p>Routing to another provider is not a configuration change either. Two measurements from the phase show how much moves with the prompt and the tokenizer:</p>
+
+<div class="stats">
+<div class="stat"><b>76 points</b><span>accuracy swing from format changes on one model</span></div>
+<div class="stat"><b>~30%</b><span>token-count difference between two of one provider's own tokenizers</span></div>
+</div>
+
+<p>A format change is meaning-preserving and still moves accuracy by up to 76 points. But format rankings transfer between models only about 57% of the time. A tokenizer change re-prices every request and moves your context headroom. That 30% gap is between two tokenizers from the same provider. Crossing providers costs more.</p>
+
+<p>If you build a fallback anyway, the phase sets four conditions:</p>
+
+<ol>
+<li><b>Split the chain by error class</b>, because a context overflow needs a larger context and a 429 needs another deployment, not one shared chain.</li>
+<li><b>Never catch every exception</b>, because a handler for <code>Exception</code> turns your own parsing bug into a silent fallback; name the exceptions you mean.</li>
+<li><b>Stamp the answering path in the record</b>, filling <code>gen_ai.response.model</code> with the model that actually answered.</li>
+<li><b>Run it continuously</b>, on a share of real traffic, or do not ship it.</li>
+</ol>
+
+<p>Classified this way, most situations that reach for "fallback" turn out to be something else:</p>
+
+<table>
+<thead><tr><th>situation</th><th>what it is</th><th>what to do</th></tr></thead>
+<tbody>
+<tr><td>one deployment down</td><td class="ok">failover</td><td>route to another deployment of the same model</td></tr>
+<tr><td>provider down</td><td class="ok">bounded staleness</td><td>fail the request, or serve a stamped stale answer from the same mechanism</td></tr>
+<tr><td>rate limited</td><td class="ok">shedding</td><td>shed and retry later, as Phase 5A measured</td></tr>
+<tr><td>context overflow</td><td class="ok">compaction</td><td>compact the prompt; a different model keeps the same limit risk</td></tr>
+<tr><td>budget exceeded</td><td class="ok">deliberate degradation</td><td>degrade on purpose and log it loudly</td></tr>
+<tr><td>want a cheaper model</td><td class="ok">routing</td><td>a routing decision with a control group, not an incident response</td></tr>
+<tr class="pick"><td>cross-mechanism fallback</td><td class="bad">fallback</td><td>only with continuous exercise and the answering path stamped</td></tr>
+</tbody>
+</table>
+
+<details class="evidence">
+<summary>Evidence</summary>
+<p>The four-strategy definitions, the 2001 incident quote and the continuous-exercise requirement share one source. They are from the archived Amazon Builders' Library article "Avoiding fallback in distributed systems", read 2026-10-10. The semantic-cache warning and the 0.05 and 0.2 thresholds are from Microsoft's <code>llm-semantic-cache-lookup</code> documentation, read 2026-10-10. The 76-point format swing, the 57% ranking correlation and the 30% tokenizer gap are cited from the phase. The underlying papers were not re-opened.</p>
+</details>
+
+<p>In the lab you can try the decision yourself. Classify each row of your own error history as failover, shedding, or fallback. Then check whether any fallback path in your code runs today or only on failure. The record answers the second half of that question.</p>
+
+<div class="keypoints">
+<p class="remember">Failover changes the instance, fallback changes the mechanism, and only fallback turns partial outages into total ones.</p>
+<p class="trap">A fallback that runs only in incidents is untested code, and an LLM fallback can succeed and be wrong.</p>
+<p class="try">Find one fallback in your code and check whether a stored record shows which path answered.</p>
+</div>
+
+<p>You can now define the four indicators and alert on their burn rates. You can record calls under the real names and refuse a fallback with reasons. The recall section gathers these claims. Then Phase 6A asks how many servers hold your TTFT target when tenants share the fleet.</p>
+<h2 data-kind="recall">What you can do now, and what comes next</h2>
+<p>Five claims carry this phase. Read them again; each should sound like something you would say to a colleague.</p>
+
+<ol>
+<li>A green availability-and-latency dashboard can hide a broken feature. Truncation, degraded output and frozen streams each return 200 OK, so each needs its own SLI as a ratio of good events, because only a ratio has an error budget. (<i>Why is every dashboard green during the incident?</i>)</li>
+<li>A mean score can never page you, because a mean has no budget. The quality indicator must be a proportion of records past a threshold, and the judge's noise sets how tight that threshold can be. (<i>Why can a mean score never page you?</i>)</li>
+<li>Burn rate measures budget consumption speed, so it turns a monthly report into an alert. The long window says how bad the incident is, and the short window says whether it is still happening. (<i>Does anyone get paged, and when?</i>)</li>
+<li>The client sees chunks and the server sees tokens, so a client-side "time to first token" lies by name. The span covers the logical operation with its retries, so a 429-then-success records as one clean success. (<i>What is your client actually allowed to call a token?</i> and <i>Where did your 429s go?</i>)</li>
+<li>Truncation is <code>incomplete</code>, not an error. Counting it as an error pumps the error rate and buries the truncation rate, so one line of classifier code can fabricate an incident. (<i>When did a one-line change fabricate an incident?</i>)</li>
+<li>Failover changes the instance and fallback changes the mechanism. Failover is usually safe, while fallback is untested code that runs first on your worst day. (<i>What is the difference between failover and fallback?</i>)</li>
+</ol>
+
+<p>You can now define availability, TTFT, smoothness and completeness as ratio SLIs with error budgets. You can alert on burn rate over two windows instead of reading a monthly report. You can record every call under the real OpenTelemetry GenAI names, so the record answers what changed when a quality alert fires. You can also refuse most fallback designs with reasons, because the record shows which path answered.</p>
+
+<p>Your TTFT SLO raises a question this phase did not answer. Holding a target p99 takes a specific number of servers at a specific load, and Phase 6A asks how many it takes when several tenants share the fleet.</p>
+<h2 data-kind="lab">Hands-on lab</h2>
+<div class="lab">
+<p>Seven exercises come from your phase, plus one new one for the fallback section. Only E13 needs an API key.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E8</b> <span class="tag">offline</span></label> See what an average hides. An <dfn>SLI</dfn> must be its own indicator, because a mean hides a frozen stream.
+<pre><code data-lang="bash">python phase05_operations/run_recorder.py --demo --role cache_demo</code></pre>
+Expected: <code>ITL  p50    24ms  p99    900ms  MAX GAP    900ms</code>, and a note that the worst gap is 37x the median.</li>
+
+<li><label><input type="checkbox"> <b>E9</b> <span class="tag">offline</span></label> Find the incident that TTFT misses. Availability and latency alone cannot see a frozen stream.
+<pre><code data-lang="bash">python phase05_operations/slo_report.py --demo</code></pre>
+Expected: TTFT passes at 99.60%, and the freeze indicator fails at 89.93% with <code>burn 10.07x</code>.</li>
+
+<li><label><input type="checkbox"> <b>E10</b> <span class="tag">offline</span></label> Two windows, two answers. The long window sets severity, and the short window shows whether it is still happening.
+<pre><code data-lang="bash">python phase05_operations/slo_report.py --demo --window-minutes 300</code></pre>
+Expected: the freeze indicator fails over the whole period but passes at 99.83% over the last 300 minutes, 601 records, because the incident had ended. The block <code>BURN RATE, LAST 300 MINUTES</code> shows <code>burn  0.17x</code>, while the whole-period block shows <code>burn 10.07x</code>.</li>
+
+<li><label><input type="checkbox"> <b>E11</b> <span class="tag">offline</span></label> Do the burn arithmetic by hand. Burn rate is a ratio, so it turns a monthly report into an alert. For a 99.9% SLO over 30 days, compute the burn rate of a 1% error rate and how long the budget lasts.
+<pre><code>allowed bad rate = 0.1%
+burn             = 1% ÷ 0.1%        = 10
+budget lasts     = 30 days ÷ 10     = 3 days</code></pre>
+Check your answer against the formula at <code>slo_report.py:347</code>.</li>
+
+<li><label><input type="checkbox"> <b>E12</b> <span class="tag">offline</span></label> Read the naming decision, because a chunk may carry several tokens or none. Open <code>otel_attributes</code> at <code>run_recorder.py:200</code> and read the docstring on chunk and token.
+<pre><code data-lang="bash">python phase05_operations/run_recorder.py --self-test</code></pre>
+Find the line "first-token uses the SPEC name, not an invented one". Then answer why a client cannot honestly report time to first token.</li>
+
+<li><label><input type="checkbox"> <b>E13</b> <span class="tag">live</span></label> Record a real call, because the ledger is the deliverable.
+<pre><code data-lang="bash">python phase05_operations/run_recorder.py --model &lt;your-model&gt; --role cheap --ledger runs.jsonl
+python phase05_operations/slo_report.py --ledger runs.jsonl</code></pre>
+Expected: one JSON object per call, and an SLO table from your own traffic, at a cost of about $0.01.</li>
+
+<li><label><input type="checkbox"> <b>E14</b> <span class="tag">offline</span></label> Price your telemetry before you turn it on, because metadata is flat while content grows. Use your median prompt and completion sizes with the section 5.5 table to estimate bytes per span, with and without content. Multiply by your request rate for a monthly figure, and compare with the flat 1,450 bytes of metadata.</li>
+
+<li><label><input type="checkbox"> <b>E15</b> <span class="tag">offline</span></label> Break it: count truncation as an error, and watch the test catch it.
+<pre><code data-lang="bash">B=phase05_operations/rr_broken.py
+sed 's/    if rec.error_kind:$/    if rec.error_kind or rec.finish_reason == "length":/' phase05_operations/run_recorder.py &gt; $B
+python $B --self-test</code></pre>
+Expected: <code>[FAIL] a truncated answer is 'incomplete', not an error</code>, then <code>1 FAILED</code>, exit code 1, with the other 16 checks passing. Clean up with <code>rm $B</code>.</li>
+
+<li><label><input type="checkbox"> <b>Fallback simulation</b> <span class="tag">offline, new</span></label> No exercise in your phase touches the fallback section, so this one is new. It shows how a fallback chain can carry one point of congestion onto a second system.
+<ol>
+<li>Write a small simulation with two queues, <code>primary</code> and <code>fallback</code>, each serving 50 requests per second.</li>
+<li>Offer more requests per second to the primary than it can serve, so its queue grows, and mark any request that waits too long as failed.</li>
+<li>Route each failed request to the fallback queue, and count failures there too.</li>
+<li>Run it twice: once with the fallback path live, once with failures simply returned.</li>
+</ol>
+<pre><code>without fallback: primary degrades, fallback queue idle
+with fallback:    fallback queue now shares the overload</code></pre>
+Look for the point where the fallback's own failure rate starts climbing. That is the 2001 pattern in miniature: the fallback did not fail itself, but it carried the congestion into a system that was healthy. The question it answers: when is returning an error cheaper than keeping the feature up?</li>
+</ul>
+
+<details class="evidence"><summary>Evidence</summary>
+Every offline command (E8 to E12, E14, E15) was run on 2026-09-17 and the Expected lines match. E13 is unverified against a live provider, because no API key was available. The availability shift named in E15 (99.30% to 97.50% on the demo ledger) is the author's arithmetic, not independently re-derived.
+</details>
+
+<p>With the lab done, the checkpoint asks you to do the arithmetic and the classification without the scripts.</p>
+</div>
+<h2 data-kind="checkpoint">Checkpoint</h2>
+<p>The lab scripts did the arithmetic for you. These five questions do it by hand, so you can check the scripts were not the lesson. Answer each one in your own words before opening its sketch.</p>
+
+<ol class="steps">
+<li><b>Burn arithmetic.</b> Your quality SLO is 99% over 30 days on answers reaching a judge threshold. In the last hour, 4% were below the threshold. (a) Compute the burn rate. (b) How long does the budget last? (c) Should this page someone, and which short window confirms it?
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) The allowed bad rate is 1%, so burn is 4 ÷ 1 = 4. (b) At burn 4 the 30-day budget lasts 30 ÷ 4 = 7.5 days. (c) Page thresholds are 14.4 over one hour and 6 over six hours, so burn 4 is below both. It is a ticket: burn 1 over three days, confirmed over six hours as the short window. At 6% bad the burn would be 6, a six-hour page confirmed over 30 minutes.</p>
+</details></li>
+
+<li><b>The judge ceiling.</b> A colleague proposes "99.9% of answers our judge rates good". Give two reasons this cannot hold: one about the judge, one about task shape.
+<details class="answer"><summary>Answer sketch</summary>
+<p>The judge agrees with human experts about 85% of the time (66% with ties counted), so it cannot certify 99.9% per request. It can only back an aggregate rate. And per-request quality multiplies over the steps of one task, so even 75% per step gives 0.75 × 0.75 × 0.75 ≈ 42% over three steps. Set the target on the outcome the user sees.</p>
+</details></li>
+
+<li><b>The classifier change.</b> The team doubles <code>max_tokens</code> to stop truncated answers, and the error rate halves with no other change. Explain what happened, and which two rates the old classifier corrupted.
+<details class="answer"><summary>Answer sketch</summary>
+<p>The classifier mapped <code>finish_reason == "length"</code> to error. Doubling <code>max_tokens</code> removed truncations, and those records moved from "error" to "success", so the error rate fell. The old mapping counted a truncation as both a failed request and a hidden defect, so it pumped the error rate and buried the truncation rate. On the demo ledger, that one line moves availability from 99.30% to 97.50% and burn from 1.40x to 5.00x. The honest record is HTTP 200 with status <code>incomplete</code>.</p>
+</details></li>
+
+<li><b>Telemetry volume.</b> Your median request is 4,000 input and 500 output tokens at 10 requests per second. (a) Estimate the monthly telemetry volume with content capture off and on. (b) Your collector accepts 4 MiB per request and batches 512 spans. Does a batch fit with content on?
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) A span is about 109 compressed bytes without content and 6,932 bytes with it. A month has about 25.9 million spans at 10 requests per second, so about 2.8 GB without content and about 180 GB with it, roughly 64 times more. (b) No: one uncompressed span with content is about 21 KB, and 512 of them is about 11 MB, over the 4 MiB limit, and the export fails silently. Lower the batch below 200 spans, raise the limit, or store content outside the trace.</p>
+</details></li>
+
+<li><b>The proposed fallback.</b> A colleague says: "We fall back to a cheaper model when the primary fails, so we are covered." Reject or condition the design with three objections, covering testing, how an LLM fallback fails, and one popular helper's default.
+<details class="answer"><summary>Answer sketch</summary>
+<p>First, a fallback that runs only during incidents is untested code on the worst day, so approve it only if both paths run continuously against real traffic. Second, a cheaper model that answers still returns a fluent 200 OK, just a worse answer, so it can succeed and be wrong and no monitor turns red; Microsoft's semantic-cache documentation warns such a path can return incorrect, outdated or unsafe responses. Third, the popular retry helper catches a bare <code>Exception</code> by default, so your own parsing bug starts the fallback silently. If it is built anyway, split by error class and stamp which path answered in the record.</p>
+</details></li>
+</ol>
+
+<p>If all five felt routine, the phase did its job: the numbers live in your head now, not in the scripts.</p>
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+<pre class="cheatsheet">FOUR INDICATORS (availability + latency cannot see wrong or frozen answers)
+  availability   the call returned
+  TTFT           first token inside target
+  smoothness     no gap above target        &lt;- the Phase 2 freeze
+  completeness   finish_reason != "length"  &lt;- a 200 OK that dashboards count
+  demo: TTFT PASSES 99.60%, freeze FAILS 89.93% (burn 10.07x)
+        availability fails from a separate 0.4% background error rate
+
+ERROR BUDGET AND BURN
+  budget = 100% - target      99.9% / 30d -> about 43 minutes
+  burn = bad rate / budget    burn 1 -> 30 days | 10 -> 3 days | 1000 -> 43 min
+  page    burn 14.4  over 1h  confirmed over 5m   (2% of budget)
+  page    burn  6    over 6h  confirmed over 30m  (5%)
+  ticket  burn  1    over 3d  confirmed over 6h   (10%)
+  short window = 1/12 of the long window
+  tiers read from the SRE workbook, 2026-10-10
+  low traffic: one failed request can read as burn 1,000
+    -> artificial traffic, group services, or lower the target
+  latency ladder: 90% &lt; X | 99% &lt; 10X | 99.9% &lt; 100X
+  PAIR LATENCY WITH TOKENS.  total = TTFT + (time per token x tokens)
+
+QUALITY AS AN SLI
+  good event = record REACHES a threshold, never the mean score
+  judge: about 85% agreement, ties excluded (66% with ties) -> aggregate only
+  0.75^3 is about 42% for three steps at 75% -> SLO on the outcome
+  noise: 1,000 runs at temp 0 -> 80 unique completions (Thinking Machines)
+    -> exact text is useless. Measure your floor with your own metric.
+  gaming: delay tokens, drop slow requests. Keep completeness beside latency.
+
+TELEMETRY NAMES  (semantic-conventions-genai, main branch, read 2026-10-10)
+  CLIENT says CHUNK. SERVER says TOKEN.
+    gen_ai.response.time_to_first_chunk          span attribute, seconds
+    gen_ai.server.time_to_first_token            server metric, seconds
+    gen_ai.client.inference.time_to_first_chunk
+    gen_ai.client.inference.time_per_output_chunk
+    gen_ai.client.inference.duration
+  no release tags exist: pin and cite a commit
+  required: operation.name, provider.name   span name "{operation} {model}"
+  span covers ALL RETRIES -> 429s INVISIBLE by default
+  0 of 13 reference libraries emit the first-chunk attribute (phase-cited)
+  "ITL" has two meanings across tools. Write down yours.
+
+RECORDING FAILURES
+  timeout         error.type + status Error
+  429             usually invisible (retried inside the span)
+  truncation      NOT an error: finish reasons ["length"], status "incomplete"
+                  gen_ai.response.status: completed | incomplete | failed
+                  as an error on the demo: availability 99.30% -> 97.50%,
+                  burn 1.40x -> 5.00x (author's arithmetic, inferred)
+  content filter  PROMPT = 400, OUTPUT = 200 with a finish reason
+  stream ended early -> "error" in the finish_reasons position
+
+ATTRIBUTION
+  model     gen_ai.request.model vs gen_ai.response.model  &lt;- alert on diff
+  prompt    gen_ai.prompt.name + .version
+  data      NO ATTRIBUTE. Invent one.
+  serving   NO ATTRIBUTE. A pinned model id does NOT pin behaviour.
+
+TELEMETRY COST (author's measurement, gzipped, per span)
+  500/150    metadata 107 B   with content  1,210 B   (11x)
+  4k/500     metadata 109 B   with content  6,932 B   (64x)
+  30k/1k     metadata 110 B   with content 47,156 B  (430x)
+  metadata FLAT about 1,450 B raw.  10 rps = 25.9M spans/month
+  4 MiB collector limit x 512-span batch FAILS with content on
+    -> keep the batch under 200 spans or store content outside the trace
+  sample SPANS, keep METRICS at 100%; parentbased_traceidratio only
+
+FALLBACK
+  retry = same call | failover = same mechanism, other instance (SAFE)
+  fallback = DIFFERENT mechanism (the one with the history)
+    Amazon 2001: fallback turned a partial outage into a full-site outage
+  test: does the fallback run CONTINUOUSLY on real traffic?
+  an LLM fallback can SUCCEED AND BE WRONG
+  semantic cache: threshold 0.05 to start, above 0.2 mismatches likely
+  split by ERROR CLASS; never catch bare Exception; record WHICH path answered
+  cross-provider: format moves accuracy up to 76 points; tokenizer +30%
+
+DECISIONS
+  one deployment down   failover
+  provider down         retry with budget, then shed or fail
+  rate limited          read the 429, back off, shed
+  context overflow      compact, then send once
+  budget exceeded       shed load
+  want a cheaper model  a ROUTED change with a quality gate, not a fallback
+
+THE COMMANDS
+  run_recorder.py --demo --role cache_demo    the freeze, offline
+  run_recorder.py --self-test                 19 checks, offline
+  run_recorder.py --model X --ledger runs.jsonl   real calls
+  slo_report.py --demo                        four indicators, offline
+  slo_report.py --demo --window-minutes 300   two windows
+  slo_report.py --ledger runs.jsonl           your own traffic
+</pre>
+<h2 data-kind="post">Post</h2>
+<p>Two drafts, ready to edit and post. Each is one claim, and the second line says what makes it yours to tell.</p>
+
+<div class="lab">
+<h4>Post 1: four indicators</h4>
+<p>Anthropic's postmortem: three infra bugs degraded Claude for weeks, peaking at 16% of Sonnet 4 requests. Every availability dashboard stayed green. An LLM feature can be up, fast and wrong. So I measure it on four ratios, not two: availability, TTFT, smoothness, completeness. Only a ratio carries an error budget.</p>
+<p>What makes it his: the demo ledger where the freeze indicator fails at 89.93% while TTFT passes at 99.60%. It is reproducible offline with <code>slo_report.py --demo</code>.</p>
+</div>
+
+<div class="lab">
+<h4>Post 2: the fallback you have not shipped</h4>
+<p>Amazon, 2001: every server cache failed at once. The database fallback turned a missing shipping-speeds widget into a full-site outage. A fallback that runs only during incidents is untested code that starts on your worst day. An LLM fallback adds a worse failure: it can return 200 OK and be wrong. Failover changes the instance; fallback changes the mechanism.</p>
+<p>What makes it his: his own decision table. Most "add a fallback" proposals turn out to be failover, retries or shedding instead.</p>
+</div>
+<h2 data-kind="sources">Sources</h2>
+<p>Every claim, number and name in this phase traces to one of these. Where the verification of the study note differs from the phase, the newer date is kept.</p>
+
+<ul class="sources">
+<li><b>Alerting on SLOs, Google SRE Workbook</b> — <a href="https://sre.google/workbook/alerting-on-slos/">https://sre.google/workbook/alerting-on-slos/</a> — the burn tiers this phase uses (page at burn 14.4 over 1 hour confirmed over 5 minutes, page at 6 over 6 hours, ticket at 1 over 3 days), the one-twelfth short-window rule and the low-traffic caveat. Re-verified 2026-10-10.</li>
+<li><b>A postmortem of three recent issues, Anthropic, September 2025</b> — <a href="https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues">https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues</a> — three bugs degraded Claude for weeks while every availability dashboard stayed green and the evaluation suite missed it. Re-verified 2026-10-10.</li>
+<li><b>Avoiding fallback in distributed systems, Amazon Builders' Library (archived)</b> — <a href="https://web.archive.org/web/20250119023338/https://aws.amazon.com/builders-library/avoiding-fallback-in-distributed-systems/">https://web.archive.org/web/20250119023338/https://aws.amazon.com/builders-library/avoiding-fallback-in-distributed-systems/</a> — the four-strategy definitions, the Amazon 2001 quote and the continuous-exercise requirement. The archive link resolves; re-verified 2026-10-10.</li>
+<li><b>OpenTelemetry GenAI semantic conventions, metrics.yaml</b> — <a href="https://raw.githubusercontent.com/open-telemetry/semantic-conventions-genai/main/model/gen-ai/metrics.yaml">https://raw.githubusercontent.com/open-telemetry/semantic-conventions-genai/main/model/gen-ai/metrics.yaml</a> — the current client metric names and gen_ai.server.time_to_first_token. The repo has no release tags, so this is a main-branch read of 2026-10-10, and the phase's two client names were corrected from it.</li>
+<li><b>OpenTelemetry GenAI semantic conventions, registry.yaml</b> — <a href="https://raw.githubusercontent.com/open-telemetry/semantic-conventions-genai/main/model/gen-ai/registry.yaml">https://raw.githubusercontent.com/open-telemetry/semantic-conventions-genai/main/model/gen-ai/registry.yaml</a> — verified gen_ai.response.time_to_first_chunk and the gen_ai.response.status enum, including incomplete defined as the token-limit or content-filter case. Read 2026-10-10, development stability.</li>
+<li><b>Defeating Nondeterminism in LLM Inference, Thinking Machines Lab, 2025</b> — <a href="https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/">https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/</a> — 1,000 temperature-0 completions of one prompt produced 80 unique outputs, diverging at token 103; the reason exact-text comparison cannot be a quality floor. Re-verified 2026-10-10.</li>
+<li><b>llm-semantic-cache-lookup, Microsoft Learn</b> — <a href="https://learn.microsoft.com/en-us/azure/api-management/azure-openai-semantic-cache-lookup-policy">https://learn.microsoft.com/en-us/azure/api-management/azure-openai-semantic-cache-lookup-policy</a> — the "incorrect, outdated, or unsafe" warning and the 0.05 and 0.2 similarity thresholds. Re-verified 2026-10-10.</li>
+</ul>
+
+<div class="callout note">
+Two items the note could not re-verify stay labelled as the phase cited them: the "0 of 13" conformance report and the judge agreement figures (85% without ties, about 66% with). Anything else it could not open is absent from this phase rather than asserted.
+</div>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

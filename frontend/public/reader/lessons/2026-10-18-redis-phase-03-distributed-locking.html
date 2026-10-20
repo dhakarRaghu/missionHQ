@@ -1,0 +1,1634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Distributed locking: wasted work or wrong data</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Redis · Phase 3</div><h1>Distributed locking: wasted work or wrong data</h1><p class="subtitle">Your lock passed every test. When can two workers still both act, and what stops them?</p></header>
+<aside class="mustknow">
+<h3>What you must know</h3>
+<ol class="concepts">
+<li id="c1"><b>If a double run wastes work, one Redis node is enough. If it corrupts data, the resource must refuse it.</b><span>Decide which kind of lock you are writing, and where its guarantee lives.</span></li>
+<li id="c2"><b>Release and extend must compare your own random token and act in one server-side step.</b><span>Write an acquire, release and extend that never touch another holder's lock.</span></li>
+<li id="c3"><b>Any pause longer than the TTL gives two acting holders, and no check inside the client closes that gap.</b><span>Size a lease, add a watchdog, and know what neither one fixes.</span></li>
+<li id="c4"><b>A lock on one Redis primary can vanish at failover, and its expiry follows the server's wall clock.</b><span>Name the two server-side ways a correct client still gets two holders.</span></li>
+<li id="c5"><b>A fencing token protects only if it never goes backwards and the resource checks it in the write.</b><span>Design a fence, and pick a token source that survives a failover.</span></li>
+</ol>
+</aside>
+
+<p>In Phase 2 you stopped a cache stampede inside one process with singleflight. singleflight lets one call fetch a value while the duplicate callers in the same process wait for its result. This lesson starts where singleflight stops working, because the duplicate callers now run on different machines.</p>
+
+<p>The running case is a weekly summary job for an AI agent feature. It is this lesson's own example, not the settings cache of Phase 2. For each customer account, the job calls a paid LLM to summarise the week. Then it saves the summary row, emails the account owner, and deducts the AI credits that the call used. The job runs on three worker pods, A, B and C, and two pods can pick the same account. singleflight in pod A cannot see pod B, so the team adds one Redis lock per account, <code>lock:summary:42</code> for account 42.</p>
+
+<p>In this lesson's example, the LLM call usually takes 2 seconds and the lock's TTL is 10 seconds. These two numbers are an illustration, not a measurement. Each section asks what can still go wrong with that lock. Each answer moves the guarantee one step closer to the database row that holds the credits.</p>
+
+<h2 data-kind="orientation">What you bring from Phases 0 to 2</h2>
+<div class="cards" data-cols="2">
+<div class="card"><h4>One thread runs every command, from Phase 0</h4><p>Redis runs commands one at a time on one main thread. So one command, or one Lua script, is atomic: no other command runs in the middle of it. In Redis 8, I/O threads read, parse and write, but they never run commands.</p></div>
+<div class="card"><h4>TTL and expiry, from Phases 0 to 2</h4><p>A TTL, time to live, tells Redis to treat a key as deleted after a set time. <code>PX 10000</code> on a <code>SET</code> gives the key a TTL of 10,000 milliseconds. Phase 2 used TTLs to make cached values expire.</p></div>
+<div class="card"><h4>singleflight, from Phase 2</h4><p>singleflight merges duplicate calls for the same key inside one process. The first caller does the work, and the others wait for its result. It knows nothing about other processes, so three pods still make three calls.</p></div>
+<div class="card"><h4>A lock across processes, new here</h4><p>A distributed lock is a key in a shared store that only one process may hold at a time. Every pod tries to create the key, and only the pod that succeeds runs the job.</p></div>
+</div>
+<ol class="flow">
+<li><b>pod picks account 42</b><span>Pods A, B and C all can.</span></li>
+<li class="hot"><b>take lock:summary:42</b><span>Only one pod gets it.</span></li>
+<li><b>call the LLM</b><span>About 2 seconds, and it costs money.</span></li>
+<li><b>save, email, deduct</b><span>Three effects outside Redis.</span></li>
+<li class="ok"><b>release the lock</b><span>The next pod may now run.</span></li>
+</ol>
+<p>This phase stays with one job and one lock. Phase 4 explains replication and failover in full. This lesson needs only one fact from it, in the failover section: a replica can miss the last writes of its primary.</p>
+
+<h2 data-concept="c1">Is this lock about wasted work or about wrong data?</h2>
+<p class="why">The cost of a double run decides which tool can protect the job.</p>
+
+<p>The summary job has one lock, but that lock protects three different effects. If two pods both run account 42, the owner gets two emails and the company pays for two LLM calls. The credits are worse, because they are deducted twice and the customer loses money.</p>
+
+<p>A lock can have two jobs. An <dfn>efficiency lock</dfn> stops the same work from running twice, and a rare double run only wastes time or money. A <dfn>correctness lock</dfn> must stop two actors from both acting, because a double run leaves wrong data behind. The code of the two locks is identical, so only the cost of a failure tells you which one you have.</p>
+
+<ul class="tree">
+<li><b>What breaks if two pods both run the job for account 42?</b>
+<ul>
+<li class="ok"><em>only waste</em><span>Efficiency lock: one Redis node with SET NX PX is enough. Document that a rare double run can happen.</span></li>
+<li class="bad"><em>wrong data</em><span>Correctness lock: the resource itself must refuse the second actor. The lock stays only to save work.</span></li>
+</ul></li>
+</ul>
+
+<details class="predict"><summary>Predict: the team moves the lock from Redis to etcd, a consensus store whose nodes agree on each write by majority vote. The lock is a 30-second lease, a lock that ends unless its holder renews it. Pod A pauses for 40 seconds in the middle of the job. Are the credits deducted once or twice?</summary>
+<p>They can be deducted twice. The lease ends at 30 seconds, so pod B acquires the lock and deducts the credits. Pod A then resumes at 40 seconds and does not know that its lease ended, so it deducts them again. The guess "once" is reasonable, because etcd is a correct store. But etcd keeps the lock record correct, and the deduction happens in a different system. What stops the second deduction is a check in the credits table, which the next section shows.</p>
+</details>
+
+<p>Any lock service faces the same choice when a holder stops answering, and the steps below show why.</p>
+<ol>
+<li>The service must free a lock when its holder looks dead, because a crashed holder would otherwise block every other pod forever.</li>
+<li>It decides that a holder looks dead when a lease runs out or a heartbeat stops arriving.</li>
+<li>A holder that is paused, or cut off by the network, looks dead in the same way. But it is still alive, and it can act when it resumes.</li>
+<li>So every lock that can recover from a crash can also have two holders for a while. This is true for Redis, etcd and ZooKeeper alike.</li>
+<li>The store can stay perfectly correct while the work under the lock goes wrong, because the work happens outside the store.</li>
+</ol>
+
+<p>The failure looks like this in production. Both pods log "lock acquired", neither logs an error, and the credits table shows two deductions for one week. Nothing in Redis or etcd is wrong, so a dashboard of the lock store shows no fault.</p>
+
+<p><b>etcd under Jepsen tests</b> shows the failure with a number. The testers used etcd's own lock to protect updates to a set, and they paused the client processes on purpose. Leases expired during the pauses, and a bug also skipped the lease check after a client had waited for the lock. About 18% of acknowledged updates were lost, with 2-second lease TTLs, five processes, and a pause every five seconds. With 1 to 3 second TTLs, mutual exclusion usually failed within a few minutes of testing, even in healthy clusters. etcd fixed the bug, and the report's safe pattern checks the lock key's version inside the same write. That pattern is a check at the resource.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Jepsen, "etcd 3.4.3", Kyle Kingsbury, published 2020-01-30. Conditions quoted in the report: "two-second leases TTLs, five concurrent processes, and process pauses every five seconds". Result: "we could reliably induce the loss of ~18% of acknowledged updates". The same report found etcd's key-value operations strict-serializable under the same faults. Its summary of the trade-off: "lock services must sacrifice correctness in order to preserve liveness in asynchronous systems". Read in the study note, which fetched the report.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: the two kinds of lock in more detail, and the rest of the etcd result</summary>
+<p>The efficiency and correctness split comes from Martin Kleppmann's post on distributed locking. He describes an efficiency lock as one that "saves you from unnecessarily doing the same work twice". He advises you to document that single-node locks "are only approximate and may occasionally fail".</p>
+<table>
+<thead><tr><th></th><th>Efficiency lock</th><th>Correctness lock</th></tr></thead>
+<tbody>
+<tr><td>Its promise</td><td>Do not do the same work twice.</td><td>Two actors must never both act.</td></tr>
+<tr><td>Cost of a double run</td><td>A duplicate email, a wasted LLM call of about $0.02, a cache entry computed twice.</td><td>Corrupted data, a customer charged twice, two conflicting writes to one record.</td></tr>
+<tr><td>Enough protection</td><td class="ok">One Redis node with SET NX PX.</td><td class="bad">Redis alone is not enough. Use an idempotent write, a fencing token or a consensus system with fencing.</td></tr>
+</tbody>
+</table>
+<p>Many locks in a typical service are efficiency locks. Deduplicating notification emails, building a share link and starting a chat session are all cases where a rare double run is a nuisance. For those, a single Redis node is the right and cheap answer.</p>
+<p>The etcd tests also matter for the claim "use a consensus store and the lock is safe". The store passed its own checks under the same faults, so the data in etcd was never wrong. The lock built on top still failed, because a lease is a promise about time, and a paused client cannot see time pass. The report's two fixes are a transaction that checks the lock key's version in the same write, or using the lock key's revision as a fencing token. Both put the check at the resource.</p>
+</details>
+
+<h2 data-concept="c1">Where does the guarantee live when a lock is not enough?</h2>
+<p class="why">A correctness job needs a check at the resource, and the lock only saves work.</p>
+
+<p>The last section showed that any lease-based lock can have two holders, so the credits need a guard outside the lock. There are three places to put that guard. Each one makes the resource, the system that holds the data, refuse the second actor.</p>
+
+<table>
+<thead><tr><th>Guard</th><th>What refuses the second actor</th><th>When it works</th><th>Cost</th></tr></thead>
+<tbody>
+<tr class="pick"><td>Idempotent write</td><td>A unique key on the effect, such as one charge per account and week</td><td>The resource can enforce a unique key or a conditional write</td><td class="ok">Low. It also covers retries and crashes.</td></tr>
+<tr><td>Fencing token</td><td>The resource rejects a write whose token is lower than the highest it has accepted</td><td>The resource can compare a number in the same step as the write</td><td>Medium. The token source must never go backwards.</td></tr>
+<tr><td>Consensus lock plus fencing</td><td>A consensus store, such as etcd or ZooKeeper, issues an ordered token, and the resource checks it</td><td>You need real mutual exclusion across machines</td><td class="bad">High. You run a consensus cluster, and the resource still checks.</td></tr>
+<tr><td>Redis lock alone</td><td>Nothing refuses a late actor</td><td>Only when a double run is harmless</td><td>Lowest</td></tr>
+</tbody>
+</table>
+
+<p>An <dfn>idempotent write</dfn> is a write that leaves the same result when it runs twice. It is often the best guard, because it also protects against client retries and crashes, which a lock never sees. In the running case, the credits table gets a unique key on account and week. The second deduction then fails on that key, whichever pod sends it.</p>
+
+<pre><code data-lang="sql">-- one charge per account and week, whichever pod gets here first
+INSERT INTO credit_charges (account_id, week, credits)
+VALUES (42, '2026-W42', 120)
+ON CONFLICT (account_id, week) DO NOTHING;</code></pre>
+
+<p>With this row in place, the Redis lock no longer protects the credits. It only stops most duplicate LLM calls and emails, which is an efficiency job. The decision for any lock follows from that split.</p>
+<ol>
+<li><b>Efficiency lock.</b> Use one Redis node with <code>SET NX PX</code>, a random token, and a compare-and-delete release. Do not add a multi-node algorithm, and document that a rare double run can happen.</li>
+<li><b>Correctness lock.</b> Do not rely on any Redis lock as the guarantee. Make the write idempotent, or add a fencing token that the resource checks, or use a consensus store with fencing. Keep the Redis lock only as a way to save work.</li>
+</ol>
+
+<p><b>Shopify</b> shows what happens when the guard sits in a different store from the data. Inventory reservations lived in Redis as one counter per item, with DECR to reserve and INCR to release. The inventory ledger lived in MySQL, so the claim step could not be atomic across both stores, and that risked overselling. Shopify moved reservations into MySQL as one row per unit, claimed with <code>SELECT FOR UPDATE SKIP LOCKED</code>, up to 1,000 rows per item and location. On Black Friday 2025, Shopify merchants peaked at $5.1M in sales per minute. On the new MySQL design, the throughput limit turned out to be database connections, not CPU.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Shopify Engineering, "We replaced Redis with MySQL for inventory reservations, and it scaled", Emilie Noel, 2026-05-12. The peak figure is for Black Friday 2025. Fetched for the course's company research, re-fetched once, and read again for this review on 2026-10-18, with matching facts.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: the Redlock argument, and what both sides agree on</summary>
+<p><dfn>Redlock</dfn> is an algorithm by antirez, the creator of Redis. It takes the same lock on N independent Redis primaries and counts the lock as held when a majority of them said yes. So the failure of one node does not lose the lock. Martin Kleppmann criticised it, and antirez answered. Their points are below.</p>
+<table>
+<thead><tr><th>Kleppmann's points</th><th>antirez's answers</th></tr></thead>
+<tbody>
+<tr><td>Redlock cannot give correctness. A pause past the lease gives two holders, so the resource needs fencing tokens. Redlock's random value cannot be put in order, so it cannot serve as one.</td><td>A large random token plus a check-and-set on the resource gives the same protection as a number that only grows, and it is more practical.</td></tr>
+<tr><td>Its safety depends on timing: a bounded pause, a bounded network delay and no clock jump. Real systems break all three.</td><td>Redlock assumes only that each node can count time with a bounded error, such as 5 seconds with at most 10% error. He agreed that Redis should use a monotonic clock, which the failover section shows never happened for key expiry.</td></tr>
+<tr><td>For correctness, use ZooKeeper or etcd with fencing. For efficiency, one Redis node is enough. He calls Redlock "neither fish nor fowl": too heavy for efficiency, not safe enough for correctness.</td><td>Redlock moves people off locks on one primary with failover, which are less safe, at little cost. If the resource can resolve races itself, "it is not clear why you would use a lock with strong properties at all".</td></tr>
+</tbody>
+</table>
+<p>Both are right on their own terms. No lock that relies on a timeout can be correct against a pause of any length without fencing. And if the resource can check a token, you may not need a strong lock at all. So the decision above uses one Redis node for efficiency and puts correctness at the resource. A multi-node Redlock adds operations work and still gives no correctness without fencing.</p>
+<p>The phase's line "if you need fencing, you probably didn't need the heavy lock" is a fair paraphrase of antirez, not his words. He says a strong lock is unclear when races can be resolved another way.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: an idempotency key for a paid API call</summary>
+<p>A paid third-party call, such as an LLM request or a payment, cannot be fenced, because the provider does not check your tokens. The production design for that case is an idempotency-key row in your own database. Brandur Leach describes one for a Stripe-like API in Postgres. Each request carries a key, and the server keeps a row for that key with a <code>locked_at</code> time. The work runs in atomic phases, each one a database transaction, and each phase records a recovery point. A retry can take the key only when its lock is free or older than a lock timeout. A request that crashed then resumes from its last recovery point, on a client retry or through a completer process. A reaper process deletes old keys, after about 72 hours. So the row is a lease plus a record of progress, kept in the same database as the data.</p>
+<p>The storage course, Phase 3, teaches the leased task claim and the version-column check in PostgreSQL. This lesson does not teach them again. A version column is the check-and-set that antirez describes: the UPDATE succeeds only if the version is still the one you read.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">Before writing a lock, ask what a double run breaks.</p>
+<p class="trap">An email lock and a money lock look identical in code, so the money one ships unguarded.</p>
+<p class="try">Pick one lock in your code and write down what breaks if two holders act.</p>
+</div>
+
+<p>The summary job now needs a correct efficiency lock, so the next section takes the acquire command apart.</p>
+
+<h2 data-concept="c2">What does each part of SET NX PX protect against?</h2>
+<p class="why">The acquire is one command, and each of its three parts stops one failure.</p>
+
+<p>The summary lock is now an efficiency lock, so one Redis node is enough, but the lock still has to be written correctly. The acquire is a single <code>SET</code> command with three parts. Each part defends against one failure, and a lock that drops any part breaks in a specific way.</p>
+
+<ol class="flow">
+<li><b>SET lock:summary:42</b><span>The key names what you lock.</span></li>
+<li class="hot"><b>&lt;random token&gt;</b><span>The value names this one holder.</span></li>
+<li class="hot"><b>NX</b><span>Set only if the key is absent.</span></li>
+<li class="hot"><b>PX 10000</b><span>The key expires after 10 seconds.</span></li>
+<li class="ok"><b>OK or nil</b><span>OK means this pod holds the lock.</span></li>
+</ol>
+
+<details class="predict"><summary>Predict: a Go helper calls go-redis <code>SetNX(ctx, key, "1", ttl)</code>, and one caller passes a ttl of 0 by mistake. That pod is then killed while it holds the lock. When does the lock free itself?</summary>
+<p>Never. In go-redis, an expiry of 0 means "no TTL", so the key is created with no expiry at all. Every later pod gets nil until someone deletes the key by hand. The guess "Redis rejects a TTL of 0" is reasonable, because a raw <code>SET k v NX PX 0</code> does fail with "ERR invalid expire time". But the client library turns 0 into a command with no TTL before Redis sees it, so Redis has nothing to reject.</p>
+</details>
+
+<ul>
+<li><b><code>NX</code> gives mutual exclusion.</b> The key is set only if it does not exist yet. One thread runs commands one at a time, so of many pods that send this command at once, exactly one gets <code>OK</code> and the rest get nil.</li>
+<li><b><code>PX</code> frees the lock after a crash.</b> Without a TTL, a holder that is OOM-killed, killed with <code>kill -9</code> or cut off by the network holds the lock forever. With a TTL, the worst case is that other pods wait one TTL.</li>
+<li><b>The random token names the holder.</b> It must be unique to this one acquisition: 16 or more random bytes from a secure random source, or a UUID. A constant such as <code>"1"</code> or <code>"locked"</code> works in a demo, but at release time it cannot tell your lock from the next holder's lock.</li>
+</ul>
+
+<p>The TTL also sets a trap of its own. If the work takes longer than the TTL, the lock frees itself while you still work, which the lease sections cover. So the TTL is a real choice between fast recovery from a crash and safety for slow work.</p>
+
+<div class="callout warn"><p><b>Correction.</b> The phase calls <code>SETNX</code> "a valid lock primitive". The <code>SETNX</code> command page says it is "regarded as deprecated" as of Redis 2.6.12. <code>SETNX</code> also cannot set a TTL in the same command, so a crash between <code>SETNX</code> and <code>EXPIRE</code> leaves a lock with no expiry. Use <code>SET key token NX PX ttl</code>, which is one atomic command.</p></div>
+
+<p>The whole correct lock on one node is two calls: <code>SET NX PX</code> to acquire, and a release that deletes the key only if it still holds your token. The Go version is in the Go deeper block below.</p>
+
+<p>The pods that lose must decide when to try again. The official Redis lock page asks for a random delay before a retry, so that losing clients do not all retry at the same moment. The Go library redsync uses 32 tries by default, with a random delay of 50 to 250 milliseconds between them.</p>
+
+<p><b>Flipkart</b> saw what unbounded waiting does to Redis itself. A service that feeds Flipkart's load tests used a lock from Redisson, a Java client. It was a read-write lock on one Redis primary, watched by three Sentinel processes for failover, and it guarded a MySQL calculation. In a peak load test, every request thread polled <code>isLocked</code> in a loop and then called <code>lock</code> with no wait limit. Redis CPU reached 100%, all threads blocked, and pods failed their health checks and restarted in a loop, while pod CPU stayed under 40%. The fix that held was a counter in each pod that let only 5 requests at a time try the lock. It answered HTTP 429 to the rest. The team sized it from the time a request spent inside that gate, 200 to 300 milliseconds, budgeted as 500 ms. That gave about 90 requests per second across 9 pods.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Flipkart Tech blog, "When Good Locks Go Bad: Diagnosing a System Meltdown Under Load", Yash Agrawal, 2025-11-10. The course's company research read the full text from the blog's feed. This review fetched the feed again on 2026-10-18, got HTTP 200, and re-read the full text. Each Flipkart fact on this page matches it. The go-redis behaviour is from its source: at v9.5.1, <code>SetNX</code> with expiry 0 sends <code>SETNX</code>, and at v9.23.0 it sends <code>SET k v NX</code>. In both versions the key has no TTL. The "ERR invalid expire time" reply was run by the study note's author on Redis 8.10.1.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: the whole lock in Go, token size, the go-redis versions, and watching the acquire</summary>
+<p>The acquire and the safe release in Go, from the phase:</p>
+
+<pre><code data-lang="go">// ACQUIRE
+token := random16Bytes()
+ok, _ := rdb.SetNX(ctx, key, token, ttl).Result()   // SET key token NX PX ttl
+if !ok { /* someone else holds it */ }
+
+// ... do the protected work (must finish well within ttl) ...
+
+// RELEASE: atomic compare-and-delete (next section)
+releaseScript.Run(ctx, rdb, []string{key}, token)    // DEL only if value == my token</code></pre>
+<ul>
+<li>The official lock page assumes a token of "20 bytes from /dev/urandom". redsync uses 16 random bytes, encoded in base64, in v4.18.0. Both are large enough that two pods never pick the same value.</li>
+<li>The go-redis method name <code>SetNX</code> hides which command it sends. At v9.5.1, the version the lab pins, a non-zero expiry sends <code>SET key value PX ms NX</code>, or <code>EX</code> with seconds for a whole-second TTL, and 0 sends plain <code>SETNX</code>. At v9.23.0, 0 sends <code>SET k v NX</code> with no TTL. A helper that takes the TTL from its caller should refuse 0, or set a default.</li>
+<li>Other <code>SET</code> options include <code>XX</code>, which sets only if the key exists, and <code>GET</code>, which returns the old value. <code>EX</code> and <code>PX</code> take a TTL in seconds or milliseconds, <code>EXAT</code> and <code>PXAT</code> take an absolute time, and <code>KEEPTTL</code> keeps the old TTL. Since 8.4.0, <code>IFEQ</code>, <code>IFNE</code>, <code>IFDEQ</code> and <code>IFDNE</code> set the key only when a condition on its current value holds. A lock needs <code>NX</code> with <code>PX</code> or <code>EX</code> to acquire, and <code>IFEQ</code> to extend.</li>
+<li>Lab exercise E2 watches the acquire on the wire with <code>MONITOR</code>. The first <code>SET ... NX</code> returns <code>OK</code> and the second returns nil, because the key already exists.</li>
+<li>redsync's defaults, from <code>redsync.go</code> at v4.18.0, are an 8-second expiry, 32 tries, a random retry delay of 50 to 250 milliseconds, and a drift factor of 0.01. The lease sections use the drift factor.</li>
+<li>Flipkart's first gate was about 128 requests per pod, taken from Redis <code>maxclients</code> of 1,160 divided by 9 pods, and the service still collapsed. A connection limit says how many clients Redis accepts, not how many requests the locked section can serve well.</li>
+<li>Flipkart's lesson is general: a lock is also a queue of waiting callers. Bound the wait. Size the number of callers you let in from the time each one spends in the locked section, not from a connection limit.</li>
+</ul>
+</details>
+
+<p>The random token does nothing at acquire time, so the next section shows the release that needs it.</p>
+
+<h2 data-concept="c2">Why does a plain DEL delete the next holder's lock?</h2>
+<p class="why">After your TTL ends, the key you delete may belong to another pod.</p>
+
+<p>The acquire is now correct, and the random token in it matters only at release. Suppose the summary lock used the constant value <code>"1"</code> and a plain <code>DEL</code> to release. The figure below uses a 2-second TTL and a job that takes 3 seconds, so the lease ends while pod A still works.</p>
+
+<div class="lanes" id="p05-del" data-play>
+<h4>Plain DEL with value "1": the TTL is 2 s and pod A's work takes 3 s.</h4>
+<div class="lane" data-label="pod A">
+<i class="decode" style="--w:2000" data-t="holds, works"></i><i class="frozen" style="--w:150" data-t="ends"></i><i class="frozen" style="--w:1000" data-t="still works"></i><i class="frozen" style="--w:150" data-t="DEL"></i><i class="idle" style="--w:1000" data-t="done"></i></div>
+<div class="lane" data-label="pod B">
+<i class="wait" style="--w:2000" data-t="nil, waits"></i><i class="wait" style="--w:150" data-t="tries"></i><i class="decode" style="--w:1000" data-t="holds, works"></i><i class="decode" style="--w:150" data-t="gone"></i><i class="frozen" style="--w:1000" data-t="overlaps C"></i></div>
+<div class="lane" data-label="pod C">
+<i class="idle" style="--w:2000" data-t=""></i><i class="idle" style="--w:150" data-t=""></i><i class="wait" style="--w:1000" data-t="nil, waits"></i><i class="wait" style="--w:150" data-t="tries"></i><i class="frozen" style="--w:1000" data-t="holds too"></i></div>
+<div class="lane" data-label="the key">
+<i class="prefill" style="--w:2000" data-t="A's &quot;1&quot;"></i><i class="idle" style="--w:150" data-t="free"></i><i class="prefill" style="--w:1000" data-t="B's &quot;1&quot;"></i><i class="idle" style="--w:150" data-t="gone"></i><i class="prefill" style="--w:1000" data-t="C's &quot;1&quot;"></i></div>
+<p class="at" data-step="1">From t=0.0 s, pod A holds the lock and starts 3 seconds of work.</p>
+<p class="at" data-step="2">At t=2.0 s, the key expires. Pod A is still working and does not know.</p>
+<p class="at" data-step="3">Pod B's <code>SET NX</code> now succeeds, so pods A and B both work.</p>
+<p class="at" data-step="4">At t=3.0 s, pod A finishes and sends <code>DEL</code>. The value is "1" in both cases, so it deletes B's lock.</p>
+<p class="at" data-step="5">Pod C acquires the free key, so pods B and C both believe they hold the lock.</p>
+<p class="at" data-step="all">The timeline from the phase's E3 exercise. Times are the program's settings, not a measurement.</p>
+</div>
+
+<p>The cause is that a plain <code>DEL</code> cannot ask "is this still my lock?". It deletes whatever is there, and after a lease ends that is often the next holder's lock. So one lease overrun grows from two holders to three. The fix is the random token plus a <dfn>compare-and-delete</dfn>, a release that deletes the key only if its value is still your token.</p>
+
+<p>The compare and the delete must run as one step on the server. If Go code sends a <code>GET</code>, compares, and then sends a <code>DEL</code>, the key can change between the two commands. Another pod can take the lock inside that gap, and your <code>DEL</code> then removes it.</p>
+
+<div class="compare">
+<div class="wrong"><p><b>Two calls from the client</b></p>
+<pre><code data-lang="go">v, _ := rdb.Get(ctx, key).Result()
+if v == token {
+    // lease can end here, and pod B can acquire
+    rdb.Del(ctx, key)   // deletes B's lock
+}</code></pre></div>
+<div class="right"><p><b>One step on the server</b></p>
+<pre><code data-lang="text"># Redis 8.4 and later
+DELEX lock:summary:42 IFEQ &lt;my-token&gt;
+
+# any version: one Lua script
+EVAL "if redis.call('GET',KEYS[1]) == ARGV[1]
+      then return redis.call('DEL',KEYS[1])
+      else return 0 end" 1 lock:summary:42 &lt;my-token&gt;</code></pre></div>
+</div>
+
+<p>A Lua script runs on the one command thread, so no other command runs between its <code>GET</code> and its <code>DEL</code>. Now pod A's late release at t=3.0 s finds B's token, returns 0 and deletes nothing. The same rule applies to extending a lease: set a new TTL only if the value is still your token, in one step. On Redis 8.4 and later that is <code>SET lock:summary:42 &lt;my-token&gt; IFEQ &lt;my-token&gt; PX 10000</code>, which does nothing when the key is gone or holds another token.</p>
+
+<div class="callout warn"><p><b>Correction.</b> The phase gives only the Lua script for release, and says to extend by "re-PEXPIRE while you still own it". Since Redis 8.4.0, the official lock page gives <code>DELEX key IFEQ token</code> as the release step and keeps Lua for older versions. An extend must be a compare-and-extend, either <code>SET key token IFEQ token PX ttl</code> on 8.4 and later, or the Lua script above. A bare <code>PEXPIRE</code> can extend another pod's lock.</p></div>
+
+<p>The return value of a release is also your cheapest alarm for a lease overrun. The table shows what each release returns in each case.</p>
+
+<table>
+<thead><tr><th>Release</th><th>Key holds my token</th><th>Key holds another token</th><th>Key is gone</th></tr></thead>
+<tbody>
+<tr><td><code>DELEX key IFEQ token</code></td><td>1</td><td>0</td><td class="bad">0</td></tr>
+<tr><td>The phase's Lua script</td><td>1</td><td>0</td><td class="bad">0</td></tr>
+<tr class="pick"><td>redsync's release script</td><td>1</td><td>0</td><td class="ok">-1, so <code>Unlock</code> returns <code>ErrLockAlreadyExpired</code></td></tr>
+</tbody>
+</table>
+
+<p>A key that is gone at release time means the lease ended before you finished. redsync reports that case as its own error, so you can count it. <code>DELEX</code> returns 0 for both a foreign token and a missing key, so you lose this signal unless you keep a script that tells the two cases apart.</p>
+
+<p>Compare-and-delete stops pod A from deleting pod B's lock. It does not stop A and B from working at the same time between t=2.0 s and t=3.0 s. That overlap is the subject of the next section.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p><code>DELEX</code> is "since 8.4.0" on its command page, and <code>IFEQ</code> on <code>SET</code> is "since 8.4.0" on the <code>SET</code> page, which says "If the key doesn't exist, it won't be created." The study note's author ran both on Redis 8.10.1: <code>DELEX lock:y IFEQ wrongtoken</code> returned 0 and <code>DELEX lock:y IFEQ realowner</code> returned 1. <code>SET lock:z tokB IFEQ tokB PX 30000</code> returned nil while the value was <code>tokA</code>. On a missing key, <code>SET ... IFEQ</code> returned nil and created nothing. The redsync return values are from <code>scripts.go</code> and <code>mutex.go</code> at v4.18.0.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: the extend script, Valkey's commands, and redsync's three scripts</summary>
+<p>Before Redis 8.4, extend with a script that compares first. This is redsync's touch script:</p>
+<pre><code data-lang="lua">if redis.call("GET", KEYS[1]) == ARGV[1] then
+    return redis.call("PEXPIRE", KEYS[1], ARGV[2])
+else
+    return 0
+end</code></pre>
+<ul>
+<li>Valkey has no <code>DELEX</code>. It has <code>DELIFEQ key value</code> since 9.0.0, and <code>SET ... IFEQ</code> since 8.1.0. Code that must run on both Redis and Valkey needs the Lua script, or a branch for each server.</li>
+<li>Whether AWS ElastiCache, Google Memorystore and Azure support <code>DELEX</code> or <code>SET IFEQ</code> was not checked. Test it on your managed service before you remove the Lua script.</li>
+<li>redsync's release script is a <code>GET</code>, then <code>DEL</code> if the value matches, <code>-1</code> if the key is gone, and <code>0</code> otherwise. Its touch script compares the value and then sends <code>PEXPIRE</code>. A third script, used with <code>WithSetNXOnExtend()</code>, recreates the key with <code>SET ... NX</code> when it is gone. The lease sections explain why that third script can hide a gap.</li>
+<li>A library's compare-and-delete stays safe even when your code ignores the error that <code>Unlock</code> returns. The library still refuses to delete a foreign lock. You only lose the signal that the lease ran out, which is a monitoring gap and not a safety gap.</li>
+<li>A Lua script blocks every other client while it runs. The release script is two commands on one key, so it costs about as much as two commands.</li>
+</ul>
+</details>
+
+<div class="keypoints">
+<p class="remember">Release and extend compare my token and act in one server step.</p>
+<p class="trap">GET then DEL from Go leaves a gap where another pod takes the lock.</p>
+<p class="try">Run E4, then repeat it with DELEX on Redis 8.4 or later, and compare both replies.</p>
+</div>
+
+<p>The release is safe now. But pods A and B still worked at the same time, so the next section asks what happens when the work outlives the lease.</p>
+
+<h2 data-concept="c3">What happens when the work outlives the lease?</h2>
+<p class="why">A correct lock still gives two holders when the holder stops longer than the TTL.</p>
+
+<p>The last section ended with pods A and B working at the same time, even though both followed the rules. The lock in this section is fully correct, with a random token and a compare-and-delete release. It still fails, because a lock with a TTL is a <dfn>lease</dfn>: a promise that the key is yours until a deadline. You hold that promise only if your work finishes before the deadline, and the holder cannot see itself miss it.</p>
+
+<div class="lanes" id="p06-pause" data-play>
+<h4>A correct lock with a 5 s TTL, and a 6 s pause in pod A.</h4>
+<div class="lane" data-label="pod A">
+<i class="decode" style="--w:1000" data-t="works"></i><i class="frozen" style="--w:4000" data-t="GC pause"></i><i class="frozen" style="--w:2000" data-t="still paused"></i><i class="frozen" style="--w:1000" data-t="writes"></i></div>
+<div class="lane" data-label="pod B">
+<i class="wait" style="--w:1000" data-t="waits"></i><i class="wait" style="--w:4000" data-t="nil, waits"></i><i class="decode" style="--w:2000" data-t="holds, works"></i><i class="decode" style="--w:1000" data-t="writes"></i></div>
+<div class="lane" data-label="the key">
+<i class="prefill" style="--w:1000" data-t="A's token"></i><i class="prefill" style="--w:4000" data-t="A's token"></i><i class="prefill" style="--w:2000" data-t="B's token"></i><i class="prefill" style="--w:1000" data-t="B's token"></i></div>
+<p class="at" data-step="1">At t=0 s, pod A acquires with a 5-second TTL. Its work normally takes 2 seconds.</p>
+<p class="at" data-step="2">At t=1 s, a stop-the-world garbage collection pause freezes pod A for 6 seconds.</p>
+<p class="at" data-step="3">At t=5 s, A's lease expires while A is frozen. Pod B acquires the free key and starts its own work.</p>
+<p class="at" data-step="4">At t=7 s, pod A resumes as if nothing happened and writes. Pod B writes too, so both act on the resource.</p>
+<p class="at" data-step="all">The phase's own timeline. Illustration, not measured.</p>
+</div>
+
+<details class="predict"><summary>Predict: you add <code>if time.Now().Before(lease.Until) { deductCredits() }</code> right before the write. Can the deduction still land after the lease has ended? Name two ways.</summary>
+<p>Yes. First, the pause can start after the check returns true and before the write is sent. The check passed at a moment when the lease was valid, and the write left much later. Second, the write can be delayed after it leaves the pod, in a busy network or in a queue inside the database client. It then reaches the resource after the lease has ended, whatever the pod checked. The check looks like the last safe moment, so the guess "no" is reasonable. But there is always some time between any check and the write landing.</p>
+</details>
+
+<p>The mechanism is a gap between knowing and acting, in four steps.</p>
+<ol>
+<li>The pod learns that it holds the lock at time t0, when <code>SET NX PX</code> returns <code>OK</code>.</li>
+<li>The pod acts at a later time t1, when its write reaches the credits table.</li>
+<li>Anything between t0 and t1 can stretch with no fixed limit. Examples are a garbage collection pause, a page fault, CPU steal on a shared host, a slow disk, or a packet held in the network.</li>
+<li>If the stretch passes the TTL, another pod acquires at the deadline, and two holders act. No error appears anywhere, because each step worked as written.</li>
+</ol>
+
+<p>Martin Kleppmann states the limit in one line. He writes that you cannot fix this "by inserting a check on the lock expiry just before writing back to storage". In the running case, the risky step is the LLM call. It usually takes 2 seconds, and this lesson assumes that one call in ten thousand takes 15 seconds, past the 10-second TTL. That number is an illustration, but the shape is general: a stall that is rare per call becomes routine at millions of calls a week.</p>
+
+<p><b>GitHub</b> saw this failure in many fileserver pairs at once, with a heartbeat timeout in the role of the lease. During a switch upgrade, traffic between access switches was blocked for about 90 seconds. The nodes in each fileserver pair exceeded their heartbeat timeouts, so each node decided that its partner was dead. Each node then sent STONITH, a command to cut power to its partner, and some of those commands never arrived. After the network recovered, both nodes in some pairs expected to be active for the same storage. The nodes then shut each other down, so both nodes of many pairs stopped. Recovery took over five hours. The problem was widespread, and for each pair the team had to find the node that was active last, mostly from logs.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>GitHub, "Downtime last Saturday", Mark Imbriaco, 2012-12-26, about the outage of 2012-12-22. Quotes: traffic was "blocked for roughly a minute and a half", the pairs "exceeded their heartbeat timeouts", and "both nodes expected to be active for the same resource". Recovery "took over five hours". Kleppmann's post uses this outage as its example of a long network delay. The quote on the expiry check is from that post.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: garbage collection pauses in a real system, and why the gap scales with traffic</summary>
+<p>Kleppmann writes that "HBase used to have this problem". HBase is a database on the JVM, and stop-the-world garbage collection pauses there lasted "several minutes" while a process held a lease. The primary HBase source for this was not read: its blog link now redirects to an index page. So treat it as Kleppmann's report, not as a checked incident.</p>
+<p>The gap does not need a bug in your code. A pause, a page fault, CPU steal on a shared host, a slow disk and a held packet all happen outside the program's logic. So the program cannot see one coming, and it cannot measure one that hits between its last check and its write.</p>
+<p>The arithmetic is what turns a rare event into a routine one. If one call in 10,000 stalls past the TTL, as this lesson assumes, a job that runs 5 million times a week sees about 500 overlaps every week. This is an illustration, not a measurement.</p>
+</details>
+
+<p>The lock cannot close this gap, but it can make it smaller. The next section measures how far a longer TTL and a watchdog narrow it, and what each one costs.</p>
+
+<h2 data-concept="c3">How far do a longer TTL and a watchdog narrow the gap?</h2>
+<p class="why">Both make overlaps rarer, and neither makes them impossible.</p>
+
+<p>The last section showed that any stall longer than the TTL gives two holders, so the next question is how much the lock itself can do. There are four answers, and only the last two remove the harm of an overlap.</p>
+<ol>
+<li><b>Size the TTL well above the slowest work.</b> A longer TTL makes overruns rarer. But a pod that crashes then blocks every other pod for the whole TTL, so a short TTL recovers fast and a long one is safer for slow work.</li>
+<li><b>Add a <dfn>watchdog</dfn>, a background task that extends the lease while the work runs.</b> Each extension must be a compare-and-extend, as the release section showed. The window becomes smaller, but the watchdog runs in the same process, so a process pause stops the watchdog too.</li>
+<li><b>Make the protected write idempotent.</b> An overlap then leaves the same result as one run, which is why the credits table got its unique key.</li>
+<li><b>Add a fencing token at the resource.</b> The resource then refuses the late writer, which the fencing sections cover.</li>
+</ol>
+
+<p>A client library also shortens the lease it reports, to leave room for the time the acquire took. redsync computes how long the lock stays valid as the expiry, minus the time the acquire took, minus 1% of the expiry for clock drift. Move the sliders to see how much margin the summary job has.</p>
+
+<div class="calc" id="p07-valid">
+<h4>How long redsync says the lock is valid, against the slowest work</h4>
+<label>Lock expiry, ms <input type="range" name="expiry" min="500" max="30000" step="500" value="10000"> <span class="val" data-val="expiry"></span></label>
+<label>Time the acquire took, ms <input type="range" name="elapsed" min="0" max="1000" step="10" value="20"> <span class="val" data-val="elapsed"></span></label>
+<label>Slowest work you expect, ms <input type="range" name="work" min="0" max="30000" step="500" value="8000"> <span class="val" data-val="work"></span></label>
+<div class="result">Valid for <b data-out="valid"></b>, margin <b data-out="margin"></b>, so <b data-out="verdict"></b></div>
+<script>kit.calc('#p07-valid', function(v){ var valid=v.expiry-v.elapsed-v.expiry*0.01; var m=valid-v.work; return {valid: kit.fmt(valid,0)+' ms', margin: kit.fmt(m,0)+' ms', verdict: m>0 ? 'the slowest work fits, if nothing pauses' : 'the slowest work outlives the lease'}; });</script>
+<p>Formula from redsync v4.18.0 <code>mutex.go</code>. The work numbers are yours to choose, and the defaults are an illustration.</p>
+</div>
+
+<p>Real systems either narrow the window like this or say openly that they cannot close it. Kubernetes leader election, in the <code>client-go</code> library, uses a lease to pick one leader. Its source says it "does not guarantee that only one client is acting as a leader (a.k.a. fencing)". So Kubernetes leaves the fencing to the code that uses it.</p>
+
+<p>In Go, you can tie the work to the lease. Give the work a <code>context</code> whose deadline is earlier than <code>mutex.Until()</code>, and check it before every side effect. A pod that misses the deadline then stops before it sends the email or the deduction. This practice is inferred and has no published source. It narrows the window without closing it, because the pause can still hit after the check.</p>
+
+<p>The lock also needs its own metrics, so that overruns show up before customers see them. Track the time pods wait for the lock, the time they hold it, and the count of <code>ErrLockAlreadyExpired</code> at release. These metrics are inferred practice. The error itself exists, and a non-zero count means a lease ran out while a pod still worked.</p>
+
+<div class="callout note"><p><b>A trap in redsync.</b> With the option <code>WithSetNXOnExtend()</code>, an extend recreates the key with <code>SET ... NX</code> when it is gone. So "extend succeeded" does not prove that you held the lock with no gap. Another pod may have acquired, acted and released in between. This reading is inferred from the script.</p></div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>redsync v4.18.0: the validity formula is in <code>mutex.go</code>, lines 115 to 116, and the defaults are in <code>redsync.go</code>, lines 12 to 40. Redisson's watchdog default is <code>lockWatchdogTimeout = 30 * 1000</code> in <code>Config.java</code> at tag <code>redisson-4.8.0</code>, line 82. Kubernetes <code>client-go</code> <code>tools/leaderelection/leaderelection.go</code> at tag v0.34.1, lines 19 to 20.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: watchdog defaults, TTLs seen in one codebase, and the lab runs</summary>
+<ul>
+<li>Redisson, the Java client, has a lock watchdog whose default timeout is 30 seconds. The watchdog runs inside the client process, so a pause of that process stops the extensions too. The lease then runs out like any other.</li>
+<li>redsync's <code>Extend()</code> runs the touch script on every pool and counts the lock as extended on a quorum. It then recomputes the validity with the same formula as the acquire. You call it yourself, for example from a goroutine on a timer shorter than the expiry.</li>
+<li>The shared platform of Phase 0 had lock TTLs from 500 milliseconds for a chat session start up to 180 seconds for a content sync. Every one assumed that the work finishes before the lease. The 500-millisecond lock guarded a session start that calls other services. One slow call to another service is enough to overrun it, so that lock gives less protection than its presence suggests.</li>
+<li>No TTL is safe against a pause of any length. A TTL only says how long a pause has to be before two holders appear.</li>
+<li>Lab exercises E5, E6 and E9 change the TTL and the work time. The lab notes explain that their program cannot show the overlap as written, and what to expect instead.</li>
+</ul>
+</details>
+
+<div class="keypoints">
+<p class="remember">A lease only says how long a pause must last to give two holders.</p>
+<p class="trap">A short TTL for fast crash recovery on an LLM call makes overruns routine.</p>
+<p class="try">Find your slowest locked job's p99, the time that 99% of runs finish within, and compare it with that lock's TTL.</p>
+</div>
+
+<p>Every failure so far needed a slow client, so the next section asks how the lock can vanish when no client paused at all.</p>
+
+<h2 data-concept="c4">How can the lock vanish when no client paused?</h2>
+<p class="why">Replication and the wall clock can both end a lease early, on the server.</p>
+
+<p>Every failure so far needed a pod that was slow, and a faster pod or a longer TTL made it rarer. This section shows two failures that happen inside Redis, so a perfect client cannot prevent them. The summary lock now lives on a primary with one replica and automatic failover.</p>
+
+<details class="predict"><summary>Predict: no pod pauses, and every pod uses the correct lock from the release section. Name the sequence that gives two holders of <code>lock:summary:42</code>. Then say what changes if pod A runs <code>WAIT 1 100</code> right after it acquires.</summary>
+<p>Pod A acquires on the primary. The primary crashes before it sends that write to the replica. The replica is promoted and has no lock key, so pod B's <code>SET NX</code> succeeds, and both pods hold the lock. <code>WAIT 1 100</code> blocks pod A for up to 100 milliseconds until one replica confirms the write. A reply of 1 makes this loss less likely, and a reply of 0 tells A that its lock is at risk. It does not make the failover safe, which is inferred: <code>WAIT</code> only reports how many replicas acknowledged, and with several replicas, the promoted one can still be one that did not. The guess "a correct client is enough" is reasonable, because every step of the client was correct.</p>
+</details>
+
+<ol class="flow" data-dir="down">
+<li><b>Pod A: SET lock:summary:42 tokA NX PX 10000</b><span>The primary answers OK, and pod A starts the job.</span></li>
+<li class="bad"><b>The primary crashes</b><span>Replication is asynchronous, so the replica never got the lock key.</span></li>
+<li class="hot"><b>The replica is promoted</b><span>It becomes the new primary, without the key.</span></li>
+<li class="bad"><b>Pod B: SET ... NX succeeds</b><span>Pods A and B both hold the lock, and neither paused.</span></li>
+</ol>
+
+<p>The official Redis lock page lists this race and calls it a "SAFETY VIOLATION". The window is the time between the primary's reply and the replica receiving the write. Phase 4 explains that window and the failover sequence. For a lock, what matters is that any write in that window can disappear, and the lock key is a write like any other.</p>
+
+<p>The second failure is in how Redis decides that a key has expired. It uses the wall clock, the system time that an administrator or a time daemon can step forward or back. The steps below follow the Redis 8.10.2 source.</p>
+<ol>
+<li><code>SET ... PX 10000</code> turns the TTL into an absolute time: the current time in milliseconds plus 10,000.</li>
+<li>Redis sends the command to replicas and to the append-only file as <code>SET key value PXAT &lt;absolute-ms&gt;</code>, so they keep the same absolute deadline.</li>
+<li>When a command touches the key, Redis compares that deadline with its current time, which comes from <code>gettimeofday</code>, the wall clock.</li>
+<li>So if the server's clock steps forward by 5 seconds, every lease on that server ends 5 seconds early.</li>
+<li>A promoted replica checks the old primary's deadline against its own clock, so clock skew between the two machines moves every lease at failover. This step is inferred from the code paths above.</li>
+</ol>
+
+<div class="callout warn"><p><b>Correction.</b> The phase says antirez "conceded" the monotonic clock, which reads as if Redis now uses one. It does not. The current official lock page says that "Redis is not using monotonic clock for TTL expiration mechanism". The Redis 8.10.2 source and the Valkey 9.1.2 source both decide expiry from the wall clock.</p></div>
+
+<p>Redlock is antirez's algorithm that takes the same lock on several independent Redis primaries and needs a majority of them. A Redlock library does not protect against either failure when it talks to one endpoint. redsync computes its quorum as half the number of Redis pools plus one, and with one pool the quorum is 1. So the library gives single-node behaviour, with a safe compare-and-delete and a nicer API. The phase's former employer ran its Redlock-library locks this way, against one managed Redis cluster. All its locks therefore lived on the same primaries, so one failover could affect all of them at once.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The four-step race and the monotonic-clock warning are on the redis.io page "Distributed Locks with Redis". Source at Redis tag 8.10.2: <code>*milliseconds += commandTimeSnapshot()</code> in <code>t_string.c</code>, line 259, and the <code>PXAT</code> rewrite in <code>t_string.c</code>, lines 194 to 205. <code>keyIsExpired</code> compares with <code>commandTimeSnapshot()</code> in <code>db.c</code>, line 2946, and that time comes from <code>ustime()</code>, which calls <code>gettimeofday</code>, in <code>server.c</code>, lines 242 to 249. Valkey 9.1.2: <code>src/util.c</code>, lines 1601 to 1621. The redsync quorum is in <code>redsync.go</code>, line 40, at v4.18.0. antirez wrote "I'll implement this in the next weeks" in his 2016 post.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: Valkey's clock, WAIT and WAITAOF, and when an expired key frees the lock</summary>
+<ul>
+<li>Valkey's <code>ustime()</code> adds a monotonic delta for at most 1 millisecond, and then calls <code>gettimeofday</code> again. So Valkey expiry still follows the wall clock.</li>
+<li><code>WAIT n timeout</code> blocks the client until <code>n</code> replicas acknowledge its write offset. Replicas send that acknowledgement once a second, and a waiting <code>WAIT</code> also asks for one in the same event-loop turn. <code>WAIT</code> does not make the write durable, because it only reports how many replicas received it.</li>
+<li><code>WAITAOF numlocal numreplicas timeout</code>, since Redis 7.2.0, waits until the write is fsynced to the append-only file on the primary and on replicas. It makes a loss less likely too. Whether it makes a lock safe at failover was not tested, and the reasoning above says it does not.</li>
+<li>Expiry has two paths. Each access to a key checks its deadline, and a background cycle samples keys with a TTL. On a primary, an access after the deadline deletes the key at once. So a <code>SET NX</code> sent right after a lease ends succeeds even if the background cycle has not reached the key yet. This last point is inferred from the access path.</li>
+<li>On a replica, an expired key reads as missing, but the replica waits for the primary's delete before it frees the memory.</li>
+<li>Real Redlock uses N independent primaries with no replication between them. A lock is held when a majority accepted it within the validity time. So losing one primary does not lose the lock. Kleppmann's point is that a clock step on some of the primaries still can.</li>
+</ul>
+</details>
+
+<div class="keypoints">
+<p class="remember">A lock on a primary with a replica can vanish at failover.</p>
+<p class="trap">Trusting a TTL across a failover or a clock step, because the client code was correct.</p>
+<p class="try">Ask your Redis host whether failover is automatic, and how much write loss it allows.</p>
+</div>
+
+<p>A paused pod and a failover both leave a late writer behind, so the next section moves the check to where the write lands.</p>
+
+<h2 data-concept="c5">What must the resource check before it accepts a write?</h2>
+<p class="why">The resource, not the lock, refuses the late writer, in the same step as the write.</p>
+
+<p>A paused pod and a failover both leave a late writer that believes it holds the lock, so the check has to sit where the write lands. A <dfn>fencing token</dfn> is a number that grows each time the lock is granted. The holder sends its token with every write. The resource rejects any write whose token is lower than the highest token it has already accepted.</p>
+
+<ol class="flow">
+<li><b>A acquires, token 33</b><span>Then a pause stops A, and its lease ends.</span></li>
+<li><b>B acquires, token 34</b><span>B writes with 34.</span></li>
+<li class="ok"><b>resource: 34 &gt; 33 seen</b><span>Accept, and remember 34.</span></li>
+<li><b>A wakes, writes with 33</b><span>A still believes it holds the lock.</span></li>
+<li class="bad"><b>resource: 33 &lt; 34</b><span>Reject. The late writer is fenced off.</span></li>
+</ol>
+
+<details class="predict"><summary>Predict: the summary service checks the token in Go. It reads the highest token from the row, compares, and then sends the UPDATE as a second statement. Pod B holds token 34 and pod A holds the old token 33. Is A's write always rejected?</summary>
+<p>No. Suppose A reads the row first and sees 32, so its check passes. Then B reads 32, passes, and writes 34. Then A's UPDATE lands with 33 and overwrites B's summary. Each check was correct at the moment it ran, so the guess "always rejected" is reasonable. But the row changed between A's check and A's write, which is the same gap as a <code>GET</code> followed by a <code>DEL</code>. The check and the write must be one atomic step at the resource.</p>
+</details>
+
+<p>A fence protects only when two conditions hold.</p>
+<ol>
+<li><b>The issuer never goes backwards.</b> It never hands out the same number twice, or a lower one, even across a crash or a failover. The next section shows why one Redis counter can break this.</li>
+<li><b>The resource checks and writes in one atomic step.</b> In SQL that is one conditional <code>UPDATE</code>, or a transaction that compares a version.</li>
+</ol>
+
+<pre><code data-lang="sql">-- one statement: the compare and the write cannot be separated
+UPDATE account_summaries
+SET    body = :body, fence = :token
+WHERE  account_id = 42 AND fence &lt; :token;
+-- 0 rows updated: a newer holder already wrote, so stop and do not email</code></pre>
+
+<p>The check is easy when the resource is a row you control. It is hard when the resource is a third-party API, which does not know your tokens, and it is impossible for a physical action. An object store with no conditional write cannot compare a token either. For those resources, the guard moves to a row you control, such as the idempotency key from the second section.</p>
+
+<p>A token that nobody checks does nothing. A team can add <code>INCR</code> on acquire, pass the number through every call, log it, and still accept every write. Lab exercise E8 shows the result: with no check, the stale writer's data is what remains.</p>
+
+<p>antirez makes one more point about this check. If the resource can already refuse an out-of-date write, you may not need a strong lock at all. A <dfn>version column</dfn> does the same job: the UPDATE succeeds only if the version is still the one you read, and it adds one to the version. For the summary row, the version check and the fence are the same SQL with a different number in it.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The fencing idea, the 33 and 34 example, and the advice to check at the storage are from Martin Kleppmann's post "How to do distributed locking". The point that a lock with strong properties is unclear when races are resolved another way is from antirez, "Is Redlock safe?". Chubby, Google's lock service, calls its tokens "sequencers", as the Jepsen etcd report notes.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: fencing an object store write, and the lab's fencing program</summary>
+<p>Suppose the job also writes a PDF of the summary to an object store such as S3. The store cannot compare your token, so one design is to make the object key unique per token, for example <code>summaries/42/34.pdf</code>. The writer uploads the object first, and then runs the conditional <code>UPDATE</code> that points the row at that object. A late writer's upload then lands under its own key, and its UPDATE matches 0 rows, so no reader ever sees its file. Old objects can be removed later. This design is a sketch for this lesson, not a published one.</p>
+<p>The lab program <code>fencing_tokens</code> deletes its counter and then calls <code>INCR</code>, so it prints tokens 1 and 2, not the 34 and 33 that the phase text says. It never takes a lock, and it shows only the resource's check. Its token comes from a separate <code>INCR</code>, not from the acquire itself, which is a gap the next section explains.</p>
+</details>
+
+<p>The resource's check is only as good as the numbers it compares, so the next section asks where the fencing token should come from.</p>
+
+<h2 data-concept="c5">Where should the fencing token come from?</h2>
+<p class="why">A token that can repeat after a failover lets two writers pass the same check.</p>
+
+<p>The resource now rejects a lower token in one atomic step, so everything depends on the issuer never going backwards. The obvious issuer is a Redis counter: <code>INCR fence:summary:42</code> on every acquire. That counter lives on the same kind of primary as the lock, and the failover section showed that a primary can lose its last writes.</p>
+
+<ol>
+<li>Pod A acquires and runs <code>INCR</code>. The primary answers 34.</li>
+<li>The primary crashes before the increment reaches the replica.</li>
+<li>The replica is promoted with the counter still at 33.</li>
+<li>Pod B acquires, runs <code>INCR</code>, and also gets 34.</li>
+<li>A resource that rejects only lower tokens accepts both writes, because 34 is not lower than 34.</li>
+<li>The SQL check above, <code>fence &lt; :token</code>, refuses an equal token, so it accepts only the first write with 34. It cannot tell which writer is newer, so the stale pod A can be the one that wins.</li>
+</ol>
+
+<p>This sequence is inferred from asynchronous replication, and no published incident of it was found. Kleppmann states the conclusion directly. He writes that "simply keeping a counter on one Redis node would not be sufficient, because that node may fail". He adds that you would likely "need a consensus algorithm just to generate the fencing tokens".</p>
+
+<div class="callout warn"><p><b>Correction.</b> The phase says "In Redis that's trivial: <code>INCR</code> a counter on acquire". A counter on one Redis primary can repeat a token after a failover, so it does not meet the first condition of a fence. Take the token from a source that never goes backwards, or use the resource's own version.</p></div>
+
+<p>There is a second gap even with no failover. If the token comes from a separate <code>INCR</code> after <code>SET NX</code>, pod A can acquire first and still receive a later token than pod B. Issue the lock and the token in one script, or use the resource's own version column. Both points are inferred from the order of the two commands.</p>
+
+<p>Systems that fence in production take their tokens from a source that is ordered by design.</p>
+<table>
+<thead><tr><th>System</th><th>Token</th><th>Who checks it</th></tr></thead>
+<tbody>
+<tr class="pick"><td>Kafka transactional producer</td><td>An epoch that grows each time a new instance starts with the same <code>transactional.id</code></td><td>The broker rejects a producer with an older epoch</td></tr>
+<tr><td>etcd</td><td>The revision of the lock key, ordered across the whole cluster</td><td>A transaction that compares the lock key in the same write</td></tr>
+<tr><td>ZooKeeper</td><td>The zxid, or the znode version</td><td>The resource, which compares it</td></tr>
+<tr><td>Chubby</td><td>A "sequencer" handed out with the lock</td><td>The server that receives the request</td></tr>
+<tr><td>Hazelcast <code>FencedLock</code></td><td>A number that only grows, issued through Raft, a consensus algorithm</td><td>The caller passes it to the resource</td></tr>
+<tr><td>A Redis <code>INCR</code> on one primary</td><td class="bad">Can repeat after a failover</td><td>Whatever resource you add</td></tr>
+</tbody>
+</table>
+
+<p><b>Kafka</b> uses its epoch to stop "zombie" producers, ones that are paused or cut off but still alive after a replacement has started. The new instance raises the epoch, and the broker, which is the resource, refuses every write that carries an older one.</p>
+
+<p>For the summary job, the clean answer avoids a separate token. The credits row has its unique key, and the summary row has a version column, so both checks come from the database that holds the data.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Kleppmann's quotes are from "How to do distributed locking". The Kafka epoch quotes are from Confluent's "Transactions in Apache Kafka": a new instance "increments an epoch", and producers "with same transactional.id and an older epoch are considered zombies and are fenced off". The etcd revision as a "globally ordered fencing token" is from the Jepsen etcd 3.4.3 report. Hazelcast's post of 2019-04-03 by Ensar Basri Kahveci describes <code>FencedLock</code>. Jepsen's Hazelcast 3.8.3 report of 2017 found that its earlier locks "aren't exclusive" under partitions.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: Hazelcast's path to fenced locks, and one script for lock and token</summary>
+<p><b>Hazelcast</b> first shipped locks that were not safe under a network split. Jepsen's tests found that its locks were not exclusive under partitions, because a split cluster ran as two clusters and each one granted the lock. Hazelcast then built <code>FencedLock</code> on the Raft consensus algorithm, with sessions and tokens that only grow, and tested it with Jepsen. The name comes from Kleppmann's post. Neither page gives incident numbers.</p>
+<p>If you must take a token from Redis, issue it in the same script as the lock, so the order of tokens matches the order of grants. The sketch below was not run. It still repeats a token after a failover, so it closes only the second gap.</p>
+<pre><code data-lang="lua">-- KEYS[1] = lock key, KEYS[2] = fence counter, ARGV[1] = token, ARGV[2] = ttl ms
+if redis.call("SET", KEYS[1], ARGV[1], "NX", "PX", ARGV[2]) then
+    return redis.call("INCR", KEYS[2])
+end
+return 0</code></pre>
+<p>In Redis Cluster both keys must be in the same hash slot, for example <code>{summary:42}:lock</code> and <code>{summary:42}:fence</code>.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">A fence needs a token that never repeats and a check inside the write.</p>
+<p class="trap">Taking tokens from INCR on one primary, which can repeat a token after failover.</p>
+<p class="try">Run E7, then reset the counter to stand in for a failover, and run it again.</p>
+</div>
+
+<p>You now have every way a lock can fail, so the last teaching section turns them into an audit you can run on any lock.</p>
+
+<h2 data-concept="c1">How do you audit a lock you find in a codebase?</h2>
+<p class="why">Eight questions find each failure in this lesson, and the first decides how much the rest matter.</p>
+
+<p>The sections above gave one failure each, so any lock can now be read against all of them. The phase came with an audit of a real codebase. It was the same platform, with eight Redis locks in Go services, all on one managed Redis cluster.</p>
+<ul>
+<li>Four locks used a Redlock library against one endpoint, so their quorum was 1 and they behaved as single-node locks. The library's compare-and-delete made their release safe.</li>
+<li>Four were written by hand with <code>SETNX</code> and a plain <code>DEL</code>, and their values were constants: <code>"1"</code>, <code>"locked"</code> and <code>"100"</code>. All four can delete the next holder's lock after an overrun.</li>
+<li>TTLs ran from 500 milliseconds to 180 seconds. One helper took its TTL from the caller with no default, so a caller passing 0 got a lock that never expires.</li>
+<li>No lock used a fencing token.</li>
+</ul>
+<p>The audit's verdict came from the first question. Every lock guarded a job whose double run is a nuisance, such as a duplicate invitation email or a second share link. So the gaps were real but tolerable. The risk is the day someone copies one of these locks to guard money, because "we already do it this way".</p>
+
+<table>
+<thead><tr><th>#</th><th>Ask about each lock</th><th>A bad answer</th><th>Section</th></tr></thead>
+<tbody>
+<tr class="pick"><td>1</td><td>What breaks if two holders act?</td><td>Money, a ledger, or a write that cannot be undone</td><td>wasted work or wrong data</td></tr>
+<tr><td>2</td><td>Is the value a random token?</td><td><code>"1"</code>, <code>"locked"</code>, a hostname, or a constant</td><td>SET NX PX</td></tr>
+<tr><td>3</td><td>Is the release a compare-and-delete in one step?</td><td>A plain <code>DEL</code>, or a <code>GET</code> then <code>DEL</code> from the client</td><td>plain DEL</td></tr>
+<tr><td>4</td><td>Is the TTL above the p99 of the work, with margin?</td><td>A sub-second TTL on a call to another service or to an LLM</td><td>longer TTL and watchdog</td></tr>
+<tr><td>5</td><td>Can a caller pass a TTL of 0?</td><td>Yes, and the client library turns 0 into no expiry</td><td>SET NX PX</td></tr>
+<tr><td>6</td><td>Is the unlock error checked and counted?</td><td><code>defer</code> drops <code>ErrLockAlreadyExpired</code></td><td>plain DEL</td></tr>
+<tr><td>7</td><td>Is there a fencing token or an idempotent write at the resource?</td><td>No, and question 1 said money</td><td>where the guarantee lives, fencing</td></tr>
+<tr><td>8</td><td>Does the lock live on a primary that can fail over?</td><td>Yes, and question 1 said money</td><td>failover</td></tr>
+</tbody>
+</table>
+
+<p>Two lessons from that audit apply to any codebase. A library's compare-and-delete stays safe when the caller drops the unlock error, because the library still refuses to delete a foreign lock. Dropping the error only hides the lease-overrun signal, which is a monitoring gap and not a safety gap.</p>
+
+<p>The second lesson is a comment found next to a removed lock: "we do not need to take a lock here, since redis is always atomic". That comment is half right. One Redis command is atomic, as Phase 0 showed. A read-modify-write across several commands is not, so another client can run between them. When the resource is Redis itself, the fix is not a lock. Put the commands in one Lua script, or use <code>WATCH</code> with <code>MULTI</code> and <code>EXEC</code>, which aborts the transaction if a watched key changed.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The eight locks come from the phase's audit of the former employer's private code, so no row can be checked from outside. The "TTL 0 means no expiry" part holds for go-redis at v9.5.1 and v9.23.0, from its <code>string_commands.go</code>.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: the eight locks one by one, in general terms</summary>
+<table>
+<thead><tr><th>What the lock guarded</th><th>Built with</th><th>TTL</th><th>Release</th><th>Owner check</th></tr></thead>
+<tbody>
+<tr><td>A content sync job</td><td>Redlock library</td><td>180 s</td><td>Library unlock, error dropped by a <code>defer</code></td><td class="ok">Yes, random token</td></tr>
+<tr><td>Search indexing of one resource</td><td>Redlock library, 1 try</td><td>2 min</td><td>Library unlock, error only logged</td><td class="ok">Yes. The log line could panic on a nil error.</td></tr>
+<tr><td>A folder upload</td><td>Redlock library, 1 try</td><td>2 s</td><td>Library unlock, error only logged</td><td class="ok">Yes</td></tr>
+<tr class="pick"><td>A resumable file upload</td><td>Redlock library, 1 try</td><td>20 s</td><td>Library unlock, error returned and checked</td><td class="ok">Yes, the cleanest of the eight</td></tr>
+<tr><td>Invitation email dedup</td><td><code>SETNX</code>, retried until a deadline</td><td>60 s</td><td>Plain <code>DEL</code> by the caller</td><td class="bad">None, value <code>"1"</code></td></tr>
+<tr><td>Chat session start</td><td><code>SETNX</code></td><td>500 ms, set by the caller</td><td>Plain <code>DEL</code></td><td class="bad">None</td></tr>
+<tr><td>Public share-link creation</td><td><code>SETNX</code></td><td>10 s</td><td>Plain <code>DEL</code></td><td class="bad">None, value <code>"locked"</code></td></tr>
+<tr><td>A trending counter</td><td><code>SETNX</code>, call sites removed</td><td>20 s</td><td>Plain <code>DEL</code></td><td class="bad">None, value <code>"100"</code></td></tr>
+</tbody>
+</table>
+<ul>
+<li>The email-dedup lock had no unlock function. Its comment told callers to delete the key themselves, so every caller wrote its own plain <code>DEL</code>.</li>
+<li>The trending-counter lock was one line from correct. Its acquire stored a value token, but its release never compared that token before deleting.</li>
+<li>The search lock's release logged the error when the unlock returned false. If the unlock returned false with a nil error, the log line read the nil error and panicked. Error-handling code needs the same tests as the main path.</li>
+<li>The chat-session lock had both problems from this lesson's lease sections: a 500 ms TTL on work that calls other services, and a caller-supplied TTL with no default. A double session is still only a nuisance, but this lock was the closest to causing real harm.</li>
+<li>The library locks were all created against one cluster endpoint, so a failover of that one primary affected every one of them at once.</li>
+</ul>
+</details>
+
+<p>Every release and extend in that audit is a Lua script, so the next section asks what happens to those scripts at a failover.</p>
+
+<h2 data-concept="c2">What happens to the lock's scripts at a failover, or when one runs long?</h2>
+<p class="why">Every lock here runs a Lua script, and a failover empties the script cache.</p>
+
+<p>The audited locks trust the server to keep their scripts. Pod A releases <code>lock:summary:42</code> with the compare-and-delete script. The team sends it with <code>EVALSHA</code>, so each call carries a hash instead of the source. Then the primary fails over.</p>
+
+<p>Redis keeps two kinds of server-side code in two different places. A <dfn>script cache</dfn> is a table in the memory of one Redis process that maps the SHA1 hash of a script to its source. It is not part of the data set, so it is not saved to disk and not sent to replicas. A <dfn>function</dfn> is Lua code in a named library that you load once with <code>FUNCTION LOAD</code>. Libraries belong to the data set, like keys, so they survive a restart and a failover.</p>
+
+<figure class="diagram"><svg viewBox="0 0 640 250" role="img" aria-label="The script cache stays on one process, and the data set with its libraries is copied to the replica">
+<defs><marker id="p11-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+<text x="140" y="20" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor">primary</text>
+<text x="500" y="20" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor">replica, then promoted</text>
+<rect x="20" y="32" width="240" height="92" rx="8" fill="none" stroke="currentColor"/>
+<text x="36" y="58" font-size="14" font-weight="600" fill="currentColor">script cache</text>
+<text x="36" y="82" font-size="13" fill="currentColor">SHA1 hash to unlock source</text>
+<text x="36" y="104" font-size="13" fill="currentColor">memory of this process only</text>
+<rect x="20" y="140" width="240" height="92" rx="8" fill="none" stroke="currentColor"/>
+<text x="36" y="166" font-size="14" font-weight="600" fill="currentColor">data set</text>
+<text x="36" y="190" font-size="13" fill="currentColor">lock:summary:42, libraries</text>
+<text x="36" y="212" font-size="13" fill="currentColor">saved in RDB and AOF</text>
+<rect x="380" y="32" width="240" height="92" rx="8" fill="none" stroke="currentColor"/>
+<text x="396" y="58" font-size="14" font-weight="600" fill="currentColor">script cache</text>
+<text x="396" y="82" font-size="13" fill="currentColor">empty</text>
+<text x="396" y="104" font-size="13" fill="currentColor">EVALSHA gets NOSCRIPT</text>
+<rect x="380" y="140" width="240" height="92" rx="8" fill="none" stroke="currentColor"/>
+<text x="396" y="166" font-size="14" font-weight="600" fill="currentColor">data set</text>
+<text x="396" y="190" font-size="13" fill="currentColor">the same keys and libraries</text>
+<text x="396" y="212" font-size="13" fill="currentColor">FCALL works at once</text>
+<line x1="264" y1="78" x2="374" y2="78" stroke="currentColor" stroke-width="1.5" marker-end="url(#p11-arrow)"/>
+<text x="319" y="68" text-anchor="middle" font-size="12" fill="currentColor">not copied</text>
+<text x="319" y="98" text-anchor="middle" font-size="18" fill="currentColor">✗</text>
+<line x1="264" y1="186" x2="374" y2="186" stroke="currentColor" stroke-width="1.5" marker-end="url(#p11-arrow)"/>
+<text x="319" y="176" text-anchor="middle" font-size="12" fill="currentColor">replicated</text>
+</svg><figcaption>Where each kind of server-side code lives. The labels come from the Redis 8.10.2 source and the E13 and E15 runs.</figcaption></figure>
+
+<details class="predict"><summary>Predict: each pod ran <code>SCRIPT LOAD</code> once at start and releases with <code>EVALSHA</code>. The primary fails over, and the lock key reached the replica. What does pod A's next release return, and when does <code>lock:summary:42</code> free itself?</summary>
+<p>The release returns an error, <code>NOSCRIPT No matching script. Please use EVAL.</code>, and deletes nothing. The promoted replica never received the script, so its cache is empty. The key then stays until its TTL ends, up to 10 seconds after the last acquire or extend. The guess "the release works" is reasonable, because the key and its token both survived. But the script is not data, so it did not travel with them.</p>
+</details>
+
+<p>Three commands put a script into the cache or run it from there:</p>
+<ol>
+<li><code>EVAL source numkeys key... arg...</code> sends the full source. Redis hashes it, caches it and runs it.</li>
+<li><code>EVALSHA sha1 numkeys key... arg...</code> sends only the 40-character hash, so a long script costs fewer bytes per call.</li>
+<li><code>SCRIPT LOAD source</code> caches a script without running it and returns its hash.</li>
+</ol>
+<p>Because the cache lives in one process, five events change it. E13 and E15 measured four of them on Redis 8.10.1.</p>
+<table>
+<thead><tr><th>Event</th><th>The script cache after it</th></tr></thead>
+<tbody>
+<tr><td>A restart of the process</td><td class="bad">Empty</td></tr>
+<tr><td>A failover to a replica</td><td class="bad">Empty, because <code>SCRIPT LOAD</code> is not replicated since Redis 7.0</td></tr>
+<tr><td><code>SCRIPT FLUSH</code></td><td class="bad">Empty</td></tr>
+<tr><td>500 newer <code>EVAL</code> scripts, since Redis 7.4</td><td class="bad">The least recently used script that came through <code>EVAL</code> is evicted</td></tr>
+<tr><td><code>DEBUG RELOAD</code></td><td class="ok">Unchanged, because it reloads only the data set</td></tr>
+</tbody>
+</table>
+<p>The eviction rule surprises most people. Redis keeps at most 500 scripts that arrived through <code>EVAL</code>, and INFO stats counts each eviction as <code>evicted_scripts</code>. Scripts from <code>SCRIPT LOAD</code> are never evicted. But on Redis 8.10, <code>SCRIPT LOAD</code> does not protect a script that <code>EVAL</code> cached first, because Redis finds it cached and returns early.</p>
+
+<p>A client must therefore handle <code>NOSCRIPT</code> on every call, and the two common clients do it in different ways.</p>
+<div class="compare">
+<div class="wrong"><p><b>Load once, then EVALSHA forever</b></p>
+<pre><code data-lang="go">sha := rdb.ScriptLoad(ctx, unlockSrc).Val()
+// ... a failover empties the script cache ...
+err := rdb.EvalSha(ctx, sha, []string{key}, token).Err()
+// err: NOSCRIPT No matching script. Please use EVAL.</code></pre></div>
+<div class="right"><p><b>Fall back on NOSCRIPT</b></p>
+<pre><code data-lang="go">var unlock = redis.NewScript(unlockSrc)
+// EVALSHA first, and EVAL with the source on NOSCRIPT
+n, err := unlock.Run(ctx, rdb, []string{key}, token).Int()
+// n == 1: released, n == 0: another holder has the lock</code></pre></div>
+</div>
+<table>
+<thead><tr><th>Client</th><th>On NOSCRIPT it sends</th><th>Effect on the cache</th></tr></thead>
+<tbody>
+<tr><td>go-redis <code>Script.Run</code>, and redsync on go-redis</td><td><code>EVAL</code> with the source</td><td>The script came through <code>EVAL</code>, so it can be evicted again</td></tr>
+<tr class="pick"><td>redis-py <code>Script.__call__</code></td><td><code>SCRIPT LOAD</code>, then <code>EVALSHA</code></td><td class="ok">Never evicted</td></tr>
+<tr><td>Code that calls only <code>EVALSHA</code></td><td>Nothing, the error reaches the caller</td><td class="bad">The unlock fails</td></tr>
+</tbody>
+</table>
+<p>Two more rules keep scripts working in a cluster and on replicas. Pass every key a script touches in its key arguments, never in <code>ARGV</code>, because the client routes the call by those keys. In cluster mode the server also refuses a key that lives on another node. And a replica never runs your script: the primary sends it only the writes the script made. When there is more than one write, it wraps them in <code>MULTI</code> and <code>EXEC</code>. So the replica's empty cache matters only on the day it becomes the primary.</p>
+
+<p>While one script runs, the server serves nobody else. After <code>busy-reply-threshold</code>, 5000 ms by default, Redis does not stop the script. It answers every other client with <code>BUSY</code> instead. <code>SCRIPT KILL</code> stops the script only if it has not written yet, because stopping it after a write would leave half its writes behind. E14 lowered the threshold to 200 ms on its own server and measured both cases.</p>
+<ol class="timeline">
+<li><time>t=50 ms</time> Client 2 sends <code>PING</code> while a read-only script spins. It gets no reply, because the server is inside the script.</li>
+<li><time>t=200 ms</time> The threshold passes, and the <code>PING</code> gets <code>BUSY</code> after waiting 150 ms. <code>SCRIPT KILL</code> returns <code>OK</code>.</li>
+<li><time>t=310 ms</time> A second script wrote one key and then spins. <code>SCRIPT KILL</code> gets <code>UNKILLABLE</code>, and <code>PING</code> still gets <code>BUSY</code>.</li>
+<li><time>t=1.51 s</time> The second script ends by itself, and <code>PING</code> works again.</li>
+</ol>
+<p>After a write, the only ways out are to wait or to run <code>SHUTDOWN NOSAVE</code>, which stops the server and loses every write since its last save. The lock scripts are two commands on one key, so they finish far below 5000 ms. The danger is a long script that another team runs on the same primary.</p>
+
+<p>Functions remove the empty-cache problem. The library below holds the release, the extend and a read-only owner check. Pod A calls <code>FCALL p3sc_unlock 1 lock:summary:42 tokA</code> by name, so there is no hash to miss.</p>
+<pre><code data-lang="lua">#!lua name=p3sc_lockkit
+redis.register_function('p3sc_unlock', function(keys, args)
+  if redis.call('GET', keys[1]) == args[1] then
+    return redis.call('DEL', keys[1])
+  end
+  return 0
+end)
+redis.register_function('p3sc_extend', function(keys, args)
+  if redis.call('GET', keys[1]) == args[1] then
+    return redis.call('PEXPIRE', keys[1], args[2])
+  end
+  return 0
+end)
+redis.register_function{
+  function_name = 'p3sc_owner',
+  callback = function(keys) return redis.call('GET', keys[1]) end,
+  flags = {'no-writes'},
+}</code></pre>
+<p><code>FUNCTION LOAD</code> is a write command, so the library goes to the replicas and the AOF, and <code>SAVE</code> puts it in the RDB file. The cost is a deploy step. In a cluster, Redis does not copy libraries between shards, so you load the library on every primary yourself. Keep <code>EVAL</code> with a fallback for a short script that one app owns, and choose Functions when several services share the code.</p>
+
+<p>An open issue report describes this failure in a real library. async-job-processor-redis, an open-source Ruby job library, loads its scripts when the process starts and then calls only <code>EVALSHA</code>. The report says that after a restart or <code>SCRIPT FLUSH</code>, the first <code>NOSCRIPT</code> ends its heartbeat and delayed-job loops. They never start again. Workers still take jobs, because that path uses no script, so the server looks healthy. In the running case, the same mistake leaves every summary lock held until its TTL ends, and every watchdog extend fails.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Run with <code>script_cache</code> on the lab's own Redis 8.10.1 server, the build that the lab section names. E13: after <code>SCRIPT FLUSH</code>, <code>EVALSHA</code> returned <code>NOSCRIPT No matching script. Please use EVAL.</code>, and go-redis <code>Script.Run</code> released the lock with 1. Then 500 other <code>EVAL</code> scripts evicted it, and <code>evicted_scripts</code> rose by 1. E14 printed the timeline above. E15: the library and the script were both present after <code>DEBUG RELOAD</code>, and after a real restart the library was present and the script was gone. Source at Redis 8.10.2: the 500 limit is <code>LRU_LIST_LENGTH</code> in <code>src/eval.c:534</code>, and the early return is in <code>src/eval.c:445-447</code>. The <code>NOSCRIPT</code> and <code>BUSY</code> texts are in <code>src/server.c:2231-2238</code>. The default of 5000 is in <code>src/config.c:3573</code>. Release notes 7.0.0 list PR #9812, which ended script replication and the propagation of <code>SCRIPT LOAD</code>. Clients: go-redis v9.5.1 <code>script.go:68-74</code>, redsync v4.18.0 <code>redis/goredis/v9/goredis.go:62-64</code>, redis-py v8.1.0 <code>redis/commands/core.py:10937</code>. The Ruby case is socketry/async-job-processor-redis issue #15, an open issue against version 0.3.1.</p>
+</details>
+
+<details class="answer deeper"><summary>Go deeper: BUSY and Sentinel, read-only calls, Functions in a cluster, the choice, and Valkey</summary>
+<p><b>The busy limit in detail.</b> The config is <code>busy-reply-threshold</code>, with the old name <code>lua-time-limit</code>, and the lab server returned 5000 for both.</p>
+<ul>
+<li>Before the threshold, other clients only wait. After it, Redis logs "Slow script detected" and replies with the <code>BUSY</code> error that E14 prints.</li>
+<li>The full refusal from E14 is <code>UNKILLABLE Sorry the script already executed write commands against the dataset. You can either wait the script termination or kill the server in a hard way using the SHUTDOWN NOSAVE command.</code></li>
+<li>Redis checks the limit from a Lua hook every 100,000 Lua instructions, in <code>src/script_lua.c:1669-1671</code>. One long <code>redis.call</code>, such as <code>KEYS *</code> on a large database, cannot be stopped while it runs. This is inferred from the hook and was not measured.</li>
+<li>A threshold of 0 removes the limit, so the script can never be killed. The lab server refused <code>CONFIG SET busy-reply-threshold -1</code> with "argument must be between 0 and 9223372036854775807 inclusive".</li>
+<li><code>SCRIPT KILL</code> cannot stop a function, and <code>FUNCTION KILL</code> cannot stop a script.</li>
+</ul>
+<p><b>Sentinel and a busy primary.</b> Sentinel does not count <code>BUSY</code> as a valid reply to its <code>PING</code>. When it already sees the primary as down and the reply is <code>BUSY</code>, it sends <code>SCRIPT KILL</code> once, in <code>src/sentinel.c:2813-2831</code>. Its default <code>down-after-milliseconds</code> is 30,000, in <code>src/sentinel.c:69</code>. ScaleGrid, a Redis hosting vendor, showed the next step in a demo with <code>lua-time-limit</code> 500 ms and <code>down-after-milliseconds</code> 5 s. An endless script that wrote keys made Sentinel promote the replica. When the old primary was brought back online, Sentinel made it a replica. It synced from the new primary, so the script's writes were lost. The post does not say how the endless script was stopped. This is a vendor demo, not an incident report.</p>
+<p><b>A long script in a real library.</b> Rails' <code>RedisCacheStore#delete_matched</code> deleted keys by pattern inside one Lua script. With enough keys, other clients got <code>BUSY</code> errors. The fix replaced the script with a <code>SCAN</code> and <code>DEL</code> loop.</p>
+<p><b>Read-only calls.</b> <code>EVAL_RO</code>, <code>EVALSHA_RO</code> and <code>FCALL_RO</code>, since Redis 7.0, run code that must not write. They can run on a read-only replica, and an ACL rule can allow them for a user who may not write. On the lab server, a write inside <code>EVAL_RO</code> failed with "ERR Write commands are not allowed from read-only scripts." In E15, <code>FCALL_RO p3sc_owner</code> returned <code>tokA</code>, and <code>FCALL_RO p3sc_unlock</code> failed with the write-flag error that the lab shows.</p>
+<p><b>Keys in a cluster.</b> A key on another node fails with "Script attempted to access a non local key in a cluster node", in <code>src/script.c:496-539</code>. A script that starts with a <code>#!lua</code> line also refuses undeclared keys in another slot, unless it sets the flag <code>allow-cross-slot-keys</code>. So a lock key and its fence counter need one hash tag, such as <code>{summary:42}:lock</code> and <code>{summary:42}:fence</code>. The lab server is not a cluster, so these rules come from the source only.</p>
+<p><b>Functions in detail.</b></p>
+<ol>
+<li><code>FUNCTION LOAD</code> loads a whole library. Without <code>REPLACE</code>, a name that exists fails, and the lab server replied "ERR Library 'lockkit' already exists". Function names are unique across libraries.</li>
+<li>A function gets its keys as the first argument of its callback and its other arguments as the second. The <code>KEYS</code> and <code>ARGV</code> globals do not exist in functions.</li>
+<li>The documentation gives <code>redis-cli --cluster-only-masters --cluster call host:port FUNCTION LOAD ...</code> to load on every primary. <code>redis-cli --cluster add-node</code> copies the libraries to a new node.</li>
+<li><code>FUNCTION DUMP</code> returns every library in the RDB format, with a version and a checksum. <code>FUNCTION RESTORE payload</code> takes a policy: <code>APPEND</code> is the default and fails when a library exists, <code>REPLACE</code> replaces it, and <code>FLUSH</code> deletes all libraries first. E15 got "ERR Library p3sc_lockkit already exists" with the default, and <code>OK</code> with <code>REPLACE</code>.</li>
+<li>Library code runs once at load time, with a limit of 500 ms.</li>
+</ol>
+<table>
+<thead><tr><th>Flag</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td>no flags, on a <code>#!lua</code> script or a function</td><td>May write. Refused on a stale replica and when memory is over <code>maxmemory</code>. Keys in one slot</td></tr>
+<tr><td><code>no-writes</code></td><td>Allowed under <code>FCALL_RO</code> and <code>EVAL_RO</code>, and on read-only replicas</td></tr>
+<tr><td><code>allow-oom</code></td><td>Allowed when used memory is over <code>maxmemory</code></td></tr>
+<tr><td><code>allow-stale</code></td><td>Allowed on a stale replica with <code>replica-serve-stale-data no</code></td></tr>
+<tr><td><code>no-cluster</code></td><td>Refused in cluster mode</td></tr>
+<tr><td><code>allow-cross-slot-keys</code></td><td>May touch undeclared keys in other slots</td></tr>
+</tbody>
+</table>
+<p><b>When to choose Functions over EVAL.</b></p>
+<table>
+<thead><tr><th>Question</th><th>EVAL and EVALSHA</th><th>Functions</th></tr></thead>
+<tbody>
+<tr><td>Survives restart and failover</td><td class="bad">No. Each client must handle NOSCRIPT</td><td class="ok">Yes. Saved in RDB and AOF, and replicated</td></tr>
+<tr><td>Deploy step</td><td class="ok">None. The app carries the source</td><td class="bad">Load on every primary, and again on a new cluster</td></tr>
+<tr><td>Name in SLOWLOG and MONITOR</td><td><code>EVALSHA</code> shows a SHA1 hash, and <code>EVAL</code> shows the whole source</td><td>A function name</td></tr>
+<tr><td>Changing the code</td><td>New source gives a new hash, and old and new run side by side</td><td><code>FUNCTION LOAD REPLACE</code> changes it for every caller at once</td></tr>
+<tr><td>Inside a pipeline</td><td class="bad"><code>EVALSHA</code> can fail with NOSCRIPT</td><td class="ok">No cache to miss</td></tr>
+</tbody>
+</table>
+<p>The Redis design issue that proposed Functions, #8693, lists the same problems: scripts can disappear, <code>EVALSHA</code> in a transaction is risky, and SHA names are hard to debug. No first-hand report of a production move from <code>EVAL</code> to Functions was found. For a pipeline, the Redis page Scripting with Lua says to use <code>EVAL</code>, and redis-py runs <code>SCRIPT EXISTS</code> and <code>SCRIPT LOAD</code> before it sends one.</p>
+<p><b>Valkey 9.1.2.</b> The commands are the same, with these differences:</p>
+<ul>
+<li>Lua is a module in <code>src/modules/lua</code> since Valkey 9.1.0. The build option <code>BUILD_LUA</code> is <code>static</code> by default, <code>module</code> for a loadable <code>libvalkeylua.so</code>, or <code>no</code> for a server without Lua, in <code>src/Makefile:261-293</code>.</li>
+<li>On a <code>BUILD_LUA=no</code> server, <code>EVAL</code> and <code>FCALL</code> with Lua code fail, because no Lua engine is registered. This is inferred from the engine lookup, and no such build was made. Ask your managed Valkey service which build it runs.</li>
+<li>The Lua global table is <code>server</code>, and <code>redis</code> is an alias for it, so code that calls <code>redis.call</code> runs on both servers.</li>
+<li><code>SCRIPT SHOW sha1</code> returns the source of a cached script, since Valkey 8.0.0. Redis 8.10.2 has no <code>SCRIPT SHOW</code>.</li>
+<li><code>SCRIPT LOAD</code> of a script that <code>EVAL</code> cached first takes it off the eviction list, in <code>src/eval.c:366-388</code>. So on Valkey, <code>SCRIPT LOAD</code> protects the script, and on Redis 8.10 it does not.</li>
+<li><code>busy-reply-threshold</code> has the same names and the same default of 5000 ms.</li>
+</ul>
+<p><b>A first draft that was wrong.</b> The first version of E15 expected <code>DEBUG RELOAD</code> to empty the script cache. The run showed the script still cached. <code>DEBUG RELOAD</code> calls <code>emptyData</code> and <code>rdbLoad</code> in <code>src/debug.c:648-651</code>, and <code>emptyData</code> clears the keys and the libraries, not the script cache. <code>rdbLoad</code> skips the old <code>lua</code> field of the file, in <code>src/rdb.c:4822-4823</code>. So E15 also restarts the server, which is the real test.</p>
+</details>
+
+<div class="keypoints">
+<p class="remember">The script cache is lost at restart and failover, so EVALSHA needs a fallback.</p>
+<p class="trap">SCRIPT LOAD once at start: after a failover, every unlock fails with NOSCRIPT.</p>
+<p class="try">Run E13 and find NOSCRIPT, then the fallback's reply of 1.</p>
+</div>
+
+<p>That closes the teaching sections, and the next section collects what you can now do.</p>
+
+<h2 data-kind="recall">What you can do now, and what comes next</h2>
+<p>c1 to c5 below are the five ideas of "What you must know", in the same order.</p>
+<ul>
+<li><b>c1.</b> A double run that only wastes work needs one Redis node. A double run that corrupts data needs a check at the resource, and the lock then only saves work. Taught in "Is this lock about wasted work or about wrong data?" and "Where does the guarantee live when a lock is not enough?".</li>
+<li><b>c2.</b> The acquire is <code>SET key token NX PX ttl</code> with a random token. Release and extend compare that token and act in one step on the server, with <code>DELEX</code>, <code>SET IFEQ</code> or a Lua script. A script needs a <code>NOSCRIPT</code> fallback, because only a Function survives a failover. Taught in the two sections on <code>SET NX PX</code> and on plain <code>DEL</code>, and in the section on the lock's scripts.</li>
+<li><b>c3.</b> A pause longer than the TTL gives two acting holders. A longer TTL, a watchdog and a deadline in the work make it rarer, and only an idempotent write or a fence removes the harm. Taught in the two lease sections.</li>
+<li><b>c4.</b> A lock on a primary with a replica can vanish at failover, and expiry follows the wall clock. A Redlock library on one endpoint is a single-node lock. Taught in "How can the lock vanish when no client paused?".</li>
+<li><b>c5.</b> A fencing token works only if it never repeats and the resource checks it inside the write. One Redis counter can repeat after failover. Taught in the two fencing sections.</li>
+</ul>
+<p>You can now read any lock, say what it protects and what it does not, and choose where its guarantee must live. You saw that a lock key can disappear when a primary fails before its replica has the write. Phase 4 answers how large that window is: how replication works, how much data a failover can lose, and how long the failover takes.</p>
+
+<h2 data-kind="lab">Lab: the exercises that teach Phase 3</h2>
+<details class="answer practice"><summary>Open the lab: E1 to E15, copied from the phase. E13 to E15 were run, and E1 to E12 were not run for this lesson</summary>
+<p>The lab below is copied from the phase. The only change is that the former employer's service names are replaced with what each service did. This lesson's author ran none of E1 to E12. Where the study note or the earlier audit found a problem, a note under the exercise says what is wrong and what to expect instead.</p>
+<p><b>What each exercise proves.</b> E1 to E4 prove the acquire and the compare-and-delete release. E5, E6, E9 and E12 are about the lease. E7 and E8 are about fencing. E10 builds a lock with retries by hand, and E11 shows a read-modify-write that needs one atomic step. E13 to E15 show what happens to the lock's scripts when the cache is emptied, when a script runs long, and across a reload and a restart.</p>
+
+<p>Setup:</p>
+<pre><code data-lang="bash">cd /Users/raghvendradhakar/Desktop/code/verly/study-material/redis/code
+docker-compose up -d &amp;&amp; docker exec redis-study redis-cli PING   # → PONG</code></pre>
+<div class="callout warn"><p><b>Lab note.</b> The code is at <code>/Users/raghvendra.dhakar/Desktop/project/code/study-material/redis/code</code>, not at the path above. Its <code>docker-compose.yml</code> pins <code>redis:7.2</code>, and <code>DELEX</code> and <code>SET IFEQ</code> need Redis 8.4 or later, so pin an 8.x image. The current release is 8.10.2. The Go programs accept <code>-addr</code> and use port 6379 by default, so a local <code>redis-server</code> works without Docker.</p></div>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1. The correct lock.</b></label>
+<ul>
+<li>Run: <code>go run ./phase03_locking/safe_lock</code></li>
+<li>Expected: A acquires, B denied while A holds, A releases, A's stale token can't release B's later lock.</li>
+<li>Teaches: <code>SET NX PX</code> + random token + Lua CAS unlock, end to end.</li>
+</ul>
+<p class="note"><i>Lab note:</i> the study note ran this program and saw the expected result. Add a <code>DELEX</code> version on Redis 8.4 or later, and print the 0 it returns for a missing key.</p></li>
+
+<li><label><input type="checkbox"> <b>E2. Watch the acquire on the wire.</b></label>
+<ul>
+<li>Run: <code>docker exec -it redis-study redis-cli MONITOR</code> in one terminal; in another <code>docker exec redis-study redis-cli SET lock:x tokenA NX PX 30000</code> then again with <code>tokenB</code>.</li>
+<li>Expected: first returns OK, second returns nil (key exists).</li>
+<li>Teaches: <code>NX</code> is the mutual exclusion; the single thread makes it atomic.</li>
+</ul>
+<p class="note"><i>Lab note:</i> not run, because it needs Docker as written. Without Docker, run the same commands with <code>redis-cli</code> directly.</p></li>
+
+<li><label><input type="checkbox"> <b>E3. (Break it) The plain-DEL unlock bug.</b></label>
+<ul>
+<li>Run: <code>go run ./phase03_locking/unsafe_unlock</code></li>
+<li>Expected: A's lock expires mid-work, B acquires, A's <code>DEL</code> deletes B's lock, C acquires → B+C both hold.</li>
+<li>Teaches: the exact email-dedup and share-link lock failure mode. This is why value must be random + CAS unlock.</li>
+</ul>
+<p class="note"><i>Lab note:</i> the study note ran it, and it printed that A deleted B's lock and that B and C both believe they hold it. The program's comments name the former employer.</p></li>
+
+<li><label><input type="checkbox"> <b>E4. Prove the Lua CAS unlock refuses a stale release.</b></label>
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli SET lock:y realowner PX 30000</code>, then run the release script with the WRONG token: <code>docker exec redis-study redis-cli EVAL 'if redis.call("GET",KEYS[1])==ARGV[1] then return redis.call("DEL",KEYS[1]) else return 0 end' 1 lock:y wrongtoken</code> (→ 0, not deleted), then with <code>realowner</code> (→ 1).</li>
+<li>Teaches: compare-and-delete only deletes when you still own it.</li>
+</ul>
+<p class="note"><i>Lab note:</i> on Redis 8.4 or later, also run <code>DELEX lock:y IFEQ wrongtoken</code> and <code>DELEX lock:y IFEQ realowner</code>. The study note saw 0 and then 1 on Redis 8.10.1.</p></li>
+
+<li><label><input type="checkbox"> <b>E5. (Break it) Lease overrun → two holders.</b></label>
+<ul>
+<li>Run: <code>go run ./phase03_locking/lease_expiry_race -ttl 500ms -work 900ms</code></li>
+<li>Expected: counter==2, invariant broken, "❌ BROKEN".</li>
+<li>Teaches: a perfect lock still fails if work &gt; TTL. The Redlock-debate crux.</li>
+</ul>
+<p class="note"><i>Lab note:</i> this program has a bug, found by reading its code. This lesson reports no run of it. <code>lease_expiry_race/main.go</code>, lines 54 to 87, counts increments, and each of its two workers always increments once. So the final counter is 2 for every flag value, even when the two leases never overlap, and it prints BROKEN every time. Expect <code>counter == 2</code> here, but it does not prove an overlap. To see real overlap, count the holders inside the critical section with an atomic counter and print the maximum.</p></li>
+
+<li><label><input type="checkbox"> <b>E6. Tune the lease to fix (and then break) it.</b></label>
+<ul>
+<li>Run: <code>-ttl 2s -work 900ms</code> (safe: counter==1), then <code>-ttl 2s -work 3s</code> (broken again).</li>
+<li>Teaches: TTL sizing is a bet on worst-case work; there's no value that's safe against an unbounded pause.</li>
+</ul>
+<p class="note"><i>Lab note:</i> with the bug from E5, the "safe" run also prints <code>counter == 2</code> and BROKEN. With <code>-ttl 2s -work 900ms</code>, the code has worker 1 hold from 0 to 900 ms and worker 2 from about 900 ms to 1.8 s, so there is no overlap. These times are read from the code, not measured. Only the fixed program shows the difference between the two runs.</p></li>
+
+<li><label><input type="checkbox"> <b>E7. Fencing tokens save the day.</b></label>
+<ul>
+<li>Run: <code>go run ./phase03_locking/fencing_tokens</code></li>
+<li>Expected: token 34 accepted, stale token 33 rejected.</li>
+<li>Teaches: only the resource-enforced token prevents the lease-overrun double-act.</li>
+</ul>
+<p class="note"><i>Lab note:</i> the program deletes its counter first, so it hands out tokens 1 and 2, not 33 and 34. Its code, <code>fencing_tokens/main.go</code>, lines 55 to 72, shows this. The stale write is still rejected. The program never takes a lock, and it calls only <code>INCR</code>. Add a step that resets the counter, to stand in for a failover, and watch a "reject if lower" check accept a repeated token.</p></li>
+
+<li><label><input type="checkbox"> <b>E8. Fencing without enforcement is theater.</b></label>
+<ul>
+<li>Reason about it: modify <code>fencing_tokens</code> so the resource does NOT check the token (accept all writes). What's the final value? (A's stale "A's STALE data" wins — the token did nothing.)</li>
+<li>Teaches: the token is worthless unless the resource rejects stale ones.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E9. Simulate the chat-session lock's 500ms TTL.</b></label>
+<ul>
+<li>Run: <code>go run ./phase03_locking/lease_expiry_race -ttl 500ms -work 700ms</code></li>
+<li>Expected: broken (counter==2) — a 700ms init (one slow gRPC) overruns a 500ms lease.</li>
+<li>Teaches: why a sub-second TTL on variable-latency work is fragile.</li>
+</ul>
+<p class="note"><i>Lab note:</i> the same bug as E5 applies, so <code>counter == 2</code> appears whatever the overlap. From the code's timings, the leases do overlap here, but the output does not prove it.</p></li>
+
+<li><label><input type="checkbox"> <b>E10. Build the redsync-equivalent by hand.</b></label>
+<ul>
+<li>Write a tiny Go loop that acquires with <code>SetNX(key, uuid, ttl)</code>, retries with backoff on failure (like the trending-counter lock's <code>[1,2,5,10]s</code> jittered backoff), and releases with the Lua CAS. Compare your version to <code>safe_lock</code>.</li>
+<li>Teaches: what <code>redsync</code> does for you, and the retry/backoff dimension.</li>
+</ul>
+<p class="note"><i>Lab note:</i> the backoff above copies a private codebase. Use redsync's public defaults instead: up to 32 tries with a random delay of 50 to 250 milliseconds. Also reject a ttl of 0.</p></li>
+
+<li><label><input type="checkbox"> <b>E11. (Break it) Read-modify-write without a lock.</b></label>
+<ul>
+<li>Run: 50 concurrent <code>GET counter; increment in your shell; SET counter</code> (the WRONG way) vs 50 <code>INCR counter</code> (right).</li>
+<li>Expected: the GET/SET version loses updates; <code>INCR</code> is exact.</li>
+<li>Teaches: the trending-counter service's "redis is always atomic" comment is only true for single ops, not read-modify-write — sometimes you DO need the lock (or a Lua script).</li>
+</ul>
+<p class="note"><i>Lab note:</i> not runnable as written, because it gives no script. Write a small Go program with 50 goroutines for each way. When the resource is Redis itself, the answer is a Lua script or <code>WATCH</code> with <code>MULTI</code>, not a lock.</p></li>
+
+<li><label><input type="checkbox"> <b>E12. Inspect a live lock's TTL.</b></label>
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli SET lock:demo tok PX 30000; docker exec redis-study redis-cli PTTL lock:demo</code> repeatedly.</li>
+<li>Expected: PTTL counts down; at 0 the key vanishes (auto-expiry).</li>
+<li>Teaches: the lease is real and observable; <code>PTTL</code> is your debugging tool for "who holds it and for how long."</li>
+</ul>
+<p class="note"><i>Lab note:</i> not run, because it needs Docker as written. Run the same two commands with <code>redis-cli</code> directly.</p></li>
+</ul>
+<p class="note">E13 to E15 were run on 2026-10-19 against a throwaway server. It was an x86_64 Homebrew Redis 8.10.1 under Rosetta 2 on an Apple M4 Pro. It was started with <code>redis-server --port 6582 --dir &lt;tmpdir&gt; --save '' --appendonly no --enable-debug-command local --daemonize yes</code>. The program flushes the script cache and changes a config value. So it refuses to run when the server holds a key that is not its own, in any database. A small model of the server rules runs next to the server and gives the expected value of each step. Its offline check is <code>go run ./phase03_locking/script_cache -self-test</code>.</p>
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E13 (live).</b> EVALSHA after the script cache is emptied, and how each client recovers.</label>
+<ul>
+<li>Run: <code>go run ./phase03_locking/script_cache -addr localhost:6582 -part noscript</code></li>
+<li>Expected: <code>after SCRIPT FLUSH, EVALSHA -&gt; NOSCRIPT No matching script. Please use EVAL.</code> Then <code>go-redis Script.Run falls back to EVAL, released</code> with <code>got 1</code>. After 500 other <code>EVAL</code> scripts the unlock script is gone, and <code>evicted_scripts went up by</code> shows <code>got 1</code>. The <code>SCRIPT LOAD</code> way keeps the script. Every line ends with <code>matches the model</code>.</li>
+<li>If it fails: <code>refusing to run</code> means the server holds keys that are not the lab's. Start a throwaway server on its own port.</li>
+<li>Teaches: the script cache is memory only, and every <code>EVALSHA</code> needs a <code>NOSCRIPT</code> fallback.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E14 (break-it, live).</b> A slow script gives other clients BUSY, and SCRIPT KILL fails after a write.</label>
+<ul>
+<li>Run: <code>go run ./phase03_locking/script_cache -addr localhost:6582 -part busy</code></li>
+<li>Expected: <code>PING sent at 50ms waited 150ms -&gt; BUSY Redis is busy running a script. You can only call SCRIPT KILL or SHUTDOWN NOSAVE.</code> Then <code>SCRIPT KILL before any write</code> gets <code>OK</code>. For the script that wrote: <code>SCRIPT KILL at 310ms -&gt; UNKILLABLE Sorry the script already executed write commands against the dataset.</code> and later <code>script reply after 1.51s: write-spin done</code>. The times move by about 10 ms between runs: a second run printed <code>300ms</code> and <code>1.5s</code>.</li>
+<li>If it fails: the program lowers <code>busy-reply-threshold</code> to 200 ms with <code>CONFIG SET</code>. It puts the old value back at the end. On a slow machine, raise <code>-spin</code> so the scripts run past the threshold.</li>
+<li>Teaches: the busy limit does not stop a script. After the first write, only waiting or <code>SHUTDOWN NOSAVE</code> ends it.</li>
+</ul></li>
+
+<li><label><input type="checkbox"> <b>E15 (break-it, live).</b> A Function survives a reload and a restart. The script cache survives only DEBUG RELOAD.</label>
+<ul>
+<li>Run: <code>go run ./phase03_locking/script_cache -addr localhost:6582 -part reload</code></li>
+<li>Expected: <code>library p3sc_lockkit loaded after DEBUG RELOAD</code> and <code>unlock script cached after DEBUG RELOAD</code> both match. After <code>FUNCTION DELETE</code>, <code>DEBUG RELOAD NOSAVE</code> loads the library back from the file. <code>FCALL_RO p3sc_unlock -&gt; ERR Can not execute a script with write flag using *_ro command.</code> <code>FUNCTION RESTORE (APPEND) -&gt; ERR Library p3sc_lockkit already exists</code>, and <code>REPLACE</code> gets <code>OK</code>.</li>
+<li>Then run: <code>go run ./phase03_locking/script_cache -addr localhost:6582 -part restart-prep</code>, then <code>redis-cli -p 6582 SHUTDOWN NOSAVE</code>, start the server again with the same <code>--dir</code>, and run <code>go run ./phase03_locking/script_cache -addr localhost:6582 -part restart-check</code>.</li>
+<li>Expected: <code>uptime_in_seconds:1</code>, <code>unlock script cached after the restart</code> with <code>got false</code>, and <code>library p3sc_lockkit loaded after the restart</code> with <code>got 1</code>.</li>
+<li>If it fails: if <code>DEBUG RELOAD</code> returns an error that DEBUG is not allowed, start the server with <code>--enable-debug-command local</code>.</li>
+<li>Teaches: a library is part of the data set and comes back from the RDB file. The script cache is part of the process.</li>
+</ul></li>
+</ul>
+</details>
+
+<h2 data-kind="checkpoint">Checkpoint questions</h2>
+<details class="answer practice"><summary>Open the checkpoint: eight questions, each with an answer sketch</summary>
+<p>The phase's questions used the former employer's services. They are rewritten here around general jobs, and each keeps its mechanism.</p>
+
+<p><b>Q1.</b> Say "efficiency" or "correctness" for each lock, and whether <code>SETNX</code> plus a plain <code>DEL</code> is adequate. (a) Deduplicating invitation emails. (b) Charging a subscription exactly once. (c) Preventing a duplicate chat session. (d) Decrementing a ledger balance once.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) Efficiency, since a double email is a nuisance. The pattern is tolerable, though a random token and a compare-and-delete cost nothing. (b) Correctness. No Redis lock is the guarantee. Use an idempotency key with the payment provider and a unique charge row in your database. (c) Efficiency, but watch for a TTL shorter than the session start. (d) Correctness. Use a conditional UPDATE or a version check in the ledger's own database. Only (a) and (c) could use the existing pattern, and (b) and (d) must not.</p>
+</details>
+
+<p><b>Q2.</b> A lock is <code>SetNX(key, "1", 60s)</code> with <code>defer Delete(key)</code>. Give a timeline in which worker A deletes worker B's lock. Why does a random UUID plus a compare-and-delete fix this bug, and which deeper bug does it not fix?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>A acquires at t=0 s, and its work stalls until t=70 s. The key expires at t=60 s, and B acquires at t=61 s. A finishes at t=70 s, and its deferred <code>Delete</code> removes B's key. C acquires at t=71 s, so B and C overlap. With a random token, A's release finds B's token and deletes nothing. A and B still both worked between t=61 s and t=70 s, which is the lease problem, and only an idempotent write or a fence fixes it.</p>
+</details>
+
+<p><b>Q3.</b> A session-start lock has a TTL of 500 ms. The session start makes a gRPC call that normally takes 80 ms but sometimes takes 1.2 s under load. Show the 1.2 s case. Can two session starts run at once? Propose two fixes and say which you would ship.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>Flow 1 acquires at 0 ms, and the lock expires at 500 ms. Flow 2 acquires at, say, 600 ms, so the two flows run at once from 600 ms to 1,200 ms. If the release is a plain <code>DEL</code>, flow 1 then deletes flow 2's lock at 1,200 ms. Fix one: a TTL well above the p99 of the call, such as 5 s, with a watchdog. Fix two: make session creation idempotent with a unique key on user and feature. Ship both, and treat the unique key as the guarantee and the lock as a saving.</p>
+</details>
+
+<p><b>Q4.</b> Explain the Redlock argument in four sentences: what Kleppmann claims, what antirez replies, why both are right, and what you do for an efficiency lock and a correctness lock. Then say what a Redlock library gives you when it talks to one Redis endpoint.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>Kleppmann says no lease-based lock is correct against long pauses without fencing, and that Redlock leans on timing assumptions. antirez says a random token with check-and-set at the resource is enough, and that a resource able to resolve races needs no strong lock. Both are right, so you use one Redis node for efficiency and a check at the resource for correctness. On one endpoint the library's quorum is 1, so you get single-node <code>SET NX PX</code> with a safe release. You do not get tolerance of node failures, and the lock can still vanish at failover.</p>
+</details>
+
+<p><b>Q5.</b> Design a fencing scheme for "generate exactly one invoice PDF per order", where the PDF goes to S3. Give the acquire with its token, the write with its token, and what the resource must do to reject a stale writer. Then explain why, following antirez, you might not need the distributed lock at all.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>Take the token from the order's database row, for example by adding one to an <code>invoice_fence</code> column and reading it back, because that source does not go backwards. Optionally take a Redis lock to save work. Upload the PDF under a key that includes the token, such as <code>invoices/42/7.pdf</code>. Then run <code>UPDATE invoices SET object_key = :k, fence = :t WHERE order_id = :o AND fence &lt; :t</code>, and treat 0 rows as "a newer writer won". S3 cannot do the check, so the metadata row is the resource. The row already refuses stale writers with its own version, so the lock only saves duplicate rendering work.</p>
+</details>
+
+<p><b>Q6.</b> A comment says "we do not need a lock, since redis is always atomic". Use the trending design from Phase 1. It records a view as LPOP the oldest view, ZINCRBY to decrement its item, RPUSH the new view, and ZINCRBY to increment its item. Give one operation where the comment is correct and one where it is wrong. Is that safe without a lock, and what would make it safe?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>Correct: one <code>ZINCRBY</code> or one <code>INCR</code> is atomic. Wrong: the four-command view update, because another client's commands can run between any two of them. Two views can then pop and decrement in an order that leaves the counts wrong. Make the four commands one Lua script, because the decrement needs the value that <code>LPOP</code> returned, which <code>MULTI</code> cannot pass along. <code>WATCH</code> with a retry also works. A distributed lock is the wrong tool, because Redis is the resource.</p>
+</details>
+
+<p><b>Q7.</b> A code review adds a <code>SETNX</code> plus plain <code>DEL</code> lock, copied from an email-dedup helper. The lock guards a flow that decrements a customer's remaining AI credits and calls a paid third-party API. Write the review comment: what is wrong, the risk in concrete terms, and three changes you require, in order of importance.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>What is wrong: an efficiency-lock pattern now guards a correctness job, with a constant value, a plain <code>DEL</code> and no check at the resource. The risk: one stall past the TTL deducts the customer's credits twice and bills the provider twice, and no error is logged. Required changes, in order. First, make the credit decrement conditional and idempotent in the database, with a unique key per request. Second, record the paid call in a row before sending, and send the provider an idempotency key if it accepts one. Third, fix the lock itself, with a random token, a <code>DELEX</code> or Lua release, a TTL above the call's p99, and a count of <code>ErrLockAlreadyExpired</code>.</p>
+</details>
+
+<p><b>Q8.</b> Your summary service calls the compare-and-delete script with <code>EVALSHA</code> only. Each pod runs <code>SCRIPT LOAD</code> once at start. The lock TTL is 10 s, and Sentinel's <code>down-after-milliseconds</code> is 30,000. (a) Sentinel fails over the primary at 02:00. Walk through what each pod sees on its next unlock and extend, and how long each lock stays. (b) A teammate adds a reporting script with <code>EVAL</code> on the same primary. It writes a key first and then runs for about 7 s. With the default <code>busy-reply-threshold</code>, what do the lock clients see, for how long, and can <code>SCRIPT KILL</code> help? (c) What would you move into a Function, and what deploy step does that add on a cluster with 3 primaries?</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>(a) The promoted replica has an empty script cache, because <code>SCRIPT LOAD</code> is not replicated since Redis 7.0. Every pod's next <code>EVALSHA</code> gets <code>NOSCRIPT</code>, so no unlock and no extend succeeds. A lock whose key reached the replica stays until its TTL ends. That is at most 10 s after its last acquire or extend. A watchdog's extend also fails, so long jobs lose their lease and overrun. The fix is go-redis <code>Script.Run</code>, which sends <code>EVAL</code> on <code>NOSCRIPT</code>. (b) For the first 5,000 ms every lock command waits, and at 5,000 ms the waiting commands get <code>BUSY</code>. For the last 7,000 - 5,000 = 2,000 ms every new command gets <code>BUSY</code> at once. The script wrote first, so <code>SCRIPT KILL</code> gets <code>UNKILLABLE</code>. Sentinel sends one <code>SCRIPT KILL</code> only when it already sees the primary as down. That takes 30,000 ms here, so no failover happens. Rewrite the report as a <code>SCAN</code> loop, as Rails did. (c) Move the unlock and extend into one library, such as <code>p3sc_lockkit</code>. It then survives restarts and failovers. The new step is <code>FUNCTION LOAD REPLACE</code> on all 3 primaries, for example with <code>redis-cli --cluster-only-masters --cluster call host:port FUNCTION LOAD REPLACE ...</code>, on every release of the library. The reporting job stays a client-side loop, because a function blocks the server exactly as a script does.</p>
+</details>
+</details>
+
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+<details class="answer practice"><summary>Open the cheatsheet</summary>
+<pre class="cheatsheet">THE FIRST QUESTION (ask before every lock)
+  EFFICIENCY lock  -> "don't do it twice", failure = minor (dup email, wasted LLM $)
+                   -> one Redis node: SET NX PX + random token + compare-and-delete
+                   -> document that a rare double run can happen
+  CORRECTNESS lock -> "two must never both act", failure = wrong data, double charge
+                   -> no Redis lock is the guarantee
+                   -> idempotent write | fencing token | consensus store + fencing
+                   -> keep the Redis lock only to save work
+
+THE CORRECT SINGLE-NODE LOCK
+  acquire: SET lock:res &lt;randomToken&gt; NX PX &lt;ttl&gt;
+             NX    = mutual exclusion (one command thread)
+             PX    = auto-expire, no deadlock after a crash
+             token = 16+ random bytes or a UUID, never "1" / "locked"
+  release: DELEX lock:res IFEQ &lt;token&gt;                 Redis 8.4+
+           EVAL 'if GET(k)==ARGV[1] then DEL(k) else 0'   any version
+           Valkey: DELIFEQ lock:res &lt;token&gt;            Valkey 9.0+
+  extend:  SET lock:res &lt;token&gt; IFEQ &lt;token&gt; PX &lt;ttl&gt;   Redis 8.4+, Valkey 8.1+
+           Lua: if GET==token then PEXPIRE                any version
+  never:   SETNX (deprecated, no TTL) | GET then DEL from the client | bare PEXPIRE
+  go-redis SetNX(ctx, k, v, 0) = NO TTL. Raw SET ... PX 0 = "ERR invalid expire time"
+
+RELEASE REPLIES
+  DELEX / phase Lua : 1 mine, 0 not mine, 0 key gone      (gone = lease ran out)
+  redsync script    : 1 mine, 0 not mine, -1 key gone  -> ErrLockAlreadyExpired
+
+THE FAILURE MODES
+  1. no TTL          -> crashed holder locks forever      -> always PX/EX, reject ttl 0
+  2. plain DEL       -> delete the next holder's lock     -> token + compare-and-delete
+  3. work &gt; TTL      -> two live holders, even correct    -> TTL &gt;&gt; p99, watchdog,
+     (pause, delay)                                          context deadline, idempotency, fence
+  4. failover        -> lock key lost before replication  -> fence at resource; WAIT only narrows
+  5. clock step      -> expiry uses the wall clock        -> fence at resource
+
+REDSYNC v4.18.0 DEFAULTS
+  expiry 8s | tries 32 | retry delay random 50-250ms | drift factor 0.01
+  valid until = now + expiry - acquireTime - expiry*0.01 | quorum = pools/2 + 1 (1 pool -&gt; 1)
+  WithSetNXOnExtend: extend can recreate a lost key, so "extended" != "held all along"
+REDISSON watchdog default 30s (redisson-4.8.0)
+
+FENCING TOKEN
+  rule 1: issuer never goes backwards (not INCR on one primary: repeats after failover)
+  rule 2: resource checks in the same atomic step as the write
+          UPDATE t SET body=:b, fence=:tok WHERE id=:id AND fence &lt; :tok
+  good issuers: Kafka producer epoch | etcd lock-key revision | ZooKeeper zxid |
+                Chubby sequencer | Hazelcast FencedLock | the row's own version column
+  token with no check at the resource = does nothing
+
+AUDIT ANY LOCK
+  1 what breaks if two act?   2 random token?   3 compare-and-delete?
+  4 TTL &gt; p99 with margin?   5 can ttl be 0?     6 unlock error counted?
+  7 fence or idempotent write at the resource?   8 primary that can fail over?
+
+LUA SCRIPTS AND FUNCTIONS
+  EVAL src n k.. a..      -&gt; cache by SHA1, then run     EVALSHA sha n k.. a.. -&gt; hash only
+  NOSCRIPT No matching script. Please use EVAL.        -&gt; the cache was emptied
+  emptied by: restart | failover (SCRIPT LOAD not replicated since 7.0) | SCRIPT FLUSH
+  evicted:    500 EVAL scripts, LRU, since 7.4. SCRIPT LOAD ones never. INFO evicted_scripts
+  kept by:    DEBUG RELOAD (it reloads the data set only)
+  fallback:   go-redis Script.Run, redsync -&gt; EVAL   | redis-py -&gt; SCRIPT LOAD + EVALSHA
+  pipelines:  EVAL, or load the scripts before sending
+  keys:       every key in KEYS. One hash tag: {summary:42}:lock {summary:42}:fence
+  replication since 7.0: the script's writes, in MULTI/EXEC if more than one, never the script
+  busy-reply-threshold (alias lua-time-limit) 5000 ms -&gt; then BUSY for everyone else
+    SCRIPT KILL: OK before the first write | UNKILLABLE after -&gt; wait, or SHUTDOWN NOSAVE (loses data)
+    Sentinel: BUSY to PING while down -&gt; one SCRIPT KILL -&gt; failover -&gt; the script's writes lost
+  read-only: EVAL_RO EVALSHA_RO FCALL_RO, flag no-writes
+  FUNCTIONS: FUNCTION LOAD [REPLACE] "#!lua name=lib ..."    FCALL fn n k.. a..
+    in RDB + AOF + replicated | cluster: load on EVERY primary yourself
+    FUNCTION DUMP -&gt; FUNCTION RESTORE payload APPEND (default) | REPLACE | FLUSH
+    flags: no-writes allow-oom allow-stale no-cluster allow-cross-slot-keys
+  VALKEY 9.1: Lua is a module, BUILD_LUA=static (default) | module | no
+              global "server", alias "redis" | SCRIPT SHOW sha | SCRIPT LOAD protects from eviction
+
+INVESTIGATE
+  PTTL &lt;lockkey&gt;   -> ms left on the lease
+  GET &lt;lockkey&gt;    -> whose token holds it now
+  MONITOR          -> watch SET NX / DEL / DELEX live (not on a busy primary)
+  metrics          -> lock wait time, hold time, count of ErrLockAlreadyExpired</pre>
+</details>
+
+<h2 data-kind="sources">Sources</h2>
+<details class="answer practice"><summary>Open the sources: the debate, the Redis docs and source, and the production cases</summary>
+<p>Read Kleppmann first and antirez right after him, because the two posts answer each other. The phase's old link to the Redis lock page now returns 404, so the current page is listed instead.</p>
+<ul class="sources">
+<li><a href="https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html">Martin Kleppmann, How to do distributed locking</a>: efficiency versus correctness, the pause problem, fencing tokens, why one Redis counter is not enough. About 25 minutes.</li>
+<li><a href="https://antirez.com/news/101">antirez, Is Redlock safe?</a>: the check-and-set answer, the timing model, the monotonic-clock promise. About 20 minutes.</li>
+<li><a href="https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/">Redis docs, Distributed Locks with Redis</a>: the single-node recipe with DELEX, the failover race, the wall-clock warning, and Redlock.</li>
+<li><a href="https://redis.io/docs/latest/commands/delex/">DELEX</a>, <a href="https://redis.io/docs/latest/commands/set/">SET</a> and <a href="https://redis.io/docs/latest/commands/setnx/">SETNX</a> command pages: IFEQ since 8.4.0, SETNX deprecated.</li>
+<li><a href="https://redis.io/docs/latest/develop/interact/programmability/eval-intro/">Redis docs, scripting with EVAL</a>: the atomic compare-and-delete in Lua.</li>
+<li><a href="https://redis.io/docs/latest/commands/waitaof/">WAITAOF</a>: wait for fsync on the primary and replicas, since 7.2.0.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/db.c">Redis 8.10.2 source, db.c</a>: <code>keyIsExpired</code> and the wall-clock expiry path, with <code>server.c</code> and <code>t_string.c</code>.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/commands/delifeq.json">Valkey 9.1.2, DELIFEQ</a>: Valkey's compare-and-delete command.</li>
+<li><a href="https://github.com/go-redsync/redsync">redsync</a> and its <a href="https://raw.githubusercontent.com/go-redsync/redsync/v4.18.0/scripts.go">scripts.go at v4.18.0</a>: release, touch and SetNX-on-extend scripts, defaults, validity and quorum.</li>
+<li><a href="https://raw.githubusercontent.com/redis/go-redis/v9.5.1/string_commands.go">go-redis v9.5.1, string_commands.go</a>: SetNX with expiry 0 sends no TTL.</li>
+<li><a href="https://raw.githubusercontent.com/redisson/redisson/redisson-4.8.0/redisson/src/main/java/org/redisson/config/Config.java">Redisson 4.8.0, Config.java</a>: the 30-second watchdog default.</li>
+<li><a href="https://raw.githubusercontent.com/kubernetes/client-go/v0.34.1/tools/leaderelection/leaderelection.go">Kubernetes client-go leader election</a>: a lease-based leader with no fencing guarantee, stated in the source.</li>
+<li><a href="https://jepsen.io/analyses/etcd-3.4.3">Jepsen, etcd 3.4.3</a>: about 18% of acknowledged updates lost under an etcd lock with 2 s leases and pauses.</li>
+<li><a href="https://jepsen.io/analyses/hazelcast-3-8-3">Jepsen, Hazelcast 3.8.3</a> and <a href="https://hazelcast.com/blog/long-live-distributed-locks/">Hazelcast, Distributed Locks are Dead; Long Live Distributed Locks!</a>: non-exclusive locks under partitions, then FencedLock on Raft.</li>
+<li><a href="https://www.confluent.io/blog/transactions-apache-kafka/">Confluent, Transactions in Apache Kafka</a>: producer epochs that fence off zombie producers.</li>
+<li><a href="https://github.blog/news-insights/the-library/downtime-last-saturday/">GitHub, Downtime last Saturday</a>: a 90-second network stall, expired heartbeats, two active fileservers, over five hours of recovery.</li>
+<li><a href="https://brandur.org/idempotency-keys">Brandur Leach, Implementing Stripe-like Idempotency Keys in Postgres</a>: the idempotency-key row with atomic phases and recovery points.</li>
+<li><a href="https://shopify.engineering/scaling-inventory-reservations">Shopify Engineering, We replaced Redis with MySQL for inventory reservations</a>: moving the guarantee into the store that holds the data.</li>
+<li><a href="https://blog.flipkart.tech/when-good-locks-go-bad-diagnosing-a-system-meltdown-under-load-0b168c363143">Flipkart Tech, When Good Locks Go Bad</a>: unbounded lock waiting took Redis to 100% CPU, and a gate sized from the time spent in the locked section fixed it.</li>
+<li><a href="https://research.google/pubs/the-chubby-lock-service-for-loosely-coupled-distributed-systems/">Google, The Chubby lock service</a>: the lock service design that calls its fencing tokens sequencers. About 45 minutes.</li>
+<li><a href="https://www.youtube.com/playlist?list=PLeKd45zvjcDFUEv_ohr_HdUFe97RItdiB">Martin Kleppmann, Distributed systems lecture series</a>: the consistency and consensus lectures under the debate. About 50 minutes each.</li>
+<li>Designing Data-Intensive Applications, Martin Kleppmann, chapter 8 on process pauses and fencing, and chapter 9 on consensus. No link.</li>
+<li><a href="https://redis.io/docs/latest/develop/programmability/eval-intro/">Redis docs, Scripting with Lua</a>: the script cache, cache volatility, EVALSHA in a pipeline, and script replication.</li>
+<li><a href="https://redis.io/docs/latest/commands/eval/">EVAL command page</a>: scripts from EVAL are evicted since Redis 7.4.</li>
+<li><a href="https://redis.io/docs/latest/develop/programmability/">Redis docs, Redis programmability</a>: maximum execution time, SCRIPT KILL, SHUTDOWN NOSAVE and read-only scripts.</li>
+<li><a href="https://redis.io/docs/latest/develop/programmability/functions-intro/">Redis docs, Redis functions</a>: what is wrong with EVAL scripts, Functions in a cluster, and function flags.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/eval.c">Redis 8.10.2 source, eval.c</a>: the 500-entry LRU for EVAL scripts and the early return in SCRIPT LOAD.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/script.c">Redis 8.10.2 source, script.c</a>: the slow-script log, when SCRIPT KILL refuses, and the cluster key checks.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/script_lua.c">Redis 8.10.2 source, script_lua.c</a>: the hook that checks the busy limit every 100,000 instructions.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/server.c">Redis 8.10.2 source, server.c</a>: the NOSCRIPT and BUSY reply texts.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/config.c">Redis 8.10.2 source, config.c</a>: busy-reply-threshold, alias lua-time-limit, default 5000.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/sentinel.c">Redis 8.10.2 source, sentinel.c</a>: Sentinel&#x27;s one SCRIPT KILL to a busy primary, and the 30,000 ms down-after default.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/debug.c">Redis 8.10.2 source, debug.c</a>: why DEBUG RELOAD keeps the script cache.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/7.0.0/00-RELEASENOTES">Redis 7.0.0 release notes</a>: PR #9812, the end of script replication and of SCRIPT LOAD propagation.</li>
+<li><a href="https://github.com/redis/redis/issues/8693">Redis issue #8693</a>: the design of Functions and the problems with EVAL scripts it lists.</li>
+<li><a href="https://raw.githubusercontent.com/redis/go-redis/v9.5.1/script.go">go-redis v9.5.1, script.go</a>: Script.Run and its EVAL fallback.</li>
+<li><a href="https://raw.githubusercontent.com/go-redsync/redsync/v4.18.0/redis/goredis/v9/goredis.go">redsync v4.18.0, go-redis adapter</a>: the same EVAL fallback inside redsync.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis-py/v8.1.0/redis/commands/core.py">redis-py v8.1.0, commands/core.py</a>: SCRIPT LOAD and EVALSHA on NoScriptError.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis-py/v8.1.0/redis/client.py">redis-py v8.1.0, client.py</a>: SCRIPT EXISTS and SCRIPT LOAD before a pipeline is sent.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/Makefile">Valkey 9.1.2, src/Makefile</a>: the three BUILD_LUA values.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/modules/lua/README.md">Valkey 9.1.2, Lua module README</a>: why Lua became a module.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/modules/lua/script_lua.c">Valkey 9.1.2, script_lua.c</a>: the server global and its redis alias.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/eval.c">Valkey 9.1.2, eval.c</a>: SCRIPT LOAD takes an EVAL script off the eviction list.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/00-RELEASENOTES">Valkey 9.1.2 release notes</a>: Lua moved into a module, and static linking by default.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/commands/script-show.json">Valkey 9.1.2, SCRIPT SHOW</a>: the command that returns a cached script&#x27;s source, since 8.0.0.</li>
+<li><a href="https://github.com/socketry/async-job-processor-redis/issues/15">async-job-processor-redis issue #15</a>: one NOSCRIPT after a restart stopped two background loops while the server looked healthy.</li>
+<li><a href="https://github.com/rails/rails/issues/32610">Rails issue #32610</a>: a Lua delete-by-pattern that caused BUSY errors, replaced with SCAN and DEL.</li>
+<li><a href="https://dev.to/scalegrid/redis-transactions-long-running-lua-scripts-5a6e">ScaleGrid, Redis Transactions and Long-Running Lua Scripts</a>: a vendor demo where a busy write script led to a Sentinel failover and lost writes.</li>
+</ul>
+</details>
+
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

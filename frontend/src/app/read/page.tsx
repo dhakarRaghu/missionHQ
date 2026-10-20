@@ -76,8 +76,8 @@ export default function ReadPage() {
 
       {nothing ? (
         <EmptyState title="No lessons in this deployment">
-          Run <code>uv run python -m hq.cli export-reader</code> on the machine
-          that holds the library, then commit and push.
+          Push lesson pages to <code>learning/lessons</code> on main. The
+          build runs <code>npm run reader</code> and ships them.
         </EmptyState>
       ) : null}
 

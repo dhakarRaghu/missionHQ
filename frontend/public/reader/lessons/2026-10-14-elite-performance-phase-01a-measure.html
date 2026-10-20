@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Performance, concurrency and the machine — Phase 1A: What one run shows</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Performance, concurrency and the machine · Phase 1A</div><h1>Performance, concurrency and the machine — Phase 1A: What one run shows</h1><p class="subtitle">Your load test said p99 50 ms while the service stood still for 3 seconds. Which parts of one run can you trust?</p></header>
+<p>You build a small service, point a load tool at it, and the tool prints p99 equals 50.6 ms. So no user waited more than about 50 ms. Except the service stopped for 3 seconds in the middle of the run, and a second tool, driving the same service through the same stop, printed p99 equals 2.73 s. Both tools ran correctly and both reports are internally consistent. One of them described your users, and one of them did not, and nothing in either report says which.</p>
+
+<p>The difference is not the service and not the maths of percentiles. It is what each tool was willing to write down when a request took seconds instead of milliseconds, and what the run was long enough to see. This phase takes one load test of one 10 ms service on your laptop, with one 3-second stop in the middle, and reads its report line by line: whether the tool that drove it could have seen a stall at all, how many samples sit above each percentile it prints, whether 25 seconds at that load is enough, and what was genuinely slow in the first seconds. After it, you can look at any single run and say which of its numbers you would defend in a review.</p>
+<p>This lesson teaches five ideas. They are listed here so you can see where the lesson is going. They will read more clearly once each has been explained below, so come back to this list at the end.</p>
+<ol class="concepts"><li id="c1"><b>A closed-loop generator&#x27;s send rate is coupled to the service&#x27;s latency, so a stall is recorded once, not once per delayed request, and its p99 describes the healthy seconds.</b> <span>Decide whether a given load tool can see stalls at all, and reject a clean report from a tool that cannot.</span></li><li id="c2"><b>A reported percentile rests on the samples above it, roughly n·(1−q) of them, so below about ten the percentile should not be reported and below a computable floor no interval for it exists.</b> <span>State, for any run size, which percentiles he can defend and how large a run a p99.9 target needs.</span></li><li id="c3"><b>Near the knee, a short run understates steady-state p99, more so the busier the service is, because the deep-queue excursions that set the tail are rarer than the run.</b> <span>Decide how long a run must be at a given utilisation, and explain why two identical short runs can disagree by a factor of 4 without anyone being wrong.</span></li><li id="c4"><b>In a fresh CPython service the interpreter is warm after about one request, because the specialising interpreter rewrites an instruction the second time it executes; the cold state that costs users is imports, connection pools, caches and the empty queue.</b> <span>Choose what to warm before a measurement, keep the first seconds instead of discarding them, and stop blaming the interpreter for first-request latency.</span></li><li id="c5"><b>Percentiles cannot be averaged or concatenated across windows or instances; the histograms must be merged and the percentile taken from the merged distribution.</b> <span>Aggregate per-window and per-instance latency correctly in a dashboard, and spot why averaging hides a stall.</span></li></ol>
+<h2 data-kind="orientation">The run and the report that cannot be true</h2>
+<p>You have a service and you want to know if it is fast. So you run a load test, and the tool prints a p99. This whole phase is about one question: which numbers in that report can you defend?</p>
+
+<p>Here is the run every section returns to. The service is a Starlette app on your laptop, served by uvicorn. Each request draws an exponential service time averaging 10 ms. At t = 20 s the test injects a 3 s stall with <code>POST /stall?seconds=3</code>. So the service answers nothing for 3 s. Two load tests drive it at 48 req/s, one after the other, and only the way they send requests differs.</p>
+
+<div class="stats">
+  <div class="stat"><b>2.73 s</b><span>p99 reported by run one</span></div>
+  <div class="stat"><b>50.6 ms</b><span>p99 reported by run two</span></div>
+  <div class="stat"><b>54×</b><span>gap between the two reports</span></div>
+</div>
+<p class="at" style="font-size:smaller;color:var(--muted)">Run E3 of this phase, CPython 3.13.3, Apple M2, same service and same 3 s stall in both runs.</p>
+
+<p>One stall, two reports, and a factor of 54 between them. Both reports came from working tools with no bug. Run two says a user at the unlucky 99th percentile waited 50 ms, while the service was frozen for 3,000 ms. The two numbers cannot both describe the same users, and this phase explains each of them.</p>
+
+<p>Three names cover everyone in this story, and the whole phase uses them.</p>
+
+<ol class="flow" data-dir="down">
+  <li><b>generator sends a request</b><span>the <dfn>generator</dfn>, the tool that sends requests and measures replies</span></li>
+  <li><b>service works</b><span>10 ms of fixed work, or nothing during the stall</span></li>
+  <li><b>reply returns</b><span>the gap between send and reply becomes one latency sample</span></li>
+</ol>
+
+<ul>
+  <li>The <b>generator</b> is the load tool. It decides when each request is sent, and that decision is the whole difference between the two runs.</li>
+  <li>A <dfn>latency sample</dfn> is one number: the time from sending one request to its reply coming back. Every percentile you will ever report is a count over these samples.</li>
+  <li>The <dfn>stall window</dfn> is the 3 s during which the service answered nothing. How many samples land in this window is what separates the two reports.</li>
+</ul>
+
+<p>The phase grows from this one run in three directions, each marked by a number that moves.</p>
+
+<div class="cards" data-cols="3">
+  <div class="card"><h4>48 req/s, one stall</h4><p>The run above, at 49% busy. It asks whether the generator can see a stall at all, and how the samples were stored and counted.</p></div>
+  <div class="card"><h4>77 req/s and 91 req/s</h4><p>The same service at 79% and 93% busy. It asks how long a run must last before its p99 means anything, and why two identical runs disagree.</p></div>
+  <div class="card"><h4>The first seconds</h4><p>A freshly started service. It asks what is genuinely cold at t = 0, and whether discarding the first seconds hides it.</p></div>
+</div>
+
+<p>By the end you will run one load test and say which of its numbers you would defend in an incident review. The first question is the run-two report above: how a working tool recorded a 3 s freeze as 50 ms. The next section shows why a client that waits for each reply cannot count a stall.</p>
+<h2 data-concept="c1">Why a waiting client cannot count a stall</h2>
+<p class="why">A client that waits for each reply records a 3 s stall as one sample, not 136. So its p99 describes the healthy seconds.</p>
+
+<p>The opening run printed two p99s, 2.73 s and 50.6 ms, from one service and one 3 s stall. The 2.73 s report came from a schedule. The 50.6 ms report came from a single waiting client. Both tools worked exactly as built. This section explains the waiting client: why its report is internally correct, and why that is the problem.</p>
+
+<p><b>The picture.</b> A <dfn>closed-loop generator</dfn> sends a request, waits for the reply, sleeps its pacing delay, and only then sends again. The time between two sends is the response time plus the delay. So the service's latency decides how fast the client can send. The generator and the service form one feedback loop. The slowest seconds of the run produce the fewest samples from each client.</p>
+
+<ol class="flow">
+  <li><b>send</b><span>one request goes out</span></li>
+  <li class="hot"><b>wait</b><span>the client blocks until the reply arrives</span></li>
+  <li><b>sleep</b><span>the pacing delay, 10.8 ms at a planned 48 req/s</span></li>
+  <li class="ok"><b>send again</b><span>the loop repeats</span></li>
+</ol>
+
+<div class="predict"><details class="predict"><summary>Predict: one client, a 5 s freeze, 100 planned requests per second</summary>
+<p>A service answers in 1 ms. A test plans 100 requests per second for 100 s. At t = 50 the service freezes for 5 s. One closed-loop client sends, waits, sleeps 9 ms, and sends again. What p99 does it report?</p>
+<p>Answer: about 11 ms. The client sends one request at t = 50 and waits the whole 5 s freeze. So the stall contributes exactly 1 sample out of roughly 9,501. The p99 looks past the slowest 1%. So it lands on a healthy sample of about 9 ms plus 1 ms of work. A schedule-driven generator sends 500 requests into the freeze. Roughly 5% of its samples sit between 0 and 5 s. So its p99 lands inside the stall at about 4 s.</p></details></div>
+
+<p><b>The mechanism.</b> The failure is arithmetic, not a bug. The planned 48 req/s becomes an <dfn>offered load</dfn> of only what the loop can push, because each send waits on a reply:</p>
+
+<pre><code>send rate ≤ clients ÷ latency
+  healthy:  1 ÷ 0.0103 s  ≈ 48 req/s   plan met
+  stalled:  1 ÷ 3 s       ≈ 0.33 req/s  99% of planned load never sent</code></pre>
+
+<p>The coupling has two consequences, and both bend the report toward healthy:</p>
+<ol>
+  <li><b>The stall yields about one sample per client, however long it lasts.</b> One request is in flight when the freeze starts, and no client can send a second before the first returns. A 3 s stall and a 30 s stall look the same to the sample set, because duration never multiplies into the count.</li>
+  <li><b>The achieved rate quietly drops below the plan.</b> The closed run sent 39 req/s against a planned 48, because every response time eats into the pacing budget. Even without any stall, capacity conclusions from this run are wrong in the optimistic direction.</li>
+</ol>
+
+<p>An <dfn>open-loop generator</dfn> breaks the loop by making each request's send time independent of every other request's completion. Its sends march through the stall, and every scheduled request that lands in the freeze becomes one slow sample. The timeline shows the difference as empty space:</p>
+
+<div class="lanes" id="s2-stall" data-play>
+  <h4>The same 3 s stall, seen by both generators</h4>
+  <div class="lane" data-label="open loop sends">
+    <i class="decode" style="--w:20" data-t="48/s"></i><i class="decode" style="--w:20" data-t="48/s"></i>
+    <i class="prefill" style="--w:60" data-t="sends continue: 136 requests land in the stall"></i>
+    <i class="decode" style="--w:20" data-t="48/s"></i></div>
+  <div class="lane" data-label="open loop latency">
+    <i class="decode" style="--w:20" data-t="10 ms"></i><i class="decode" style="--w:20" data-t="10 ms"></i>
+    <i class="frozen" style="--w:60" data-t="136 samples up to 3 s"></i>
+    <i class="decode" style="--w:20" data-t="10 ms"></i></div>
+  <div class="lane" data-label="closed loop sends">
+    <i class="decode" style="--w:20" data-t="48/s"></i><i class="decode" style="--w:20" data-t="48/s"></i>
+    <i class="idle" style="--w:60" data-t="no sends: the client is waiting"></i>
+    <i class="decode" style="--w:20" data-t="48/s"></i></div>
+  <div class="lane" data-label="closed loop latency">
+    <i class="decode" style="--w:20" data-t="10 ms"></i><i class="decode" style="--w:20" data-t="10 ms"></i>
+    <i class="frozen" style="--w:60" data-t="exactly 1 sample of 3 s"></i>
+    <i class="decode" style="--w:20" data-t="10 ms"></i></div>
+  <p class="at" data-step="2">Step 2: both generators send at 48 req/s while the service is healthy, and both see 10 ms responses.</p>
+  <p class="at" data-step="3">Step 3: the stall begins. The open loop keeps sending and 136 requests pile into the freeze. The closed loop's one in-flight request waits it out alone.</p>
+  <p class="at" data-step="all">Illustration of the measured run: open 136 stall samples, closed 1, same service and stall.</p>
+</div>
+
+<p>The p99 is a count over samples, so the two sample sets give the two reports. In the closed run's 1,544 samples, the single 3 s sample sits inside the top 1%. So p99 comes out at 50.6 ms from the healthy seconds. In the open run, 136 of 1,867 samples are slow, that is 7.3%. So p99 must land inside the stall at 2.73 s. Same service, same stall, p99 off by a factor of 54.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The phase's own lab E3, 2026-09-25, Apple M2 8 GB, CPython 3.13.3. Starlette/uvicorn service at 48 req/s (49% busy), 3 s stall injected at t = 20 s. Open loop (Poisson, timer=due): n=1,867, p99 2.73 s, 136 requests recorded in the stall window. Closed loop (one client paced to 48/s, as Locust <code>constant_throughput</code> paces): n=1,544, p99 50.6 ms. Exactly 1 request in the stall window, achieved rate 39/s. The hand-computed variant (100 req/s, 1 ms service, 5 s stall) puts the factor at about 4,100. The wrk2 README reports the same shape. A 1.4 s server pause gives corrected p99 1.27 s against uncorrected 6.04 ms, about 200x.</p></details>
+
+<p><b>Use it.</b> Exercise E1 (<code>coordinated_omission.py</code>) lets you compute this by hand before you run it. Use <code>--stall 1 --rate 200</code> and one client that sends, waits for the reply, then sends again. Work out how many samples the stall contributes and what p99 each generator prints. Then run it and check your numbers. The question to hold while you run it: which seconds did the closed run fail to record?</p>
+
+<div class="keypoints">
+  <p class="remember">A waiting client sends at most one request per response time, so a stall costs it one sample.</p>
+  <p class="trap">Believing p99 50 ms proves no user waited seconds, when the tool sent 39 req/s of a planned 48.</p>
+  <p class="try">Open your load tool's docs and find whether it waits for the reply before sending. Look also for what it names achieved-versus-planned rate.</p>
+</div>
+
+<p>The open loop's secret is a send time fixed in advance and a latency measured from that moment. The next section shows how measuring from when the request was due repairs a closed-loop recording. It also shows what the repair cannot rebuild.</p>
+<h2 data-concept="c1">Measuring from when the request was due</h2>
+<p class="why">Fixing send times before the run breaks the coupling; measuring from those times is what makes the stall visible.</p>
+
+<p>The closed loop failed because its send times depend on the service's replies. The open loop removes that dependence with one change: the schedule is written before the run starts. This section shows what that change does to the same 3 s stall. It then shows what a repair can and cannot rebuild from a closed-loop recording you already have.</p>
+
+<h3>Fix the send times, then measure from them</h3>
+
+<p>An <dfn>open-loop generator</dfn>'s schedule exists independently of the service. Each request has a <dfn>due time</dfn>, the clock time the schedule says it should leave. The generator sends it then whether or not earlier replies have come back. The latency of each request is measured from its due time. It is not measured from when the sender happened to get around to it. With that, the stall can no longer hide, because the schedule keeps producing requests through it.</p>
+
+<ol>
+<li>The generator gives each request its due time, 48 Poisson arrivals per second in this course, and sends it at that time.</li>
+<li>During the run, it sends each request when its due time arrives, on a connection that does not wait for replies.</li>
+<li>When a reply lands, the sample recorded is now minus that request's due time, so a request sent during the stall and answered 2.9 s later records 2.9 s.</li>
+<li>The 136 requests due during the 3 s stall each record their own wait, so the stall contributes 136 samples instead of one.</li>
+</ol>
+
+<p>The failure this repairs has a name. <dfn>Coordinated omission</dfn> is what happens when the thing being measured and the measurer move together. So the slow period produces the fewest samples. The service slows, and the waiting client slows with it. The stall is omitted from the recording because the two were coordinated. It is the name Gil Tene gave the closed-loop failure in his talk.</p>
+
+<div class="lanes" id="s3-due" data-play>
+  <h4>One 3 s stall, scheduled sends against waiting sends (illustration from the course's measured runs)</h4>
+  <div class="lane" data-label="open loop sends">
+    <i class="decode" style="--w:120" data-t="≈950 sends before t=20 s"></i>
+    <i class="prefill" style="--w:136" data-t="136 requests due inside the stall"></i>
+    <i class="wait" style="--w:60" data-t="drain: replies arrive late"></i>
+    <i class="decode" style="--w:120" data-t="schedule continues"></i></div>
+  <div class="lane" data-label="closed loop sends">
+    <i class="decode" style="--w:120" data-t="1 request every ~21 ms"></i>
+    <i class="frozen" style="--w:136" data-t="1 request waits all 3 s"></i>
+    <i class="idle" style="--w:60" data-t="no samples"></i>
+    <i class="decode" style="--w:120" data-t="sending resumes"></i></div>
+  <p class="at" data-step="2">Step 2: during the stall the open schedule produces 136 due times, and the closed client produces one waiting request.</p>
+  <p class="at" data-step="3">Step 3: the open loop's replies arrive late and record that lateness; the closed loop has nothing to record here.</p>
+  <p class="at" data-step="all">The same stall run gave p99 2.73 s to the open loop and 50.6 ms to the closed loop. That is a factor of 54.</p>
+</div>
+
+<p>The numbers from the course's own run, both against the same Starlette service with the same stall at t = 20 s:</p>
+
+<div class="stats">
+  <div class="stat"><b>2.73 s</b><span>open-loop p99, n = 1,867</span></div>
+  <div class="stat"><b>136</b><span>samples recorded inside the stall window</span></div>
+  <div class="stat"><b>50.6 ms</b><span>closed-loop p99, n = 1,544</span></div>
+  <div class="stat"><b>1</b><span>sample inside the stall window</span></div>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Lab E3 run of 2026-09-25 used Apple M2 and CPython 3.13.3. It planned 48 req/s against a 10.25 ms service, with <code>POST /stall?seconds=3</code> at t = 20 s. Open loop, Poisson schedule, timer from due time: n = 1,867, p99 2.73 s, 136 requests in the stall window. Closed loop, one client paced to 48/s: n = 1,544, p99 50.6 ms. 1 request was in the stall window, and the achieved rate was 39/s. The wrk2 README reports the same shape from a 1.4 s pause. Corrected p99 was 1.27 s against uncorrected 6.04 ms, about a 200x gap. Numbers from the phase, not re-run here.</p>
+</details>
+
+<h3>Repairing a recording you already have</h3>
+
+<p>Sometimes the recording exists and you cannot rerun it. That is because it came from a tool that only had a closed loop. The histogram library offers a repair called <dfn>corrected recording</dfn> (<code>record_corrected_value</code> in hdrhistogram_py). It works by filling in the samples the schedule would have produced.</p>
+
+<p>Its loop is short. You record one observed value and the schedule interval you meant to keep, 10 ms in the checkpoint's example:</p>
+
+<ol>
+<li>Take the observed value, 4.1 s for the one request that waited out the stall.</li>
+<li>Subtract one interval, record the rest, and repeat, while what is left stays above the interval: 4.1 s, then 4.09 s, then 4.08 s, and so on.</li>
+<li>Each subtracted copy stands for one request that was due while the waiting request held the client. A 4.1 s value with a 10 ms interval inserts about 410 copies.</li>
+</ol>
+
+<details class="predict"><summary>Predict: you repair the closed recording with the 10 ms schedule intervals. Will the corrected p99 land above the open loop's 4.10 s, at 4.10 s, or below?</summary>
+<p>Below, at 4.00 s in the course's run. The reconstructed copies are the requests that were due during the freeze, and they record nearly the full wait. The repair has no samples of what happened after the stall ended. Then the queue of 136 waiting requests drained, and each reply still arrived later than its due time. The open loop measured those drain samples directly, and they are what lift its p99 the extra 0.1 s. A repair built from one observed value describes the stall's left edge well and its right edge not at all.</p>
+</details>
+
+<p>This limit is verified in the library source. In hdrhistogram_py 0.10.7 and 0.10.8, <code>record_corrected_value</code> only inserts copies of the observed value minus k times the interval. It can rebuild the statuses due inside a stall. It can never synthesize the queue that drains afterwards. That is because nothing in the closed recording says how long that drain took.</p>
+
+<p>One more limit sits on the other side of the open loop. Its 2.73 s is an upper bound when users give up. Real users behind a 1 s timeout abandon and retry instead of waiting out the 3 s stall. What they experience is the timeout plus the retry, not 2.73 s (inferred; the course does not model abandonment). Report the open-loop p99 as what waiting would have cost, and say whether your users wait.</p>
+
+<p><b>Use it.</b> Exercise E1 uses <code>coordinated_omission.py</code> with <code>--stall 1 --rate 200</code>. It asks you to compute by hand how many samples the closed loop's stall contributes before you run it. When you read the open run's output, check one thing. Does the tool also print the schedule it planned next to the rate it achieved? That pair, planned against achieved, is the quickest tell of a generator that cannot keep its own schedule.</p>
+
+<div class="keypoints">
+  <p class="remember">Fix send times before the run and measure from due time, so the stall yields one sample per scheduled send.</p>
+  <p class="trap">Trusting corrected recording to rebuild a stall fully. It cannot rebuild the queue drain and reads 0.1 s low here.</p>
+  <p class="try">Rerun your last load test with the timer switched to due time and compare the two p99s. The gap is generator lag and connection wait, latency users feel.</p>
+</div>
+
+<p>Both honest runs now produce one to two thousand latency values. The next section is recording every latency without losing the tail. It shows the container that keeps them all without dropping the slow ones.</p>
+<h2 data-concept="c2">Recording every latency without losing the tail</h2>
+<p>The open loop now hands you one to two thousand honest latency samples per run. The corrected record does the same. This section is the container that keeps every one of them, plus its one silent failure.</p>
+
+<p class="why">If the recorder drops slow samples, even an honest generator reports healthy seconds.</p>
+
+<p>In the stall run at 48 req/s, whose windows extend to 40 s, the service sat frozen. The open loop recorded 136 samples near 3 s. Those samples alone separate the honest p99 of 2.73 s from a clean 50 ms. The container receives them. If it loses exactly the large values, the honest run is back to the closed loop's report.</p>
+
+<p>An <dfn>HDR histogram</dfn> is a container for latency samples that keeps counts instead of the samples themselves. You declare the smallest and the largest value it may hold when you create it. It allocates one fixed row of buckets right then. Each bucket covers a thin slice of the range. Recording a sample adds one to exactly one bucket's counter, and the sample itself is thrown away. It exists so that a run of one hundred samples and a run of five million cost the same memory. Every percentile stays readable from the counts afterwards.</p>
+
+<ul class="tree">
+  <li><b>A sample arrives: does it fit the declared range?</b>
+    <ul>
+      <li class="ok"><em>in range</em><span>one bucket's counter rises by one, and the value is discarded</span></li>
+      <li class="bad"><em>out of range</em><span>the record call returns False, and nothing is stored anywhere</span></li>
+    </ul></li>
+</ul>
+
+<details class="predict"><summary>Predict: a 90 s request lands in a histogram declared for 1 µs to 60 s that already holds 999 samples at 10 ms. What do count and max print after it, and what did record_value return for the 90 s value?</summary>
+<p>It prints count 999 and max 10 ms, and <code>record_value</code> returned <b>False</b>. The 90 s value sits outside the declared range. So no counter moves and no error is raised. The only trace of the lost sample is the return value the caller ignored.</p>
+<p>Answering count 1,000 and max 60 s is reasonable. The clamp keeps the slow request as the largest value, 60 s or more. This one cannot grow, because its whole memory was fixed at creation.</p>
+</details>
+
+<p>Three decisions happen once at creation, and then each sample costs one counter.</p>
+
+<ol>
+<li><b>Declare the range and the precision once.</b> The course's recorder is created for 1 µs to 60 s at three <dfn>significant figures</dfn>, meaning every recorded value keeps about one part in a thousand of its own size. All counters exist from then on, so a 25 s run and the 300 s runs occupy exactly the same histogram, and a longer run never asks the recorder for more memory.</li>
+<li><b>Record by counting.</b> An <code>_us</code> helper in latency.py converts each sample to integer microseconds, the library maps that number to a bucket index by arithmetic, and one counter rises. There is no list to append to, so the work per sample does not grow as the run grows.</li>
+<li><b>Read percentiles from the counts.</b> A p99 is the value that 99% of all samples are at or below. The answer can sit up to one bucket width away from the true value, and at three significant figures that error scales with the latency itself.</li>
+</ol>
+
+<table>
+<tr><th>value being recorded</th><th>its bucket spans about</th><th>so a percentile there is off by at most</th></tr>
+<tr><td>10 ms, the run's healthy requests</td><td>0.01 ms</td><td class="ok">0.01 ms</td></tr>
+<tr><td>2.73 s, the open loop's p99 in the stall run</td><td>2.7 ms</td><td class="ok">2.7 ms</td></tr>
+</table>
+
+<p>The absolute error grows with the value. The relative error stays at one part in a thousand. That is the entire precision model.</p>
+
+<div class="calc" id="s4-bw">
+  <h4>One bucket's width, from the definition</h4>
+  <label>Latency being recorded (ms) <input type="range" name="v" min="1" max="3000" step="1" value="10">
+    <span class="val" data-val="v"></span> ms</label>
+  <label>Significant figures <input type="range" name="sf" min="1" max="5" step="1" value="3">
+    <span class="val" data-val="sf"></span></label>
+  <div class="result">Bucket width <b data-out="w"></b></div>
+  <div class="result">Relative error <b data-out="r"></b></div>
+  <script>kit.calc('#s4-bw', function(v){ var w = v.v / Math.pow(10, v.sf); return {w: (w >= 1 ? kit.fmt(w,1) : w.toPrecision(2)) + ' ms', r: '1 part in ' + kit.fmt(Math.pow(10, v.sf),0)}; });</script>
+</div>
+
+<p>The box applies the definition of significant figures directly, not the library's exact bucket layout.</p>
+
+<p><b>The one silent failure.</b> A sample outside the declared range is an <dfn>out-of-range value</dfn>. <code>record_value</code> handles it by returning <code>False</code> and storing nothing: no exception, and nothing printed. Apply that to the running case. The stall produced 136 samples near 3 s. So a histogram declared with a 1 s maximum would drop all 136 and print a p99 over the survivors. That gives the honest open loop the closed loop's clean report. The failure is also biased because a range overflows at the slow end. That is exactly the end a latency measurement exists for.</p>
+
+<div class="compare">
+  <div class="wrong">
+<pre><code data-lang="python">h.record_value(us)   # return value ignored: slow samples vanish untraced</code></pre>
+  </div>
+  <div class="right">
+<pre><code data-lang="python">if not h.record_value(us):
+    dropped += 1     # the False is the only signal out-of-range ever sends</code></pre>
+  </div>
+</div>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The out-of-range behaviour is verified from source. <code>record_value</code> returns <code>False</code> and records nothing for a value outside the declared range. It is byte-identical in hdrhistogram_py 0.10.7 and 0.10.8 (read 2026-10-13). Version 0.10.8 is the current PyPI release, dated 2026-10-12, and the course pins 0.10.7. The 136 stall samples and the p99 of 2.73 s are the phase's own measured 25 s run. They are taken as given.</p>
+</details>
+
+<p><b>Use it.</b> Open <code>latency.py</code>, the recorder every lab in this phase writes through. Read its self-test next to the clamp in <code>_us</code>. One question to answer from the code: what does the clamp turn a 90 s sample into?</p>
+
+<div class="keypoints">
+  <p class="remember">An HDR histogram keeps counts, not values, so its memory is fixed at creation.</p>
+  <p class="trap">A too-small range drops exactly the slow samples silently, and the report still looks healthy.</p>
+  <p class="try">Add a 90 s record to a 60 s histogram and watch the count stay at 999.</p>
+</div>
+
+<p>Now the recorder keeps every sample. The next section asks what the load generator itself records when the service stalls.</p>
+<h2 data-concept="c2">How many samples stand behind your p99</h2>
+<p class="why">A printed percentile is only as real as the samples above it, and you can count them.</p>
+
+<p>The HDR histogram now records all 1,063 latencies of a run without dropping any. That makes the recording faithful, but it does not make every number read from it defensible. Your open-loop run at 48 req/s prints p50, p90, p99, p99.9 and max. This section asks which of those you would sign in an incident review.</p>
+
+<p>Sort all n samples from fastest to slowest. A percentile is an <dfn>order statistic</dfn>, a value picked by rank from that sorted list. The p99 is the value at rank 99% of n. Its worth is set entirely by the slowest 1% of samples, the <dfn>samples above the percentile</dfn>. Their count is n·(1−q). If ten samples stand above the p99, the reported value is whichever of those ten happened to appear. Re-run the test and a different ten appear, so the p99 moves. One sample above the p99.9 is not a description of the tail. It is one observation.</p>
+
+<details class="predict"><summary>Predict: your test ran 2,000 requests. Which of p50, p99, p99.9 can you defend, and how many requests would a defensible p99.9 need?</summary>
+<p>Count samples above each percentile: p50 has about 1,000, p99 has about 20, p99.9 has about 2. You can defend p50 and p99. The p99.9 is two samples, so it is a coin flip, not a measurement. For about ten samples above p99.9 you need n·0.001 ≥ 10, so n ≥ 10,000 requests. The reason the wrong answer feels right: the tool prints all three with the same number of decimal places. Nothing in the report says what each rests on.</p>
+</details>
+
+<p>The rule and the floor come from the same arithmetic.</p>
+
+<ol>
+<li>Write the run size as n and the percentile as q, so p99 is q = 0.99.</li>
+<li>The samples above it number n·(1−q). Below about ten, the percentile moves from run to run on arrival luck alone, so you do not quote it.</li>
+<li>There is also a hard floor below which no interval for the percentile exists at all. For a 95% interval to exist, the largest sample must beat the true quantile with probability at least 0.975, which means q<sup>n</sup> ≤ 0.025.</li>
+<li>Solving gives n ≥ ln(0.025)/ln(q). For p99 that is 367.04, so n ≥ 368. (inferred: derived from first principles, not a cited standard.)</li>
+</ol>
+
+<pre><code data-lang="text">samples above q = n · (1 − q)
+n = 1,063:  p50 → 531    p99 → 10    p99.9 → 1
+floor: n ≥ ln(0.025)/ln(q)   →  368 for p99, 3,688 for p99.9</code></pre>
+
+<div class="stack">
+<h4>n = 1,063 sorted samples (E7 run 1, open, 48 req/s, 25 s)</h4>
+<div class="whole">
+<i style="--w:989;--c:var(--muted)" data-label="below p99" data-value="1,053" data-note="these decide nothing about p99"></i>
+<i style="--w:10;--c:var(--accent)" data-label="above p99" data-value="10" data-note="92.9 to 103.4 ms; these set the p99"></i>
+<i style="--w:1;--c:var(--bad)" data-label="above p99.9" data-value="1" data-note="one sample is the whole p99.9"></i>
+</div>
+</div>
+
+<p>Now read E7's run 1 with this lens. n = 1,063. The p99 of 92.8 ms rests on exactly 10 values, 92.9 to 103.4 ms. It just passes the count rule. The p99.9 of 98.3 ms rests on exactly 1 value, so that number is one sample wearing a percentile's clothing. Notice one thing: the floor of 368 for p99 is met. The count of ten is the binding constraint here, not the floor.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Lab E7 run 1, open loop at 48 req/s for 25 s, the phase's own run: n = 1,063. The p99 = 92.8 ms on 10 samples (92.9 … 103.4 ms, listed in the phase). The p99.9 = 98.3 ms on 1 sample. The floor n ≥ ln(0.025)/ln(q) is derived in this course and in phase 1B, not quoted from a standard.</p>
+</details>
+
+<p>Use it before any run whose numbers you will defend. Decide the deepest percentile you will quote, multiply the needed samples by 1/(1−q), and check the run reaches that n. A p99.9 target for an endpoint that sees 5,000 requests per window is unmeasurable at any window length. Saying so is the defensible answer.</p>
+
+<div class="keypoints">
+<p class="remember">Count n·(1−q) samples above a percentile, and quote it only when ten or more stand there.</p>
+<p class="trap">The tool prints p99.9 for any n, so a two-sample tail reads as a measured SLO.</p>
+<p class="try">Take your last run's n, compute n·(1−q) for p99 and p99.9, and cross out what fails.</p>
+</div>
+
+<p>Enough samples above the percentile is still not enough if the run itself is too short. The next section shows why a short run near the knee reads low.</p>
+<h2 data-concept="c3">Why a short run near the knee reads low</h2>
+<p class="why">A short run near the knee underreports p99, and the busier the service, the larger the gap.</p>
+
+<p>The section above showed a percentile with enough samples behind it can still be trusted or not. Even with every stall recorded and ten samples above p99, one thing still decides what p99 you see. That thing is how long the run lasted, and the effect grows as the service gets busier.</p>
+
+<p>Back at the Starlette service. It is healthy now, no stall injected, just exponential service times with mean 10 ms per request and Poisson arrivals. You drive it at 91 req/s, which is 93% busy, for 23 seconds. The run reports p99 385 ms. Is that the service's p99?</p>
+
+<h3>The picture: the tail belongs to rare events, and a short run rarely meets them</h3>
+
+<p>At 93% busy the queue does not stay near its mean. It wanders, and every few minutes an unlucky burst of arrivals drives it deep for a while. Those deep moments produce the slowest one percent of responses, so they set the p99. A run long enough to contain them is in <dfn>steady state</dfn>, in which the queue has forgotten how it started and its statistics no longer drift. A 23 s window usually sits on a shallow part of the trace. This is <dfn>short-run understatement</dfn>: a short run samples the queue's ordinary moments and misses the excursions that define the tail it reports.</p>
+
+<figure class="diagram"><svg viewBox="0 0 640 260" role="img" aria-label="Queue length over time at 93 percent busy, with one deep excursion and two short windows on shallow parts">
+<line x1="40" y1="220" x2="620" y2="220" stroke="currentColor" stroke-width="1"/>
+<line x1="40" y1="220" x2="40" y2="20" stroke="currentColor" stroke-width="1"/>
+<text x="330" y="245" text-anchor="middle" fill="currentColor" font-size="11">time, 15 minutes</text>
+<text x="20" y="120" fill="currentColor" font-size="11" transform="rotate(-90 20 120)">queue length</text>
+<polyline points="40,205 70,200 100,208 130,198 160,206 190,202 220,210 250,200 280,204 310,198 340,60 360,45 380,70 400,140 420,196 450,206 480,200 510,208 540,202 570,206 600,200" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+<rect x="100" y="190" width="60" height="30" fill="var(--warn)" opacity="0.35"/>
+<rect x="480" y="192" width="60" height="28" fill="var(--warn)" opacity="0.35"/>
+<text x="130" y="183" text-anchor="middle" fill="currentColor" font-size="10">23 s window</text>
+<text x="510" y="185" text-anchor="middle" fill="currentColor" font-size="10">23 s window</text>
+<text x="368" y="35" text-anchor="middle" fill="currentColor" font-size="10">one deep excursion sets the long-run p99</text>
+</svg><figcaption>Illustration, not measured. Both shaded 23 s windows sit on shallow queue, so both report a small p99, and they disagree with each other.</figcaption></figure>
+
+<details class="predict"><summary>Predict: your 30 s run at 93% busy reports p99 300 ms; a colleague re-runs it and gets 700 ms. Is one of you wrong, and what single change makes the number reliable?</summary>
+<p>Neither of you is wrong. Each run samples whichever queue excursions happened to fall inside its 30 s. At 93% busy those excursions differ by a factor of 4 between identical runs. The reliable change is longer runs, because the deep excursions that set p99 arrive on the scale of minutes there. More short runs tell you the spread but not the steady value. Lower load dodges the question you were asked, which is the p99 at 93%.</p>
+</details>
+
+<h3>The mechanism: why busier means rarer</h3>
+
+<p>Model the service as <b>M/M/1</b>: Poisson arrivals, exponential service times, one server. The course uses S = 10.25 ms per request, the 10 ms of work plus 0.25 ms of framework overhead. Two standard results explain everything in this section.</p>
+
+<ol>
+<li>The response time is exponential with rate μ−λ, so the long-run p99 is <b>ln(100)·S/(1−ρ)</b>. At 49% busy that is 93 ms. At 93% it is 702 ms. The tail stretches 7.6x while the load rises less than 2x.</li>
+<li>The queue-length variance is ρ/(1−ρ)². At 49% it is about 1. At 93% it is about 128. The queue swings over a range more than a hundred times wider, so the deep excursions that set the tail are both deeper and further apart.</li>
+</ol>
+
+<p>The two results split the work. The first gives the long-run p99. The second says how rarely a visit to that depth happens. Near <dfn>the knee</dfn>, the utilisation where waiting time rises sharply, the visits come minutes apart. A window seconds long usually contains none of them. The phase's simulation makes the size of the miss concrete.</p>
+
+<table>
+<tr><th>Run shape at S = 10.25 ms</th><th>Median run p99</th><th>Long-run p99</th><th>Spread across 40 identical runs</th></tr>
+<tr><td>49% busy, 23 s runs</td><td class="ok">89 ms</td><td>93 ms</td><td>adequate</td></tr>
+<tr><td>79% busy, 23 s runs</td><td>184 ms</td><td>224 ms</td><td>reads 82%</td></tr>
+<tr><td>93% busy, 23 s runs</td><td class="bad">385 ms</td><td>702 ms</td><td>180 to 863 ms, 4.8x</td></tr>
+<tr><td>93% busy, 300 s runs</td><td class="bad">606 ms</td><td>702 ms</td><td>455 to 1,795 ms, 3.9x</td></tr>
+</table>
+
+<p>The one number to carry is the third row. At 93% busy a 23 s run reports about half the steady p99. Two identical runs disagree by a factor of 4.8. Even five minutes only reaches 86% of the steady value, with the same wide spread. At 49% busy the same 23 s is already adequate, because the tail lives close to the mean. Every run meets it.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The numbers are the phase's own <code>predict.py --short-runs</code> simulation, 40 runs of 23 s each, M/M/1 with S = 10.25 ms. The two formulas (FCFS response time exponential with rate μ−λ, queue variance ρ/(1−ρ)²) are standard M/M/1 results, taken from the Wikipedia M/M/1 queue page, read 2026-10-13. The real lab agrees with the simulation: E7's 25 s open runs at 93% measured 233 to 325 ms against the model's 702 ms, which is this effect, not a model error.</p>
+</details>
+
+<h3>Use it</h3>
+
+<p>Exercise E5 runs this simulation yourself: <code>predict.py --short-runs</code>, then the 300 s variant. Watch the medians approach the long-run p99 as runs lengthen, and watch the spread refuse to close at 93%. You may next inherit a CI load test that measures 60 s after discarding 30 s. Then ask what utilisation it runs at. Above the knee, that test is reading arrival luck, not the service.</p>
+
+<div class="keypoints">
+<p class="remember">Near the knee a short run reads about half the steady p99, so lengthen the run before trusting it.</p>
+<p class="trap">Discarding 30 s of warm-up then measuring 60 s feels rigorous and still reports arrival luck at 93% busy.</p>
+<p class="try">Compute ln(100)·S/(1−ρ) at your service's peak utilisation, and compare it with your last run's p99.</p>
+</div>
+
+<p>This section covered run length, the first of the two problems usually called warm-up. The second is cold state, and the next section asks what is actually cold in the first seconds.</p>
+<h2 data-concept="c4">What is actually cold in the first seconds</h2>
+<p class="why">The first seconds of a run cost users on every deploy, so report them instead of discarding them.</p>
+
+<p>The previous section split "warm-up" into two problems and covered the first, run length. This section measures the second: the state a fresh process starts with.</p>
+
+<p>Restart your Starlette service on your laptop and send requests one at a time. The first request takes 11 ms, and the rest take 10.25 ms. The standard advice is to discard the first minute of every run. That advice protects you from a cost that has already settled, while hiding costs your users pay on every deploy.</p>
+
+<details class="predict"><summary>Predict: a fresh service answers its first request in 30 ms and the rest in 10 ms. Is the extra 20 ms interpreter warm-up, and what one measurement settles it?</summary>
+
+<p>Probably not, and the settling measurement is to time the first three requests separately. CPython specialises an instruction the second time it runs, so request two is already warm and request three adds nothing. If the penalty sits on request one alone, the interpreter explains at most part of it. The rest is cold state such as imports, connection setup or empty caches. Restart the process and send exactly three requests: that separates a one-request interpreter cost from costs that decay over seconds.</p>
+
+</details>
+
+<h3>The picture</h3>
+
+<p><dfn>Cold state</dfn> is everything a fresh process starts without. That includes loaded modules, open connections, filled caches and a queue that has seen traffic. Code warm-up and state warm-up are different things, and they settle on different timescales. Code warms in about one request. State warms when something fills it, and some of it never does within a run.</p>
+
+<div class="stack">
+<h4>The first request, 11 ms, against a steady request at 10.25 ms (lab W, M2, fixed 10 ms work)</h4>
+<div class="whole">
+<i style="--w:1000;--c:var(--accent)" data-label="work" data-value="10 ms" data-note="the fixed unit, same every request"></i>
+<i style="--w:25;--c:var(--violet)" data-label="framework" data-value="0.25 ms" data-note="Starlette and uvicorn overhead"></i>
+<i style="--w:70;--c:var(--warn)" data-label="interpreter" data-value="0.7 ms" data-note="gone from request two onward"></i>
+</div>
+</div>
+
+<p>The bar shows the whole code-warming cost: 0.7 ms on one request. The costs the bar cannot show live elsewhere. Imports take about 70 ms of the 0.12 to 0.17 s process start. A connection pool, application caches, the page cache and the empty queue each add their own delay. None appears in this measurement, because lab W reused one warm client against a local service.</p>
+
+<h3>Why one request warms the code</h3>
+
+<p>Since CPython 3.11, the interpreter is a <dfn>specialising interpreter</dfn>. It watches each bytecode instruction. The second time that instruction executes, it rewrites it into a faster form for the types it saw. The source at v3.12.0 sets <code>ADAPTIVE_WARMUP_VALUE</code> to 1, which means specialising on the second execution. One request runs your handler's instructions once or twice, so one request completes the warm-up. The 3.13 JIT is experimental and off by default, so no further tier of warm-up applies in a stock build.</p>
+
+<ol>
+<li>Request one executes each handler bytecode once, and the interpreter rewrites each one for the types seen, costing 0.7 ms in lab W.</li>
+<li>Request two runs the rewritten instructions at full speed, so the interpreter's contribution is finished.</li>
+<li>Every later request differs from request two only in state, such as which connections exist and which caches hold entries.</li>
+</ol>
+
+<p>Lab W measured this directly, with a fresh process, fixed 10 ms work and one-at-a-time requests. The first request took 10.6 to 11.0 ms against a median of 10.2 to 10.3 ms for the rest. That is a 3 to 7% penalty that settled after 0 requests, across three repeats.</p>
+
+<h3>What stays cold after the code is warm</h3>
+
+<ul>
+<li><b>Imports.</b> Loading the application's modules costs about 70 ms of the 0.12 to 0.17 s process start, paid before the first request arrives.</li>
+<li><b>Connections.</b> httpx 0.28.1 sets <code>keepalive_expiry</code> to 5.0 s, the <dfn>keep-alive expiry</dfn>, the idle time after which a pooled connection is closed. A 5 s pause mid-test costs a fresh connect and TLS on the next request.</li>
+<li><b>Caches.</b> Application caches and the operating system's page cache fill only as real traffic touches data, so they can stay cold for minutes.</li>
+<li><b>The queue.</b> A fresh run starts with an empty queue, so its first seconds differ from <dfn>the knee</dfn>, the high-utilisation region where the tail grows fastest, in either direction.</li>
+</ul>
+
+<p>The queue is why the first seconds can mislead in both directions. At 79% busy, 8 of 10 unchanged-code runs had a lower median in the first 2 s. That happened because the queue starts empty. At 93% busy the first 2 s ran slower, because arrivals bunch at start. So discard the first seconds and you throw away evidence. Average them in and you hide which direction they ran. Report them separately.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+
+<p>Lab W, the phase's own run, 2026-09-25, Apple M2, CPython 3.13.3. Fresh process, fixed 10 ms work, one-at-a-time requests. First request 10.6 to 11.0 ms, median of the rest 10.2 to 10.3 ms, settled after 0 requests, three repeats. Process start 0.12 to 0.17 s, with <code>python -X importtime</code> attributing about 70 ms to imports. The specialising mechanism is verified from CPython v3.12.0 <code>Include/internal/pycore_code.h</code>. It defines <code>ADAPTIVE_WARMUP_VALUE 1</code> with the comment "we attempt to specialize the *second* time each instruction is executed" (read 2026-10-13). Where the threshold lives in 3.13 was not found, so the v3.12.0 tag is the citation. The keep-alive default of 5.0 s is verified from httpx 0.28.1 <code>_config.py</code>; later releases were not checked. The first-seconds direction at 79% and 93% comes from the phase's unchanged-code runs.</p>
+
+</details>
+
+<h3>Use it</h3>
+
+<p>Exercise E2 runs lab W yourself: <code>./lab.sh W</code>. Then read the first request against the median of the rest on your own machine. The expected output is a first-to-median ratio of about 1.03 to 1.07 and "settled after 0". Then open whatever load test script you run most often and find the line that discards a warm-up window. Ask what that window is hiding.</p>
+
+<div class="keypoints">
+<p class="remember">One request warms the interpreter; imports, pools, caches and the empty queue are the cold state users pay for.</p>
+<p class="trap">Discarding the first minute removes the cold costs users pay on every deploy and fixes none of them.</p>
+<p class="try">Restart your service, time requests one, two and three separately, and check which carry the penalty.</p>
+</div>
+
+<p>This section measured each cold component and found the interpreter innocent. All the honest per-window numbers now exist. The next section asks how to add twenty-five windows into one honest p99.</p>
+<h2 data-concept="c5">Adding twenty-five windows into one honest p99</h2>
+<p class="why">Combining per-window p99 numbers is impossible; only the merged histogram gives an honest run p99.</p>
+
+<p>The phase so far has produced honest numbers for every one-second window of the run. What is missing is the one lawful way to turn those window numbers into one number for the whole run. It applies per instance or per day. This section is that rule, worked on the same 25 s run from the opening.</p>
+
+<h3>The picture first</h3>
+
+<p>Your dashboard keeps one HDR histogram, the counting container from the recording section, per second of the run. A percentile is not a property of a number. It is a position in a distribution, chosen by counting samples. So it has no meaning apart from the distribution behind it. Once a window is reduced to the single number "p99 51 ms", the counts that produced it are gone. No arithmetic on that number can recover them. A <dfn>histogram merge</dfn> adds the counter arrays of two histograms bucket by bucket. That rebuilds the full distribution of both windows, and only then is a percentile taken from it.</p>
+
+<figure class="diagram"><svg viewBox="0 0 640 250" role="img" aria-label="Two paths from 25 window histograms to the run p99">
+<text x="20" y="22" fill="currentColor" font-size="13">25 one-second histograms, one of them holding the 3 s stall</text>
+<rect x="20" y="30" width="600" height="26" rx="4" fill="var(--accent)" opacity="0.25"/>
+<rect x="500" y="30" width="24" height="26" fill="var(--bad)" opacity="0.7"/>
+<text x="532" y="47" fill="currentColor" font-size="11">stall window</text>
+
+<text x="20" y="90" fill="currentColor" font-size="12">Path 1: take each window's p99, then average the 25 numbers</text>
+<rect x="20" y="100" width="180" height="30" rx="4" fill="var(--muted)" opacity="0.4"/>
+<text x="32" y="119" fill="currentColor" font-size="11">50, 51, 48, …, 2,730 ms</text>
+<text x="235" y="119" fill="currentColor" font-size="12">average →</text>
+<rect x="330" y="100" width="160" height="30" rx="4" fill="var(--bad)" opacity="0.35"/>
+<text x="342" y="119" fill="currentColor" font-size="12">about 160 ms</text>
+<text x="500" y="119" fill="currentColor" font-size="11">looks healthy</text>
+
+<text x="20" y="165" fill="currentColor" font-size="12">Path 2: add the 25 counter arrays, then read the percentile</text>
+<rect x="20" y="175" width="180" height="30" rx="4" fill="var(--muted)" opacity="0.4"/>
+<text x="32" y="194" fill="currentColor" font-size="11">sum of all bucket counts</text>
+<text x="235" y="194" fill="currentColor" font-size="12">merged p99 →</text>
+<rect x="345" y="175" width="100" height="30" rx="4" fill="var(--ok)" opacity="0.35"/>
+<text x="362" y="194" fill="currentColor" font-size="12">2.73 s</text>
+<text x="460" y="194" fill="currentColor" font-size="11">the 136 stall samples are still in the counts</text>
+</svg>
+<figcaption>Two paths from the same windows to one number. The averaged path loses the stall because a p99 carries none of the counts behind it. Illustration built on E3's recorded numbers.</figcaption></figure>
+
+<details class="predict"><summary>Predict: twenty-four hourly windows report p99 between 40 and 60 ms, except one window that held a 3 s stall and reports 2.7 s. What does the average of the 24 p99s say, and what does the merged histogram say?</summary>
+
+<p>The average says about 170 ms. That is because one 2.7 s number spread across 24 values adds roughly 110 ms to a 50 ms base. The merged histogram says 2.7 s, because its counts still hold every delayed request from the stall window. The average is wrong for the question a p99 answers. It treats each window's p99 as a measurement rather than as a count position. The merged p99 is the honest one. Percentiles are computed from distributions, and the merge is the only step that kept the distributions.</p></details>
+
+<h3>Why the average fails, in one count</h3>
+
+<p>A window's p99 is the value below which 99% of that window's samples fall. Two facts follow from that definition.</p>
+
+<ul>
+<li>Each window's p99 is chosen from a <b>different distribution</b>, so the numbers are not measurements of one thing and cannot be combined.</li>
+<li>A percentage is a ratio, and ratios do not add, because the denominators differ whenever the windows hold different request counts.</li>
+<li>The average dilutes, because one bad window among 25 contributes its p99 with weight 1/25 instead of contributing its 2,730 ms samples with their true count of 136 among about 1,900.</li>
+</ul>
+
+<p>Weight is the heart of it. In E3's run the stall window held 136 delayed samples out of roughly 1,867, about 7% of the run. Those samples belong near the p99 position of the merged distribution, so they move it by seconds. In the average of window p99s the same stall is one number among 25. So it moves the result by about 110 ms.</p>
+
+<h3>The merge, in code</h3>
+
+<p><code>HdrHistogram.add()</code> sums the two counter arrays bucket by bucket, which is exact because both histograms store counts rather than percentiles. It raises if the other histogram's values do not fit the target's range. So a merge cannot silently drop the stall the way an undersized <code>record_value</code> can.</p>
+
+<pre><code data-lang="python">merged = None
+for h in window_histograms:          # one HdrHistogram per second
+    if merged is None:
+        merged = h
+    else:
+        merged.add(h)                # raises if h's values exceed merged's range
+p99 = merged.get_value_at_percentile(99)   # 2.73 s on E3's stall run</code></pre>
+
+<details class="evidence"><summary>Evidence</summary>
+
+<p><code>HdrHistogram.add()</code> exists in hdrhistogram_py 0.10.7 and 0.10.8 and raises if the other histogram's values do not fit the range. This was verified from source, read 2026-10-13. Exactness follows from the structure. Both histograms store counts per bucket, so adding the arrays is exact up to each histogram's fixed relative precision. The direction and size of the gap in E3 (merged 2.73 s, average near the healthy seconds) is inferred. The direction follows from one stall window averaged with healthy ones, and the size follows from E3's recorded numbers.</p></details>
+
+<h3>Use it</h3>
+
+<p>In exercise E3 you already have the 25 one-second histograms from <code>windows.py</code>. Add the merge step: build one merged histogram with <code>add()</code>, read its p99. Then compare it with the average of the 25 window p99s. The reading question is how many seconds of delay the average hid on your own run. The same rule applies anywhere a dashboard shows per-instance or per-window percentiles. A row of window p99s cannot be combined into a run p99 by any arithmetic on the row itself.</p>
+
+<div class="keypoints">
+<p class="remember">Merge the histograms, then take the percentile; never average percentiles.</p>
+<p class="trap">Averaging window p99s dilutes one stall window by the window count, so the worst hour disappears.</p>
+<p class="try">Merge your E3 window histograms with <code>add()</code> and compare the merged p99 with the average of the window p99s.</p>
+</div>
+
+<p>You can now produce one honestly measured run. You can say which of its numbers you would defend in an incident review. What one run cannot tell you is whether the gap between two runs is real or arrival randomness. That is the question the next phase answers, together with what M/M/1 predicts before you measure.</p>
+<h2 data-kind="recall">What you can do now, and what comes next</h2>
+<p>The phase ends where it began: one service, one injected stall. The decision is which printed numbers you would defend. These are the five claims, each with the section that earned it.</p>
+
+<div class="cards" data-cols="2">
+<div class="card">
+<h4>A waiting client cannot count a stall</h4>
+<p>A closed-loop generator, a client that waits for the reply before sending, sees its send rate fall when latency rises. A stall is recorded once per client whatever its duration. Its p99 describes the healthy seconds: 50.6 ms for a service frozen 3 s. Fix the send times in advance and measure from when each request was due. Then the same stall reports 2.73 s with 136 delayed requests. <i>Sections 2 and 3.</i></p>
+</div>
+<div class="card">
+<h4>A percentile rests on the samples above it</h4>
+<p>The p99 of n samples is decided by the n·(1−q) slowest values. Below about ten of them, the percentile should not be printed. Below n = ln(0.025)/ln(q), 368 samples for p99, no interval for it exists at all. So a p99.9 from 1,063 requests is one sample. Sections 4 and 5.</p>
+</div>
+<div class="card">
+<h4>A short run near the knee reads low</h4>
+<p>Near the knee, the utilisation where the queue takes off, the tail is set by rare deep-queue excursions. A short run usually never contains them. This is more so the busier the service. At 93% busy a 23 s run reports about half the steady p99. Even 300 s runs still range 455 to 1,795 ms. Section 6.</p>
+</div>
+<div class="card">
+<h4>The interpreter is warm after one request</h4>
+<p>The specialising interpreter rewrites an instruction the second time it executes. The measured first-request penalty is 3 to 7% and settles immediately. The cold state that costs users is imports, connection pools, caches and the empty queue. A connection pool's keep-alive expires after 5 s of silence. So the first seconds are reported, never discarded. Section 7.</p>
+</div>
+<div class="card">
+<h4>Percentiles never average</h4>
+<p>Averages of percentiles are meaningless and hide exactly the window that hurts. The average of 25 window p99s stays near the healthy seconds, but the merged histogram reports 2.73 s. Keep one histogram per window or per instance, and merge them with add(). Read the percentile once from the merged distribution. Section 8.</p>
+</div>
+</div>
+
+<p>Put together they answer the question this phase opened with. One honest run records every stall and keeps enough samples above each percentile it quotes. It runs long enough for its utilisation. It reports its first seconds and aggregates by merging. You can now say, for any load report placed in front of you, which of its numbers you would defend. The why belongs in an incident review.</p>
+
+<p>What one run cannot tell you is whether the next run will agree. Two identical 30 s runs at 93% busy in this phase reported 300 ms and 700 ms. Both were measured correctly. The next phase asks that question. Is the difference between two runs real, or the randomness of arrival? Can M/M/1 queueing predict the spread before you measure it?</p>
+<h2 data-kind="lab">Lab</h2>
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1</b> <span class="tag">offline</span></label>
+<p><b>Concept c1: a waiting client records a stall once.</b> Run <code>coordinated_omission.py --stall 1 --rate 200</code>. This is the only exercise in the phase whose answer you can compute by hand, so compute it first: with one waiting client and a 1 s stall, how many samples can the stall window contain? Then run it and compare. The run prints the closed loop's p99 against the open loop's p99 for the same service and the same stall, and the gap between them is the concept.</p>
+<details class="answer"><summary>Answer sketch</summary>
+<p>One waiting client sends the next request only after the reply, so a 1 s stall yields exactly one late sample: the request sitting in the service when it froze. Percentiles are counts of samples, so one sample out of hundreds cannot reach p99. The open loop fixes send times in advance and measures from when each request was due, so every request scheduled into the stall is recorded with a latency near 1 s, and p99 follows them.</p>
+</details></li>
+
+<li><label><input type="checkbox"> <b>E3</b> <span class="tag">live service</span></label>
+<p><b>Concepts c1 and c5: the hiding, and the one lawful aggregation.</b> Run <code>lab.sh A</code>, the stall experiment on the real service at 48 req/s (49% busy) with the 3 s stall injected at t = 20 s, then <code>windows.py</code> to split the run into one-second windows. Write one paragraph answering the question the exercise demands: which seconds did the closed-run log fail to record? Then do the merge step: add the 25 window histograms with <code>HdrHistogram.add()</code>, read p99 from the merged histogram, and compare it with the average of the 25 window p99s. The average stays near the healthy seconds. The merged p99 reports 2.73 s, because the stall window's counters are still in the sum.</p></li>
+
+<li><label><input type="checkbox"> <b>E4</b> <span class="tag">break-it</span></label>
+<p><b>Concept c1, inverted: the queue moves into the client.</b> Drive the service at 77 req/s over one connection. The service keeps up, but the client's connection pool becomes the queue, and a timer started at send time never sees the wait because the request has not left the client yet. This is the closed loop's blindness without any stall at all. Use the run to train the validity rule: when generator lag passes 10 ms, the generator itself fell behind, and the run's numbers describe the laptop, not the service.</p></li>
+
+<li><label><input type="checkbox"> <b>E5</b> <span class="tag">offline</span></label>
+<p><b>Concept c3: a short run near the knee reads low.</b> Run <code>predict.py --short-runs</code>. The simulation repeats the M/M/1 arrival process with S = 10.25 ms, 40 runs of 23 s each. At 49% busy the median run p99 of 89 ms is close to the long-run 93 ms, so a 23 s run is adequate there. At 93% busy the median run reads 385 ms against a long-run 702 ms, and identical runs spread from 180 to 863 ms. Then run the 300 s variant, the memorable one: even five minutes of measurement at 93% busy gives a median of 606 ms with runs from 455 to 1,795 ms.</p></li>
+
+<li><label><input type="checkbox"> <b>E2</b> <span class="tag">live service</span></label>
+<p><b>Concept c4: the interpreter is warm after about one request.</b> Run <code>lab.sh W</code> on a fresh process, fixed 10 ms work, requests one at a time. Expect the first request at 10.6 to 11.0 ms against a median of the rest near 10.2 to 10.3 ms, a first-request penalty of 3 to 7%, and the run reports it settled after 0 requests. The 30 to 60 s warm-up you might have discarded measures nothing the interpreter is doing.</p>
+<p><b>Concept c2, instrumentation side:</b> run the <code>latency.py</code> self-test, then try recording a value outside the histogram's range. <code>record_value</code> returns <code>False</code> and records nothing (hdrhistogram_py 0.10.7, identical in 0.10.8). A histogram sized too small silently drops exactly the stall samples this phase exists to keep, so check the return value in any harness you write.</p></li>
+</ul>
+
+<p>Five exercises, one habit across all of them: before you trust a number, ask which mechanism produced it. The closed client, the short run, the undersized histogram and the discarded first seconds all fail in the same direction, toward a report that looks healthy.</p>
+<h2 data-kind="checkpoint">Checkpoint</h2>
+<p>Five questions, one per idea in this phase. Answer each before opening it. Every question uses numbers from the running case: the 1 ms service and the injected stall.</p>
+
+<ol class="steps">
+<li>
+<b>A closed loop and a 5 s stall.</b> A service answers every request in 1 ms. A test sends 100 requests per second for 100 s, because one client sends, waits for the reply, sleeps 9 ms and sends again. At t = 50 the service freezes for 5 s. What p99 does the test report, and what would an open-loop generator at the same rate report?
+<details class="answer"><summary>Answer sketch</summary>
+<p>The closed loop reports a p99 near the healthy 10 ms.</p>
+<p>During the freeze the client holds one request open, so the stall produces exactly one slow sample in about 9,500. One sample in 9,500 cannot move a p99. The open loop sends 500 requests into the stall. Each is measured from its due time, so they record up to 5 s. The open p99 sits near 4 to 5 s. Same service, same stall: the closed loop cannot see it.</p>
+</details>
+</li>
+
+<li>
+<b>Which percentiles can you defend.</b> Your run made 2,000 requests. Which of p50, p99 and p99.9 can you defend, and how many requests would a defensible p99.9 need?
+<details class="answer"><summary>Answer sketch</summary>
+<p>p50 and p99 are defensible. p99.9 is not.</p>
+<p>The samples above a percentile are n·(1−q). At n = 2,000 that is 1,000 above p50 and 20 above p99, both past the ten-sample rule. p99.9 rests on 2 samples, so it is a reading, not a percentile. A defensible p99.9 needs about 10,000 samples for the count rule. The floor n ≥ ln(0.025)/ln(0.999) gives about 3,688 for any interval to exist at all.</p>
+</details>
+</li>
+
+<li>
+<b>Two colleagues, two p99s.</b> At 93% busy your 30 s run reports p99 300 ms. A colleague re-runs the same code and gets 700 ms. Is one of you wrong, and which single change makes the measurement reliable: longer runs, more runs of the same length, or lower load?
+<details class="answer"><summary>Answer sketch</summary>
+<p>Neither is wrong.</p>
+<p>At 93% busy the tail is set by rare deep-queue excursions, and a 30 s run usually contains none. The phase's simulation shows identical 23 s runs at 93% ranging from 180 to 863 ms. Repeating 30 s runs only collects more readings of the same short window. The single change is longer runs, and even 300 s reads low at 93%. If longer is impossible, measure at lower load and say so.</p>
+</details>
+</li>
+
+<li>
+<b>The slow first request.</b> A fresh service answers its first request in 30 ms and every later request in 10 ms. Name three cold candidates behind the extra 20 ms, and the one measurement that separates them.
+<details class="answer"><summary>Answer sketch</summary>
+<p>The candidates are cold imports, a cold client connection pool, and empty application caches.</p>
+<p>The specialising interpreter is not one of them: it rewrites an instruction the second time it runs, so one request warms it. Lab W measured the penalty at 3 to 7%, not the 200% seen here. The separating measurement is to restart the process with a client that keeps its connection alive. If the first request is still slow, the cost is inside the service, so imports or caches. If it turns fast, the cold item was the connection.</p>
+</details>
+</li>
+
+<li>
+<b>One number from twenty-four windows.</b> Twenty-four hourly windows report p99 between 40 and 60 ms. One window held a 3 s stall and reports 2.7 s. What does the average of the 24 p99s say, and what does the merged histogram say?
+<details class="answer"><summary>Answer sketch</summary>
+<p>The average is about 150 ms, and the merged p99 is 2.7 s.</p>
+<p>The average gives the stall window a weight of 1 in 24, so 2.7 s becomes about 110 ms of contribution. The merged histogram adds the 24 counter arrays with HdrHistogram.add() and keeps every delayed sample. The stall is one of the day's slowest 1%, so it sets the merged p99. Percentiles never average; histograms merge.</p>
+</details>
+</li>
+</ol>
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+<pre class="cheatsheet" id="s12-cheatsheet">LOAD TEST CHEATSHEET  ·  one run, measured honestly
+
+GENERATING LOAD
+  Closed loop    send rate ≤ clients ÷ latency; a stall costs
+                 about one sample per client, whatever its length
+                 (48/s planned, 3 s stall: 1 sample, p99 50.6 ms)
+  Open loop      fix send times in advance, measure from due time;
+                 the same stall: 136 samples, p99 2.73 s
+  Corrected rec. record_corrected_value rebuilds requests due
+                 during a stall; never the queue draining after it,
+                 so its p99 sits slightly low (4.00 vs 4.10 s)
+  Validity       generator lag must stay small; at lag > 10 ms
+                 the run measures the generator, not the service
+
+COUNTING SAMPLES
+  Above q        samples above q = n·(1−q)
+  Quote rule     report a percentile only above ~10 samples
+  Floor          n ≥ ln(0.025)/ln(q);  p99 needs n ≥ 368,
+                 p99.9 needs about 3,685
+  Recorder       HDR histogram: record_value returns False out of
+                 range and drops the sample silently; size the
+                 range for the stall, not the healthy seconds
+
+SIZING THE RUN
+  M/M/1          p99 = ln(100)·S/(1−ρ);  S = 10.25 ms here
+  Queue variance ρ/(1−ρ)²: the busier the service, the deeper
+                 and rarer the excursions that set the tail
+  23 s run       adequate at 49% busy (median 89 vs 93 ms long-run)
+                 93%: median 385 vs 702 ms, runs 180–863 ms
+  300 s run      still not settled at 93%: median 606 ms,
+                 runs 455–1,795 ms
+  Two runs       near the knee, identical short runs disagree by
+                 4–5x; longer runs fix it, more short runs do not
+
+FIRST SECONDS
+  Interpreter    specialising CPython rewrites an instruction the
+                 second time it runs (ADAPTIVE_WARMUP_VALUE 1,
+                 v3.12.0); warm after about one request,
+                 first-request penalty 3–7%
+  Really cold    imports (~70 ms of a 0.12–0.17 s start),
+                 connection pools (keep-alive 5 s, httpx 0.28.1),
+                 application caches, page cache, empty queue
+  Rule           keep the first seconds, report them apart;
+                 never discard them
+
+AGGREGATING
+  Never          average percentiles across windows or instances;
+                 a stall window surrounded by healthy ones averages
+                 away (24 windows: mean ~150 ms, true p99 2.7 s)
+  Always         HdrHistogram.add() merges the counter arrays and
+                 raises on range mismatch; read p99 from the merge
+
+RECEIPTS
+  wrk2           1.4 s pause: corrected p99 1.27 s,
+                 uncorrected 6.04 ms
+  This phase     open 136 samples in stall vs closed 1, 54x p99 gap
+</pre>
+<h2 data-kind="post">Posts</h2>
+<p>Two drafts based on what you measured in this phase. Each is one claim plus the run that makes it yours. He posts them or edits them; nothing here is sent.</p>
+
+<div class="cards" data-cols="2">
+<div class="card" id="s13-post1">
+<h4>Draft 1: the tool was not broken</h4>
+<p>My load test printed p99 50 ms for a service I froze for 3 s. The tool was not broken; a waiting client stops sending when the service slows, so the stall appears once. Here is the same run, open loop: p99 2.73 s.</p>
+<p>What makes it his: both numbers come from the E3 runs on the course service and the same stall. The phase recorded them on its own machine. There were 136 samples in the stall window against 1. The paired measurement, not the claim, is the post.</p>
+</div>
+<div class="card" id="s13-post2">
+<h4>Draft 2: p99.9 from one sample</h4>
+<p>p99.9 from 1,063 requests is one sample. A percentile is only as real as the n·(1−q) values above it. For p99 an interval does not exist below n = 368.</p>
+<p>What makes it his: E7's open loop run printed n = 1,063. Its p99 rests on the 10 values above it against the single value above p99.9. The floor of 368 is derived in the lesson, so he can show the algebra if asked.</p>
+</div>
+</div>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+<li><code>https://raw.githubusercontent.com/HdrHistogram/HdrHistogram_py/0.10.7/hdrh/histogram.py</code> — the pinned library. <code>record_value</code> returns <code>False</code> and records nothing out of range, <code>record_corrected_value</code> reconstructs only values due during a stall, and <code>add()</code> merges two histograms and raises on range mismatch. Verified from source on 2026-10-13.</li>
+<li><code>https://raw.githubusercontent.com/HdrHistogram/HdrHistogram_py/0.10.8/hdrh/histogram.py</code> — the same three behaviours, byte-identical at the newest tag, so the lessons survive the upgrade.</li>
+<li><code>https://pypi.org/project/hdrhistogram/</code> — shows 0.10.8 is current, released 2026-10-12; the course pin of 0.10.7 is one release old and safe.</li>
+<li><code>https://raw.githubusercontent.com/encode/httpx/0.28.1/httpx/_config.py</code> — the <code>keepalive_expiry</code> default of 5.0 s behind the claim that a 5 s pause costs a fresh connect and TLS. Read 2026-10-13; whether the default moved in later releases was not checked.</li>
+<li><code>https://raw.githubusercontent.com/python/cpython/v3.12.0/Include/internal/pycore_code.h</code> — <code>ADAPTIVE_WARMUP_VALUE 1</code> and the comment that an instruction is specialised the second time it executes. This is the version where the constant is verified; the phase originally cited 3.13, where it was not found.</li>
+<li><code>https://raw.githubusercontent.com/python/cpython/v3.13.0/Include/internal/pycore_code.h</code> and <code>https://raw.githubusercontent.com/python/cpython/v3.13.0/Include/internal/pycore_backoff.h</code> — absence checks only: both read in full, and neither contains the warmup constant. No claim about 3.13 rests on these files.</li>
+<li><code>https://raw.githubusercontent.com/python/cpython/v3.13.0/Python/specialize.c</code> — fetched with sections stripped; used only for the absence finding above, not for any claim about where 3.13 defines the threshold.</li>
+<li><code>https://github.com/giltene/wrk2</code> — the README's independent cross-check: measuring from the intended send time turns a 1.4 s server pause into a corrected p99 of 1.27 s against an uncorrected 6.04 ms.</li>
+<li><code>https://en.wikipedia.org/wiki/M/M/1_queue</code> — the two standard results the short-run section rests on: response time exponential with rate μ−λ, and queue variance ρ/(1−ρ)².</li>
+<li><code>https://sourcegraph.com/github.com/python/cpython@v3.13.0/-/blob/Python/specialize.c</code> — returned no content; nothing was used from it.</li>
+<li>The phase's own measured numbers (E3's 1,867 and 1,544 samples, lab W's first-request ratios, predict.py's simulation table) come from his own runs on his machine, taken as given with their conditions stated, not reproduced.</li>
+</ul>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

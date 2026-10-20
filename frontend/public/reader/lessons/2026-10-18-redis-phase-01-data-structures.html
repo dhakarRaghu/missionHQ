@@ -1,0 +1,1733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data structures and what they cost</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">Redis · Phase 1</div><h1>Data structures and what they cost</h1><p class="subtitle">Which Redis type does the read-modify-write for you, and what does each choice cost in safety and memory?</p></header>
+<p>Phase 0 ended with one shared Redis cluster and one rule. A single thread runs every command, so one slow command makes every service wait. This lesson adds a new feature to that cluster and asks which Redis type each of its needs should use. The feature is an AI roleplay coach, a new example in place of the grading service of Phase 0. The answer decides how many round trips you pay, whether concurrent updates survive, and how much memory you rent.</p>
+<p><b>What you must know</b>, taught below in this order:</p>
+<ol class="concepts">
+<li id="c1"><b>The value's type decides which read-modify-write Redis does in one command, and a client GET then SET loses updates.</b><span>You can pick the command that makes a concurrent update safe, and spot code that loses writes.</span></li>
+<li id="c2"><b>Memory follows the encoding, because small collections are flat listpacks that convert to larger structures at fixed sizes.</b><span>You can predict a memory jump before a deploy, and check it with two commands.</span></li>
+<li id="c3"><b>A sorted set orders members by a score you choose, and a sliding-log limiter stores one member per request.</b><span>You can build a leaderboard, a time window or a delayed job, and price each in bytes.</span></li>
+<li id="c4"><b>A list pop deletes the job, so a reliable queue moves it to a processing list until the work is done.</b><span>You can say where a job is after a worker crash, and change one command to keep it.</span></li>
+<li id="c5"><b>A HyperLogLog counts distinct items in at most 12,304 bytes with 0.81% standard error, and cannot list them.</b><span>You can count unique users for millions of keys, and know when you need an exact structure instead.</span></li>
+</ol>
+<p>The lab tags these five ideas c1 to c5, in the order of this list.</p>
+<details class="answer deeper"><summary>Go deeper: what this phase covered, the versions, and how long it takes</summary>
+<p><b>The original phase.</b> It was a survey of eight topics, in this order. Strings, hashes, lists, sets, sorted sets, then Streams with HyperLogLog and bitmaps, then encodings, then key naming. This lesson keeps every part of it that is correct. It groups them under the five ideas above, because one idea connects them. The type decides which work Redis does inside one command, and the size of the value decides how Redis stores it.</p>
+<p><b>Versions.</b> Current Redis is 8.10.2. Valkey 9.1.2 is the main fork, a project of the Linux Foundation that started from Redis 7.2.4. The lab's container still pins <code>redis:7.2</code>. Where a command or a default differs between these, the section says so.</p>
+<p><b>Time.</b> The phase planned 3 to 5 days for reading and labs. It is the phase you will open most often later, because "which structure?" is a decision you make every week.</p>
+<p><b>How the numbers are labelled.</b> A number that says "measured" comes from a run on Redis 8.10.1 on an Apple M4 Pro, with the libc allocator. Production Linux builds use jemalloc, so absolute byte counts differ there. Ratios and the sizes where an encoding changes do not depend on the allocator. That last point is inferred from how the allocator works, not measured on Linux.</p>
+<details class="evidence"><summary>Evidence</summary><p>Redis 8.10.2 was released on 2026-09-17, from the GitHub release page. Valkey 9.1.2 is the latest stable tag on 2026-10-18. The measurements ran on 2026-10-18 on a fresh Redis 8.10.1 Homebrew server, an x86_64 build under Rosetta, macOS 26.6, port 6481, no persistence, loopback client.</p></details>
+</details>
+
+<h2 data-kind="orientation">What you bring from Phase 0</h2>
+<div class="cards" data-cols="2">
+<div class="card"><h4>One thread runs the commands</h4><p>Redis runs each command to the end before it starts the next one. Commands from all clients wait in one line for that thread.</p></div>
+<div class="card"><h4>One command is atomic</h4><p>Because nothing runs in the middle of a command, a command that reads and changes a value cannot be interrupted. Two separate commands from one client can be, because other clients' commands run between them.</p></div>
+<div class="card"><h4>The round trip is the cost</h4><p>A round trip is one request to Redis and its reply. On a network it costs far more time than the command itself, so the number of round trips sets your latency.</p></div>
+<div class="card"><h4>An O(N) command blocks everyone</h4><p>Some commands do work that grows with the size of the value, such as <code>KEYS</code>. Such a command holds the thread for all of that work. Every other client waits, so Phase 0 replaced <code>KEYS</code> with the cursor-based <code>SCAN</code>.</p></div>
+<div class="card"><h4>A shared cluster shares memory</h4><p>All services on one cluster use one <code>maxmemory</code> limit. Keys with no TTL, a time to live after which Redis deletes the key, can fill it and take down a neighbour.</p></div>
+</div>
+<p>This phase needs all five. The type you choose decides whether an update is one atomic command or two that can interleave. It decides how many round trips a feature costs, and how much of the shared memory it uses.</p>
+<p>The situation for the whole lesson is the platform from Phase 0, where about 34 services share several Redis clusters. You are adding an AI roleplay coach to it. A learner talks to a simulated buyer, and the coach scores the conversation. Each of its needs below copies a mechanism that another service on the platform already runs.</p>
+<figure class="diagram">
+<table>
+<thead><tr><th>What the coach needs</th><th>The question it raises</th><th>Where the lesson answers it</th></tr></thead>
+<tbody>
+<tr><td>Cache the buyer persona that the model plays</td><td>A JSON String or a Hash?</td><td>Strings and Hashes</td></tr>
+<tr><td>Keep each learner's session, and log a user out everywhere</td><td>Which fields change one at a time?</td><td>Hashes and Sets</td></tr>
+<tr><td>Count finished scoring jobs across many workers</td><td>Can two workers lose a count?</td><td>The lost update</td></tr>
+<tr><td>Limit LLM calls per company</td><td>A counter or a log of timestamps?</td><td>Sliding windows</td></tr>
+<tr><td>Queue transcripts for scoring</td><td>Where is the job if a worker dies?</td><td>Lists and Streams</td></tr>
+<tr><td>Show trending scenarios and unique learners per scenario</td><td>A sorted set, a Set or a HyperLogLog?</td><td>Sorted sets and HyperLogLog</td></tr>
+</tbody>
+</table>
+<figcaption>The running case. The coach is the lesson's example. Each mechanism in it comes from a service the platform already runs.</figcaption>
+</figure>
+<details class="answer deeper"><summary>Go deeper: the O(N) commands and their cursor forms, in one place</summary>
+<p>Phase 0 taught why an O(N) command blocks every client. This lesson gives it one line per type and points back here. The cursor forms return a small batch per call, so the thread is free between batches.</p>
+<pre class="cheatsheet">KEYS pattern            → SCAN cursor MATCH pattern
+HGETALL on a huge hash  → HSCAN
+SMEMBERS on a huge set  → SSCAN
+ZRANGE over a huge set  → bound the range; a large LIMIT offset still walks the set
+LRANGE 0 -1 on a huge list → read a bounded range</pre>
+<p>Phase 5 covers big keys in full, including how to find them and delete them without a stall.</p>
+</details>
+
+<h2 data-concept="c1">What happens when two clients change the same value?</h2>
+<p class="why">The type you store decides whether an update can be lost.</p>
+<p>Phase 0 showed that one command is atomic and two commands are not. The coach runs many scoring workers, and each one adds 1 to a count of finished jobs. If each worker reads the count and writes back a new one, some of those additions disappear.</p>
+<p>A Redis <dfn>keyspace</dfn> is one large map from keys to values. The key is always a string. The value has a <dfn>type</dfn>, such as String, Hash, List, Set or Sorted Set, and the type decides which commands may touch it. Each type also comes with commands that read and change the value inside Redis, in one command. Those commands are why the type matters for safety and not only for convenience.</p>
+<figure class="diagram">
+<svg viewBox="0 0 640 250" role="img" aria-label="Keys on the left point to values of different types on the right">
+<g font-size="13" fill="currentColor">
+<text x="20" y="22" font-weight="700">key (always a string)</text>
+<text x="330" y="22" font-weight="700">value (one type each)</text>
+<rect x="20" y="36" width="230" height="30" rx="6" fill="none" stroke="currentColor"/><text x="30" y="56">sess:abc</text>
+<rect x="330" y="36" width="290" height="30" rx="6" fill="none" stroke="currentColor"/><text x="340" y="56">Hash {token, ip, role}</text>
+<rect x="20" y="76" width="230" height="30" rx="6" fill="none" stroke="currentColor"/><text x="30" y="96">user:u42:sessions</text>
+<rect x="330" y="76" width="290" height="30" rx="6" fill="none" stroke="currentColor"/><text x="340" y="96">Set {abc, def, ghi}</text>
+<rect x="20" y="116" width="230" height="30" rx="6" fill="none" stroke="currentColor"/><text x="30" y="136">queue:jobs</text>
+<rect x="330" y="116" width="290" height="30" rx="6" fill="none" stroke="currentColor"/><text x="340" y="136">List [j1, j2, j3]</text>
+<rect x="20" y="156" width="230" height="30" rx="6" fill="none" stroke="currentColor"/><text x="30" y="176">ratelimit:c7:/report</text>
+<rect x="330" y="156" width="290" height="30" rx="6" fill="none" stroke="currentColor"/><text x="340" y="176">Sorted Set {ts1, ts2, ts3}</text>
+<rect x="20" y="196" width="230" height="30" rx="6" fill="none" stroke="currentColor"/><text x="30" y="216">persona:m1:u42</text>
+<rect x="330" y="196" width="290" height="30" rx="6" fill="none" stroke="currentColor"/><text x="340" y="216">String "{json...}"</text>
+</g>
+<g stroke="currentColor" stroke-width="1.5">
+<line x1="250" y1="51" x2="330" y2="51"/><line x1="250" y1="91" x2="330" y2="91"/><line x1="250" y1="131" x2="330" y2="131"/><line x1="250" y1="171" x2="330" y2="171"/><line x1="250" y1="211" x2="330" y2="211"/>
+</g>
+</svg>
+<figcaption>The keyspace. A Hash command on a String key returns a WRONGTYPE error, because the value's type decides which commands are legal.</figcaption>
+</figure>
+<details class="predict"><summary>Predict: 8 clients each run GET, add 1 in code, then SET, 2,000 times each. What share of the 16,000 additions survive?</summary>
+<p>About 20%. In a measured run, the counter ended at 3,234 instead of 16,000, so 79.8% of the additions were lost. With <code>INCR</code>, the same 8 clients ended at exactly 16,000.</p>
+<p>The reasonable guess is "almost all survive, because Redis is fast and the gap is small". The gap is small, but 8 clients send commands at full speed, so another client's GET or SET lands inside almost every gap.</p>
+</details>
+<p>The loss follows from Phase 0's single thread. Each command runs to the end, but between two commands of one client, other clients run theirs.</p>
+<figure class="diagram">
+<div class="lanes" id="s02-race" data-play>
+<h4>Two clients, one counter, GET then SET</h4>
+<div class="lane" data-label="client A"><i class="decode" style="--w:60" data-t="GET → 5"></i><i class="idle" style="--w:60"></i><i class="decode" style="--w:60" data-t="SET 6"></i><i class="idle" style="--w:60"></i></div>
+<div class="lane" data-label="client B"><i class="idle" style="--w:60"></i><i class="decode" style="--w:60" data-t="GET → 5"></i><i class="idle" style="--w:60"></i><i class="decode" style="--w:60" data-t="SET 6"></i></div>
+<div class="lane" data-label="counter"><i class="wait" style="--w:60" data-t="5"></i><i class="wait" style="--w:60" data-t="5"></i><i class="prefill" style="--w:60" data-t="6"></i><i class="frozen" style="--w:60" data-t="6, not 7"></i></div>
+<p class="at" data-step="1">Step 1: client A reads 5 and starts to add 1 in its own memory.</p>
+<p class="at" data-step="2">Step 2: client B reads 5 too, because A has not written yet.</p>
+<p class="at" data-step="3">Step 3: client A writes 6.</p>
+<p class="at" data-step="4">Step 4: client B also writes 6, so A's addition is lost and no error appears.</p>
+<p class="at" data-step="all">Illustration of the order of commands, not measured.</p>
+</div>
+<figcaption>Each command is atomic. The pair of commands is not, because B's commands run between A's.</figcaption>
+</figure>
+<p><code>INCR counter</code> does the read, the addition and the write inside one command, so no other client's command can run between them.</p>
+<p>The loss grows with the number of clients, because more commands from other clients land in each gap.</p>
+<figure class="diagram">
+<table>
+<thead><tr><th>Clients</th><th>Expected</th><th>GET then SET result</th><th>Lost</th><th>INCR result</th></tr></thead>
+<tbody>
+<tr><td>2</td><td>4,000</td><td>2,000</td><td class="bad">50.0%</td><td class="ok">4,000</td></tr>
+<tr><td>8</td><td>16,000</td><td>3,234</td><td class="bad">79.8%</td><td class="ok">16,000</td></tr>
+<tr><td>32</td><td>64,000</td><td>3,766</td><td class="bad">94.1%</td><td class="ok">64,000</td></tr>
+</tbody>
+</table>
+<figcaption>Measured on Homebrew Redis 8.10.1 under Rosetta on an Apple M4 Pro, libc malloc, one TCP connection per client, no pipelining, loopback. Each client adds 1 to the counter 2,000 times.</figcaption>
+</figure>
+<details class="evidence"><summary>Evidence</summary><p>Measured for this lesson on 2026-10-18 with <code>p1lab/race/main.go</code>, against a fresh server on 127.0.0.1:6481. A first round went to a server on another port, was discarded, and re-run. The two rounds agreed.</p></details>
+<div class="callout warn"><p><b>Correction.</b> The phase said a field update costs "String = 4 ops, Hash = 1". The String path is 2 round trips, a GET and a SET, plus work in the client. The larger cost is the lost update between those two commands, which the count of operations does not show.</p></div>
+<p>Production code follows this rule. One service on the platform limits requests with <code>INCR</code> and <code>EXPIRE</code> inside one Lua script, and another counts fan-out jobs with <code>HINCRBY</code>. When no single command does the change you need, a transaction or a script can do it. The next section shows what a transaction promises.</p>
+<p>Try E3 from the lab now. It runs <code>LPUSH</code> on a String key and shows the WRONGTYPE error, which proves the keyspace is typed.</p>
+<details class="answer deeper"><summary>Go deeper: where the rule stops, key names on a shared cluster, and the string size limit</summary>
+<p><b>Why loopback loses the most.</b> The loss is highest on loopback, because the clients run in lock step there. Across a real network, the gap between GET and SET is longer, so each race window is wider. The clients also collide less often per operation. The network effect is inferred, not measured.</p>
+<p><b>Where the rule stops.</b> If a key has only one writer, GET then SET is safe, because no other write can land in the gap. That point is inferred from the single-thread model.</p>
+<p><b>Why names matter here.</b> Keys from dozens of services live in one keyspace on a shared cluster. Without a convention, two services can write the same key, and nobody can say which service owns a key or its memory.</p>
+<p><b>The common style.</b> Colon-separated parts, from general to specific, such as <code>type:sub:id:id</code>. A key like <code>persona:m1:u42</code> says the type, the scenario and the user. A good prefix makes <code>SCAN MATCH persona:*</code> possible, so you can find, count and size one service's keys.</p>
+<p><b>Put the tenant ID in the key.</b> A multi-tenant platform writes the company ID value into each key, such as <code>cache:&lt;companyId&gt;:&lt;userId&gt;</code>. This keeps one customer's cache from being served to another customer, so it is a correctness and security property. The platform writes the ID value itself, with no literal <code>COMPANY_</code> prefix.</p>
+<p><b>More than one convention exists.</b> The platform has no single standard, and several styles live side by side. One API layer uses pipe-separated keys. <code>CK|&lt;url&gt;|&lt;dataHash&gt;</code> holds a cached response. <code>SK|&lt;scope&gt;|md5(url)|&lt;hash&gt;</code> and <code>MSK|md5(scopes)|md5(url)|...</code> tie a response to one or more invalidation scopes. <code>Scope|&lt;scope&gt;</code> lists the keys of one scope, so a whole scope can be deleted at once. Another service uses <code>game|&lt;eid&gt;|company|&lt;cid&gt;|new</code>. When you edit a service, match the style it already uses.</p>
+<p><b>Hash tags.</b> In a cluster, the text inside the braces decides the slot, so <code>{&lt;companyId&gt;}key</code> puts a tenant's keys on one shard. Then one <code>MGET</code> can read them all. This is a sharding tool, not a naming style, and Phase 4 explains slots.</p>
+<p><b>The trap.</b> A key with no prefix, such as <code>u42</code> or <code>count</code>, can collide with another service's key, and you cannot find it with <code>SCAN MATCH</code>.</p>
+<p><b>Size limit.</b> A String value can hold up to 512 MB, set by <code>proto-max-bulk-len 512mb</code> in <code>redis.conf</code> at 8.10.2.</p>
+<p><b>Check it in your services.</b> Search one service for the code that builds Redis keys. Check three things. Is there a type prefix? Is the tenant ID in the key? Could two services build the same key?</p>
+</details>
+<p>One command is safe, and some changes need several. The next section asks what a transaction promises when one command is not enough.</p>
+
+<h2 data-concept="c1">What does a transaction promise, and what does it not?</h2>
+<p class="why">EXEC runs a queue with nothing in between, and it never undoes a command.</p>
+<p><code>INCR</code> made one change safe in one command. The coach also charges each scoring job to its company's LLM budget. It reads the budget, checks that the job fits, then lowers the budget and logs the charge. No single command does all three steps, so the race from the section above comes back.</p>
+<p>A <dfn>transaction</dfn> is a queue of commands on one connection. <code>MULTI</code> starts the queue, and each later command replies <code>QUEUED</code> and waits. <code>EXEC</code> runs the whole queue in order, and no other client's command runs in the middle. <dfn>WATCH</dfn>, sent before <code>MULTI</code>, makes <code>EXEC</code> run only if no watched key changed after the <code>WATCH</code>. This is <dfn>optimistic locking</dfn>: the client takes no lock, checks at the end, and tries again if another client wrote first.</p>
+<figure class="diagram">
+<div class="lanes" id="s02b-watch" data-play>
+<h4>The coach charges a budget with WATCH, and another worker writes first</h4>
+<div class="lane" data-label="coach A"><i class="decode" style="--w:60" data-t="WATCH budget"></i><i class="decode" style="--w:60" data-t="GET → 100"></i><i class="idle" style="--w:60"></i><i class="decode" style="--w:60" data-t="MULTI, SET 70"></i><i class="frozen" style="--w:60" data-t="EXEC → null"></i></div>
+<div class="lane" data-label="worker B"><i class="idle" style="--w:60"></i><i class="idle" style="--w:60"></i><i class="decode" style="--w:60" data-t="SET budget 90"></i><i class="idle" style="--w:60"></i><i class="idle" style="--w:60"></i></div>
+<div class="lane" data-label="budget"><i class="wait" style="--w:60" data-t="100"></i><i class="wait" style="--w:60" data-t="100"></i><i class="prefill" style="--w:60" data-t="90, A is dirty"></i><i class="wait" style="--w:60" data-t="90"></i><i class="wait" style="--w:60" data-t="90, kept"></i></div>
+<p class="at" data-step="1">Step 1: coach A watches the budget key. Redis adds A to the list of clients that watch it.</p>
+<p class="at" data-step="2">Step 2: A reads 100 and decides that a job of 30 fits.</p>
+<p class="at" data-step="3">Step 3: worker B writes 90. Redis marks every watcher of the key dirty, so A is now dirty.</p>
+<p class="at" data-step="4">Step 4: A sends MULTI and SET budget 70. The SET only joins the queue.</p>
+<p class="at" data-step="5">Step 5: EXEC sees that A is dirty, replies a null array and runs nothing, so B's 90 stays.</p>
+<p class="at" data-step="all">An example order, made up to show the shape of the race. Without WATCH, step 5 would write 70 over B's 90.</p>
+</div>
+<figcaption>A WATCH turns the lost update into an aborted EXEC, which the client sees and can retry.</figcaption>
+</figure>
+<details class="predict"><summary>Predict: the coach queues INCR on a counter, then LPOP on a key that holds a String by mistake, then SET on a log key. EXEC runs. Which of the three writes are still there afterwards?</summary>
+<p>The <code>INCR</code> and the <code>SET</code>. <code>LPOP</code> fails with <code>WRONGTYPE</code> inside the <code>EXEC</code> reply, and the other two commands still run. In a measured run, <code>EXEC</code> returned <code>[1 | WRONGTYPE ... | OK]</code>, and afterwards <code>tx:n</code> was 1 and <code>tx:b</code> was <code>done</code>. Redis has no rollback.</p>
+<p>The reasonable guess is "none of them, because the transaction failed". A SQL transaction works that way. Redis checks each command only when it is queued, and an error found later stays inside that one command's reply.</p>
+</details>
+<p>An error can happen at two times, and the time decides what <code>EXEC</code> does.</p>
+<figure class="diagram">
+<table>
+<thead><tr><th>The error is found</th><th>Examples</th><th>Reply while queueing</th><th>What EXEC does</th></tr></thead>
+<tbody>
+<tr><td>While queueing</td><td>Unknown command, wrong number of arguments, ACL denied, <code>MOVED</code>, out of memory</td><td>The error, not <code>QUEUED</code></td><td class="ok">Replies <code>EXECABORT</code> and runs nothing</td></tr>
+<tr><td>While EXEC runs</td><td><code>WRONGTYPE</code>, a value that is not an integer</td><td><code>QUEUED</code></td><td class="bad">Runs every command, and this one replies its error</td></tr>
+</tbody>
+</table>
+<figcaption>The two error times. E13 part b measured row one with a wrong number of arguments, and part a measured row two with WRONGTYPE. The other examples are from the source.</figcaption>
+</figure>
+<ol>
+<li>While a client is in <code>MULTI</code>, Redis checks each command before it replies <code>QUEUED</code>. It checks the name, the arguments, ACL, the cluster slot and the memory limit.</li>
+<li>A failed check sets <code>CLIENT_DIRTY_EXEC</code> on the client. Redis then stops storing the rest of the queue, to save memory.</li>
+<li><code>EXEC</code> on a dirty transaction replies <code>EXECABORT Transaction discarded because of previous errors.</code> and runs nothing.</li>
+<li>A command that passed the checks can still fail on the data. Its error becomes its own entry in the <code>EXEC</code> reply, and the next command runs.</li>
+</ol>
+<p>The reason for no rollback is design, not a missing feature. The docs say rollback would hurt "the simplicity and performance of Redis". The cost lands in client code that treats an error as "nothing happened".</p>
+<div class="compare">
+<div class="wrong"><p><b>Retry on any error.</b> go-redis <code>TxPipelined</code> returns the error of the first failed command. In the measured run it returned <code>WRONGTYPE</code>, yet <code>tx:n</code> went from 1 to 2 and <code>tx:b</code> became <code>again</code>. A loop that retries on that error adds 1 again on every pass.</p></div>
+<div class="right"><p><b>Retry only on <code>TxFailedErr</code>.</b> That error means a watched key changed and nothing ran. An <code>EXECABORT</code> also means nothing ran, but a retry fails the same way. Any other error from Redis means <code>EXEC</code> ran, so read each command's error and do not send the queue again.</p></div>
+</div>
+<p>A network error after the client sent <code>EXEC</code> is a third case, because the client cannot know whether it ran. Make the change idempotent, or read the state before you retry.</p>
+<p>A watch reacts to any change of the key, not only to a new value. Every command that changes a watched key marks each client that watches it dirty, even a <code>SET</code> of the same value. A command that changes nothing, such as <code>SADD</code> of a member that is already there, does not. <code>EXEC</code> also checks whether a watched key expired. E13 part c ran one row for each kind of change.</p>
+<figure class="diagram">
+<table>
+<thead><tr><th>Between WATCH and EXEC</th><th>EXEC</th></tr></thead>
+<tbody>
+<tr><td>Nothing changes</td><td class="ok">commits</td></tr>
+<tr><td>B reads the key with <code>GET</code></td><td class="ok">commits</td></tr>
+<tr><td>B writes another key</td><td class="ok">commits</td></tr>
+<tr><td>B writes the same value</td><td class="bad">aborts</td></tr>
+<tr><td>B sets a TTL with <code>EXPIRE 100</code></td><td class="bad">aborts</td></tr>
+<tr><td>The key expires before <code>EXEC</code></td><td class="bad">aborts</td></tr>
+<tr><td>B runs <code>FLUSHDB</code></td><td class="bad">aborts</td></tr>
+<tr><td>B runs <code>SWAPDB 14 15</code></td><td class="bad">aborts</td></tr>
+</tbody>
+</table>
+<figcaption>Measured with E13 part c on the Homebrew build named under the race table, port 6581. Every row matched the rule in the source.</figcaption>
+</figure>
+<p>This surprises most people: a write of the same value aborts the watcher, and so does an <code>EXPIRE</code>. <code>EXEC</code> also drops every watch before it runs, whether it commits or not. So each retry must send <code>WATCH</code> again.</p>
+<p>Under contention the <code>WATCH</code> loop stays correct, and it pays for every aborted attempt. E13 part d starts N clients, and each adds 1 to one key 200 times.</p>
+<figure class="diagram">
+<div class="bars">
+<div class="bar" style="--v:0" data-label="1 client" data-value="0.00 aborts per commit"></div>
+<div class="bar" style="--v:3" data-label="2 clients" data-value="0.50"></div>
+<div class="bar" style="--v:26" data-label="8 clients" data-value="4.59"></div>
+<div class="bar" style="--v:100" data-label="32 clients" data-value="17.48"></div>
+</div>
+<div class="stats">
+<div class="stat"><b>4,166.5 ms</b><span>WATCH loop, 32 clients, 6,400 increments</span></div>
+<div class="stat"><b>73.5 ms</b><span>plain INCR, the same work</span></div>
+<div class="stat"><b>0 of 100</b><span>commits against a plain INCR writer</span></div>
+</div>
+<figcaption>Measured with E13 part d on the same Homebrew build, port 6581, go-redis v9.5.1, one connection per client, 3 round trips per attempt.</figcaption>
+</figure>
+<details class="evidence"><summary>Evidence</summary><p>Run on 2026-10-19 with <code>code/phase01_data_structures/tx_watch</code>, on the Homebrew 8.10.1 server that E13 names, over loopback. Over five runs, the aborts per commit at 8 clients were 4.00 to 4.87, and at 32 clients 17.48 to 17.81.</p></details>
+<ul>
+<li>No increment was lost, because the final value equalled the commits in every run.</li>
+<li>When every writer uses the loop, an abort needs another client's commit, so the group always moves forward. That is inferred from the rule that only a write aborts a watch.</li>
+<li>One client can still wait a long time. At 2 clients, one increment needed 201 attempts, because the other client won every round until it finished.</li>
+<li>A writer that does not use <code>WATCH</code> can stop the loop. Against a plain <code>INCR</code> loop, 0 of 100 increments committed. This is <dfn>livelock</dfn>: the client keeps working and makes no progress.</li>
+</ul>
+<p>The arithmetic for the livelock, inferred from the run:</p>
+<pre><code>writer: 3,299 INCR in 472 ms           → one write every 143 µs
+one round trip: 71.9 ms / (200 × 3)     → about 120 µs
+from WATCH to EXEC: 2 round trips       → about 240 µs
+240 µs gap, one write every 143 µs      → a write lands in almost every gap</code></pre>
+<p>A retry cap turns the wait into an error. With a cap of 10 at 32 clients, 3,491 of 6,400 increments gave up. redis-py's <code>transaction()</code> retries with no limit, and go-redis leaves the loop to you. So choose a limit and a random wait between attempts, and fail the request when it reaches the limit.</p>
+<p>An open-source file system, SwordFS, met this limit in its tests. Writers of unrelated names all watched one parent key, and its default allowed 3 attempts. One create in 40 failed with "Redis transaction retry limit exceeded". The fix raised the default to 8 attempts, with the same random backoff.</p>
+<details class="evidence"><summary>Evidence</summary><p>SwordFS issue #454, closed 2026-10-10, read with its comments. A small open-source project, not a company postmortem. redis-py <code>redis/client.py:628-638</code> at v8.1.0: <code>while True</code> on <code>WatchError</code>. The cap run used <code>-max-retries 10</code> on the same server.</p></details>
+<p>In a cluster, every key of one transaction must sit in one hash slot, or <code>EXEC</code> replies <code>CROSSSLOT</code>. The hash tags from the key-naming notes above fix it. <code>{c7}:budget</code> and <code>{c7}:log</code> hash only <code>c7</code>, so they share a slot.</p>
+<p>So pick the smallest tool that does the change on the server in one step.</p>
+<figure class="diagram">
+<ul class="tree">
+<li><b>Does one command do the change?</b>
+<ul><li class="ok"><em>yes</em><span>Use it: <code>INCR</code>, <code>SET ... NX</code>, or <code>SET k new IFEQ old</code> on Redis 8.4 and later.</span></li>
+<li class="bad"><em>no</em><span>Ask the next question.</span></li></ul></li>
+<li><b>Do the writes depend on values you read first?</b>
+<ul><li class="ok"><em>no</em><span><code>MULTI</code> and <code>EXEC</code>, sent in one round trip.</span></li>
+<li class="bad"><em>yes</em><span>Ask the next question.</span></li></ul></li>
+<li><b>Do many clients write the key, or do some write without WATCH?</b>
+<ul><li class="ok"><em>no</em><span><code>WATCH</code> with capped retries and a random backoff.</span></li>
+<li class="bad"><em>yes</em><span>A Lua script or a Function, which runs once with no abort. Phase 3, section 3.8, teaches both.</span></li></ul></li>
+</ul>
+<figcaption>Choosing between a command, a transaction and a script. Each step down costs more round trips or more code on the server.</figcaption>
+</figure>
+<p>Try E13 from the lab now. Part a ends with <code>tx:n=2</code> after a call that returned an error, and part c prints one row per kind of change.</p>
+<div class="keypoints">
+<p class="remember">EXEC isolates the queue, but it never undoes a command.</p>
+<p class="trap">Retrying a transaction on any error runs its finished writes again.</p>
+<p class="try">Run E13 part c and see which changes abort a WATCH.</p>
+</div>
+<details class="answer deeper"><summary>Go deeper: the AOF and replicas, pipelining, the 8.10.2 ACL fix, cluster clients, and Valkey</summary>
+<p><b>Isolation, not atomicity.</b> elite-storage 3.1 separates two promises. Atomicity is about what a failure leaves behind, and isolation is about other clients. <code>EXEC</code> gives isolation. It gives all or nothing only before it starts, because a client that disconnects before <code>EXEC</code> runs nothing. elite-storage 3.6 shows optimistic locking with a version column in PostgreSQL, and <code>WATCH</code> is the same idea with the version kept by the server.</p>
+<p><b>What else invalidates a watch.</b> <code>FLUSHALL</code> and the end of a diskless replica sync also mark watchers dirty, but only for keys that existed. Before Redis 6.0.9, a key that expired did not abort the transaction. A key that was already expired at <code>WATCH</code> time is ignored. Eviction counts as a change too. The eviction code calls <code>keyModified()</code>, which touches the watch, in <code>src/evict.c:686</code> and <code>src/db.c:2877</code>. A run on the lab server confirmed it. With <code>volatile-lru</code>, <code>evicted_keys</code> went from 0 to 1, and <code>EXEC</code> replied a null array.</p>
+<p><b>The AOF and the replicas.</b> The AOF, the append-only file, is the log of writes that Redis replays at start, and Phase 4 covers it.</p>
+<ol>
+<li>One command, one <code>EXEC</code> or one script is one execution unit. When a unit makes more than one write, Redis wraps those writes in <code>MULTI</code> and <code>EXEC</code> for the AOF and the replicas.</li>
+<li>Only the writes that happened are sent, so the failed <code>LPOP</code> of part a is not in the file.</li>
+<li>A single write is sent alone, with no wrapper.</li>
+<li>A crash can cut the file inside a transaction. With <code>aof-load-truncated yes</code>, the default, Redis cuts the file and starts. Where it cuts depends on where the crash cut, as shown below.</li>
+</ol>
+<pre><code>*2 $6 SELECT $1 0
+*3 $3 SET $4 tx:a $3 abc
+*1 $5 MULTI
+*2 $4 INCR $4 tx:n
+*3 $3 SET $4 tx:b $4 done
+*1 $4 EXEC
+*2 $4 INCR $9 tx:single</code></pre>
+<p>That is the AOF after part a and one plain <code>INCR</code>, with <code>appendonly yes</code> set on the lab server for this check.</p>
+<p>If the file ends after a whole command, Redis goes back to the offset before the open <code>MULTI</code>. If it ends in the middle of a command, Redis 8.10.2 cuts it after the last whole command, and the open <code>MULTI</code> stays in the file. The data is right after that start. But Redis appends new writes after the open <code>MULTI</code>, and the next start removes them with it.</p>
+<pre><code>cut at byte 111 (midcmd)
+start 1: tx:a=1 tx:n= tx:b=
+!!! Truncating the AOF appendonly.aof.1.incr.aof at offset 92 !!!
+file after start 1:
+*2 $6 SELECT $1 0
+*3 $3 SET $4 tx:a $1 1
+*1 $5 MULTI
+*2 $4 INCR $4 tx:n
+start 2: tx:after=, written after start 1
+Revert incomplete MULTI/EXEC transaction in AOF file appendonly.aof.1.incr.aof</code></pre>
+<p>That is the output of <code>tx_watch/aof_cut.sh midcmd</code>, with its last log line left out. The Homebrew 8.10.1 build and a Redis 8.10.2 compiled from source printed the same lines. With <code>boundary</code>, it printed <code>start 2: tx:after=1</code>. The first draft of this lesson said that Redis always goes back to the <code>MULTI</code>, and this run corrected it. After a short-read warning in the log, run <code>BGREWRITEAOF</code> before the next restart. In the same test, a rewrite after start 1 kept the later write. With <code>aof-load-truncated no</code>, Redis stops at the cut and asks for <code>redis-check-aof</code>, which is what the docs describe.</p>
+<p><b>Pipelining.</b> A pipeline sends many commands before it reads the replies. A pipeline alone is not a transaction, because other clients' commands can run between its commands.</p>
+<ul>
+<li>Clients send <code>MULTI</code>, the queue and <code>EXEC</code> in one write. go-redis does this in <code>TxPipelined</code>, and redis-py <code>pipeline()</code> does it by default, with <code>transaction=True</code>.</li>
+<li>The <code>WATCH</code> and the read cannot go into that same write, because the client needs the value before it builds the queue. So a <code>WATCH</code> loop costs at least 2 round trips per attempt, and E13 uses 3.</li>
+<li><code>MULTI</code> and <code>WATCH</code> are allowed while a slow script holds the server, and <code>EXEC</code> is not. Redis accepts a pipelined <code>MULTI</code> and rejects the next commands with <code>BUSY</code>, which marks the transaction dirty. If Redis refused the <code>MULTI</code> too, the commands sent after the script ended would run alone.</li>
+<li>A watch belongs to one connection, so a reconnect loses it. node-redis fixed a bug where <code>exec()</code> after a reconnect committed over another client's write. Check how your client handles a reconnect between <code>WATCH</code> and <code>EXEC</code>.</li>
+</ul>
+<p><b>The 8.10.2 ACL fix.</b> ACL, the access control list, decides which commands and keys each user may use. Redis checks it when it queues a command and again at <code>EXEC</code>, so a removed permission applies to a queued transaction too.</p>
+<ol>
+<li>From Redis 8.4.0 to 8.10.1, the check at <code>EXEC</code> read the keys of the current command, which is <code>EXEC</code> itself and has no keys. So key permissions were not checked again, and command permissions still were.</li>
+<li>Redis 8.10.2 passes each queued command to the check. Its release note is security fix #15673, and the bug came with the lookahead pre-fetching commit.</li>
+<li>Valkey 9.1.2 checks with <code>ACLCheckAllPerm(c, &amp;acl_errpos)</code> and has no such key cache, so the bug likely does not apply there. That is inferred from the source and was not run.</li>
+</ol>
+<pre><code>e. ACL AT EXEC on redis_version 8.10.1: access removed after GET was queued
+   MULTI                      → OK
+   GET tx:acl:secret          → QUEUED
+   (admin) ACL SETUSER p1tx resetkeys ~other:*
+   EXEC                       → [s3cret]
+   GET tx:acl:secret          → (error) NOPERM No permissions to access a key</code></pre>
+<p>That is E13 part e on this machine's 8.10.1 build. With Redis 8.10.2, compiled from its source tag on the same Mac, the same <code>EXEC</code> refused the queued <code>GET</code>:</p>
+<pre><code>e. ACL AT EXEC on redis_version 8.10.2: access removed after GET was queued
+   EXEC                       → [(error) NOPERM ACLs rules changed between the moment the transaction was accumulated and the EXEC call. This command is no longer allowed for the following reason: no permission to touch the specified keys]
+   EXEC re-checked the key: the queued GET was refused.</code></pre>
+<p>Until you upgrade, also close a user's connections after a revoke, with <code>CLIENT KILL USER &lt;name&gt;</code>.</p>
+<p><b>Cluster details.</b> Each queued command is checked for its own key as it arrives. A key whose slot lives on another node gets <code>MOVED</code>, which marks the transaction dirty, so <code>EXEC</code> replies <code>EXECABORT</code>. At <code>EXEC</code>, Redis checks all queued keys together and replies <code>CROSSSLOT Keys in request don't hash to the same slot</code> for two slots. <code>WATCH</code> has the same one-slot rule. The client can hide this: go-redis v9.5.1 <code>ClusterClient</code> splits a <code>TxPipeline</code> by slot and sends one <code>MULTI</code> and <code>EXEC</code> per slot. Keys in two slots then become two transactions with no error. Its <code>Watch</code> checks the slots first and returns <code>redis: Watch requires all keys to be in the same slot</code>. Both were read in the source and not run, because the lab server is one node.</p>
+<p><b>Valkey.</b> Valkey 9.1.2 keeps the same transaction rules, read from its source and not run. It stores watched keys per database in a hash table, for an O(1) check of a duplicate <code>WATCH</code>. It also goes back to the <code>MULTI</code> when the AOF is cut inside a command, from PR #4342, so it does not lose the later writes. Valkey has <code>SET ... IFEQ</code> since 8.1.0 and <code>DELIFEQ</code> since 9.0.0. Redis has <code>IFEQ</code>, <code>IFNE</code>, <code>IFDEQ</code>, <code>IFDNE</code> and <code>DELEX</code> since 8.4.0.</p>
+<p><b>Scripts.</b> A Lua script or a Function runs whole on the server, with nothing in between, so it needs no <code>WATCH</code> and no retry. Phase 3, section 3.8 "Lua scripts and Functions in production", covers the script cache, the time limit and how each is replicated.</p>
+<details class="evidence"><summary>Evidence</summary><p>Redis 8.10.2 source: <code>src/multi.c:139-246</code> for <code>EXEC</code>, <code>389-428</code> for <code>touchWatchedKey</code>, <code>430-486</code> for flushes and <code>SWAPDB</code>, <code>192-223</code> for the ACL re-check. <code>src/server.c:3848-3891</code> for <code>propagatePendingCommands</code>, <code>4277-4287</code> for <code>rejectCommand</code>, <code>4793-4811</code> for the <code>BUSY</code> rule, which names PR #7022. <code>src/aof.c:1970</code>, <code>2016-2026</code> and <code>2041-2056</code>, default at <code>src/config.c:3422</code>. <code>src/evict.c:686</code>, <code>src/db.c:2877</code> and <code>1190-1196</code> for eviction and <code>keyModified()</code>. <code>src/cluster.c:1261-1300</code> and <code>1366-1372</code>. Release notes at 8.10.2, lines 24-31, and PR #15673, which names commit 235e688b0. Valkey 9.1.2 <code>src/multi.c:250-271</code>, release notes for PRs #3360 and #4342. go-redis v9.5.1 <code>tx.go:124</code>, <code>osscluster.go:1424-1425</code> and <code>1599-1605</code>. node-redis PR #3506, merged 2026-10-13. <code>set.json</code> at Redis 8.10.2 and Valkey 9.1.2, <code>delifeq.json</code> at Valkey 9.1.2. The AOF and ACL outputs were run on 2026-10-19 on port 6581. The cut-AOF runs, the eviction run and the 8.10.2 ACL run were made on 2026-10-19 on port 6591.</p></details>
+</details>
+<p>A transaction joins several commands into one step. The next section shows what a String can do inside one command, and where the JSON-in-a-String habit starts to cost you.</p>
+
+<h2 data-concept="c1">What can a String do in one command?</h2>
+<p class="why">A String is a blob, a counter or a claim, and two are atomic.</p>
+<p><code>INCR</code> kept the count of finished jobs safe because it reads and writes inside one command. The coach has two more String needs. It caches the buyer persona that the model plays, and it must make sure only one worker scores each transcript.</p>
+<p>A Redis <dfn>String</dfn> is a binary-safe sequence of bytes, up to 512 MB. Binary-safe means Redis does not read the bytes, so a String can hold UTF-8 text, JSON, a protobuf, an image or an integer. Production code uses a String in three ways, and each way has its own commands.</p>
+<figure class="diagram">
+<table>
+<thead><tr><th>Use</th><th>Commands</th><th>Atomic inside Redis?</th><th>Coach example</th></tr></thead>
+<tbody>
+<tr><td>Cache blob</td><td><code>SET k v EX s</code>, <code>GET k</code></td><td>The whole value only</td><td>The buyer persona as JSON</td></tr>
+<tr><td>Counter</td><td><code>INCR</code>, <code>INCRBY</code>, <code>DECR</code></td><td class="ok">Yes, read and write in one command</td><td>Requests in this minute</td></tr>
+<tr><td>Claim, or flag</td><td><code>SET k v NX EX s</code></td><td class="ok">Yes, check and set in one command</td><td>"This worker scores transcript t9"</td></tr>
+</tbody>
+</table>
+<figcaption>Three uses of one type. The counter and the claim are safe under concurrency for the reason the race section showed.</figcaption>
+</figure>
+<p>Each use works like this.</p>
+<ol>
+<li><b>The cache blob.</b> The service marshals the persona to JSON and runs <code>SET persona:m1:u42 '{"name":"Dana","tone":"skeptical"}' EX 259200</code>, a 3-day TTL. <code>GET persona:m1:u42</code> returns the whole blob in one round trip.</li>
+<li><b>The cost of the blob.</b> To change one field, the service must GET the whole value, unmarshal it, change it, marshal it and SET it. The whole object crosses the network twice, and the GET then SET pair has the race from the section above.</li>
+<li><b>The counter.</b> <code>INCR</code>, <code>INCRBY</code> and <code>DECR</code> work on a String that holds an integer. Redis reads, adds and writes inside one command, so no lock is needed. A fixed-window rate limiter is <code>INCR</code> plus <code>EXPIRE</code> on a key per window. On Redis 8.8 and later, <code>INCREX key EX 60 ENX</code> does both in one command. On older Redis and on Valkey, a Lua script runs the two.</li>
+<li><b>The claim.</b> <code>SET key val NX EX 30</code> means "set this only if the key does not exist, and expire it in 30 seconds". The first caller gets OK and every later caller gets nil, so exactly one worker wins.</li>
+</ol>
+<p>The claim is the whole idempotency pattern. An AI service on the platform claims a key with <code>SET ... NX</code> before it creates content, so a retried request does not create it twice. Another service wraps the same command in a helper for its own duplicate checks. The same command is also the start of a distributed lock, which Phase 3 builds and then shows where it breaks.</p>
+<div class="callout warn"><p><b>Correction.</b> The phase listed <code>SETNX</code> as a current atomic command. <code>SETNX</code> is deprecated since Redis 2.6.12. Use <code>SET key value NX EX seconds</code>, which also sets the TTL in the same command.</p></div>
+<p>One String bug is common. A plain <code>SET</code> on an existing key removes its TTL, so a cache entry that should expire stays forever. <code>SET key val KEEPTTL</code> changes the value and keeps the expiry.</p>
+<p>So is the persona right as a JSON String? Yes, because the coach reads and writes it whole and never changes one field. The cache layer also has no reason to look inside it. The learner's session is different, because the coach changes its fields one at a time.</p>
+<p>Try E1 from the lab now. The second <code>SET flag ... NX</code> returns nil, because the first call already holds the claim.</p>
+<details class="answer deeper"><summary>Go deeper: the TTL bug, two newer commands, JSON inside Redis 8, and byte-level commands</summary>
+<p><b>The KEEPTTL bug, side by side.</b></p>
+<div class="compare">
+<div class="wrong"><p><b>The TTL is lost.</b> <code>SET persona:m1:u42 '{...}' EX 259200</code>, then later <code>SET persona:m1:u42 '{...new...}'</code>. <code>TTL</code> now returns -1, so the key never expires.</p></div>
+<div class="right"><p><b>The TTL is kept.</b> The second write is <code>SET persona:m1:u42 '{...new...}' KEEPTTL</code>. The key still expires at the original time.</p></div>
+</div>
+<p>Two newer commands remove a round trip from common pairs. <code>GETEX</code> reads a value and changes its TTL, and <code>GETDEL</code> reads a value and deletes it. Both arrived in Redis 6.2.</p>
+<p><b>JSON as a type.</b> The Redis 8.0 release notes say RedisJSON and the other former modules are now part of Redis. With JSON as a type, the coach could change one field of the persona with a path update, instead of a full GET and SET. But the build decides what you get. The Homebrew Redis 8.10.1 server used for this lesson's measurements had only the <code>vectorset</code> module, and <code>JSON.SET</code> returned <code>ERR unknown command</code>. Whether the official Docker image includes JSON was not checked. Before you design on JSON paths, run <code>JSON.SET</code> on your own build.</p>
+<p><b>Byte-level commands.</b> <code>APPEND</code> adds bytes to the end of a String in place. <code>GETRANGE</code> and <code>SETRANGE</code> read and write a byte range, so a String can act as a random-access buffer. They rarely change a design decision.</p>
+<p><b>Where JSON and Hashes meet.</b> The Hash section next shows the other way to store an object with fields. JSON in Redis 8 adds a third choice when your build has it.</p>
+<details class="evidence"><summary>Evidence</summary><p>Redis 8.0.0 release notes, line 5: "Stand alone RediSearch, RedisJSON, RedisTimeSeries, and RedisBloom are no longer needed as they are now part of Redis." The <code>JSON.SET</code> result was measured on 2026-10-18. <code>setnx.json</code> at tag 8.10.2 carries <code>"deprecated_since": "2.6.12"</code>. <code>getex.json</code> and <code>getdel.json</code> carry <code>"since": "6.2.0"</code>.</p></details>
+</details>
+<p>The next section shows when an object belongs in a Hash instead, and what a Hash changes about TTLs.</p>
+
+<h2 data-concept="c1">When does an object belong in a Hash?</h2>
+<p class="why">A Hash changes one field in one command, so field updates do not race.</p>
+<p>The persona stays a String because the coach always reads and writes it whole. A learner's session is different. The coach updates the role, deletes the IP address on logout and reads one token on each request.</p>
+<p>A <dfn>Hash</dfn> is a map inside one value, with fields and their values under one key. It matches an object with named fields. Each field can be read, written or deleted on its own, inside Redis, without moving the rest of the object.</p>
+<figure class="diagram">
+<table>
+<thead><tr><th colspan="2">Key <code>u42|c7</code>, a user and company pair</th></tr><tr><th>field</th><th>value</th></tr></thead>
+<tbody>
+<tr><td>token</td><td>"abc123"</td></tr>
+<tr><td>ip</td><td>"10.0.0.1"</td></tr>
+<tr><td>role</td><td>"manager"</td></tr>
+<tr><td>sess-index</td><td>"c7|sess-a", a field used as a secondary index</td></tr>
+</tbody>
+</table>
+<pre><code>HGETALL u42|c7               → the whole object
+HGET    u42|c7 role          → one field, no unmarshal
+HSET    u42|c7 role manager  → change one field in place
+HDEL    u42|c7 ip            → drop one field</code></pre>
+<figcaption>A session as a Hash. The same object as a JSON String would need a GET and a SET for each of these changes.</figcaption>
+</figure>
+<p>The commands you will use most are <code>HSET</code>, <code>HGET</code>, <code>HGETALL</code>, <code>HDEL</code>, <code>HEXISTS</code>, <code>HKEYS</code> and <code>HVALS</code>. The one that matters most for safety is <code>HINCRBY</code>. It adds to one field inside one command, so it is a counter that lives inside an object.</p>
+<div class="callout warn"><p><b>Correction.</b> The phase's examples use <code>HMSET</code>. It is deprecated since Redis 4.0.0, because <code>HSET</code> now takes many field and value pairs in one call.</p></div>
+<p>A worker service on the platform uses <code>HINCRBY</code> as a fan-out counter. A job splits into many subtasks, and each one runs <code>HINCRBY &lt;jobKey&gt; completed 1</code> when it finishes. The service then reads <code>HMGET &lt;jobKey&gt; total completed</code> and starts the next workflow step when the two are equal. The coach can count finished scoring subtasks the same way, with no lock.</p>
+<figure class="diagram">
+<ol class="flow">
+<li><b>split</b><span>HSET job total 10 completed 0.</span></li>
+<li class="hot"><b>each subtask ends</b><span>HINCRBY job completed 1 returns the new count.</span></li>
+<li class="ok"><b>last one</b><span>The call that returns 10 starts the next step.</span></li>
+</ol>
+<figcaption>A fan-out counter in one Hash. Act on the value that <code>HINCRBY</code> returns, for the reason in the Go deeper block.</figcaption>
+</figure>
+<p>The session on the platform shows a second lesson, about TTLs. One service creates the session hash with <code>HMSET</code> and then sends a separate <code>EXPIRE</code>, and a second service only reads it. If the writer crashes between those two commands, the hash never expires. It becomes the no-TTL key from Phase 0 that fills a shared cluster. Send <code>HSET</code> and <code>EXPIRE</code> inside one <code>MULTI</code> and <code>EXEC</code>, or one script, so both apply together.</p>
+<p>Hash fields can also expire one by one now. <code>HEXPIRE</code> arrived in Redis 7.4.0, and <code>HSETEX</code>, <code>HGETEX</code> and <code>HGETDEL</code> in 8.0.0. So you no longer need one String key per field to give fields their own TTL.</p>
+<p>One line from Phase 0 applies here. <code>HGETALL</code> is O(N) in the number of fields, so on a hash that grew to millions of fields it blocks the thread. Bound the field count, or read with <code>HSCAN</code>.</p>
+<p>Try E4 from the lab now. Two <code>HINCRBY</code> fields in one key end at <code>views=2, likes=1</code>, two independent atomic counters in one object.</p>
+<details class="answer deeper"><summary>Go deeper: the session contract, field TTLs in Redis and Valkey, and the old trade-off</summary>
+<p><b>Acting on the count.</b> One detail of that pattern can start the next step twice. Two subtasks can each increment, and then both read the final count with a later <code>HMGET</code>. If each worker acts on the value its own <code>HINCRBY</code> returned, exactly one worker sees 10. This is inferred from the order of the commands, not seen in an incident.</p>
+<p><b>The session contract in detail.</b> The writer is a Node service. It runs <code>hmset(key, {email, attempt, company, expiryTime, lastActivityTrackedTime, ...})</code> and then a separate <code>EXPIRE</code>. The reader runs <code>HGETALL</code> on a <code>userId|companyId</code> key, and deletes secondary-index fields with <code>HDEL</code>. So the Hash is a contract between two services, and a change of field names on one side breaks the other. That last point is inferred.</p>
+<p><b>A measured field TTL.</b> <code>HEXPIRE sess 60 FIELDS 1 token</code> followed by <code>HTTL</code> returned <code>60 -1</code>, and <code>OBJECT ENCODING</code> returned <code>listpackex</code>.</p>
+<p><b>Memory.</b> Memory is the other reason to group fields. A small Hash is stored as one flat array, so 20 fields in one Hash cost far less than 20 top-level String keys. It also returns all of them in one round trip with <code>HGETALL</code>. The encoding sections below measure this.</p>
+<p><b>Check it in your services.</b> Find a session or profile that a service stores as a JSON String. Ask what breaks when two requests change two different fields at the same time. Each one rewrites the whole blob, so the later write removes the earlier change.</p>
+<p><b>The old trade-off.</b> Before Redis 7.4, a TTL applied only to a whole key. DoorDash's feature store stored one Hash per entity and read it with <code>HMGET</code>. Their write-up names the cost, that a TTL works on the whole key and not on fields. Field TTLs remove that cost.</p>
+<p><b>Valkey.</b> Valkey has <code>HEXPIRE</code>, <code>HSETEX</code> and <code>HGETEX</code> since 9.0.0, and <code>HGETDEL</code> since 9.1.0. Whether Valkey's <code>HSETEX</code> and <code>HGETEX</code> take exactly the same arguments as Redis 8 was not checked. In Valkey, a Hash with any field TTL is converted to a hashtable, so it loses the compact form. In Redis, a small Hash with field TTLs keeps a compact form called <code>listpackex</code>, which stores field, value and TTL together.</p>
+<p><b>How Redis finds expired fields.</b> Each database keeps an index of hashes ordered by their next field expiry. Active field expiry deletes up to <code>10000/hz</code> fields per call, and does more when it falls behind. Whole keys use a different method. Active expiry of keys scans the keys that have a TTL in batches, and it keeps no order by expiry time.</p>
+<p><b>The separate-keys argument.</b> One checkpoint question in the phase asked when 6 separate String keys per session beat one Hash. The usual answer was "when fields need their own TTL". On Redis 7.4 or later and Valkey 9.0 or later, a Hash gives you that too.</p>
+<details class="evidence"><summary>Evidence</summary><p><code>src/commands/hexpire.json</code> at Redis tag 8.10.2: <code>"since": "7.4.0"</code>. <code>hsetex.json</code>: <code>"since": "8.0.0"</code>. Same files at Valkey tag 9.1.2. <code>hmset.json</code>: deprecated since 4.0.0. The <code>HEXPIRE</code> run was measured on 2026-10-18. Valkey's conversion to hashtable: <code>src/t_hash.c:375</code> and <code>556-560</code> at 9.1.2. Redis <code>listpackex</code>: <code>src/server.h:3941-3948</code> at 8.10.2. Field expiry limit: <code>src/expire.c:101</code> and <code>228-275</code> at 8.10.2. DoorDash, 2020-11-19, from the archived post.</p></details>
+</details>
+<p>A Hash groups the fields of one object. The next section covers a group of objects, such as all sessions of one user, which a Set holds.</p>
+
+<h2 data-concept="c1">What do Sets compute on the server?</h2>
+<p class="why">A Set removes duplicates and compares groups inside Redis.</p>
+<p>A Hash holds the fields of one session. To log a learner out on every device, the coach needs the group of all that learner's session IDs. It also needs to find learners who are in two cohorts at once, without pulling both lists into the service.</p>
+<p>A <dfn>Set</dfn> is an unordered collection of unique strings. Adding a member that is already there changes nothing, so a Set removes duplicates for you. Redis also computes intersections, unions and differences of Sets on the server, so the members never cross the network.</p>
+<figure class="diagram">
+<pre><code>SADD  user:u42:sessions sess-a sess-b sess-c   → 3
+SADD  user:u42:sessions sess-b                 → 0, already present
+SCARD user:u42:sessions                        → 3, not 4
+
+Log u42 out everywhere:
+SMEMBERS user:u42:sessions   → [sess-a, sess-b, sess-c]
+DEL sess:sess-a ; DEL sess:sess-b ; DEL sess:sess-c
+DEL user:u42:sessions        ← drop the index itself</code></pre>
+<figcaption>A Set as the index of one user's sessions. The session service on the platform logs a user out everywhere in this way.</figcaption>
+</figure>
+<p>The Set commands follow the rule of the race section, because each one does its check inside Redis.</p>
+<ul>
+<li><code>SADD</code> returns how many members it added, so its reply tells you whether this member is new, with no separate check.</li>
+<li><code>SISMEMBER</code> tests one member in O(1), such as "does this user have this session?".</li>
+<li><code>SMISMEMBER</code> tests many members in one round trip, since Redis 6.2.</li>
+<li><code>SINTER</code>, <code>SUNION</code> and <code>SDIFF</code> return members in both, in either, or in the first but not the second.</li>
+<li><code>SINTERCARD</code> returns only the size of the intersection, since Redis 7.0, so a count does not send every member back.</li>
+</ul>
+<p>"Learners in both cohort A and cohort B" is one <code>SINTER</code>, computed in C on the server. The other way is to pull two lists into your service and loop over them, which costs two large replies and the loop.</p>
+<p>The server-side work has a cost on the single thread. The Redis latency docs name big set intersections as an example of a slow command. The O(N) line also applies, because <code>SMEMBERS</code> on a huge set blocks the thread. A session index is a few members. A Set of every user who ever viewed a course can hold millions. Read such a Set with <code>SSCAN</code>, or model it in a different way.</p>
+<p>Try E7 from the lab now. It shows the duplicate absorbed with <code>SCARD=3</code>, the log-out-everywhere fan-out, the three set operations and <code>SSCAN</code> over 10,000 members.</p>
+<div class="keypoints">
+<p class="remember">Pick the type whose command does your read-modify-write inside Redis.</p>
+<p class="trap">GET, change, then SET from many clients lost 80% of updates at 8 clients.</p>
+<p class="try">Search a service for a GET followed by a SET of the same key.</p>
+</div>
+<p>The type decides which work is atomic. The next section shows that the size of the value decides how Redis stores it, and so how much memory you pay.</p>
+
+<h2 data-concept="c2">Why can the same data take several times more memory?</h2>
+<p class="why">Redis stores small collections in a compact form and converts them at fixed sizes.</p>
+<p>The first concept decided which work is atomic. The coach's session hash has five short fields today. A deploy adds one field that holds a 100-byte JSON value. Then the cluster's memory climbs for every session at once, with no new users.</p>
+<p>Redis stores each Hash, Set, Sorted Set or List in one of two forms. A small one is a <dfn>listpack</dfn>, one flat block of bytes that holds the entries one after another. A large one uses a structure built from pointers, such as a hash table, a skip list or a quicklist. That form costs more memory for each element. Redis converts from the small form to the large form when the collection passes a size limit, and that conversion is the memory jump.</p>
+<figure class="diagram">
+<svg viewBox="0 0 640 210" role="img" aria-label="A listpack as one block of bytes, next to a hash table with buckets and pointers">
+<g font-size="13" fill="currentColor">
+<text x="20" y="22" font-weight="700">listpack: one block, entries in a row</text>
+<rect x="20" y="34" width="290" height="34" rx="4" fill="none" stroke="currentColor"/>
+<line x1="60" y1="34" x2="60" y2="68" stroke="currentColor"/><line x1="110" y1="34" x2="110" y2="68" stroke="currentColor"/><line x1="160" y1="34" x2="160" y2="68" stroke="currentColor"/><line x1="210" y1="34" x2="210" y2="68" stroke="currentColor"/><line x1="260" y1="34" x2="260" y2="68" stroke="currentColor"/>
+<text x="26" y="56">hdr</text><text x="66" y="56">token</text><text x="116" y="56">abc1</text><text x="166" y="56">role</text><text x="216" y="56">mgr</text><text x="266" y="56">end</text>
+<text x="20" y="92">A lookup scans the block from the start.</text>
+<text x="340" y="22" font-weight="700">hashtable: buckets and pointers</text>
+<rect x="340" y="34" width="60" height="26" fill="none" stroke="currentColor"/><text x="350" y="52">b0</text>
+<rect x="340" y="60" width="60" height="26" fill="none" stroke="currentColor"/><text x="350" y="78">b1</text>
+<rect x="340" y="86" width="60" height="26" fill="none" stroke="currentColor"/><text x="350" y="104">b2</text>
+<rect x="340" y="112" width="60" height="26" fill="none" stroke="currentColor"/><text x="350" y="130">b3</text>
+<rect x="450" y="34" width="150" height="26" rx="4" fill="none" stroke="currentColor"/><text x="458" y="52">entry: token → abc1</text>
+<rect x="450" y="86" width="150" height="26" rx="4" fill="none" stroke="currentColor"/><text x="458" y="104">entry: role → mgr</text>
+<line x1="400" y1="47" x2="450" y2="47" stroke="currentColor"/><line x1="400" y1="99" x2="450" y2="99" stroke="currentColor"/>
+<text x="340" y="164">Each entry is its own allocation, with pointers.</text>
+<text x="340" y="184">A lookup hashes the field and jumps to it.</text>
+</g>
+</svg>
+<figcaption>The same two fields in the two forms. The block has no pointers and no per-entry allocation, so it is several times smaller.</figcaption>
+</figure>
+<details class="predict"><summary>Predict: your session hashes have 300 short fields, and a colleague read that the limit is 128. What does <code>OBJECT ENCODING</code> print? A deploy then adds one field with a 100-byte value, and later you delete that field. What prints after each step?</summary>
+<p>First <code>listpack</code>, because the default limit for a Hash in current Redis is 512 fields, not 128. After the 100-byte value, <code>hashtable</code>, because any field or value over 64 bytes converts the whole Hash. After the delete, still <code>hashtable</code>, because a Hash does not convert back when it shrinks.</p>
+<p>The guess "hashtable from the start" is reasonable, because the phase gave 128 as the limit. The guess "it goes back after the delete" is also reasonable, and it is true only for Lists.</p>
+</details>
+<p>Redis uses the slow-looking form on purpose, for three reasons.</p>
+<ol>
+<li>A lookup in a listpack is a scan from the start, so it costs O(N). Redis keeps N small, so the average cost of <code>HGET</code> and <code>HSET</code> stays O(1) in practice.</li>
+<li>One block of bytes uses the CPU cache well, because the entries sit next to each other in memory.</li>
+<li>A hash table needs pointers and a separate allocation for each entry, so it costs several times more memory per element.</li>
+<li>An insert can push the count past the entries limit, or a field or value past the value limit. Then Redis converts the whole collection to the large form in that command.</li>
+<li>Hashes, Sets and Sorted Sets stay in the large form when they shrink. Lists convert back to a listpack, but only below half the limit, so a list near the limit does not convert back and forth.</li>
+</ol>
+<figure class="diagram">
+<table>
+<thead><tr><th>Type</th><th>Listpack limit</th><th>Value size limit</th><th>Large form</th></tr></thead>
+<tbody>
+<tr><td>Hash</td><td><code>hash-max-listpack-entries 512</code></td><td><code>hash-max-listpack-value 64</code></td><td>hashtable</td></tr>
+<tr><td>Sorted set</td><td><code>zset-max-listpack-entries 128</code></td><td><code>zset-max-listpack-value 64</code></td><td>skiplist</td></tr>
+<tr><td>Set of strings</td><td><code>set-max-listpack-entries 128</code></td><td><code>set-max-listpack-value 64</code></td><td>hashtable</td></tr>
+<tr><td>Set of integers</td><td><code>set-max-intset-entries 512</code>, an <code>intset</code> form</td><td>n/a</td><td>hashtable</td></tr>
+<tr><td>List</td><td><code>list-max-listpack-size -2</code>, 8 KB per node</td><td>n/a</td><td>quicklist</td></tr>
+</tbody>
+</table>
+<figcaption>Defaults at Redis 8.10.2, from <code>src/config.c</code> and <code>redis.conf</code>. Valkey 9.1.2 has the same defaults.</figcaption>
+</figure>
+<div class="callout warn"><p><b>Correction.</b> The phase gave 128 as the Hash and List limits. The Hash default is 512 in Redis 7.2.0, 8.10.2 and Valkey 9.1.2. The List setting is -2, which means 8 KB per node. Since 7.2, Sets of strings are listpacks too, and Lists convert back when they shrink.</p></div>
+<p>The jump at each limit was measured one key at a time.</p>
+<figure class="diagram">
+<div class="bars">
+<div class="bar" style="--v:25" data-label="hash, 512 fields, listpack" data-value="5,958 B"></div>
+<div class="bar" style="--v:100" data-label="hash, 513 fields, hashtable" data-value="23,445 B (3.9x)"></div>
+<div class="bar" style="--v:5" data-label="set of integers, 512, intset" data-value="1,056 B"></div>
+<div class="bar" style="--v:81" data-label="set of integers, 513, hashtable" data-value="18,937 B (18x)"></div>
+<div class="bar" style="--v:4" data-label="sorted set, 128, listpack" data-value="947 B"></div>
+<div class="bar" style="--v:50" data-label="sorted set, 129, skiplist" data-value="11,631 B (12x)"></div>
+<div class="bar" style="--v:3" data-label="set of strings, 128, listpack" data-value="690 B"></div>
+<div class="bar" style="--v:21" data-label="set of strings, 129, hashtable" data-value="4,857 B (7x)"></div>
+</div>
+<figcaption><code>MEMORY USAGE</code> per key, measured on the Homebrew build named under the race table, with libc malloc. One element past the limit costs 3.9 to 18 times the memory. A 64-byte Hash value keeps the listpack, and a 65-byte value converts it.</figcaption>
+</figure>
+<p>Two commands check any key. <code>OBJECT ENCODING key</code> prints the form, such as <code>listpack</code> or <code>hashtable</code>. <code>MEMORY USAGE key</code> prints the bytes the key and its value use, so you can compare two layouts with numbers, not guesses.</p>
+<p>The failure looks like "memory grew several times after a deploy, with the same number of keys". A new field, or a value that grew past 64 bytes, pushed many small hashes into the large form at once. To confirm it, run <code>OBJECT ENCODING</code> and <code>MEMORY USAGE</code> on a sample of keys from before and after the deploy.</p>
+<p>The encoding can also change behaviour, not only memory. At <b>Grab</b>, a Lua script ran again on a replica, and <code>HGETALL</code> returned fields in a different order there. One node held the small hash in the compact form, then called a ziplist, and the other held it as a hashtable. So the script made different decisions on each node. The replica drifted from the primary until a failover promoted it, and then it failed under load. Redis 7.0 removed this replication of whole scripts, so a replica now applies only the writes a script makes. The field order still differs between the two forms, so code must not depend on it.</p>
+<p>Try E12 from the lab now. A one-field Hash prints <code>listpack</code>, and after a 100-byte value it prints <code>hashtable</code>.</p>
+<details class="answer deeper"><summary>Go deeper: Grab's replica, lists, intsets, the 1 GB cap, hash templates and Twitter's lists</summary>
+<p><b>Grab in detail.</b> Grab used Redis on ElastiCache as a message queue, with a primary and replicas. After each deploy, the replica's CPU rose with no read traffic, and a reboot fixed it each time. Then a failover promoted that replica, its CPU reached 100% under reads, and the cluster stopped working. Redis then replicated the script itself, not its effects, so the script ran again on the replica. On an RDB load, a replica can rebuild a small hashtable as a listpack, and the two forms return fields in different orders. The fix was to sort the <code>HKEYS</code> or <code>HGETALL</code> output inside the script. Sorting 100 elements took under 1 ms. They rejected replicating the script's effects, because that would send thousands of writes to replicas.</p>
+<p><b>Lists.</b> A List is a <dfn>quicklist</dfn>, a linked list of listpack nodes, or one listpack when it is small. The phase called it a doubly-linked sequence of strings, which was true of old versions. The fill setting <code>-1</code> to <code>-5</code> maps to 4, 8, 16, 32 and 64 KB per node, and the default <code>-2</code> is 8 KB. <code>list-compress-depth 0</code> means no LZF compression of inner nodes, which is the default. The source says "we don't convert quicklist to listpack until its length or size is below half of the limit". In a measured run, a 5,000-item list cut to 10 items became a listpack again, and a 513-field hash cut to 10 fields stayed a hashtable.</p>
+<p><b>Intsets.</b> A Set of integers is a sorted array of 16-bit, 32-bit or 64-bit integers, the narrowest that fits every member. One string member converts it.</p>
+<p><b>The cap on a listpack.</b> Any listpack is capped at 1 GB by <code>LISTPACK_MAX_SAFETY_SIZE</code>, so a limit raised very high still has a ceiling.</p>
+<p><b>Hash templates, new in 8.10.</b> Redis 8.10 can share field names across hashes that have the same field set. It is off by default, with <code>hash-min-template-entries 0</code>. Hashes with field TTLs are never converted to templates. Valkey 9.1.2 has no template settings.</p>
+<p><b>Twitter's timelines.</b> Twitter kept each timeline as a list of tweet IDs. One ziplist, the older compact form, per timeline tied the list to a low size limit, and each write to a large ziplist needed <code>memmove</code> and <code>realloc</code>. A plain linked list cost two pointers per small ID. Their fix was a "Hybrid List", a linked list of ziplists with a byte limit per node. That is the same shape as today's quicklist. Whether one led to the other was not traced. The timeline service in one data centre used about 40 TB of heap, about 30 million QPS and over 6,000 instances.</p>
+<p><b>Where the switch is checked.</b> The thresholds are read in <code>t_hash.c</code>, <code>t_set.c</code>, <code>t_zset.c</code> and <code>t_list.c</code>. The internals report found no code path that converts a hashtable back to a listpack on delete. One zset path converts back only for store commands. That is inferred from reading the conversion code.</p>
+<details class="evidence"><summary>Evidence</summary><p>Defaults: <code>src/config.c:3511, 3593, 3600-3607</code> and <code>redis.conf:2215-2332</code> at Redis 8.10.2. Valkey: <code>src/config.c:3392, 3471-3475</code> at 9.1.2. Docs quote from the memory-optimization page: "When hashes are small we can instead just encode them in an O(N) data structure ... the amortized time for HGET and HSET commands is still O(1)". Shrink rule: <code>src/t_list.c:58-63</code>. Skip-list constants and the 1 GB cap: <code>src/server.h:656-657</code>, <code>src/listpack.c:126-130</code>. Hash templates: <code>redis.conf:2218-2243</code> at 8.10.2, absent from <code>redis.conf</code> at 8.8.0 and from <code>valkey.conf</code> at 9.1.2. Grab, 2020-09-07. Redis 7.0.0 release notes: "Remove EVAL script verbatim replication". An RDB load still builds a small hash as a listpack first: <code>src/rdb.c:3129</code> at 8.10.2. Twitter: High Scalability summary of Yao Yue's talk, 2014-09-08, a secondary source. Measurements on 2026-10-18, Redis 8.10.1, libc malloc.</p></details>
+</details>
+<p>A single key can jump several times in size. The next section shows how one layout choice uses the small form on purpose, across 100,000 small values.</p>
+
+<h2 data-concept="c2">How do small hashes hold many small values?</h2>
+<p class="why">Every top-level key has a fixed cost, and grouping values into hashes removes most of it.</p>
+<p>One key can jump several times in size when it passes a limit. The coach also maps each transcript ID to the company that owns it, so it can find the right tenant. That is 100,000 tiny pairs today, and each one as its own String key pays a fixed cost per key.</p>
+<p>Every top-level key carries overhead beyond its bytes, such as an entry in the keyspace's hash table and an object header. A Hash under the listpack limit stores its fields with almost none of that. So you can store many small values as fields of a few hashes. You then pay the per-key cost once per hash, not once per value. This is called bucketing.</p>
+<figure class="diagram">
+<div class="compare">
+<div class="wrong"><p><b>One key per pair.</b> <code>SET tx:1155315 939</code>, and so on, 100,000 times. Each pair pays the full cost of a top-level key.</p></div>
+<div class="right"><p><b>Buckets of fields.</b> <code>HSET txbucket:1155 1155315 939</code>. The bucket number is the ID divided by 1,000, so one Hash holds up to 1,000 pairs.</p></div>
+</div>
+<figcaption>The bucketing layout. The saving holds only while each bucket stays under the Hash listpack limit.</figcaption>
+</figure>
+<p>The layout works in four steps.</p>
+<ol>
+<li>Pick a bucket size B. Compute the bucket as the ID divided by B, and use the full ID as the field name, as Instagram did.</li>
+<li>Write with <code>HSET bucket field value</code> and read with <code>HGET bucket field</code>, one round trip each, as before.</li>
+<li>Check that B is at or below <code>hash-max-listpack-entries</code>, 512 by default, and that every value stays at or below 64 bytes.</li>
+<li>If B is above the limit, every bucket becomes a hashtable, and most of the saving is gone.</li>
+</ol>
+<p>Step 4 is where a copied design fails. The measured run below shows a bucket size of 1,000 taken from a public post, on the default limit of 512.</p>
+<figure class="diagram">
+<table>
+<thead><tr><th>Layout for 100,000 id-to-id pairs</th><th>Bytes, <code>used_memory</code> change</th><th>Encoding</th></tr></thead>
+<tbody>
+<tr><td>100,000 plain String keys</td><td>4,728,480</td><td>n/a</td></tr>
+<tr class="pick"><td>1,001 hashes of up to 100 fields</td><td class="ok">766,880, 6.2 times smaller</td><td>listpack</td></tr>
+<tr><td>101 hashes of up to 1,000 fields, default config</td><td class="bad">2,997,664</td><td>hashtable</td></tr>
+<tr><td>101 hashes of up to 1,000 fields, <code>hash-max-listpack-entries 1000</code></td><td class="ok">824,480</td><td>listpack</td></tr>
+</tbody>
+</table>
+<figcaption>Measured on Redis 8.10.1 from Homebrew, an x86_64 build under Rosetta on the M4 Pro, with libc malloc. The 1,000-field buckets lose most of the saving on the default config, because 1,000 is above the limit of 512.</figcaption>
+</figure>
+<figure class="diagram">
+<div class="calc" id="s07-bucket">
+<h4>Bucketing: memory against bucket size</h4>
+<label>Pairs <input type="range" name="pairs" min="100000" max="10000000" step="100000" value="1000000"> <span class="val" data-val="pairs"></span></label>
+<label>Bucket size <input type="range" name="bucket" min="50" max="2000" step="50" value="500"> <span class="val" data-val="bucket"></span></label>
+<label>hash-max-listpack-entries <input type="range" name="limit" min="128" max="2048" step="64" value="512"> <span class="val" data-val="limit"></span></label>
+<div class="result">Encoding <b data-out="enc"></b>, bucketed <b data-out="bucketed"></b>, plain keys <b data-out="plain"></b></div>
+<p>Illustration, not measured. It scales the bytes per pair from the measured table above: 47.3 for plain keys, about 8 in a listpack, about 30 in a hashtable.</p>
+<script>kit.calc('#s07-bucket', function(v){ var lp = v.bucket <= v.limit; var per = lp ? 8.0 : 30.0; return {enc: lp ? 'listpack' : 'hashtable', bucketed: kit.fmt(v.pairs*per/1e6,1)+' MB', plain: kit.fmt(v.pairs*47.3/1e6,1)+' MB'}; });</script>
+</div>
+</figure>
+<p><b>Instagram</b> needed to map about 300 million photo IDs to the ID of the user who owned each photo. As plain String keys, 1 million pairs used about 70 MB, so 300 million would need about 21 GB. That did not fit the 17 GB machine type they wanted. They moved the pairs into hashes of 1,000 fields each, and 1 million pairs then used 16 MB. Their estimate for all 300 million was a little under 5 GB, on an instance that cost about a third as much.</p>
+<details class="evidence"><summary>Evidence</summary><p>Instagram Engineering, "Storing hundreds of millions of simple key-value pairs in Redis", 2011-11-01, read from the web archive copy. These are prototype numbers and an extrapolation on Redis of 2011, which used the older zipmap encoding with <code>hash-zipmap-max-entries</code> set near 1,000. Memcached used about 52 MB for the same million pairs. The bucketing table was measured on 2026-10-18.</p></details>
+<p>Strings have small encodings too, and in Redis 8 a long key name can push a small value into a larger form. The Go deeper block shows the rule.</p>
+<p>Try E2 from the lab now. It stores one session as a String and as a Hash, and prints <code>OBJECT ENCODING</code> of the Hash, which is <code>listpack</code>.</p>
+<div class="keypoints">
+<p class="remember">Memory follows the encoding, so keep collections under the listpack limits.</p>
+<p class="trap">A 513th field made one hash 3.9 times larger in memory.</p>
+<p class="try">Run <code>OBJECT ENCODING</code> and <code>MEMORY USAGE</code> on one key of each type you store.</p>
+</div>
+<details class="answer deeper"><summary>Go deeper: the CPU cost of a larger limit, String encodings, DoorDash, and Valkey's per-key saving</summary>
+<p><b>The CPU side of a larger limit.</b> A larger limit has a cost too. A listpack lookup is a scan, so a bigger listpack makes each <code>HGET</code> and <code>HSET</code> slower. Instagram stopped at 1,000 entries because higher values made <code>HSET</code> use noticeable CPU. That point was measured on the old encoding, and the CPU point for today's listpack was not measured for this lesson.</p>
+<p><b>String encodings.</b> Strings have small encodings too, and in Redis 8 the length of the key name affects them. <code>OBJECT ENCODING</code> on a String prints one of three forms.</p>
+<ul>
+<li><code>int</code> means the value is an integer, stored as a number.</li>
+<li><code>embstr</code> means the value is stored inside the same allocation as its object.</li>
+<li><code>raw</code> means the value is in a separate allocation, so it costs another allocation and a pointer.</li>
+</ul>
+<p>In Redis 8, the key and value sit together in one object. The value stays embedded only when the key, the value and the headers fit in one CPU cache line. A cache line is 64 bytes, or 128 bytes on Apple arm64 builds. In a measured run on an x86_64 build, key <code>k38</code> with a 38-byte value was <code>embstr</code>. Key <code>k39</code> with a 39-byte value was <code>raw</code>. A 32-character key with a 20-byte value was also <code>raw</code>, so a long key name can push a small value into the larger form.</p>
+<p><b>DoorDash.</b> Their ML feature store holds billions of feature values, and store ranking makes over 1 million predictions per second. Each entity is one Hash, read with <code>HMGET</code>. They hashed feature names to 32-bit xxHash values, stored values as protocol buffers and compressed lists with Snappy. Memory fell from 298 GB to 112 GB per billion features. CPU fell from 208 to 72 vCPUs per 10 million reads per second. Redis read latency improved 40%, and total API latency about 15%.</p>
+<p><b>The old String rule.</b> In Redis 7.2, a String value of 44 bytes or less was <code>embstr</code>. In Redis 8 the rule depends on the key length too, as the section above shows.</p>
+<p><b>Valkey.</b> An AWS blog says Valkey 8.0 saves 32 bytes per key in cluster mode. It names a dictionary per cluster slot as the cause. In its test, 10 million <code>SET</code> commands with 100-byte values on random keys left about 6.3 million keys. Memory went from 1.39 GB on Valkey 7.2 to 1.11 GB on Valkey 8.0, a 20% drop for that workload. The test ran on ElastiCache, the AWS managed service, so it is a vendor number.</p>
+<p><b>Binary keys.</b> Cloudflare's anomaly detection saved about 30% memory with binary keys instead of readable keys. Short keys help for the same per-key reason.</p>
+<details class="evidence"><summary>Evidence</summary><p>Redis 7.2.0 <code>src/object.c:122</code>. Redis 8.10.2 <code>src/object.c:287-292</code>, "Embed when the sum is less than a cache line", and <code>src/config.h:38-43</code>. Measured on 2026-10-18 on the x86_64 Homebrew build. DoorDash, 2020-11-19, archived copy. AWS blog, 2024-11-21. Cloudflare, 2021-03-12.</p></details>
+</details>
+<p>Encodings set the bytes per element. The next concept is a structure whose bytes per element decide whether a design fits at all, the sorted set.</p>
+
+<h2 data-concept="c3">How does a sorted set keep members in order?</h2>
+<p class="why">You choose the score, so one structure ranks, windows and schedules.</p>
+<p>Encodings set the bytes per element, and the next structure stores one element for every event you record. The coach needs three ordered things. It shows trending scenarios, limits LLM calls per company over the last minute, and runs re-scoring jobs at a set time.</p>
+<p>A <dfn>sorted set</dfn> is a Set where every member carries a number, its <dfn>score</dfn>. Redis keeps the members ordered by score at all times. You choose what the score means. Points give a leaderboard, a timestamp gives a time window, and a due time gives a schedule.</p>
+<figure class="diagram">
+<pre><code>ZADD board 4820 dana  980 raj  6510 mei  3100 sam
+
+score:   980     3100     4820     6510
+member:  raj  →  sam   →  dana  →  mei      kept in order on every write
+rank:    0       1        2        3
+
+ZRANGE   board 0 2 REV WITHSCORES   → top 3: mei, dana, sam
+ZREVRANK board dana                 → 1, second from the top
+ZSCORE   board dana                 → 4820
+ZINCRBY  board 100 dana             → 4920, moved in one atomic command</code></pre>
+<figcaption>A leaderboard. <code>ZINCRBY</code> changes a score and its position inside one command, for the reason the first concept gave.</figcaption>
+</figure>
+<details class="predict"><summary>Predict: an API allows 5,000 requests per hour per token, and 200,000 tokens are active. A limiter stores each request as one member, with its timestamp as the score. About how much memory does it need, against one counter per token?</summary>
+<p>About 100 GB, against about 6 MB for counters. A sorted set of 5,000 members uses the large form, at about 94 to 105 bytes per member in a measured run. So one token's log is about 0.5 MB, and 200,000 of them are about 100 GB. A counter is an integer String of about 30 bytes. This total is inferred from the measured bytes per member, and it ignores key overhead.</p>
+<p>The guess "a few hundred MB" is reasonable, because a timestamp is only 8 bytes. Each member also carries the skip-list node, the hash-table entry and the member string itself.</p>
+</details>
+<p>A large sorted set is two structures that hold the same members.</p>
+<ol>
+<li>A hash table maps each member to its score, so <code>ZSCORE</code> is O(1).</li>
+<li>A <dfn>skip list</dfn> keeps the members in score order. It is a linked list with extra levels of links that skip ahead, so a search moves down the levels in O(log N) steps.</li>
+<li>Each new node gets one more level with a chance of 1 in 4, up to 32 levels, so the upper levels stay small.</li>
+<li><code>ZADD</code>, <code>ZINCRBY</code> and <code>ZRANK</code> are O(log N). A range read is O(log N + M) for M members returned.</li>
+<li>So the sorting work happens on each write. A leaderboard that is read far more often than it is written pays the cost on the less frequent path.</li>
+<li>Up to 128 members of at most 64 bytes each, the sorted set is a listpack instead, from the encoding table.</li>
+</ol>
+<figure class="diagram">
+<table>
+<thead><tr><th>Members in one key</th><th>Encoding</th><th>Bytes</th><th>Bytes per member</th></tr></thead>
+<tbody>
+<tr><td>100</td><td>listpack</td><td>3,312</td><td class="ok">33</td></tr>
+<tr><td>128</td><td>listpack</td><td>4,262</td><td class="ok">33</td></tr>
+<tr><td>129</td><td>skiplist</td><td>13,584</td><td class="bad">105</td></tr>
+<tr><td>1,000</td><td>skiplist</td><td>94,641</td><td class="bad">94</td></tr>
+<tr><td>10,000</td><td>skiplist</td><td>1,048,146</td><td class="bad">104</td></tr>
+<tr><td>A fixed-window counter</td><td>int String with TTL</td><td>30</td><td>n/a</td></tr>
+</tbody>
+</table>
+<figcaption>Measured <code>MEMORY USAGE</code> of one sorted set with a microsecond timestamp as score and the timestamp plus a suffix as member. The Homebrew x86_64 build of 8.10.1, libc malloc.</figcaption>
+</figure>
+<div class="callout warn"><p><b>Correction.</b> The phase used <code>ZREVRANGE</code> and <code>ZRANGEBYSCORE</code> as the main commands. Both are deprecated since Redis 6.2.0. Use <code>ZRANGE ... REV</code> and <code>ZRANGE ... BYSCORE</code>. <code>ZREVRANK</code> is not deprecated. The phase also called every sorted set a skip list, but small ones are listpacks.</p></div>
+<p>One trap applies to every range read. <code>LIMIT offset count</code> limits what Redis returns, but Redis still walks <code>offset</code> members to reach the start. A large offset is O(N) again, so page through a large set by score with <code>BYSCORE</code> and the last score you saw.</p>
+<p>Try E8 from the lab now. After <code>ZINCRBY lb 200 raj</code>, raj moves from the bottom to the top with 300 points.</p>
+<details class="answer deeper"><summary>Go deeper: the skip list constants, and a sorted set per map cell at Lyft</summary>
+<p><b>Constants.</b> <code>ZSKIPLIST_MAXLEVEL</code> is 32 and <code>ZSKIPLIST_P</code> is 0.25 at Redis 8.10.2. The large form is a struct with one <code>dict</code> and one <code>zskiplist</code>, so every member is stored in both.</p>
+<p><b>Lyft.</b> Lyft's dispatch keeps an index of driver locations in Redis. The final model is one sorted set per geohash cell, scored by the time each driver was last seen and trimmed to about 30 seconds. They rejected Redis GEO commands, because those have no expiry and no metadata. Region names made poor shard keys and created hot shards. Expiring many keys at once also blocked Redis longer than they expected. The fleet grew from 3 instances to about 750.</p>
+<p><b>A number the phase gave.</b> It said a <code>ZRANGEBYSCORE</code> that returns half a million members blocks the thread for tens of milliseconds. That time was not measured for this lesson, so treat it as a rough size, and measure range latency on your own data.</p>
+<details class="evidence"><summary>Evidence</summary><p><code>src/server.h:656-657</code> and <code>1816-1819</code> at 8.10.2. <code>zrangebyscore.md</code> in the Redis docs, lines 91-92: "if offset is large, the sorted set needs to be traversed for offset elements". Deprecations: <code>zrevrange.json</code>, <code>zrangebyscore.json</code>, <code>zrevrank.json</code> at 8.10.2. Lyft, RedisConf17 slides. The memory table was measured on 2026-10-18.</p></details>
+</details>
+<p>You now know what each member costs. The next section uses timestamps as scores to build a rate limiter, and compares its bytes with a counter's.</p>
+
+<h2 data-concept="c3">What does an exact sliding window cost?</h2>
+<p class="why">An exact window stores every request, and a counter stores one number.</p>
+<p>Each sorted-set member costs about 33 bytes small and about 100 bytes large. The coach must stop any one company from sending more than 100 LLM calls a minute, and there are two common ways to count.</p>
+<p>A <dfn>fixed window</dfn> counts requests in numbered blocks of time, such as one counter per calendar minute, and the count starts again at each boundary. A <dfn>sliding log</dfn> keeps the timestamp of every allowed request and counts those in the last 60 seconds, so it is exact at any moment. The first stores one integer per company, and the second stores one sorted-set member per request.</p>
+<figure class="diagram">
+<div class="compare">
+<div class="wrong"><p><b>Fixed window, burst at the boundary.</b> <code>INCR rl:c7:&lt;minute&gt;</code> and <code>EXPIRE</code>. A company sends 100 calls at 0:59.99 and 100 more at 1:00.01. Both windows allow 100, so 200 calls pass in about 20 ms.</p></div>
+<div class="right"><p><b>Sliding log, exact.</b> At 1:00.01 the log still holds the 100 calls from 0:59.99, so the next call is rejected. The cost is one member per allowed call.</p></div>
+</div>
+<figcaption>The same burst under both designs. The fixed window allows up to twice the limit across one boundary.</figcaption>
+</figure>
+<p>The sliding log runs four commands for each request, with the window W.</p>
+<ol>
+<li><code>ZREMRANGEBYSCORE key 0 (now-W)</code> removes requests older than the window.</li>
+<li><code>ZADD key now now</code> records this request, with the timestamp as score and member.</li>
+<li><code>ZCARD key</code> counts the requests in the window, and the service returns 429 when the count is over the limit.</li>
+<li><code>EXPIRE key W</code> lets an idle company's key delete itself.</li>
+</ol>
+<p>Two details decide whether the four steps are correct under load. They must run as one unit, through <code>MULTI</code> and <code>EXEC</code> or a script, or two requests can both count before either adds. The member must also be unique per request, because two clients with the same timestamp would write one member and count once.</p>
+<figure class="diagram">
+<div class="calc" id="s09-log">
+<h4>Sliding log memory for one cluster</h4>
+<label>Limit per window <input type="range" name="limit" min="10" max="10000" step="10" value="1000"> <span class="val" data-val="limit"></span></label>
+<label>Active clients <input type="range" name="clients" min="1000" max="1000000" step="1000" value="100000"> <span class="val" data-val="clients"></span></label>
+<div class="result">Sliding logs <b data-out="log"></b>, fixed-window counters <b data-out="ctr"></b></div>
+<p>Illustration from the measured bytes per member: 33 up to 128 members, about 95 above. A counter is 30 bytes. Key overhead is ignored, so this is inferred, not measured.</p>
+<script>kit.calc('#s09-log', function(v){ var per = v.limit <= 128 ? 33 : 95; var log = v.limit*per*v.clients; var ctr = 30*v.clients; function f(b){ return b >= 1e9 ? kit.fmt(b/1e9,1)+' GB' : kit.fmt(b/1e6,1)+' MB'; } return {log: f(log), ctr: f(ctr)}; });</script>
+</div>
+</figure>
+<p>With a limit of 1,000 and 100,000 active clients, the logs need about 9.5 GB, against about 3 MB of counters. That number is why large public systems count instead of logging.</p>
+<p><b>Cloudflare</b> rejected one timestamp per request because it "has huge processing and memory requirements". They keep two counters per client, for the current and the previous window. The previous count is weighted by how much of that window still overlaps the last minute. Over 400 million requests from 270,000 distinct sources, 0.003% of requests were wrongly allowed or rate limited.</p>
+<details class="evidence"><summary>Evidence</summary><p>Cloudflare, "Counting things, a lot of different things", 2017-06-07. The same post gives an average difference of 6% between the estimated and the real rate. The memory table and the per-member bytes were measured on 2026-10-18 on Redis 8.10.1.</p></details>
+<div class="callout warn"><p><b>Correction.</b> The phase called the sliding log "the best rate-limiter shape" that "never double-bursts". It is exact, but it stores one member per allowed request, so memory per client grows with the limit. A counter costs a few bytes and allows a bounded error.</p></div>
+<p>For the coach, a fixed window or a two-counter window fits a shared cluster. The sorted set fits when the limit is small and exactness matters.</p>
+<p>Try E9 from the lab now. With <code>-limit 5 -window 2s</code>, five calls pass, the burst is rejected, and calls pass again as old entries leave the window.</p>
+<details class="answer deeper"><summary>Go deeper: the platform's limiters, GitHub's fixed window, Airbnb's counter, and other algorithms</summary>
+<p><b>The platform's limiters.</b> The platform runs three limiters, and none is a sorted set. One service uses a fixed window with <code>INCR</code> and <code>EXPIRE</code> in a Lua script. An older one pushes each timestamp with <code>LPUSH</code> and caps the list with <code>LTRIM key 0 43199</code>. It then counts timestamps in the last second, minute and hour, so it is a sliding log on a List. A third keeps its window in process memory, outside Redis.</p>
+<p><b>GitHub.</b> The API rate limiter is a fixed-window counter per client in a Lua script, on shards with one primary and several replicas. Users saw rejections while the response header said <code>X-RateLimit-Remaining: 5000</code>. The check read a replica that still held the old window, while the increment on the primary had already expired the key and started a new one. Their reason was that replicas do not expire data until the primary tells them to. The fix was to manage the window end in the application and reuse the first read for the response. Storing the reset time doubled their storage. Whether a replica read of a logically expired key returns nil in current Redis was not checked, and Phase 4 covers replicas.</p>
+<p><b>Airbnb.</b> The first limiter of their key-value store was a Redis counter per caller, returning HTTP 429 over quota. It counted a 1-row read the same as a 100,000-row scan, and it could not see one hot key that overloaded one shard. The new system adds a cost per request, load shedding based on latency, and hot-key detection.</p>
+<p><b>Other algorithms.</b> Token bucket, used by Stripe, and GCRA are two more choices. The choice is a design discussion. What is true in all of them is that an exact log costs memory per request, and a counter costs a few bytes with a bounded error.</p>
+<p><b>Two details in the lab's limiter.</b> The program sends the four steps in a <code>TxPipeline</code>, which is <code>MULTI</code> and <code>EXEC</code>, so they are atomic, although a code comment says otherwise. A rejected request stays counted until a separate <code>ZREM</code>, so concurrent callers can be wrongly rejected in that gap. The member is the timestamp, which can collide between clients. One Lua script that checks before it adds fixes both. The score is a <code>float64</code> of nanoseconds, and at about 1.7e18 the spacing between floats is 256 ns, which is fine for this demo.</p>
+<details class="evidence"><summary>Evidence</summary><p>GitHub blog, "How we scaled the GitHub API with a sharded, replicated rate limiter in Redis", 2021-04-05. Redis docs today: replicas "will not expire keys independently (but will wait for the DEL coming from the master)", <code>expire.md</code> lines 277-279. Airbnb tech blog, Mussel post, no date on the page. Lab code: <code>sorted_set_ratelimit/main.go</code> lines 61, 62 and 77, read, not run.</p></details>
+</details>
+<p>Timestamps as scores give a window over the past. The next section uses scores for the future, due times, and shows the other jobs one sorted set does.</p>
+
+<h2 data-concept="c3">How do due times and decaying ranks use the same structure?</h2>
+<p class="why">A score can be a future time, so the set becomes a schedule.</p>
+<p>A timestamp score gave a window over the past. The coach also re-scores a transcript ten minutes after a learner edits it. Its trending board must also favour scenarios that are popular now, not last month.</p>
+<p>A <dfn>delayed queue</dfn> is a sorted set whose score is the time each job should run. Workers read the members whose score is at or below the current time, and those are the due jobs. Because the set is always ordered, the next due job is always the first member.</p>
+<figure class="diagram">
+<ol class="flow">
+<li><b>schedule</b><span>ZADD due &lt;runAt&gt; job:t9 stores the job with its run time.</span></li>
+<li class="hot"><b>poll</b><span>A script reads the first member with a score up to now.</span></li>
+<li><b>claim</b><span>The same script removes it with ZREM.</span></li>
+<li class="ok"><b>run</b><span>The worker that removed it runs the job.</span></li>
+</ol>
+<figcaption>A delayed queue. The read and the remove run in one script, so two pollers cannot take the same job.</figcaption>
+</figure>
+<p><b>Sidekiq</b>, a widely used job system for Ruby, keeps its scheduled and retry jobs this way. The score is "the time at which it should be processed". A Lua script runs <code>zrange key -inf now byscore limit 0 1</code> and then <code>zrem</code>, so the read and the remove are one unit. With two separate commands, two pollers could read the same due job, for the reason the first concept gave.</p>
+<p>A score can also be an expiry time. The platform keeps a lock table where each member is a language and each score is the time its lock expires. One <code>ZREMRANGEBYSCORE key -inf now</code> then removes every expired lock at once, and the Go deeper block shows the commands.</p>
+<p>The trending board combines a sorted set with a capped List. One service on the platform keeps a sorted set per company, with the asset as member and a running score.</p>
+<ol>
+<li>Each interaction runs <code>ZINCRBY</code> with a positive amount, and pushes the event onto a List that holds the last N events.</li>
+<li>When the List grows past N, the service pops the oldest event with <code>LPOP</code>.</li>
+<li>It then runs <code>ZINCRBY</code> with a negative amount for that event's asset, so old activity stops counting.</li>
+<li>The board reads the top items above a minimum score, with <code>ZRANGE ... REV WITHSCORES</code>.</li>
+</ol>
+<p>So the sorted set ranks, and the List decides what "recent" means. The coach can rank scenarios the same way.</p>
+<div class="keypoints">
+<p class="remember">A sorted set orders by a score you choose, at O(log N) per write.</p>
+<p class="trap">A sliding log at 1,000 per window for 100,000 clients needs about 9.5 GB.</p>
+<p class="try">Run <code>MEMORY USAGE</code> on your largest sorted set and divide by <code>ZCARD</code>.</p>
+</div>
+<details class="answer deeper"><summary>Go deeper: the lock table with expiry as score, and where each pattern comes from</summary>
+<p><b>The lock table.</b> The platform runs this lock table for translations. One key, such as <code>job:inprogress:&lt;id&gt;</code>, holds one member per language code, and each score is the time that language's lock expires.</p>
+<figure class="diagram">
+<pre><code>key = job:inprogress:42
+  member "fr" → score 1720000030    fr is locked until that time
+  member "de" → score 1720000030
+
+take or renew a lock    : ZADD key (now+ttl) &lt;lang&gt;
+remove expired locks    : ZREMRANGEBYSCORE key -inf &lt;now&gt;
+is fr still locked?     : ZSCORE key fr, present and greater than now
+which languages are busy: ZRANGE key &lt;now&gt; +inf BYSCORE</code></pre>
+<figcaption>A lock table with the expiry as score. One range removal clears every lock that a crashed worker left behind.</figcaption>
+</figure>
+<p>The score carries the expiry, so one <code>ZREMRANGEBYSCORE key -inf now</code> removes every expired lock in one atomic command. N separate lock keys would each need their own TTL. Three services on the platform share this layout, one of them in Java through Redisson's <code>RScoredSortedSet</code>. Taking a lock still needs care, because a check followed by a separate <code>ZADD</code> lets two workers both see the language as free. Phase 3 builds locks properly and shows where an expiring lock fails.</p>
+<p><b>Its source.</b> No public source describes the expiry-as-score lock table. It is the platform's own pattern. The phase showed it as a preview of Phase 3, done with a sorted set instead of <code>SET ... NX</code>.</p>
+<p><b>The delayed queue on the platform.</b> The plain delayed-queue form, score as run time, is not used on the platform today. The lock table is the form it runs. Sidekiq is the public example of the delayed queue.</p>
+<details class="evidence"><summary>Evidence</summary><p>Sidekiq <code>lib/sidekiq/scheduled.rb:13-20</code> at tag v8.1.7. The lock-table source search was done by the course audit and was not repeated.</p></details>
+</details>
+<p>The sorted set ends here. The coach's last need for ordered data is its scoring queue, and the next concept asks where a job is when a worker dies.</p>
+
+<h2 data-concept="c4">Where does a job go when a worker pops it?</h2>
+<p class="why">A pop deletes the job from Redis, so a crash loses it.</p>
+<p>Sorted sets ordered the coach's data by a score. Its scoring queue needs order by arrival instead. Its worker pods restart on every deploy, so a pod can die in the middle of a job.</p>
+<p>A Redis <dfn>List</dfn> is an ordered sequence of strings that you push to and pop from at either end. <code>RPUSH</code> to the tail and <code>LPOP</code> from the head gives a first-in, first-out queue. <code>LPUSH</code> and <code>LPOP</code> on the same end give a stack.</p>
+<figure class="diagram">
+<svg viewBox="0 0 640 150" role="img" aria-label="A list with pushes and pops at both ends">
+<g font-size="13" fill="currentColor">
+<rect x="200" y="50" width="60" height="40" fill="none" stroke="currentColor"/><text x="224" y="75">A</text>
+<rect x="260" y="50" width="60" height="40" fill="none" stroke="currentColor"/><text x="284" y="75">B</text>
+<rect x="320" y="50" width="60" height="40" fill="none" stroke="currentColor"/><text x="344" y="75">C</text>
+<rect x="380" y="50" width="60" height="40" fill="none" stroke="currentColor"/><text x="404" y="75">D</text>
+<text x="196" y="40">head</text><text x="410" y="40">tail</text>
+<text x="40" y="66">LPUSH →</text><text x="40" y="86">← LPOP</text>
+<text x="470" y="66">← RPUSH</text><text x="470" y="86">RPOP →</text>
+<text x="40" y="128">FIFO queue: RPUSH at the tail, LPOP at the head. Stack: LPUSH and LPOP.</text>
+</g>
+</svg>
+<figcaption>A List used as a queue. The producer pushes at the tail and the worker pops at the head.</figcaption>
+</figure>
+<details class="predict"><summary>Predict: a worker runs <code>BLPOP jobs 5</code>, gets a transcript job, and the pod is killed 2 seconds later. Where is the job now? Which one command change would let you recover it, and what second process do you then need?</summary>
+<p>The job is nowhere. The pop deleted it from Redis, and the only copy was in the dead pod's memory. Change the pop to <code>BLMOVE jobs jobs:processing LEFT RIGHT</code>, which moves the job into a processing list in the same command. You then need a reaper, a process that pushes jobs back when they stay in the processing list too long.</p>
+<p>The guess "Redis will give it to another worker" is reasonable if you have used Kafka or SQS, which wait for an acknowledgement. A List has no acknowledgement, so a pop is final.</p>
+</details>
+<p>A real worker needs to wait for work without wasting round trips.</p>
+<ol>
+<li>A worker that loops on <code>LPOP</code> gets nil from an empty queue, sleeps 100 ms and tries again. That is 10 wasted round trips per second per worker.</li>
+<li><code>BLPOP queue 5</code> blocks the connection inside Redis instead. Redis returns as soon as an item arrives, or nil after 5 seconds.</li>
+<li>In both cases, the pop removes the item from the List in the same command that returns it.</li>
+<li>Between the pop and the end of the work, the job exists only in the worker's memory. A crash, a kill or an out-of-memory error in that window loses it, and Redis has no record that it existed.</li>
+</ol>
+<p><b>Sidekiq</b>'s basic fetch takes jobs with <code>BRPOP</code>. Its own documentation says the job is then removed from Redis. It adds, "If Sidekiq crashes while processing that job, it is lost forever." Its paid fetch strategy, called super_fetch, uses <code>LMOVE</code> to fix this.</p>
+<details class="evidence"><summary>Evidence</summary><p>Sidekiq <code>lib/sidekiq/fetch.rb:48</code> at tag v8.1.7: <code>conn.blocking_call(TIMEOUT, "brpop", *qs, TIMEOUT)</code>. The quote is from the Sidekiq wiki page "Reliability".</p></details>
+<p>Try E5 and E6 from the lab now. E5 shows jobs taken in push order, with <code>BLPOP</code> waking the moment <code>job-late</code> arrives. E6 pops one job, pretends the worker crashed, and <code>LLEN</code> returns 2, so j1 cannot be recovered.</p>
+<p>Check it in your services. For each List queue, ask what happens if the worker dies between the pop and the end of the work. If losing that job is acceptable, the List is correct.</p>
+<details class="answer deeper"><summary>Go deeper: capped lists, the platform's queues, popping from several lists, and the List's layout</summary>
+<p><b>Capped lists.</b> Lists have one more production use. <code>LPUSH</code> followed by <code>LTRIM key 0 999</code> keeps only the newest 1,000 entries, a capped log of recent events. The trending board and the older rate limiter from the sorted-set sections both use a capped List. Reading the whole list with <code>LRANGE 0 -1</code> is O(N), so on a huge list read a bounded range.</p>
+<p><b>The platform's queues.</b> One service's cache client on the platform wraps a List queue as three helpers, <code>RPUSH</code>, <code>LPOP</code> and <code>LLEN</code>. No production service uses <code>BLPOP</code> or <code>BRPOP</code>, because its workers drain with <code>LPOP</code> or take work from Kafka. Work that must not be lost runs on Kafka.</p>
+<p><b>Several lists in one call.</b> <code>LMPOP</code> and <code>BLMPOP</code>, since Redis 7.0, pop from the first non-empty list of several, and can pop more than one element. Use them when a worker serves several queues in priority order.</p>
+<p><b>Layout.</b> A List is a quicklist of listpack nodes, or one listpack when small, as the encoding section showed. A push or pop at either end is O(1). An index lookup in the middle walks nodes.</p>
+<details class="evidence"><summary>Evidence</summary><p><code>lmpop.json</code> at Redis 8.10.2: <code>"since": "7.0.0"</code>.</p></details>
+</details>
+<p>A pop loses the job on a crash. The next section changes one command so the job stays in Redis until the work is done, and shows the case where even that fails.</p>
+
+<h2 data-concept="c4">How does a List queue keep a job through a crash?</h2>
+<p class="why">Move the job instead of popping it, and delete it only after the work.</p>
+<p>A pop leaves the job only in the worker's memory. The coach cannot lose a scored transcript, so it needs the job to stay in Redis until a worker has finished it.</p>
+<p>A <dfn>processing list</dfn> is a second List that holds the jobs workers are running now. <code>LMOVE</code> takes a job from the queue and pushes it onto the processing list in one atomic command. The worker deletes the job from the processing list after the work. So a crash leaves the job in Redis, where another process can find it.</p>
+<figure class="diagram">
+<ol class="flow">
+<li><b>take</b><span>BLMOVE jobs jobs:processing LEFT RIGHT 5 moves one job.</span></li>
+<li><b>work</b><span>The worker scores the transcript.</span></li>
+<li class="ok"><b>done</b><span>LREM jobs:processing 1 &lt;job&gt; deletes it.</span></li>
+<li class="hot"><b>reaper</b><span>Jobs that stay too long are pushed back to jobs.</span></li>
+</ol>
+<figcaption>The reliable List queue from the Redis docs. A job is always in one of the two lists until a worker deletes it.</figcaption>
+</figure>
+<ol>
+<li>The worker runs <code>BLMOVE jobs jobs:processing LEFT RIGHT 5</code>, so the job leaves the queue and enters the processing list in one command.</li>
+<li>If the worker crashes now, the job is still in <code>jobs:processing</code>.</li>
+<li>After the work, the worker runs <code>LREM jobs:processing 1 &lt;job&gt;</code>.</li>
+<li>A reaper checks the processing list for jobs that have stayed too long, and pushes them back to <code>jobs</code>. The docs describe this as a client that "may monitor the processing list for items that remain there for too much time".</li>
+<li>A job can now run twice, when a worker finishes but dies before its <code>LREM</code>. So this is at-least-once delivery, and the scoring code must be idempotent. A <code>SET ... NX</code> claim on the job ID, from the Strings section, is one way.</li>
+</ol>
+<p>In a measured run, <code>LMOVE q q:processing LEFT RIGHT</code> followed by a simulated crash left <code>q</code> holding <code>j2 j3</code> and <code>q:processing</code> holding <code>j1</code>. So a reaper could push j1 back. The reaper needs to know how long each job has waited. One way is to record the start time next to the job, which is inferred and not shown in the docs.</p>
+<div class="callout warn"><p><b>Correction.</b> The phase said that "the moment you need don't lose it on crash, you've outgrown Lists". <code>LMOVE</code> or <code>BLMOVE</code> into a processing list is the documented reliable queue on a List. The older <code>RPOPLPUSH</code> and <code>BRPOPLPUSH</code> are deprecated since Redis 6.2.0 and replaced by these two.</p></div>
+<p>The processing list has a cost, because moving a job is a write. <b>Slack</b> ran its job queue on Redis, about 1.4 billion jobs on busy days at a peak of 33,000 per second. Each dequeue moved a job from the pending queue to a list of in-flight jobs. Database contention slowed the jobs, the queue grew, and Redis reached its maximum configured memory, so new jobs could not be enqueued. Dequeue also needed memory to move a job, so the queue stayed stuck after the database recovered. Slack put Kafka in front of Redis as a durable buffer, with a relay that limits the rate of jobs into Redis.</p>
+<details class="evidence"><summary>Evidence</summary><p>Slack Engineering, "Scaling Slack's Job Queue", 2017-12-06, updated 2020-06-25. The post also says that dequeuing "requires work proportional to the length of the queue", because of earlier choices of data structure. The <code>LMOVE</code> run was measured on 2026-10-18 on Redis 8.10.1. Docs: <code>lmove.md</code> lines 171-183.</p></details>
+<p>After E6 in the lab, repeat it by hand with <code>LMOVE</code> in place of <code>LPOP</code>. Then run <code>LRANGE q:processing 0 -1</code>, and j1 is still there.</p>
+<details class="answer deeper"><summary>Go deeper: Discord's Redis queue under backlog</summary>
+<p><b>Discord.</b> A Redis queue fed new messages to the workers that index them into Elasticsearch. When Elasticsearch nodes failed, the queue backed up. With too many queued messages, Redis CPU reached its limit and Redis dropped messages. Discord moved the queue to Google Cloud Pub/Sub, which guarantees delivery. After the rebuild, indexing throughput doubled, with no conditions given. Slack and Discord show the same limit from two sides. A queue in memory must stay small, because its memory and CPU are shared with everything else on that Redis.</p>
+<details class="evidence"><summary>Evidence</summary><p>Discord blog, "How Discord Indexes Trillions of Messages", 2025-04-24.</p></details>
+</details>
+<p>A List can keep a job, but you build the reaper yourself. The next section looks at Streams, which keep delivered jobs for you, and asks what they still leave to you.</p>
+
+<h2 data-concept="c4">What do Streams keep for you, and what do they leave to you?</h2>
+<p class="why">A Stream remembers delivered jobs, but another consumer must claim them.</p>
+<p>The reliable List needs a reaper that you write and run. The coach's team asks whether Redis Streams remove that work, since they keep a record of every delivered entry.</p>
+<p>A <dfn>Stream</dfn> is an append-only log of entries, each with an ID that grows with time. A <dfn>consumer group</dfn> shares the entries of one Stream among several consumers, so each entry goes to one of them. Redis records each delivered entry in the group's <dfn>pending entries list</dfn>, the PEL, until the consumer confirms it with <code>XACK</code>.</p>
+<figure class="diagram">
+<ol class="flow" data-dir="down">
+<li><b>XADD s * job t9</b><span>The producer appends an entry.</span></li>
+<li><b>XREADGROUP GROUP g A ... &gt;</b><span>Consumer A gets the entry, and the PEL records it as A's.</span></li>
+<li class="bad"><b>A crashes</b><span>The entry stays in the PEL, owned by A.</span></li>
+<li><b>XREADGROUP GROUP g B ... &gt;</b><span>Consumer B gets nothing, because the entry was already delivered.</span></li>
+<li class="hot"><b>XAUTOCLAIM s g B 1000 0</b><span>B takes entries idle for over 1,000 ms.</span></li>
+<li class="ok"><b>XACK s g &lt;id&gt;</b><span>B finishes and the PEL drops the entry.</span></li>
+</ol>
+<figcaption>A crashed consumer's entry, measured on the same Homebrew 8.10.1 build. It reaches B only through the claim step.</figcaption>
+</figure>
+<p>The measured run shows what Streams do and do not do by themselves.</p>
+<ol>
+<li><code>XREADGROUP ... &gt;</code> returns only "messages never delivered to other consumers so far", in the docs' words.</li>
+<li>So after A read entry 1 and crashed, B's <code>XREADGROUP ... &gt;</code> returned nothing.</li>
+<li><code>XPENDING</code> showed 1 entry, owned by A, so Redis still had it.</li>
+<li><code>XAUTOCLAIM s g B 1000 0</code> gave the entry to B after it had been idle for 1 second. <code>XCLAIM</code> does the same for named IDs.</li>
+<li>A claimed entry runs again, so delivery is at-least-once, and the consumer must be idempotent, as with the List.</li>
+</ol>
+<p>So a Stream replaces the processing list, but you still run the claim step. Consumer groups also serve many processes, not one. A Stream is trimmed with <code>MAXLEN</code> or <code>MINID</code>, because it keeps every entry until you trim it. A PEL with entries that nobody acknowledges also grows without a limit.</p>
+<div class="callout warn"><p><b>Correction.</b> The phase's table said Streams "redeliver on crash" and work "in one process". Pending entries are redelivered only when another consumer claims them with <code>XCLAIM</code>, or with <code>XAUTOCLAIM</code>, which arrived in Redis 6.2. Consumer groups work across many processes.</p></div>
+<p><b>Harness</b> built its event-driven design on Streams. Redis already served caching and locks there, and the expected volume was a few thousand messages per minute, so Kafka seemed too much. They used consumer groups with <code>XACK</code>, and <code>XAUTOCLAIM</code> to redeliver from crashed consumers. They capped memory with <code>MAXLEN</code> or <code>MINID</code>. The problems they named were memory cost and one failing message that blocked the head of the stream. Consumer lag was also hard to check without a custom monitor. Redis 7.0 added a <code>lag</code> field to <code>XINFO GROUPS</code>, which reports it.</p>
+<div class="keypoints">
+<p class="remember">A pop deletes the job, so move it to a processing list instead.</p>
+<p class="trap">Streams keep a crashed consumer's entries pending until someone claims them.</p>
+<p class="try">Find your queue's pop command and ask where the job is after a kill.</p>
+</div>
+<details class="answer deeper"><summary>Go deeper: Streams against Kafka, how a Stream is stored, and new Stream commands</summary>
+<p><b>Streams against Kafka.</b> The platform runs durable work that must not be lost on Kafka, which already serves many services. Streams fit a smaller case, a self-contained durable queue that does not justify a Kafka topic. The queues and Kafka courses compare these in depth.</p>
+<p><b>Layout.</b> A Stream is a radix tree of listpack nodes. Each node starts with a master entry that holds the field names. Entries store their IDs as differences from the node's key, and skip the field names when they match the master entry. A new node starts at 4,096 bytes or 100 entries, from <code>stream-node-max-bytes</code> and <code>stream-node-max-entries</code>.</p>
+<p><b>The PEL.</b> Each PEL entry records the delivery time, the delivery count and the consumer. The delivery count lets you send a message that keeps failing to a dead-letter stream, instead of retrying it forever. Redis 8.10 also keeps the PEL in time order for fast claims.</p>
+<p><b>New commands.</b> <code>XACKDEL</code> and <code>XDELEX</code> arrived in Redis 8.2.0, and <code>XNACK</code> in 8.8.0. Valkey 9.1.2 has none of the three. Redis 8.6 added producer deduplication with the <code>IDMP</code> and <code>IDMPAUTO</code> arguments of <code>XADD</code>. They drop a duplicate add from a producer that retries. Deduplication does not change at-least-once delivery to consumers.</p>
+<details class="evidence"><summary>Evidence</summary><p>Docs: <code>develop/data-types/streams/_index.md</code>, lines 443 and 644. <code>xautoclaim.json</code>, <code>xackdel.json</code>, <code>xdelex.json</code>, <code>xnack.json</code> at Redis 8.10.2, absent at Valkey 9.1.2 except <code>xautoclaim</code>. Layout: <code>src/stream.h:36-53, 93-146</code> and <code>src/t_stream.c:575-622</code> at 8.10.2. PEL time order: <code>src/stream.h:108-113</code> at 8.10.2. IDMP: Redis 8.6.0 release notes, "XADD idempotency (at-most-once guarantee) with new IDMPAUTO and IDMP arguments". Harness blog, 2021-11-17. <code>xinfo-groups.json</code> at 8.10.2: 7.0.0 "Added the <code>entries-read</code> and <code>lag</code> fields". The Stream run was measured on 2026-10-18.</p></details>
+</details>
+<p>The coach now has safe updates, sized memory, ordered data and a queue that keeps its jobs. Its last need is a count of unique learners per scenario, and the next concept counts them without storing them.</p>
+
+<h2 data-concept="c5">How do you count unique users without storing them?</h2>
+<p class="why">A HyperLogLog keeps a fixed-size summary, not the members.</p>
+<p>The queue now keeps its jobs. The coach's last need is a number on each scenario's page, the unique learners this week. A Set of learner IDs gives the exact number, but its memory grows with every new learner, on every scenario.</p>
+<p>A <dfn>HyperLogLog</dfn>, or HLL, estimates how many distinct items were added to it. It does not store the items, so its size stops growing at a fixed maximum. You add with <code>PFADD</code> and read the estimate with <code>PFCOUNT</code>. <code>PFMERGE</code> combines counters, for example seven daily counters into one weekly counter.</p>
+<figure class="diagram">
+<div class="bars">
+<div class="bar" style="--v:100" data-label="Set of 100,000 IDs" data-value="4,361,836 B"></div>
+<div class="bar" style="--v:1" data-label="HLL of the same 100,000" data-value="12,822 B, about 340x smaller"></div>
+</div>
+<figcaption><code>MEMORY USAGE</code> on the Homebrew 8.10.1 build with libc malloc, members <code>user:1</code> to <code>user:100000</code>. The HLL estimated 99,471, which is 0.53% low.</figcaption>
+</figure>
+<details class="predict"><summary>Predict: one scenario reaches 1,000,000 unique learners. The Set of their IDs grows to about ten times its size at 100,000. What happens to the HLL's size and to its error?</summary>
+<p>The HLL stays at 12,304 bytes, and in a measured run its estimate was 999,674, 0.03% low. The Set would be about 44 MB, which is inferred from the measured 100,000-member Set.</p>
+<p>The guess "the HLL grows too, more slowly" is reasonable for most data structures. An HLL has a fixed number of registers, so more items change the values in the registers, not their number.</p>
+</details>
+<p>The fixed size comes from a fixed array of small registers.</p>
+<ol>
+<li>Redis hashes each added item. Part of the hash picks one of 16,384 registers.</li>
+<li>Each register keeps the longest run of zero bits it has seen in the rest of the hashes. A long run is rare, so a register that saw one has probably seen many distinct items.</li>
+<li>Each register is 6 bits, so 16,384 registers take 12,288 bytes, plus a 16-byte header, 12,304 bytes in all.</li>
+<li><code>PFCOUNT</code> combines the registers into one estimate. The standard error is 1.04 divided by the square root of 16,384, which is 0.81%.</li>
+<li>Adding the same item again picks the same register and the same run, so duplicates do not change the count.</li>
+</ol>
+<p>A small HLL uses less than 12,304 bytes. Redis stores it in a sparse form, a run-length encoding of mostly empty registers, and converts it to the dense form above <code>hll-sparse-max-bytes 3000</code>.</p>
+<figure class="diagram">
+<table>
+<thead><tr><th>Items added</th><th><code>STRLEN</code> bytes</th><th><code>PFCOUNT</code></th></tr></thead>
+<tbody>
+<tr><td>10</td><td>46</td><td>10</td></tr>
+<tr><td>100</td><td>283</td><td>100</td></tr>
+<tr><td>1,000</td><td>1,911</td><td>1,007</td></tr>
+<tr><td>3,000</td><td>12,304, dense</td><td>2,995</td></tr>
+<tr><td>100,000</td><td>12,304</td><td>99,471, 0.53% low</td></tr>
+<tr><td>1,000,000</td><td>12,304</td><td>999,674, 0.03% low</td></tr>
+</tbody>
+</table>
+<figcaption>Measured on that same Homebrew build. The HLL is a plain String, so <code>STRLEN</code> reads its size.</figcaption>
+</figure>
+<div class="callout warn"><p><b>Correction.</b> The phase said an HLL uses "a fixed ~12 KB regardless". The docs say 12 KB in the worst case, and much less for an HLL that has seen few elements. The phase's lab result of 387x and 0.17% came from an earlier run that could not be repeated. A new run gave about 340x and 0.53% at 100,000 members.</p></div>
+<p><b>Reddit</b> counted unique views per post with HLLs. A post with 1 million unique viewers would need 8 MB as a set of 8-byte IDs. As an HLL it needed 12 KB, 0.15% of that space. The requirement was a count "within a few percentage points". A Kafka consumer filtered view events, a second one ran <code>PFADD</code>, and Cassandra stored each HLL in batches every 10 seconds. When Redis evicted a counter, they loaded it back with <code>SET</code>, which works because an HLL is a String.</p>
+<details class="evidence"><summary>Evidence</summary><p>Reddit, "View Counting at Reddit", 2017-05-24, Krishnan Chandra, read from the web archive copy. Constants: <code>src/hyperloglog.c:43, 68, 103-177, 194-202</code> and <code>src/config.c:3608</code> at Redis 8.10.2. The 0.81% figure is in the HLL docs, line 26, and the worst-case wording at line 36. The table was measured on 2026-10-18.</p></details>
+<p>An HLL has three limits. You cannot list its members, remove one, or test whether one was added. The 0.81% is a standard error, so some counters will be off by 2% or more. This is inferred from what a standard error means. Merging many counters also costs time, as the Go deeper block shows.</p>
+<p>Try E10 from the lab now. It adds 100,000 unique users to a Set and to an HLL, and prints the memory of each and the error.</p>
+<details class="answer deeper"><summary>Go deeper: the cost of PFMERGE at Cloudflare</summary>
+<p><b>Cloudflare</b> kept sliding-window counts per site in HLLs and merged them with <code>PFMERGE</code>. The first launch could not keep up with about 10,000 requests per second, because <code>PFMERGE</code> cost grew with the number of features times the window size. A cache that limited how often detection ran for each site and visitor pair raised throughput about 10 times.</p>
+<details class="evidence"><summary>Evidence</summary><p>Cloudflare blog, "Lessons Learned from Scaling Up Cloudflare's Anomaly Detection Platform", 2021-03-12.</p></details>
+</details>
+<p>The HLL gives a count and nothing else. The next section shows the exact structures for the cases where you need to list, test or combine members.</p>
+
+<h2 data-concept="c5">When do you need an exact count instead?</h2>
+<p class="why">Pick the counting structure by the question the product asks.</p>
+<p>An HLL answers "how many" and nothing more. The coach also wants a retention figure, the learners active on both Monday and Tuesday. The product may later ask for the list of those learners too.</p>
+<p>A <dfn>bitmap</dfn> is a String used as an array of bits, where bit N stands for user number N. Setting a bit marks that user, and counting the set bits gives an exact count. Two bitmaps can be combined bit by bit on the server, so "active on both days" is one command.</p>
+<figure class="diagram">
+<ul class="tree">
+<li><b>Must the product list, remove or test individual members?</b>
+<ul><li class="ok"><em>yes</em><span>Use a Set, or a bitmap when IDs are dense integers.</span></li>
+<li><em>no</em><span>Go to the next question.</span></li></ul></li>
+<li><b>Is an error of about 1% acceptable?</b>
+<ul><li class="ok"><em>yes</em><span>Use an HLL, at most 12,304 bytes per counter.</span></li>
+<li class="bad"><em>no</em><span>Use a bitmap for dense integer IDs, or a Set.</span></li></ul></li>
+</ul>
+<figcaption>Choosing a counting structure. The first question is the one that decides most designs.</figcaption>
+</figure>
+<p>The bitmap commands work like this.</p>
+<ol>
+<li><code>SETBIT dau:mon 42 1</code> marks user 42 as active that day, and <code>GETBIT</code> reads one user's bit.</li>
+<li><code>BITCOUNT dau:mon</code> returns the exact number of active users.</li>
+<li><code>BITOP AND</code> on two daily bitmaps gives the users active on both days, and <code>BITOP OR</code> gives those active on either.</li>
+<li>The size follows the highest user number, not the number of users. Setting bit 1,000,000 makes the String 1,000,000 / 8 + 1 = 125,001 bytes, even with only 2 bits set.</li>
+</ol>
+<p>So a bitmap fits dense integer IDs. For 10 million users, one day is 10 million bits, about 1.25 MB, and the docs give 100 million users in 12 MB. UUIDs or sparse IDs do not fit, because the bit position must be a small integer. A Set fits any ID and can list its members, but it stores every member.</p>
+<p>So when someone proposes a large Set that the code only counts, ask the first question of the tree. An HLL or a bitmap usually answers it with far less memory.</p>
+<p>Try E11 from the lab now. <code>BITCOUNT</code> returns 2, and <code>STRLEN</code> is about 125 KB, because bit 1,000,000 makes the String grow.</p>
+<div class="keypoints">
+<p class="remember">An HLL counts distinct items in at most 12,304 bytes, but cannot list them.</p>
+<p class="trap">A Set kept only for <code>SCARD</code> used 340 times the memory of an HLL.</p>
+<p class="try">Find a Set your code only counts, and check whether anything reads its members.</p>
+</div>
+
+<details class="answer deeper"><summary>Go deeper: Bloom filters and the other Redis 8 sketches</summary>
+<p><b>New approximate types.</b> Redis 8.0 adds more approximate types. Bloom and Cuckoo filters answer "was this item added?" with a small chance of a wrong yes. Count-min sketch counts how often each item appears, Top-k keeps the most frequent items, and t-digest estimates percentiles. Not every build ships them, and the Homebrew 8.10.1 build used for this lesson did not, so test your own build first.</p>
+<p><b>Razorpay</b> stores the members of experiment segments as Bloom filters. In a test, 1 million IDs at a false-positive rate of about 1 in 100,000 used at most 3.3 MB. In production, at about 15,000 requests per second, the Bloom check had a p99 under 4 ms.</p>
+<p><b>On the platform.</b> The platform's core services use none of HyperLogLog, bitmaps or Streams today. Its unique counts are probably computed in the analytics and warehouse path instead, which is inferred from where they are absent.</p>
+<details class="evidence"><summary>Evidence</summary><p>Redis 8.0.0 release notes, line 19, for the new types. Their absence in the Homebrew build was measured on 2026-10-18. The bitmap sizes are from the memory-optimization docs page. Razorpay Engineering, "Building Splitz", 2021-06-29, read from the blog's RSS feed. The absence of these types on the platform comes from the original phase.</p></details>
+</details>
+<p>That completes the five ideas. The next section collects them, and says what the next phase answers.</p>
+
+<h2 data-kind="recall">What you can do now, and what comes next</h2>
+<p>The coach now has a Redis type for each of its six needs. Each choice has a cost you can state in commands and bytes.</p>
+<ul>
+<li><b>Atomic work follows the type.</b> <code>INCR</code>, <code>HINCRBY</code>, <code>SADD</code> and <code>SET ... NX</code> read and change a value in one command, while GET then SET lost 79.8% of updates at 8 clients. When no command fits, <code>EXEC</code> runs a queue with nothing in between, but it never undoes a command. The sections on lost updates, transactions, Strings, Hashes and Sets taught it.</li>
+<li><b>Memory follows the encoding.</b> A Hash stays a listpack up to 512 fields and 64-byte values, and one more field made it 3.9 times larger. The two encoding sections taught it.</li>
+<li><b>A sorted set orders by your score.</b> It ranks, windows and schedules, and a sliding log costs about 95 bytes per request in the large form. The three sorted-set sections taught it.</li>
+<li><b>A pop deletes the job.</b> <code>BLMOVE</code> to a processing list keeps it, and a Stream keeps it pending until someone claims it. The three queue sections taught it.</li>
+<li><b>An HLL counts without storing.</b> It uses at most 12,304 bytes with 0.81% standard error, and a Set or bitmap is the exact choice. The two counting sections taught it.</li>
+</ul>
+<p>You can now pick a type for a feature and say what it costs in round trips, safety and memory. You can also check that choice on a live key with <code>OBJECT ENCODING</code> and <code>MEMORY USAGE</code>.</p>
+<p>One question is still open. The persona sits in Redis as a copy of data that lives in a database. Phase 2 answers how that copy stays correct when the database changes. It also answers what happens when a popular key expires and many requests miss at once.</p>
+
+<h2 data-kind="lab">Lab: the exercises that teach Phase 1</h2>
+<p>The lab proves each idea with commands you run on a local Redis. It was not run for this lesson, so the Expected lines are the phase's own. Where a step is known to be wrong, a note under it says what to expect instead.</p>
+<details class="answer deeper"><summary>Open the lab: setup and E1 to E13</summary>
+<p>Setup:</p>
+<div class="lab"><pre><code data-lang="bash">cd /Users/raghvendradhakar/Desktop/code/verly/study-material/redis/code
+docker-compose up -d &amp;&amp; docker exec redis-study redis-cli PING   # → PONG</code></pre></div>
+<div class="callout note"><p><b>Note for this lesson.</b> That folder does not exist on this Mac. The lab code is in <code>/Users/raghvendra.dhakar/Desktop/project/code/study-material/redis/code</code>. Its <code>docker-compose.yml</code> pins <code>redis:7.2</code>. On 7.2 the encoding limits in this lesson are the same, but the field-TTL commands, JSON and the newer Stream commands are absent.</p></div>
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>E1</b> <span class="tag">c1</span></label> Strings: the three personalities.
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli SET blob '{"a":1}'; ... INCR counter; ... SET flag 1 NX EX 30; ... SET flag 2 NX EX 30</code></li>
+<li>Expected: the second <code>SET flag ... NX</code> returns nil (key exists) — the claim was already taken.</li>
+<li>Teaches: blob vs atomic counter vs atomic flag, all on the String type.</li>
+</ul>
+</li>
+<li><label><input type="checkbox"> <b>E2</b> <span class="tag">c1, c2</span></label> String vs Hash, measured.
+<ul>
+<li>Run: <code>go run ./phase01_data_structures/string_vs_hash</code></li>
+<li>Expected: field update = 4 ops (String) vs 1 (Hash); encoding = <code>listpack</code>.</li>
+<li>Teaches: when the JSON-blob-String costs you and the Hash pays off.</li>
+</ul>
+<div class="callout note"><p><b>Note for this lesson.</b> The program prints "4 ops" for the String update and says the Hash limit is <code>hash-max-listpack-entries=128</code>. Expect the String path to be 2 round trips, a GET and a SET, plus client work, and the real cost is the lost update between them. The real default is 512. The program does not print bytes, so run <code>MEMORY USAGE sess:string:u42</code> and <code>MEMORY USAGE sess:hash:u42</code> by hand to compare the two layouts.</p></div>
+</li>
+<li><label><input type="checkbox"> <b>E3</b> <span class="tag">c1</span></label> Break it — WRONGTYPE.
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli SET s hello; docker exec redis-study redis-cli LPUSH s x</code></li>
+<li>Expected: <code>WRONGTYPE Operation against a key holding the wrong kind of value</code>.</li>
+<li>Teaches: the value's type constrains the legal commands — the keyspace is typed.</li>
+</ul>
+</li>
+<li><label><input type="checkbox"> <b>E4</b> <span class="tag">c1</span></label> Hash field counters.
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli HINCRBY post:1 views 1; ... HINCRBY post:1 likes 1; ... HINCRBY post:1 views 1; ... HGETALL post:1</code></li>
+<li>Expected: <code>views=2, likes=1</code> — two independent atomic counters in one object.</li>
+<li>Teaches: <code>HINCRBY</code> = per-field atomic counter without separate keys.</li>
+</ul>
+</li>
+<li><label><input type="checkbox"> <b>E5</b> <span class="tag">c4</span></label> List FIFO + blocking worker.
+<ul>
+<li>Run: <code>go run ./phase01_data_structures/list_queue -jobs 8</code></li>
+<li>Expected: jobs consumed in exact push order; <code>BLPOP</code> wakes the instant <code>job-late</code> is pushed.</li>
+<li>Teaches: RPUSH/LPOP FIFO and why <code>BLPOP</code> beats busy-polling.</li>
+</ul>
+<div class="callout note"><p><b>Note for this lesson.</b> This program does not crash a worker. E6 shows the crash, and the reliable-queue section shows the <code>LMOVE</code> form to try next to it.</p></div>
+</li>
+<li><label><input type="checkbox"> <b>E6</b> <span class="tag">c4, break-it</span></label> Break it — the List queue loses a job on crash.
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli RPUSH q j1 j2 j3; docker exec redis-study redis-cli LPOP q</code> (pretend the worker crashes here) then <code>docker exec redis-study redis-cli LLEN q</code></li>
+<li>Expected: <code>LLEN=2</code> — j1 is gone, unrecoverable. No ack, no redelivery.</li>
+<li>Teaches: exactly where a List queue's guarantees end (→ Streams/Kafka).</li>
+</ul>
+</li>
+<li><label><input type="checkbox"> <b>E7</b> <span class="tag">c1</span></label> Set uniqueness + algebra.
+<ul>
+<li>Run: <code>go run ./phase01_data_structures/set_dedup</code></li>
+<li>Expected: dup absorbed (SCARD=3), SINTER/SUNION/SDIFF results, SSCAN over 10k.</li>
+<li>Teaches: dedup, the invalidate-all fan-out, server-side set math.</li>
+</ul>
+</li>
+<li><label><input type="checkbox"> <b>E8</b> <span class="tag">c3</span></label> Sorted Set leaderboard by hand.
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli ZADD lb 100 raj 250 dana 175 sam; ... ZREVRANGE lb 0 -1 WITHSCORES; ... ZREVRANK lb sam; ... ZINCRBY lb 200 raj; ... ZREVRANGE lb 0 0</code></li>
+<li>Expected: dana top; after +200, raj (300) becomes top.</li>
+<li>Teaches: ZADD/ZREVRANGE/ZREVRANK/ZINCRBY — the whole leaderboard feature.</li>
+</ul>
+<div class="callout note"><p><b>Note for this lesson.</b> <code>ZREVRANGE</code> still works, but it is deprecated since 6.2.0. The current form is <code>ZRANGE lb 0 -1 REV WITHSCORES</code>.</p></div>
+</li>
+<li><label><input type="checkbox"> <b>E9</b> <span class="tag">c3</span></label> Sorted Set sliding-window rate limiter.
+<ul>
+<li>Run: <code>go run ./phase01_data_structures/sorted_set_ratelimit -limit 5 -window 2s -n 12 -gap 200ms</code></li>
+<li>Expected: 5 allowed, burst rejected, then allowed again as the window slides.</li>
+<li>Teaches: score=timestamp = exact sliding window; no boundary double-burst.</li>
+</ul>
+<div class="callout note"><p><b>Note for this lesson.</b> With one client, the output should match the Expected line, which is inferred from reading the code. With several clients at once, two problems appear. A rejected call keeps its member until the program's later <code>ZREM</code>, which can push other callers over the limit. Two clients with the same timestamp also share one member. The sorted-set limiter section and its Go deeper block explain both.</p></div>
+</li>
+<li><label><input type="checkbox"> <b>E10</b> <span class="tag">c5</span></label> HyperLogLog vs Set memory.
+<ul>
+<li>Run: <code>go run ./phase01_data_structures/hll_vs_set -unique 100000</code></li>
+<li>Expected: ~0.1–0.8% error, ~387x memory ratio (5442 KB vs 14 KB).</li>
+<li>Teaches: when to trade exactness for a flat 12 KB.</li>
+</ul>
+<div class="callout note"><p><b>Note for this lesson.</b> Expect a ratio near 340x, not 387x. On Redis 8.10.1 with libc malloc, the Set used 4,361,836 bytes and the HLL 12,822, with 0.53% error. Inside the container the allocator is jemalloc, so expect different bytes and a similar ratio. The program sends about 200,200 commands in one pipeline, and the Redis docs advise batches of about 10,000.</p></div>
+</li>
+<li><label><input type="checkbox"> <b>E11</b> <span class="tag">c5</span></label> Bitmaps for daily-active flags.
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli SETBIT dau:2026-07-13 42 1; ... SETBIT dau:2026-07-13 1000000 1; ... BITCOUNT dau:2026-07-13; ... STRLEN dau:2026-07-13</code></li>
+<li>Expected: BITCOUNT=2; STRLEN ~125 KB (bit 1,000,000 forces the string to grow).</li>
+<li>Teaches: one bit per user; <code>BITCOUNT</code> = active count; watch the sparse-id memory cost.</li>
+</ul>
+<div class="callout note"><p><b>Note for this lesson.</b> <code>STRLEN</code> should print exactly 125001, which is 1,000,000 / 8 + 1.</p></div>
+</li>
+<li><label><input type="checkbox"> <b>E12</b> <span class="tag">c2</span></label> Encoding cliff.
+<ul>
+<li>Run: <code>docker exec redis-study redis-cli DEL h; docker exec redis-study redis-cli HSET h f v; docker exec redis-study redis-cli OBJECT ENCODING h</code> (→ listpack). Then add a &gt;64-byte value: <code>docker exec redis-study redis-cli HSET h big "$(python3 -c 'print("x"*100)')"; docker exec redis-study redis-cli OBJECT ENCODING h</code></li>
+<li>Expected: <code>listpack</code> → <code>hashtable</code> after the big value.</li>
+<li>Teaches: the automatic, one-way encoding upgrade and its memory jump.</li>
+</ul>
+</li>
+<li><label><input type="checkbox"> <b>E13</b> <span class="tag">c1, break-it</span></label> Transactions: no rollback, EXECABORT, WATCH, and retries under contention.
+<ul>
+<li>Every command in E13 was run on 2026-10-19 against Homebrew Redis 8.10.1 on port 6581, with no persistence. It was an x86_64 build under Rosetta 2 on an Apple M4 Pro. The course container runs <code>redis:7.2</code> instead.</li>
+<li>Warning: part c empties databases 14 and 15, and part e creates and deletes the ACL user <code>p1tx</code>. Run it on a server you own.</li>
+<li>Run: <code>go run ./phase01_data_structures/tx_watch -self-test</code></li>
+<li>Expected: seven <code>ok</code> lines and <code>self-test passed</code>, with no server. The lock-step check prints <code>aborts=18 want 18</code>.</li>
+<li>Then run: <code>go run ./phase01_data_structures/tx_watch</code></li>
+<li>Expected: part a prints <code>tx:n=1 tx:b=done → no rollback: true</code> and then <code>yet tx:n=2 tx:b=again</code>. Part b prints <code>EXECABORT</code> and <code>EXISTS tx:c=0</code>. Part c prints <code>every row matches the rule: true</code>. Part d prints the table from 1.9, with 0 aborts at 1 client and 17.48 aborts per commit at 32 clients. Against the plain <code>INCR</code> writer it prints <code>commits=0 gave up=100</code>. Part e prints <code>EXEC → [s3cret]</code> on Redis 8.4.0 to 8.10.1.</li>
+<li>On Redis 8.10.2, part e printed a <code>NOPERM</code> entry instead. That was run on a native arm64 build of the 8.10.2 tag, as 1.9 shows. On <code>redis:7.2</code> it should also print <code>NOPERM</code>, because the bug arrived in 8.4.0. That is inferred from the release note and was not run.</li>
+<li>Optional, for the AOF part of 1.9: <code>./phase01_data_structures/tx_watch/aof_cut.sh &lt;free port&gt; midcmd</code>. It starts its own server with the AOF on, and it refuses port 6379. Expected: <code>start 2: tx:after=,</code> because the write made after the first start is lost. With <code>boundary</code> instead of <code>midcmd</code>, it prints <code>start 2: tx:after=1</code>.</li>
+<li>Break it: delete the <code>s.Watch(c.key)</code> call in <code>step</code>, then run <code>-self-test</code> again. Expected: <code>FAIL d no lost update under contention: final=3 commits=12 want 12</code>.</li>
+<li>If it fails: <code>cannot reach Redis</code> means the container is down, so run <code>docker compose up -d</code>. An error from <code>SWAPDB</code> means the server has fewer than 16 databases.</li>
+<li>Teaches: what EXEC promises, the two times an error can happen, what invalidates a watch, and what retries cost.</li>
+</ul>
+<div class="callout note"><p><b>Note for this lesson.</b> Unlike E1 to E12, E13 was run, so its Expected lines are measured output. "The table from 1.9" is the retry table in the transactions section above.</p></div>
+</li>
+</ul>
+</details>
+
+<h2 data-kind="checkpoint">Checkpoint questions</h2>
+<p>Answer each one in your own words before you open its sketch. Every answer uses only this lesson.</p>
+<details class="answer deeper"><summary>Open the eight questions</summary>
+<p><b>Q1.</b> A teammate stores "modules assigned to a user" as a JSON array in a String. Every assignment runs GET, unmarshal, append, marshal and SET. Two assignments race. Walk the exact order that loses one, name the structure that fixes it in one atomic command, and write that command.</p>
+<details class="answer"><summary>Answer sketch</summary><p>A runs GET and gets [m1]. B runs GET and also gets [m1]. A appends m2 and runs SET [m1, m2]. B appends m3 and runs SET [m1, m3], so m2 is gone. A Set fixes it, because <code>SADD user:u42:modules m2</code> adds inside one command and also removes duplicates. A List with <code>RPUSH</code> also works if order matters and duplicates are allowed.</p></details>
+<p><b>Q2.</b> You need a rate limit of 100 requests per minute per company. Compare a fixed window with <code>INCR</code> and <code>EXPIRE</code> against the sorted-set sliding log of E9. Show the input that lets the fixed window allow about 200 requests in about 2 seconds, and explain why the sliding log cannot. Then argue why a team might still choose the fixed window, by counting bytes and commands per request.</p>
+<details class="answer"><summary>Answer sketch</summary><p>Send 100 requests in the last second of minute 1 and 100 in the first second of minute 2. Each window counts only its own 100, so 200 pass in about 2 seconds. The sliding log counts the real last 60 seconds, so request 101 in that span is rejected. But the log stores up to 100 members per company, about 33 bytes each in the listpack form, and runs four commands per request. The counter is about 30 bytes and two commands. On a shared cluster with many companies, the counter or Cloudflare's two-counter window is often the better trade.</p></details>
+<p><b>Q3.</b> "How many unique learners opened this course this month?" Design it with a Set and with a HyperLogLog. Give the memory for 5 million uniques in each. State the one question whose answer decides between them.</p>
+<details class="answer"><summary>Answer sketch</summary><p>A Set used 4,361,836 bytes for 100,000 members, so 5 million is about 218 MB, inferred by scaling. The HLL stays at 12,304 bytes, with about 0.81% standard error. The deciding question is whether the product must list, remove or test individual learners. If it only shows a count, use the HLL.</p></details>
+<p><b>Q4.</b> Walk through a sorted-set lock table for key <code>job:inprogress:42</code>. French translation starts: which score does <code>ZADD</code> write? A duplicate "translate fr" event arrives: what tells you French is still locked? French finishes. Then a German worker crashes and leaves its <code>de</code> member behind. Which single command removes the stale lock, and why can a plain Set not do it?</p>
+<details class="answer"><summary>Answer sketch</summary><p><code>ZADD key (now+ttl) fr</code>, so the score is the time the lock expires. The duplicate event runs <code>ZSCORE key fr</code>, and a score greater than now means French is locked. On finish, <code>ZREM key fr</code>. <code>ZREMRANGEBYSCORE key -inf now</code> removes <code>de</code> once its expiry has passed, together with every other expired lock. A plain Set has no score, so it cannot tell an old member from a live one, and its members cannot expire one by one.</p></details>
+<p><b>Q5.</b> A colleague wants to store each session as 6 separate String keys, such as <code>sess:u42:token</code> and <code>sess:u42:ip</code>, so fields can expire on their own. Give two reasons one Hash is better. Then say whether the one case where separate keys used to win still exists.</p>
+<details class="answer"><summary>Answer sketch</summary><p>First, a small Hash is a listpack, so it avoids six top-level key costs. Second, <code>HGETALL</code> reads every field in one round trip, and <code>HSET</code> with several fields writes them in one atomic command. Separate keys used to win when fields needed their own TTL. Since Redis 7.4, <code>HEXPIRE</code> gives fields their own TTL, and Valkey has it since 9.0, so that case is gone on current versions.</p></details>
+<p><b>Q6.</b> You call <code>HGETALL</code> on a hash in a hot path. Over three months, with no deploys, p99 latency climbs. Name two things that could be growing, how you confirm each, and the fix for each.</p>
+<details class="answer"><summary>Answer sketch</summary><p>The number of fields can grow, so <code>HGETALL</code> does more O(N) work on the single thread. Confirm with <code>HLEN</code> and <code>SLOWLOG</code>, and fix by bounding the fields, reading only needed fields with <code>HMGET</code>, or using <code>HSCAN</code>. The hash can also cross a listpack limit, more than 512 fields or a value over 64 bytes, and become a hashtable. Confirm with <code>OBJECT ENCODING</code> and <code>MEMORY USAGE</code>, and fix by splitting the hash into buckets under the limit.</p></details>
+<p><b>Q7.</b> Design a "trending scenarios" feature: the top 10 per company, weighted toward recent activity. Name the structure that holds the ranking, and the commands that record a view and read the top 10. Then say how a scenario's score falls as its activity gets old.</p>
+<details class="answer"><summary>Answer sketch</summary><p>A sorted set per company, with the scenario as member. A view runs <code>ZINCRBY trend:c7 1 s42</code>, and the board reads <code>ZRANGE trend:c7 0 9 REV WITHSCORES</code>. For decay, push each view onto a List capped at N. When the List grows past N, <code>LPOP</code> the oldest view and run <code>ZINCRBY</code> with -1 for its scenario. Another design scales all scores down on a schedule. Compare which one is simpler to reason about when a view is counted twice.</p></details>
+<p><b>Q8.</b> A wallet service moves credits between <code>wallet:{u42}:main</code> and <code>wallet:{u42}:bonus</code> with a <code>WATCH</code> loop. It watches both keys, reads both, then sends <code>MULTI</code>, <code>DECRBY main 30</code>, <code>INCRBY bonus 30</code> and <code>EXEC</code>. (a) In a load test, 16 workers move credits for the same user, and the loop retries forever. p99 rises from 1 ms to 400 ms with no errors. Use E13 part d to explain why, and give two fixes. (b) A teammate wraps the call in "if err != nil, retry". The bonus key once held a Hash by mistake, so <code>INCRBY</code> failed with <code>WRONGTYPE</code>. What did the retry do to <code>main</code>? (c) The keys move to a cluster, and someone drops the hash tag from one key name. What does the client see?</p>
+<details class="answer"><summary>Answer sketch</summary><p>(a) All 16 workers read, and in each round only one <code>EXEC</code> commits. E13 measured 4.59 aborts per commit at 8 clients and 17.48 at 32. The worst increment at 8 clients needed 316 to 664 attempts. Each attempt is 3 round trips, so p99 grows with the attempts, and no error appears because the loop never gives up. Fix 1: one Lua script or Function that checks the balance and moves the credits on the server, with no retry. Fix 2: cap the retries with a random backoff and return an error at the cap. (b) No rollback: <code>DECRBY main 30</code> ran, and <code>INCRBY</code> replied <code>WRONGTYPE</code> inside the <code>EXEC</code> array. go-redis then returns that error. Each retry ran <code>DECRBY</code> again, and <code>INCRBY</code> failed again, so the loop never stopped. <code>main</code> lost 30 on every attempt, and <code>bonus</code> gained nothing. Only <code>TxFailedErr</code> means nothing ran. (c) <code>WATCH</code> on keys in two slots fails with <code>CROSSSLOT</code>. Without the watch, <code>EXEC</code> checks all queued keys and replies <code>CROSSSLOT</code>, and Redis discards the transaction. A key whose slot is on another node gets <code>MOVED</code> at queue time, so <code>EXEC</code> replies <code>EXECABORT</code>. With go-redis v9.5.1, <code>ClusterClient.Watch</code> refuses keys in two slots before it sends anything. A <code>TxPipeline</code> with no watch instead splits the commands by slot into two transactions. No error appears, and the move is no longer one unit.</p></details>
+</details>
+
+<h2 data-kind="cheatsheet">Cheatsheet</h2>
+<details class="answer deeper"><summary>Open the cheatsheet</summary>
+<pre class="cheatsheet">PICK THE STRUCTURE
+  whole opaque object, read and written together  → STRING (JSON blob) + TTL
+  atomic counter, fixed-window limit              → STRING: INCR + EXPIRE (one script)
+                                                    or INCREX k EX s ENX (Redis 8.8+)
+  atomic claim, idempotency, start of a lock      → STRING: SET k v NX EX s   (SETNX is deprecated)
+  change value, keep TTL                          → SET k v KEEPTTL
+  object with fields changed one at a time        → HASH: HSET / HGET / HDEL / HINCRBY
+  a TTL per field                                 → HEXPIRE (7.4), HSETEX / HGETEX (8.0)
+  queue where a lost job is acceptable            → LIST: RPUSH + BLPOP
+  queue that must keep the job                    → LIST: BLMOVE to processing + LREM + reaper
+  durable queue with consumer groups              → STREAM: XREADGROUP + XACK + XAUTOCLAIM
+  uniqueness, membership, "the group of X"        → SET: SADD / SISMEMBER / SMISMEMBER
+  in both, either, one but not the other          → SET: SINTER / SUNION / SDIFF, SINTERCARD
+  ranking, leaderboard                            → ZSET: ZADD + ZRANGE ... REV + ZREVRANK
+  exact sliding window, small limits              → ZSET: score = timestamp
+  delayed jobs                                    → ZSET: score = run time, pop in one script
+  count distinct, about 1% error is fine          → HYPERLOGLOG: PFADD / PFCOUNT / PFMERGE
+  one flag per dense integer ID                   → BITMAP: SETBIT / BITCOUNT / BITOP
+
+O(N) COMMANDS THAT BLOCK → CURSOR OR BOUNDED FORM
+  KEYS → SCAN      HGETALL (huge) → HSCAN      SMEMBERS (huge) → SSCAN
+  ZRANGE (huge) → bound it; a large LIMIT offset still walks the set
+  LRANGE 0 -1 (huge) → read a bounded range
+
+ATOMIC INSIDE ONE COMMAND
+  INCR / INCRBY / DECR   HINCRBY   ZINCRBY   ZADD   SADD   SET ... NX   LMOVE
+
+ENCODING LIMITS, Redis 8.10.2 and Valkey 9.1.2 defaults
+  hash   : hash-max-listpack-entries 512, hash-max-listpack-value 64  → hashtable
+  zset   : zset-max-listpack-entries 128, zset-max-listpack-value 64  → skiplist
+  set    : set-max-listpack-entries 128, value 64; integers: set-max-intset-entries 512
+  list   : list-max-listpack-size -2 (8 KB per node)                   → quicklist
+  hashes, sets, zsets never convert back; lists convert back below half the limit
+  check  : OBJECT ENCODING key     measure: MEMORY USAGE key
+  strings: int / embstr / raw; Redis 8 embeds only if key + value + headers fit 64 B, 128 B on Apple arm64
+
+MEMORY NUMBERS (measured, Redis 8.10.1, libc malloc)
+  hash 512 → 513 fields      5,958 → 23,445 B (3.9x)
+  zset member                33 B listpack, about 94 to 105 B skiplist
+  100,000 pairs as keys      4.7 MB;  as 1,001 listpack hashes 0.77 MB
+  HLL                        at most 12,304 B, 0.81% standard error
+  Set of 100,000 IDs         4.4 MB, about 340x the HLL
+
+DEPRECATED → CURRENT
+  SETNX → SET NX      HMSET → HSET      RPOPLPUSH / BRPOPLPUSH → LMOVE / BLMOVE
+  ZREVRANGE → ZRANGE ... REV      ZRANGEBYSCORE → ZRANGE ... BYSCORE
+
+TRANSACTIONS
+  MULTI ... EXEC    queue on one connection; no other client runs in between
+  no rollback       a run-time error (WRONGTYPE) is one reply; the rest still apply
+  queue-time error  wrong arity, unknown cmd, ACL, MOVED, OOM → EXECABORT, none run
+  WATCH k           EXEC → null if k is written (same value too), EXPIREd, expires,
+                    evicted, or hit by FLUSHDB / FLUSHALL / SWAPDB
+                    reads and no-op writes (SADD of a member that exists) do not count
+                    EXEC unwatches every key → WATCH again on every retry
+  go-redis          TxPipelined err != nil does NOT mean nothing ran; TxFailedErr does
+  retry cost        measured: 17.48 aborts/commit at 32 clients; 0/100 vs a plain writer
+  retry policy      redis-py loops forever; cap it and add random backoff
+  cluster           every key in one slot, else CROSSSLOT → {tag} keys, see KEY NAMES
+  AOF / replicas    writes of one EXEC are wrapped in MULTI/EXEC; failed cmds absent
+  AOF cut in a cmd  8.10.2 keeps the open MULTI → later writes lost → BGREWRITEAOF
+  ACL               8.4.0-8.10.1 skip the key re-check at EXEC → upgrade to 8.10.2
+  pick              one command &gt; SET IFEQ (8.4+) &gt; MULTI &gt; WATCH (capped) &gt; script
+
+KEY NAMES
+  type:sub:id, tenant ID value inside the key, one prefix per service
+  {tenant} hash tag puts a tenant's keys on one cluster slot (Phase 4)</pre>
+</details>
+
+<h2 data-kind="sources">Sources</h2>
+<details class="answer deeper"><summary>Open the sources</summary>
+<p><b>Redis source and docs</b></p>
+<ul class="sources">
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/config.c">Redis 8.10.2 config.c</a>: the encoding limits, <code>hll-sparse-max-bytes</code>, verified.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/redis.conf">Redis 8.10.2 redis.conf</a>: the encoding settings and <code>list-max-listpack-size -2</code>, verified.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/t_list.c">Redis 8.10.2 t_list.c</a>: lists convert back below half the limit, verified.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/object.c">Redis 8.10.2 object.c</a> and <a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/config.h">config.h</a>: the cache-line rule for embedded strings, verified.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/7.2.0/src/object.c">Redis 7.2.0 object.c</a>: the old 44-byte <code>embstr</code> rule, verified.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/server.h">Redis 8.10.2 server.h</a>: skip-list constants, verified.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/hyperloglog.c">Redis 8.10.2 hyperloglog.c</a>: 16,384 registers of 6 bits, the sparse form, verified.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/t_zset.c">t_zset.c</a>, <a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/t_hash.c">t_hash.c</a> and <a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/t_set.c">t_set.c</a> at 8.10.2: where each type converts, verified.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/config.c">Valkey 9.1.2 config.c</a>: the same encoding defaults in Valkey, verified.</li>
+<li><a href="https://github.com/redis/redis/releases/tag/8.0.0">Redis 8.0.0 release notes</a>: JSON and the probabilistic types in Redis, verified.</li>
+<li><a href="https://github.com/redis/redis/releases/tag/8.10.2">Redis 8.10.2 release</a>: the current version, verified.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/7.0.0/00-RELEASENOTES">Redis 7.0.0 release notes</a>: scripts are no longer replicated as whole scripts, verified.</li>
+<li><a href="https://github.com/redis/redis/releases/tag/8.6.0">Redis 8.6.0 release notes</a>: <code>IDMP</code> and <code>IDMPAUTO</code> for <code>XADD</code>, verified.</li>
+<li><a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/memory-optimization/">Memory optimization docs</a>: why small encodings are O(N) and still fast, hash bucketing, bitmap sizes, verified.</li>
+<li><a href="https://redis.io/docs/latest/commands/lmove/">LMOVE docs</a>: the reliable queue pattern with a processing list, verified.</li>
+<li><a href="https://redis.io/docs/latest/develop/using-commands/transactions/">Transactions docs</a>: <code>MULTI</code>, <code>EXEC</code> and <code>WATCH</code>, and no rollback, verified.</li>
+<li><a href="https://redis.io/docs/latest/develop/data-types/streams/">Streams docs</a>: <code>XREADGROUP &gt;</code>, the PEL, <code>XAUTOCLAIM</code>, verified.</li>
+<li><a href="https://redis.io/docs/latest/develop/data-types/probabilistic/hyperloglogs/">HyperLogLog docs</a>: 12 KB worst case and 0.81% standard error, verified.</li>
+<li><a href="https://redis.io/docs/latest/commands/zrangebyscore/">ZRANGEBYSCORE docs</a>: a large offset still walks the set, verified.</li>
+<li><a href="https://redis.io/docs/latest/develop/data-types/sorted-sets/">Sorted sets guide</a>: leaderboards and ranges, from the phase.</li>
+<li><a href="https://redis.io/docs/latest/develop/data-types/">Data types overview</a> and <a href="https://redis.io/docs/latest/commands/">command reference</a>: every command with its cost, from the phase.</li>
+</ul>
+<p><b>Transactions</b></p>
+<ul class="sources">
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/multi.c">Redis 8.10.2 multi.c</a>: <code>EXEC</code>, the dirty flags, what touches a watched key, the ACL re-check, verified.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/server.c">Redis 8.10.2 server.c</a>: queue-time rejection, the <code>MULTI</code> wrapper for the AOF and replicas, the <code>BUSY</code> rule, verified.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/src/aof.c">Redis 8.10.2 aof.c</a>: a cut <code>MULTI</code> block at load, verified.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis/8.10.2/00-RELEASENOTES">Redis 8.10.2 release notes</a>: security fix #15673, verified.</li>
+<li><a href="https://github.com/redis/redis/pull/15673">Redis PR #15673</a>: why queued commands kept key access, verified.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/src/multi.c">Valkey 9.1.2 multi.c</a>: the same rules, the ACL re-check, verified.</li>
+<li><a href="https://raw.githubusercontent.com/valkey-io/valkey/9.1.2/00-RELEASENOTES">Valkey 9.1.2 release notes</a>: PR #4342, the AOF fix for a cut inside a MULTI block, verified.</li>
+<li><a href="https://redis.io/docs/latest/develop/using-commands/multi-key-operations/">Multi-key operations docs</a>: one slot for <code>MULTI</code>, <code>WATCH</code> and scripts in a cluster, verified.</li>
+<li><a href="https://redis.io/blog/you-dont-need-transaction-rollbacks-in-redis/">Redis blog, no rollbacks</a>: the argument against rollback, a vendor source.</li>
+<li><a href="https://raw.githubusercontent.com/redis/redis-py/v8.1.0/redis/client.py">redis-py v8.1.0 client.py</a>: <code>transaction()</code> retries with no limit, verified.</li>
+<li><a href="https://github.com/redis/redis-py/issues/566">redis-py issue #566</a>: a request to cap WATCH retries, closed, verified.</li>
+<li><a href="https://github.com/redis/node-redis/pull/3506">node-redis PR #3506</a>: a reconnect lost the WATCH, verified.</li>
+<li><a href="https://github.com/SwordInfra/SwordFS/issues/454">SwordFS issue #454</a>: retry limit exceeded under WATCH contention, a small open-source project, verified.</li>
+</ul>
+<p><b>Production cases</b></p>
+<ul class="sources">
+<li><a href="https://web.archive.org/web/20191114144039/https://instagram-engineering.com/storing-hundreds-of-millions-of-simple-key-value-pairs-in-redis-1091ae80f74c">Instagram, hash buckets</a>: 300 million pairs in under 5 GB, verified from the archive copy.</li>
+<li><a href="https://web.archive.org/web/20181027144034/https://redditblog.com/2017/05/24/view-counting-at-reddit/">Reddit, view counting</a>: HLL per post, 12 KB against 8 MB, verified from the archive copy.</li>
+<li><a href="https://slack.engineering/scaling-slacks-job-queue/">Slack, job queue</a>: a full Redis could not dequeue, verified.</li>
+<li><a href="https://blog.cloudflare.com/counting-things-a-lot-of-different-things/">Cloudflare, counting</a>: two counters instead of a log, 0.003% wrong, verified.</li>
+<li><a href="https://github.blog/engineering/infrastructure/how-we-scaled-github-api-sharded-replicated-rate-limiter-redis/">GitHub, sharded rate limiter</a>: fixed window in Lua, the replica read problem, verified.</li>
+<li><a href="https://raw.githubusercontent.com/sidekiq/sidekiq/v8.1.7/lib/sidekiq/fetch.rb">Sidekiq fetch.rb</a>, <a href="https://raw.githubusercontent.com/sidekiq/sidekiq/v8.1.7/lib/sidekiq/scheduled.rb">scheduled.rb</a> and <a href="https://raw.githubusercontent.com/wiki/sidekiq/sidekiq/Reliability.md">Reliability wiki</a>: <code>BRPOP</code> loses a job on a crash, sorted sets for scheduled jobs, verified.</li>
+<li><a href="http://highscalability.com/blog/2014/9/8/how-twitter-uses-redis-to-scale-105tb-ram-39mm-qps-10000-ins.html">Twitter, Hybrid List</a>: a list of small ziplists, from a secondary summary.</li>
+<li><a href="https://engineering.grab.com/uncovering-the-truth-behind-lua-and-redis-data-consistency">Grab, Lua and field order</a>: two encodings returned fields in different orders, verified.</li>
+<li><a href="http://web.archive.org/web/20240823052623/https://doordash.engineering/2020/11/19/building-a-gigascale-ml-feature-store-with-redis/">DoorDash, feature store</a>: hashes and compression, 298 GB to 112 GB, verified from the archive copy.</li>
+<li><a href="https://blog.cloudflare.com/lessons-learned-from-scaling-up-cloudflare-anomaly-detection-platform/">Cloudflare, anomaly detection</a>: <code>PFMERGE</code> cost grew with the window, verified.</li>
+<li><a href="https://harness.io/blog/event-driven-architecture-redis-streams">Harness, Redis Streams</a>: consumer groups, <code>XAUTOCLAIM</code>, trimming, verified.</li>
+<li><a href="https://discord.com/blog/how-discord-indexes-trillions-of-messages">Discord, message indexing</a>: a Redis queue dropped messages under backlog, verified.</li>
+<li><a href="https://www.slideshare.net/slideshow/redisconf17-lyft-geospatial-at-scale-daniel-hochman/77087313">Lyft, geospatial at scale</a>: a sorted set per geohash cell, verified from the slides.</li>
+<li><a href="https://engineering.razorpay.com/building-splitz-razorpays-platform-for-high-scale-experimentation-c917fe15d8f6">Razorpay, Splitz</a>: Bloom filters, 1 million IDs in 3.3 MB, verified.</li>
+<li><a href="https://aws.amazon.com/blogs/database/amazon-elasticache-version-8-0-for-valkey-brings-faster-scaling-and-improved-memory-efficiency">AWS, ElastiCache for Valkey 8.0</a>: 32 bytes saved per key, verified, a vendor source.</li>
+<li><a href="https://airbnb.tech/infrastructure/from-static-rate-limiting-to-adaptive-traffic-management-in-airbnbs-key-value-store/">Airbnb, adaptive traffic management</a>: a Redis counter per caller and its limits, verified.</li>
+</ul>
+<p><b>From the phase, not checked</b></p>
+<ul class="sources">
+<li><a href="https://oneuptime.com/blog/post/2026-01-21-redis-sorted-sets-leaderboards/view">Sorted sets for leaderboards</a>: the leaderboard, limiter and delayed-queue patterns, not checked.</li>
+<li><a href="https://oneuptime.com/blog/post/2026-01-21-redis-hashes-memory-efficient/view">Hashes for memory-efficient storage</a>: the blob against hash argument, not checked. Its thresholds may be the old ones.</li>
+<li><a href="https://medium.com/phyllo-engineering-blog/rate-limiter-using-sorted-set-in-cache-redis-bee5d939448d">Phyllo, sorted-set rate limiter</a>: the recipe E9 follows, not checked.</li>
+<li><a href="https://thoughtbot.com/blog/hyperloglogs-in-redis">thoughtbot, HyperLogLogs in Redis</a>: an intuition for HLL, not checked.</li>
+<li><a href="https://redis.io/glossary/redis-ziplist/">Redis ziplist glossary</a>: the old compact encoding, not checked. Prefer <code>src/listpack.c</code> at a tag.</li>
+<li><i>Redis in Action</i>, Josiah Carlson, chapters 3 and 4: all structures with use cases, a book from the phase.</li>
+</ul>
+<p><b>Measurements.</b> Every number marked measured came from scripts run for this lesson on Redis 8.10.1, an x86_64 Homebrew build under Rosetta on an Apple M4 Pro, macOS 26.6, libc malloc, a fresh server on loopback, 2026-10-18.</p>
+</details>
+
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

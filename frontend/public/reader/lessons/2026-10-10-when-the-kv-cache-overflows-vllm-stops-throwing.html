@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>When the KV cache overflows, vLLM stops throwing it away</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">applies · Serving It Yourself: The Rental Clock, the Flag · what the serving stack does when its own numbers say the KV cache no longer fits</div><h1>When the KV cache overflows, vLLM stops throwing it away</h1><p class="subtitle">Does a real serving stack running today do what the phase&#x27;s memory math says it should with a full KV cache?</p></header>
+<p>In the last phase you priced a rented GPU box and worked out how much KV cache, the attention keys and values the GPU keeps for each request, fits in the card's memory. You could predict exactly when the cache fills, and what it costs when it does: an old conversation's blocks are dropped, and its next message pays a full new prefill. Now put that box under a multi-turn chat workload: 12K-token conversations, 8 rounds each, with the number of simultaneous conversations climbing from 16 toward 512. Somewhere on that climb your model says throughput collapses into repeated prefill, and there is nothing in between.</p>
+
+<p>That answer turns out to be wrong in a useful way. A serving system does not have to drop an evicted block. It can copy it somewhere slower and cheaper, and read it back later for much less than a recompute. The question this lesson teaches you to ask of any serving system is not "how much cache does it have" but "how many places can a block live, and what does it cost to get one back from each?"</p>
+<p>This lesson teaches one idea. It is stated here so you can see where the lesson is going. It will read more clearly once it has been explained below, so come back to it at the end.</p>
+<ol class="concepts"><li id="c1"><b>A full KV cache is a demotion problem, not a loss: a hit on a slow tier costs a PCIe read, and recompute costs a full GPU prefill.</b> <span>Predict any serving system&#x27;s scaling curve by counting its tiers and the cost of a hit on each.</span></li></ol>
+<h2 data-concept="c1">What happens on his box when conversation 65 arrives</h2>
+<p class="why">When your cache overflows, vLLM can demote blocks to slower memory instead of dropping them. The cost gap is large.</p>
+
+<p>You are serving multi-turn chat on the rented box from your phase. Each conversation starts with a 12K-token prompt and runs 8 rounds, and the load is climbing from 16 simultaneous conversations toward 512. Your phase gave you a sharp prediction of what happens as it climbs. Recall the two numbers it used. The <dfn>KV cache</dfn>, the attention keys and values the GPU keeps for each request, must sit in the card's HBM, and it is finite. The <dfn>prefill</dfn>, the first pass that computes the KV cache from the prompt tokens, is the expensive pass. In your phase's model, a full cache means an old conversation's blocks are dropped, and its next message pays a full recompute of tens of thousands of prompt tokens.</p>
+
+<details class="predict"><summary>Predict: at 64 concurrent conversations, HBM already holds every active cache. How much does adding a CPU offload tier change throughput?</summary>Almost nothing, and the reason is that a tier only earns anything when the tier above it misses. At 64 conversations every live prefix is already in HBM, so no request ever looks one tier down. Offloading pays from 65 upward, when HBM starts evicting. This matches vLLM's own benchmark, which saw no gain until roughly 64 conversations (details in the evidence below).</details>
+
+<p>Now walk the same climb with <dfn>tiered offloading</dfn>, which copies evicted cache blocks to cheaper memory instead of dropping them. The picture is a memory hierarchy, the same shape as your box's page cache above its disk, applied to KV blocks.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 640 260" role="img" aria-label="Three tiers of KV cache storage with eviction and reload paths">
+  <rect x="170" y="20" width="300" height="50" rx="8" fill="none" stroke="currentColor"/>
+  <text x="320" y="41" text-anchor="middle" fill="currentColor">GPU HBM · active caches</text>
+  <text x="320" y="59" text-anchor="middle" fill="currentColor" font-size="12">fastest, smallest, holds ~64 conversations</text>
+  <rect x="170" y="105" width="300" height="50" rx="8" fill="none" stroke="currentColor"/>
+  <text x="320" y="126" text-anchor="middle" fill="currentColor">CPU DRAM · LRU policy</text>
+  <text x="320" y="144" text-anchor="middle" fill="currentColor" font-size="12">cheaper, larger, reload is a PCIe read</text>
+  <rect x="170" y="190" width="300" height="50" rx="8" fill="none" stroke="currentColor"/>
+  <text x="320" y="211" text-anchor="middle" fill="currentColor">Filesystem · NVMe</text>
+  <text x="320" y="229" text-anchor="middle" fill="currentColor" font-size="12">cheapest, near-unlimited, slowest reload</text>
+  <path d="M 470 45 L 540 45 L 540 130 L 470 130" fill="none" stroke="currentColor" marker-end="url(#s1a)"/>
+  <text x="556" y="90" text-anchor="middle" fill="currentColor" font-size="12">evict: copy</text>
+  <text x="556" y="105" text-anchor="middle" fill="currentColor" font-size="12">to tier below</text>
+  <path d="M 540 130 L 540 215 L 470 215" fill="none" stroke="currentColor" marker-end="url(#s1a)"/>
+  <path d="M 170 215 L 100 215 L 100 45 L 170 45" fill="none" stroke="currentColor" marker-end="url(#s1a)"/>
+  <text x="88" y="90" text-anchor="middle" fill="currentColor" font-size="12">reload on hit:</text>
+  <text x="88" y="105" text-anchor="middle" fill="currentColor" font-size="12">through DRAM first</text>
+  <path d="M 320 240 L 320 258" fill="none" stroke="currentColor" marker-end="url(#s1a)"/>
+  <text x="320" y="275" text-anchor="middle" fill="currentColor" font-size="12">miss on all tiers: recompute the full prefill on the GPU</text>
+  <defs><marker id="s1a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor"/></marker></defs>
+</svg>
+<figcaption>The three places a KV block can live, from fastest and smallest to cheapest and largest.</figcaption>
+</figure>
+
+<p>With that picture, the climb through your load range reads differently.</p>
+
+<ol>
+<li>From 16 to about 64 conversations, HBM holds every active cache, so both models behave identically and offloading sits idle.</li>
+<li>From 64 to about 128, HBM fills and eviction starts, but each evicted block is copied to host DRAM first. A conversation returning for round 5 reads its prefix back over PCIe instead of recomputing 12,288 prompt tokens on the GPU, so throughput holds.</li>
+<li>Past about 128, DRAM also fills and blocks demote to the filesystem tier. A hit there is slower than a DRAM hit, but it still beats a full prefill, because conversation 65 and conversation 400 share the same cost question, answered from disk.</li>
+</ol>
+
+<p>Vendors report this gap in concrete numbers. vLLM's own benchmark used Qwen3.6-35B-A3B on 2x H100, the same 12K-prompt 8-round shape as your workload. Throughput collapsed without offloading past 64 conversations. It held with the CPU tier. It more than doubled with the storage tier past roughly 128. The same direction appears in NVIDIA's and Moonshot AI's separate systems.</p>
+
+<details class="evidence"><summary>Evidence</summary>The thresholds and the 2x figure come only from the vLLM team's blog and their own repro repository, and that repo discloses a concurrency bug in its test harness. Treat the direction (a storage hit beats recompute at scale) as well supported and the exact curve as unverified. NVIDIA Dynamo ships the same GPU-to-CPU-to-disk design independently, and the Mooncake paper reports the same idea at production scale.</details>
+
+<p>The wrong belief your phase left you with was reasonable at the time. Evicted blocks are gone, so the only fixes were more GPUs or smaller prompts. That belief describes a cache with one tier, and serving systems do not have to have one tier.</p>
+
+<div class="keypoints">
+<p class="remember">A full KV cache is a demotion problem; a slow-tier hit costs a PCIe read, recompute costs a full prefill.</p>
+<p class="trap">Thinking evicted blocks are lost, so you buy GPUs for a problem a copy to host memory solves.</p>
+<p class="try">Sketch your own workload's three tiers and mark which tier each conversation count would be reading from.</p>
+</div>
+
+<p>Demotion exists, but existing is not the same as paying off. The next section gives you the formula for when a tier earns its place. It is hit rate times the gap between reload cost and recompute cost.</p>
+<h2 data-concept="c1">Why the value of a tier is hit rate times the gap</h2>
+<p class="why">A tier earns its place only when its hits outweigh what each hit costs.</p>
+
+<p>The section above showed the demotion happens, but not when it pays. The answer is one multiplication. Take one full prefill of your 12,288-token prompt as the unit of cost. The <dfn>recompute cost</dfn> is paying that whole pass again on the GPU because the prefix's KV cache was evicted. Call it 1 in these units. The <dfn>reload cost</dfn> is reading the stored blocks back from a lower tier. From host DRAM that is a fast PCIe copy, and from the filesystem tier a slower read. Per request, a tier saves this:</p>
+
+<pre><code>saving per request = hit rate × (recompute cost − reload cost)</code></pre>
+
+<p>Hit rate is the share of all requests the tier serves. It multiplies the gap. So a fast tier that rarely hits can lose to a slow tier that hits on nearly every request.</p>
+
+<details class="predict"><summary>Predict: Tier A reloads in 10% of a prefill and hits on 20% of requests. Tier B reloads in 50% of a prefill and hits on 80%. At 96 conversations, which tier saves more per request?</summary>
+<p>Set recompute cost to 1 and compute both tiers.</p>
+<pre><code>Tier A   0.20 × (1 − 0.10) = 0.18 prefill saved per request
+Tier B   0.80 × (1 − 0.50) = 0.40 prefill saved per request</code></pre>
+<p>Tier B saves 2.2 times more per request, because it hits four times as often. Its per-hit saving falls only from 0.90 to 0.50. Over 100 requests that is 40 prefills of GPU time against 18. The fast pick was reasonable. Reload speed shows up as latency on every miss, while hit rate stays invisible until you count requests.</p>
+</details>
+
+<p>Set the sliders to Tier B's 80 and 50 and check the results against the boxed numbers.</p>
+
+<div class="calc" id="s2-tiervalue">
+  <h4>Saving per request, in prefills</h4>
+  <label>Hit rate <input type="range" name="hit" min="0" max="100" value="20">
+    <span class="val" data-val="hit"></span> % of requests</label>
+  <label>Reload cost <input type="range" name="reload" min="0" max="100" value="10">
+    <span class="val" data-val="reload"></span> % of one prefill</label>
+  <div class="result">Saving on each hit <b data-out="perhit"></b></div>
+  <div class="result">Saving per request <b data-out="saved"></b></div>
+  <script>kit.calc('#s2-tiervalue', function(v){
+    var gap = 1 - v.reload/100;
+    return {
+      perhit: gap.toFixed(2) + ' prefill',
+      saved: ((v.hit/100) * gap).toFixed(2) + ' prefill'
+    };
+  });</script>
+</div>
+
+<p>Now read the benchmark through the formula: Qwen3.6-35B-A3B on 2 H100s. It uses 12K-token prompts over 8 rounds, with concurrency rising from 16 toward 512. Below about 64 conversations, HBM already holds every active prefix. The offload tiers see a hit rate of zero, and zero times any gap is zero. Every configuration overlaps below 64, because nothing misses and nothing needs saving. From 64 to 128 the CPU tier serves evicted prefixes at PCIe cost, keeping nearly the whole gap. Past about 128 the filesystem tier serves them at higher reload cost. So the gap shrinks, and a storage-backed box never reaches peak throughput. Each hit still avoids recomputing 12,288 prompt tokens, so throughput more than doubles there.</p>
+
+<details class="evidence"><summary>Evidence</summary>The 64 and 128 thresholds and the doubling figure come only from the vLLM team's blog and their own repro repo, which discloses a harness concurrency bug. NVIDIA Dynamo's docs and the Mooncake paper support the direction, not the numbers.</details>
+
+<p>The configuration encodes the same arithmetic. In vLLM's offloading guide at main, offload_prompt_only defaults to true. So only prefill blocks are offloaded, and decode-time KV is skipped. Every one of your 8 rounds re-reads the same prompt prefix. So its hit rate is high, and its recompute cost the full pass. KV written while generating one reply is never re-read. So its hit rate sits near zero, and storing it pays only for the copy.</p>
+
+<div class="keypoints">
+<p class="remember">A tier is worth hit rate times the gap between recompute cost and reload cost.</p>
+<p class="trap">Judging tiers by speed alone, and dropping the slow storage tier that wins at scale.</p>
+<p class="try">Drag hit rate to zero and the saving vanishes, exactly the story below 64 conversations.</p>
+</div>
+
+<p>The formula prices each tier, not the machinery that moves blocks between them. The next section answers how a slow disk avoids stalling the GPU and how two servers share one cached prompt.</p>
+<h2 data-concept="c1">The two design choices that keep the GPU out of trouble</h2>
+<p>The formula says offloading pays at scale, but it leaves two questions open. Why does a slow disk not slow the GPU, and how can two servers share cached prompts?</p>
+
+<p>On your box the filesystem tier is a plain NVMe drive. A disk read can take milliseconds where an HBM copy takes microseconds. If GPU memory stayed reserved while the disk worked, one slow drive could stall your whole serving loop. The Naive belief is that the transfer layer must be fast to keep the GPU fast. What actually happens is that the design removes the GPU from the transfer entirely.</p>
+
+<h3>Host-centric staging</h3>
+
+<p><dfn>Host-centric staging</dfn> is the rule that only the CPU tier may touch GPU memory. Every secondary tier works on host DRAM alone. The GPU hands its evicted KV blocks to the CPU tier. It is freed immediately, before any disk or network write starts. On reload the order reverses. GPU memory is allocated only after the data already sits in host memory, a just-in-time allocation.</p>
+
+<ol class="flow">
+<li><b>GPU to DRAM</b><span>the only copy that touches GPU memory; then GPU memory is freed</span></li>
+<li><b>DRAM to disk</b><span>a plain CPU process writes with POSIX I/O, at disk speed</span></li>
+<li class="ok"><b>reload</b><span>disk to DRAM first, then DRAM to GPU once the data is ready</span></li>
+</ol>
+
+<p>The consequence is exact. A slow disk can delay a reload. But it cannot extend how long GPU memory is held, because GPU memory is released in step one. The vLLM docs state it as a rule. Secondary tiers cannot read from or write to GPU memory. Every GPU-to-secondary transfer is staged through the CPU primary tier.</p>
+
+<h3>Content addressing</h3>
+
+<p>The second choice answers the sharing question. <dfn>Content addressing</dfn> means the filesystem tier names each stored chunk by a hash of its token content, not by which request produced it. Two prompts with the same prefix produce the same hash, so two vLLM instances on one shared mount read each other's cached chunks with no coordination, no registry and no lock.</p>
+
+<p>This has a sharp edge. The default block-hash seed is fixed, so sharing works out of the box. But the xxhash prefix-caching algorithms use a random seed chosen per process. So two instances hash the same tokens to different keys, and every cross-instance read misses. The docs' fix is one environment variable: set the same PYTHONHASHSEED on every instance.</p>
+
+<ul class="tree">
+<li><b>Same prompt, two boxes, does box B hit?</b>
+<ul><li class="ok"><em>default hash or same PYTHONHASHSEED</em><span>identical content, identical key, hit</span></li>
+<li class="bad"><em>xxhash with per-process seed</em><span>different keys, a miss on every lookup</span></li></ul></li>
+</ul>
+
+<details class="evidence"><summary>Evidence</summary>The GPU-access rule, the just-in-time reload order and the PYTHONHASHSEED caveat are verbatim from the vLLM usage guide at <code>main</code>, read 2026-10-09. RFC issue 38260 confirms secondary tiers never touch accelerator memory. NVIDIA Dynamo's independent docs describe the same host-first design.</details>
+
+<div class="keypoints">
+<p class="remember">Only the CPU tier touches the GPU, and chunks are named by content so sharing needs no coordination.</p>
+<p class="trap">Enabling xxhash prefix caching on two boxes with default settings: every shared lookup silently misses.</p>
+<p class="try">Check PYTHONHASHSEED on any two serving processes you expect to share a mount; mismatched seeds mean zero cross-instance hits.</p>
+</div>
+
+<p>You can now read the phase's eviction cliff as a demotion path with a recompute fallback, not a wall. HBM is the top tier. DRAM and storage sit below it, and the tier-value formula predicts what each adds. The lab puts you in the actual docs to find these defaults for your own workload.</p>
+<h2 data-kind="lab">Lab</h2>
+<p>Fifteen minutes in the source doc, so the defaults from this phase are ones you checked yourself. Open the vLLM KV offloading usage guide, the same file the digest read:</p>
+
+<pre><code data-lang="text">https://raw.githubusercontent.com/vllm-project/vllm/main/docs/features/kv_offloading_usage.md</code></pre>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>L1</b> <span class="tag">offline</span></label> <b>Find the CPU-tier policy.</b> In the guide's tier configuration section, locate the eviction policy setting. You should find <code>lru</code> as the default, with <code>arc</code> built in. This is the cache behaviour from the sections above: the host tier is a real cache, not a staging buffer.
+<details class="answer"><summary>Answer sketch</summary>The config reference lists the policy key with default <code>lru</code>. If you found it, the claim "the CPU tier is a proper cache" is verified in the doc, not just in this lesson.</details></li>
+
+<li><label><input type="checkbox"> <b>L2</b> <span class="tag">offline</span></label> <b>Find the two economics defaults.</b> Locate <code>offload_prompt_only</code> and confirm its default is <code>true</code>, and <code>blocks_per_chunk</code> and confirm its default is <code>1</code>. Connect each to the tier-value formula from earlier: the first says only the expensive reusable tokens are stored, the second says one chunk is one GPU block, so a miss costs at most the transfer of small blocks until promotion starts.
+<details class="answer"><summary>Answer sketch</summary>Both keys appear with defaults <code>true</code> and <code>1</code>. If <code>offload_prompt_only</code> were false, decode-time KV would consume DRAM capacity that prompt blocks could have used.</details></li>
+
+<li><label><input type="checkbox"> <b>L3</b> <span class="tag">offline</span></label> <b>Apply it to the running case.</b> Write one line for your workload of 12K-token conversations over 8 rounds: which tier above your cache would fill first as concurrency climbs, and what a miss costs today, before any offloading config is set. Use the formula: a miss costs the recompute cost, because there is no tier to pay a reload on.
+<details class="answer"><summary>Answer sketch</summary>HBM fills first, because it is the only tier on the box today. A miss on the eviction path costs a full GPU prefill of the 12K-token prompt. After adding a CPU tier, the same miss costs a PCIe read; after a storage tier, a disk read. One line each is enough.</details></li>
+</ul>
+
+<div class="callout tip">The phase's eviction cliff is now the top tier of a memory hierarchy. When you re-read the phase's capacity math, read the cliff as a demotion path with a recompute fallback, not a wall.</div>
+
+<p>The checkpoint puts this model to work: same shared mount, two GPU boxes, and a cache hit that never happens.</p>
+<h2 data-kind="checkpoint">Checkpoint</h2>
+<p>The lab checked the defaults on one box. The checkpoint asks what happens when a second box runs the same configuration.</p>
+
+<div class="checkpoint">
+<p><b>Scenario.</b> Your serving setup adds a second GPU box behind the same shared filesystem mount. Both boxes run xxhash prefix caching with default settings. A prompt cached on box A misses on box B every time, so box B pays a full recompute for prompts box A already holds.</p>
+
+<ol>
+<li>Using this lesson's model, what causes the miss?</li>
+<li>What single environment variable fixes it?</li>
+</ol>
+
+<details class="answer">
+<summary>Answer sketch</summary>
+<p>The filesystem tier names each chunk by a hash of its token content, so identical prompts share a cache only when both processes produce identical hashes. With the <code>xxhash</code> prefix-caching algorithms the hash seed is random per process, so box A and box B compute different keys for the same prompt. Every lookup on box B misses, and the miss costs a full GPU prefill of the 12K-token prompt.</p>
+<p>Setting the same <code>PYTHONHASHSEED</code> on both boxes makes the seeds agree, the keys match, and the shared mount starts behaving as one shared cache.</p>
+<p>The default block-hash seed is fixed, so this trap only appears when you choose an xxhash algorithm. The docs' cross-process sharing section states it in one sentence, and it costs exactly one environment variable.</p>
+</details>
+</div>
+
+<p>The post turns both results into two publishable claims, one of them a caution about the benchmark numbers.</p>
+<h2 data-kind="post">Post</h2>
+<p>Two posts this phase supports.</p>
+
+<ol>
+<li><b>"Offload shows no gain at low concurrency, and that is the point."</b> A one-screen note on the tier-value formula: a tier is worth hit rate times the gap between recompute cost and reload cost, so when HBM already holds every active prefix the formula is zero. Yours because it comes from your box: 12K-token conversations, 8 rounds, the threshold where your working set stops fitting.</li>
+<li><b>"The 2x long-context offload number is single-vendor."</b> A short caution that the threshold numbers (~64, ~128 conversations, more than 2x throughput) come from one team's benchmark of their own feature, and their repro repo discloses a harness bug that could stall concurrency. The direction is supported, the curve is not.</li>
+</ol>
+
+<details class="evidence">
+<summary>Evidence</summary>
+<p>The thresholds and 2x figure are reported by the vLLM team's blog post. It reports Qwen3.6-35B-A3B, 2x H100, 12K-token prompts over 8 rounds. Their own repro repo, neuralmagic/fs-offload-experiments, discloses the harness concurrency bug. No independent replication exists. The mechanism is confirmed independently by the vLLM usage guide, RFC issue 38260, NVIDIA Dynamo docs, and the Mooncake paper. See Sources below.</p>
+</details>
+<h2 data-kind="sources">Sources</h2>
+<ul class="sources">
+<li>https://vllm.ai/blog/2026-09-10-tiered-kv-offloading: the main text. Gave the tiered framework, the host-centric design, and the benchmark with the ~64 and ~128 thresholds and the 2x figure. Those numbers are authors-only, not independently confirmed.</li>
+<li>https://raw.githubusercontent.com/vllm-project/vllm/main/docs/features/kv_offloading_usage.md: the official usage guide. Confirmed the mechanism: the CPU tier alone touches GPU memory, the lru default, offload_prompt_only: true, blocks_per_chunk: 1, and the PYTHONHASHSEED caveat for cross-instance sharing.</li>
+<li>https://github.com/vllm-project/vllm/issues/38260: the design RFC. Confirmed the public design and carried one independent production datapoint: byte-identical chunks across TP ranks, about 38x fewer CPU bytes.</li>
+<li>https://docs.nvidia.com/dynamo/v-0-9-0/user-guides/kv-cache-offloading: a second vendor shipping the same GPU to CPU to disk tiering. Independent confirmation of the mechanism, plus two caveats the blog omits: an SSD-wear filter and cases where TTFT gains do not appear.</li>
+<li>https://arxiv.org/abs/2407.00079: the Mooncake paper. A different team's production system built on the same idea, so the mechanism has four independent sources. Says nothing about vLLM's numbers.</li>
+<li>https://github.com/neuralmagic/fs-offload-experiments: the authors' own repro repo. Confirms the benchmark method and discloses a harness concurrency bug, so the exact curve stays unverified.</li>
+</ul>
+
+<p>Two things stayed unverified: the claim that the feature landed in vLLM v0.22, and the raw chart values behind the thresholds. The mechanism is high confidence, the 2x curve is not.</p>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>

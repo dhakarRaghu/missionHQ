@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why one agent port cost $120k and not a million</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1c1b19;--muted:#6b675f;--line:#e6e2d9;--card:#ffffff;
+  --soft:#f3f0e9;--accent:#2f5bd3;--accent-soft:#e8eefc;
+  --ok:#2f7d4f;--ok-soft:#e5f3ea;--bad:#b3261e;--bad-soft:#fbe9e7;
+  --warn:#9a6a00;--warn-soft:#fdf3dc;--violet:#6b4bc7;--violet-soft:#efeafb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1d1c1a;
+  --soft:#23221f;--accent:#8fb0ff;--accent-soft:#1e2740;
+  --ok:#7fcf9c;--ok-soft:#17291e;--bad:#ff968c;--bad-soft:#35191a;
+  --warn:#e8c170;--warn-soft:#30280f;--violet:#bba7ff;--violet-soft:#241d3a;
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16.5px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:9}
+.layout{max-width:1180px;margin:0 auto;padding:2.2rem 1.2rem 5rem;display:grid;gap:2.5rem}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+main{min-width:0;max-width:74ch}
+nav.toc{font-size:.84rem}
+@media (min-width:1100px){nav.toc{position:sticky;top:1.5rem;align-self:start;
+  max-height:calc(100vh - 3rem);overflow:auto}}
+nav.toc b{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.5rem}
+nav.toc a{display:block;padding:.28rem .6rem;border-left:2px solid var(--line);
+  color:var(--muted);text-decoration:none;line-height:1.35}
+nav.toc a:hover{color:var(--fg)}
+nav.toc a.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+header.hero{margin-bottom:2rem;padding-bottom:1.4rem;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--accent);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+h1{font-size:2.05rem;line-height:1.2;margin:.35rem 0 .6rem;letter-spacing:-.015em}
+.subtitle{font-size:1.12rem;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--muted)}
+h2{display:flex;gap:.4rem;align-items:baseline;font-size:1.45rem;line-height:1.3;margin:3.2rem 0 .8rem;letter-spacing:-.01em;scroll-margin-top:1rem}
+h2 .num{display:inline-block;min-width:2.6em;margin-right:.45rem;padding:.05rem .45rem;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.8em;text-align:center}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+p,li{max-width:74ch}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+pre{position:relative;font-family:var(--mono);font-size:.82rem;line-height:1.45;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;overflow-x:auto;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+pre[data-lang]{padding-top:2rem}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.45rem;left:1.1rem;
+  font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+pre.ascii{line-height:1.25;background:var(--soft)}
+.copy{position:absolute;top:.3rem;right:.4rem;font:inherit;font-size:.7rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:6px;padding:.1rem .5rem;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.2rem 0;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.why{font-size:1.06rem;border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;margin:1rem 0 1.4rem}
+.keypoints{display:grid;gap:.5rem;margin:1.8rem 0;padding:1rem 1.1rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.keypoints p{margin:0;padding-left:1.9rem;position:relative}
+.keypoints p::before{position:absolute;left:0;top:0;font-weight:700}
+.remember::before{content:"★";color:var(--accent)}
+.trap::before{content:"⚠";color:var(--bad)}
+.try::before{content:"▶";color:var(--ok)}
+.callout{margin:1.4rem 0;padding:.8rem 1rem;border-radius:10px;border:1px solid var(--line);background:var(--soft)}
+.callout.tip{background:var(--ok-soft);border-color:transparent}
+.callout.warn{background:var(--warn-soft);border-color:transparent}
+/* What Mission HQ found reads as part of the lesson, not as a box bolted on
+   it: "why it is explicit, let it be part". The kind is kept in the markup so
+   the claims run can still find every added paragraph and check it, and it is
+   invisible to him. A correction keeps one quiet mark, because knowing the
+   original said something else is part of the teaching. */
+.addition{margin:1.2rem 0}
+.addition[data-kind=correction]{border-left:2px solid var(--line);padding-left:1rem}
+.addition>:first-child{margin-top:0}.addition>:last-child{margin-bottom:0}
+p[data-added]{margin:1rem 0}
+figure.diagram{margin:2rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+figure.diagram svg{width:100%;height:auto;display:block}
+figure.diagram svg text{fill:var(--fg);font-family:inherit}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:.6rem}
+figure.diagram button,.steps-nav button,.tabs-nav button,.toggle-fig button{font:inherit;font-size:.82rem;
+  padding:.3rem .8rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--fg);cursor:pointer;margin:.5rem .3rem 0 0}
+button.on{background:var(--fg)!important;color:var(--bg)!important;border-color:var(--fg)!important}
+.compare{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:760px){.compare{grid-template-columns:1fr 1fr}}
+.compare>div{border-radius:10px;padding:.8rem 1rem;border:1px solid var(--line);min-width:0}
+.compare>div::before{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;margin-bottom:.3rem}
+.wrong{background:var(--bad-soft)}.wrong::before{content:"✗ WRONG";color:var(--bad)}
+.right{background:var(--ok-soft)}.right::before{content:"✓ RIGHT";color:var(--ok)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps>li{counter-increment:s;position:relative;padding:.6rem 0 .6rem 2.6rem;border-left:2px solid var(--line);margin-left:.9rem}
+.steps>li::before{content:counter(s);position:absolute;left:-.95rem;top:.55rem;width:1.8rem;height:1.8rem;
+  border-radius:50%;background:var(--accent);color:#fff;font-size:.8rem;display:grid;place-items:center}
+.steps.stepping>li{display:none}.steps.stepping>li.show{display:block}
+.tabs-nav{border-bottom:1px solid var(--line);margin-top:1.2rem}
+.tabs>[data-tab]{padding:.6rem 0}.tabs.ready>[data-tab]:not(.show){display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.6rem;margin:1.4rem 0}
+.stat{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;background:var(--card)}
+.stat b{display:block;font-size:1.35rem;line-height:1.2}
+.stat span{font-size:.8rem;color:var(--muted)}
+.bars{margin:1.4rem 0;display:grid;gap:.45rem}
+.bar{display:grid;grid-template-columns:8rem 1fr 6rem;gap:.6rem;align-items:center;font-size:.85rem}
+.bar::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar::after{content:attr(data-value);text-align:right;font-family:var(--mono)}
+.bar i{display:block;height:.7rem;border-radius:4px;background:var(--accent);width:calc(var(--v,0)*1%)}
+.timeline{list-style:none;padding:0;border-left:2px solid var(--line);margin:1.4rem 0 1.4rem .4rem}
+.timeline li{position:relative;padding:.25rem 0 .25rem 1.3rem}
+.timeline li::before{content:"";position:absolute;left:-.4rem;top:.75rem;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent)}
+.timeline time{font-family:var(--mono);font-size:.8rem;color:var(--muted);margin-right:.5rem}
+.exercises{list-style:none;padding:0}
+.exercises>li{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.7rem 0;background:var(--card)}
+.exercises>li:has(input:checked){opacity:.6}
+.exercises label{cursor:pointer}
+.tag{display:inline-block;font-size:.7rem;border-radius:99px;padding:0 .5rem;margin-left:.3rem;
+  background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.break{background:var(--bad-soft);color:var(--bad)}
+details.answer{margin:.8rem 0;border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem;background:var(--card)}
+details.answer summary{cursor:pointer;font-weight:600;padding:.5rem 0;color:var(--accent)}
+pre.cheatsheet{background:var(--accent-soft);border-color:transparent}
+.sources li{margin:.4rem 0}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+/* --- richer pieces, so a lesson can show a mechanism instead of describing
+   it: a number he can move, a figure he can step through, a card that carries
+   one idea. All of it works inside the sandboxed frame: no network, no
+   storage, inline script only. --- */
+.cards{display:grid;gap:.8rem;margin:1.4rem 0}
+@media (min-width:720px){.cards[data-cols="2"]{grid-template-columns:1fr 1fr}
+  .cards[data-cols="3"]{grid-template-columns:repeat(3,1fr)}}
+.card{border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;background:var(--card)}
+.card h4{margin:0 0 .3rem;font-size:.95rem}
+.card p{margin:0;font-size:.92rem;color:var(--muted)}
+.lab{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;
+  padding:.8rem 1rem;margin:1.4rem 0;background:var(--card)}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;border-radius:99px;padding:.1rem .55rem;background:var(--soft);color:var(--muted)}
+kbd{font-family:var(--mono);font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .35em;background:var(--card)}
+/* A number he can move. Inputs drive the outputs through kit.calc. */
+.calc{border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1.6rem 0;background:var(--card)}
+.calc h4{margin:0 0 .6rem;font-size:.95rem}
+.calc label{display:grid;grid-template-columns:11rem 1fr 5rem;gap:.6rem;align-items:center;
+  font-size:.85rem;margin:.45rem 0}
+.calc input[type=range]{width:100%;accent-color:var(--accent)}
+.calc output,.calc .val{font-family:var(--mono);font-size:.85rem;text-align:right}
+.calc .result{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+  font-size:1.05rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.calc .result b{font-family:var(--mono)}
+.calc .note{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+/* Something he can flip between: before and after, wrong and right. */
+.toggle-fig{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.toggle-fig .views>[data-view]{display:none}
+.toggle-fig .views>[data-view].show{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;color:var(--muted);margin-top:.6rem}
+.legend i{display:inline-block;width:.8rem;height:.8rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
+/* --- figures drawn in HTML, so a mechanism is a picture and not a block of
+   typed characters. No coordinates to get wrong: the markup is a list, and
+   the stylesheet draws it. --- */
+dfn{font-style:normal;font-weight:650;border-bottom:1px dotted var(--muted)}
+/* A flow: boxes in order, an arrow between each pair. */
+.flow{list-style:none;padding:0;margin:1.6rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1.7rem}
+.flow>li{position:relative;flex:1 1 9rem;min-width:8rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:.6rem .8rem;font-size:.9rem;line-height:1.4}
+.flow>li b{display:block;font-size:.92rem}
+.flow>li span{display:block;color:var(--muted);font-size:.84rem;margin-top:.15rem}
+.flow>li:not(:last-child)::after{content:"→";position:absolute;right:-1.25rem;top:50%;
+  transform:translateY(-50%);color:var(--muted);font-size:1.05rem}
+.flow[data-dir=down]{flex-direction:column;gap:1.5rem;max-width:34rem}
+.flow[data-dir=down]>li{flex:0 0 auto}
+.flow[data-dir=down]>li:not(:last-child)::after{content:"↓";right:auto;left:1.2rem;top:auto;bottom:-1.45rem;transform:none}
+.flow>li.hot{border-color:var(--accent);background:var(--accent-soft)}
+.flow>li.bad{border-color:var(--bad);background:var(--bad-soft)}
+.flow>li.ok{border-color:var(--ok);background:var(--ok-soft)}
+/* Lanes: who does what in each step, drawn to scale. One row per actor, one
+   segment per step; --w is the step's duration or size. */
+.lanes{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.lanes h4{margin:0 0 .7rem;font-size:.95rem}
+.lane{display:grid;grid-template-columns:6.5rem 1fr;gap:.6rem;align-items:center;margin:.3rem 0;font-size:.8rem}
+.lane::before{content:attr(data-label);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane>div{display:flex;gap:3px;min-width:0}
+.lane i{flex:var(--w,1) 0 2.1rem;min-width:0;height:1.7rem;border-radius:5px;background:var(--soft);
+  font-style:normal;font-family:var(--mono);font-size:.68rem;line-height:1.7rem;text-align:center;
+  overflow:hidden;white-space:nowrap;color:var(--fg);transition:opacity .2s}
+.lane i::after{content:attr(data-t)}
+.lane i.decode{background:var(--ok-soft);color:var(--ok)}
+.lane i.prefill{background:var(--accent-soft);color:var(--accent)}
+.lane i.frozen{background:var(--bad-soft);color:var(--bad)}
+.lane i.wait{background:var(--warn-soft);color:var(--warn)}
+.lane i.idle{background:transparent;border:1px dashed var(--line)}
+.lanes.playing .lane i.later{opacity:.12}
+.lanes.playing .lane i.now{outline:2px solid var(--fg);outline-offset:1px}
+.lanes .at{display:none;margin:.8rem 0 0;font-size:.9rem}
+.lanes .at.show,.lanes:not(.playing) .at[data-step=all]{display:block}
+.lanes-nav button{font:inherit;font-size:.82rem;padding:.3rem .8rem;border-radius:8px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;margin:.7rem .3rem 0 0}
+.lanes-nav span{font-size:.8rem;color:var(--muted);margin-left:.3rem}
+/* A stack: one whole, split into named parts, drawn to scale. */
+.stack{border:1px solid var(--line);border-radius:12px;padding:1rem;margin:1.6rem 0;background:var(--card)}
+.stack h4{margin:0 0 .7rem;font-size:.95rem}
+.stack .whole{display:flex;gap:2px;height:2.1rem;border-radius:7px;overflow:hidden}
+.stack .whole i{flex:var(--w,1) 0 0;min-width:4px;background:var(--c,var(--accent));cursor:pointer;transition:opacity .15s}
+.stack.picked .whole i:not(.on){opacity:.25}
+.stack ul{list-style:none;padding:0;margin:.8rem 0 0;display:grid;gap:.25rem;font-size:.86rem}
+.stack li{display:grid;grid-template-columns:1rem 9rem 5.5rem 1fr;gap:.6rem;align-items:baseline;
+  padding:.15rem .3rem;border-radius:6px;cursor:pointer}
+.stack li.on{background:var(--soft)}
+.stack li::before{content:"";width:.8rem;height:.8rem;border-radius:3px;background:var(--c,var(--accent));align-self:center}
+.stack li b{font-weight:600}.stack li span{font-family:var(--mono);text-align:right}
+.stack li em{font-style:normal;color:var(--muted)}
+/* A decision tree: a question, and under it what each answer leads to. */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree{margin:1.6rem 0;font-size:.92rem}
+.tree ul{margin-left:1.1rem;border-left:2px solid var(--line);padding-left:1.1rem}
+.tree li{position:relative;margin:.5rem 0}
+.tree ul>li::before{content:"";position:absolute;left:-1.1rem;top:1.05rem;width:.9rem;border-top:2px solid var(--line)}
+.tree li>b,.tree li>span{display:inline-block;border:1px solid var(--line);border-radius:9px;background:var(--card);padding:.35rem .7rem}
+.tree li>em{font-style:normal;font-size:.78rem;color:var(--muted);margin-right:.4rem}
+.tree li.ok>span{border-color:var(--ok);background:var(--ok-soft)}
+.tree li.bad>span{border-color:var(--bad);background:var(--bad-soft)}
+/* Table cells that carry a verdict. */
+td.ok,th.ok{background:var(--ok-soft);color:var(--ok)}
+td.bad,th.bad{background:var(--bad-soft);color:var(--bad)}
+tr.pick>td{background:var(--accent-soft);font-weight:600}
+h2 a.anchor,h3 a.anchor{opacity:0;text-decoration:none;color:var(--muted);font-weight:400;margin-left:.3rem}
+h2:hover a.anchor,h3:hover a.anchor{opacity:1}
+/* --- the concept spine. A phase is three to five ideas, stated as claims he
+   can test. They open the page, every teaching section belongs to one, and
+   each is met first as a question he answers before he is told. --- */
+.concepts{list-style:none;counter-reset:c;padding:0;margin:1.6rem 0;display:grid;gap:.6rem}
+.concepts>li{counter-increment:c;position:relative;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:.8rem 1rem .8rem 3.1rem}
+.concepts>li::before{content:counter(c);position:absolute;left:.9rem;top:.85rem;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.8rem;font-weight:700;
+  display:grid;place-items:center}
+.concepts>li b{display:block;font-size:1rem;line-height:1.4}
+.concepts>li span{display:block;color:var(--muted);font-size:.92rem;margin-top:.15rem}
+details.predict{border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:10px;
+  background:var(--violet-soft);padding:.7rem 1rem;margin:1.4rem 0}
+details.predict>summary{cursor:pointer;font-weight:600}
+details.predict>summary::after{content:" Decide, then open.";font-weight:400;color:var(--muted);font-size:.88rem}
+details.predict[open]>summary::after{content:""}
+details.predict>:not(summary){margin-top:.6rem}
+/* Where a claim came from, for the day he wants to check it. Closed by
+   default: the mechanism is the lesson, the citation is the receipt. */
+details.evidence{border-top:1px solid var(--line);margin:1.2rem 0;padding-top:.5rem;font-size:.9rem;color:var(--muted)}
+details.evidence>summary{cursor:pointer;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+@media print{nav.toc,#progress,.copy{display:none}}
+</style>
+<script>
+// kit: the few helpers a figure needs, so a lesson's own script stays short.
+// It is defined in the head, before any body script runs, so a figure can
+// call kit.calc right where it is written.
+(function(){
+  var ready=[], fired=false;
+  function whenReady(fn){ if(fired) fn(); else ready.push(fn); }
+  document.addEventListener('DOMContentLoaded',function(){
+    fired=true; ready.forEach(function(fn){ fn(); }); ready=[];
+  });
+  window.kit={
+    $:function(sel,root){return (root||document).querySelector(sel);},
+    $$:function(sel,root){return [].slice.call((root||document).querySelectorAll(sel));},
+    fmt:function(n,digits){
+      if(n===null||n===undefined||isNaN(n)) return '-';
+      return Number(n).toLocaleString('en-US',{maximumFractionDigits:digits===undefined?2:digits});
+    },
+    // calc('#id', function(v){ return {label: value, ...} }): every input in
+    // the box is read by name, and every [data-out] is filled from the result.
+    calc:function(sel,compute){
+      whenReady(function(){ window.kit._calc(sel,compute); });
+    },
+    _calc:function(sel,compute){
+      var box=typeof sel==='string'?document.querySelector(sel):sel; if(!box) return;
+      var inputs=[].slice.call(box.querySelectorAll('input,select'));
+      function run(){
+        var v={};
+        inputs.forEach(function(i){ v[i.name||i.id]=i.type==='checkbox'?i.checked:(isNaN(+i.value)?i.value:+i.value); });
+        inputs.forEach(function(i){
+          var shown=box.querySelector('[data-val="'+(i.name||i.id)+'"]');
+          if(shown) shown.textContent=i.type==='range'?window.kit.fmt(+i.value,0):i.value;
+        });
+        var out=compute(v)||{};
+        Object.keys(out).forEach(function(k){
+          var el=box.querySelector('[data-out="'+k+'"]');
+          if(el) el.textContent=out[k];
+        });
+      }
+      inputs.forEach(function(i){ i.addEventListener('input',run); });
+      run();
+    }
+  };
+})();
+</script>
+</head>
+<body>
+<div id="progress"></div>
+<div class="layout">
+<nav class="toc" aria-label="Contents"><b>In this lesson</b></nav>
+<main>
+<header class="hero"><div class="eyebrow">applies · Inference Internals, Phase 3B: Routing and Batching · the same prefix-reuse idea, one layer up, at the boundary where you pay for the compute</div><h1>Why one agent port cost $120k and not a million</h1><p class="subtitle">A long agent session recomputes everything it invalidates. Why does prompt assembly order decide how much of the conversation is ever computed twice?</p></header>
+<p>In Phase 3B you saw the serving side reuse work: the KV cache, the attention keys and values the GPU keeps for each request, lets a shared prefix be computed once and never again. That phase put you inside the server, so it could not answer what the same idea does when you are the customer paying the bill. Your own agent loop sends the whole conversation with every turn, and you cannot see which parts the provider treated as already computed and which it processed fresh at full price.</p>
+
+<p>The Copilot runtime port answers it with a receipt: 128 porting PRs over 14.5 weeks, driven by agent sessions that sent 136.3 billion input tokens and got 96.22% of them back as already-computed prefix. This phase shows you the one property of prompt assembly that makes that fraction possible, and which single edit near the start destroys it, so you can read your own loop and predict what each turn will cost before you ship it.</p>
+<p>This lesson teaches one idea. It is stated here so you can see where the lesson is going. It will read more clearly once it has been explained below, so come back to it at the end.</p>
+<ol class="concepts"><li id="c1"><b>A long agent session only stays cheap because everything before the newest turn is treated as a processed prefix; one edit near the start forces all of it to be processed again.</b> <span>Predict which change to his agent&#x27;s prompt assembly turns a cheap turn into a full reprocess, before he ships it.</span></li></ol>
+<h2 data-concept="c1">What the $120,000 was actually buying</h2>
+<p class="why">Almost every token in this project was billed at the reuse rate, and this section shows what that rate bought.</p>
+
+<p>GitHub rewrote the Copilot runtime from TypeScript to Rust, about 832,000 lines of production code. Long autonomous agent sessions drove the work, producing 128 porting PRs across 14.5 weeks. Those sessions used 136.3 billion total tokens, and the token bill came to about $120,000.</p>
+
+<p>That last number is the surprise. If each turn had been billed as fully new input, the bill would have been roughly ten times larger. It was not, because 96.22% of the input-side token volume was billed as work the server had already done. This section shows what the money was actually paying for.</p>
+
+<h3>The picture: processing once, reading many times</h3>
+
+<p>In Phase 3B you met the <dfn>KV cache</dfn>, the attention keys and values the GPU keeps for each request. Computing keys and values for a token is the expensive part of reading a prompt. A token whose keys and values already exist in cache does not need that compute again.</p>
+
+<p><dfn>Prefix reuse</dfn> is the server skipping that compute for a prompt part it has already processed. Your agent sends the whole conversation with every turn, so most of turn fifty is identical to turn forty-nine. The server recognises the identical head of the prompt and charges it as a cache read, not fresh input.</p>
+
+<p>The part the server recognises is the <dfn>processed prefix</dfn>. It is the leading run of tokens, byte-identical to a prompt it has seen before. Everything in that run is priced at the read rate. Everything after it, the newest turn, is priced as new work.</p>
+
+<div class="stack">
+  <h4>One turn's prompt, late in a session</h4>
+  <div class="whole">
+    <i style="--w:30;--c:var(--ok)" data-label="tools + system" data-value="fixed head" data-note="processed once, read every turn"></i>
+    <i style="--w:950;--c:var(--accent)" data-label="conversation" data-value="processed prefix" data-note="billed at the cache-read rate"></i>
+    <i style="--w:20;--c:var(--warn)" data-label="new turn" data-value="fresh input" data-note="processed at full price"></i>
+  </div>
+</div>
+
+<details class="predict"><summary>Predict: the sessions ran for days and one compacted 647 times, yet 96.22% of tokens were read as already-processed prefix. What property of the harness makes that fraction possible at all?</summary>
+<p>The prompt head stays byte-identical across every turn, and each turn only appends to the tail. If the harness changed anything early in the prompt, for example a per-turn timestamp, the run of identical tokens would break there, and everything after that point would be processed fresh. Only a discipline of never editing the prefix keeps the fraction at 96%.</p>
+</details>
+
+<h3>The mechanism: where the 136.3 billion tokens went</h3>
+
+<p>The reported breakdown, with the price each class pays because of prefix reuse:</p>
+
+<ul>
+<li><b>130.6 billion cache-read tokens.</b> The processed prefix, billed at the read rate. Anthropic prices a 5-minute cache read at 0.1x the base input price, so these tokens cost a tenth of fresh input.</li>
+<li><b>4.2 billion cache-write tokens.</b> New tokens entering the cache for the first time, billed at 1.25x base input by Anthropic's pricing. These are the turns' new work being stored for later turns to reuse.</li>
+<li><b>0.9 billion fresh input tokens.</b> Tokens processed with no reuse, at full base price. This is 0.71% of input-side volume.</li>
+</ul>
+
+<p>So per turn, the agent paid full price for the new turn's tokens. It paid a tenth of the price for the whole conversation behind it. Session length stopped driving cost. What drove cost instead was how often the prefix survived intact.</p>
+
+<p>This is the wrong belief to drop. You would reasonably expect each turn to cost roughly the tokens it adds. So a multi-day session's cost grows with what the agent does. The belief is reasonable because most API calls you have written were one request with one price. In an agent loop the request is the whole conversation. The bill depends on how that conversation is assembled, not on what the agent did this turn.</p>
+
+<h3>The one number</h3>
+
+<div class="stats">
+<div class="stat"><b>96.22%</b><span>of input tokens billed as already-processed prefix</span></div>
+<div class="stat"><b>~$120,000</b><span>total token bill for 136.3B tokens</span></div>
+<div class="stat"><b>0.71%</b><span>of input tokens processed with no reuse</span></div>
+</div>
+
+<p>A rough back-of-envelope check shows why the fraction matters. At a 0.1x read price, reprocessing all input as fresh would multiply the input-side bill by about ten. Drop the hit rate and the same sessions cost near a million dollars. This is the difference this phase's title names.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The token breakdown, the hit rate and the $120,000 bill are author-reported in the GitHub blog post, from private session logs, and cannot be measured independently. The author's own definition: "The prompt-cache hit rate was 96.22%: cache reads divided by all input-side token volume." The 0.1x read and 1.25x write prices come from Anthropic's prompt-caching documentation, verified against the first-party docs on 2026-10-15.</p>
+</details>
+
+<h3>Use it</h3>
+
+<p>Open the prompt assembly of any agent you have on hand and find the newest-turn boundary. Everything before it is the tokens that become the processed prefix, and you can now say what each part costs. If the boundary moves because something early in the prompt changes between turns, you have found where the bill would multiply.</p>
+
+<div class="keypoints">
+<p class="remember">A long agent turn pays full price for the new tail and a tenth for everything before it.</p>
+<p class="trap">Expecting cost to track what the agent did this turn; one unstable head multiplies the whole session's bill.</p>
+<p class="try">Sum your last agent run's input tokens per turn, and check whether the turn-over-turn growth was billed or reused.</p>
+</div>
+
+<p>This section showed the prefix held across 14.5 weeks of sessions, but not what kept it true. The next section answers why the prefix holds, and what silently breaks it.</p>
+<h2 data-concept="c1">Why the prefix holds, and what silently breaks it</h2>
+<p>The section above showed only the tail of each turn was ever new. It did not show what kept that true across sessions that ran for days. The answer is a discipline the harness follows on every turn, and this section is that discipline.</p>
+
+<p class="why">The prefix order is a contract: what goes first must stay fixed, or the conversation gets processed again.</p>
+
+<h3>The order the server expects</h3>
+
+<p>Prefix reuse is the server skipping compute for a prompt part it has already processed. It does not match "text that looks similar". It matches <b>an exact byte-for-byte prefix</b> of this request against one it has in the KV cache. The KV cache is the attention keys and values the GPU keeps for each request. Provider caches define a fixed order for the prompt: tool definitions first, then the system prompt, then the conversation messages. A match for one level only counts if every level before it also matched.</p>
+
+<p>So a change at any level invalidates that level and everything after it. This is <dfn>prefix invalidation</dfn>. The moment any byte early in the prompt differs, the processed prefix ends there. Then the server computes the rest of the prompt fresh at full input price.</p>
+
+<ol class="flow" id="s2-order">
+<li><b>tool definitions</b><span>checked first; a byte change here ends the prefix for everything</span></li>
+<li><b>system prompt</b><span>checked second; a change here keeps the tools cached, loses the conversation</span></li>
+<li class="hot"><b>conversation</b><span>grows at the tail each turn; only this part is expected to change</span></li>
+<li class="ok"><b>new turn</b><span>appended; the only tokens the server should ever process fresh</span></li>
+</ol>
+
+<p>The Copilot harness held this order across 14.5 weeks. It kept tools and system prompt byte-identical and treated the conversation as append-only. Even compaction, which rewrote long stretches of history, ended at a stable summary the harness re-anchored. So one session survived 647 compactions and still read most of its tokens as processed prefix.</p>
+
+<h3>One timestamp, and the cache is gone</h3>
+
+<details class="predict"><summary>Predict: turn 41 differs from turn 40 only by a timestamp written into the system prompt. The prompt behind the new turn is 2,000 + 4,000 + 90,000 tokens, and the new turn is 1,000. How many tokens does the server process fresh?</summary>
+<p>About 95,000. The timestamp sits in the system prompt, so the prefix match ends there. The system prompt (4,000), the whole conversation (90,000) and the new turn (1,000) are all processed fresh. Only the 2,000 tool-definition tokens before the change still count as a hit. The temptation is to answer 1,000, because nothing in the conversation changed. But the server never looks at the conversation as a separate thing.</p>
+</details>
+
+<div class="toggle-fig" id="s2-timestamp">
+<button data-show="stable">Append-only prompt</button><button data-show="broken">Timestamp in system prompt</button>
+<div class="views">
+<div data-view="stable">
+<div class="stack">
+<h4>Turn 41, prefix intact · 1,000 tokens fresh</h4>
+<div class="whole">
+<i style="--w:2000;--c:var(--accent)" data-label="tools" data-value="2,000" data-note="prefix hit"></i>
+<i style="--w:4000;--c:var(--accent)" data-label="system" data-value="4,000" data-note="prefix hit"></i>
+<i style="--w:90000;--c:var(--accent)" data-label="conversation" data-value="90,000" data-note="prefix hit"></i>
+<i style="--w:1000;--c:var(--bad)" data-label="new turn" data-value="1,000" data-note="processed fresh"></i>
+</div>
+</div>
+</div>
+<div data-view="broken">
+<div class="stack">
+<h4>Turn 41, timestamp changed · 95,000 tokens fresh</h4>
+<div class="whole">
+<i style="--w:2000;--c:var(--accent)" data-label="tools" data-value="2,000" data-note="still a hit"></i>
+<i style="--w:4000;--c:var(--bad)" data-label="system + timestamp" data-value="4,000" data-note="prefix ends here"></i>
+<i style="--w:90000;--c:var(--bad)" data-label="conversation" data-value="90,000" data-note="recomputed"></i>
+<i style="--w:1000;--c:var(--bad)" data-label="new turn" data-value="1,000" data-note="processed fresh"></i>
+</div>
+</div>
+</div>
+</div>
+<div class="legend"><span><i style="background:var(--accent)"></i>read as processed prefix</span><span><i style="background:var(--bad)"></i>processed fresh</span></div>
+</div>
+
+<p>The two bars have identical content and nearly identical cost to write. The difference is 95 times the fresh-token bill on this turn. The gap grows with the conversation, so the same timestamp costs more every hour the session runs.</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>The prefix order is tools, then system, then messages. The rule that editing a level invalidates that level and everything after it comes from Anthropic's prompt-caching documentation. Both are verified against the first-party docs on 2026-10-15. The 647 compactions in one session are author-reported in the GitHub blog post. So is the append-only discipline of the Copilot harness.</p>
+</details>
+
+<h3>The three ways your own agents break it</h3>
+
+<p>Each pattern below is a small, reasonable-looking edit. Each one ends the processed prefix at the level it touches.</p>
+
+<ul>
+<li><b>Re-sorting tool definitions</b>, for example listing tools in the order they were registered: tools sit first, so the whole prompt is processed fresh on every turn where the order changes.</li>
+<li><b>A timestamp or session id in the system prompt</b>: the tools stay cached, but the system prompt changes hourly or per run, so the entire conversation behind it is recomputed each time.</li>
+<li><b>Editing mid-session history</b>, for example trimming or rewriting an old tool result: everything from the edited message onward leaves the cache, because the messages before it no longer match byte for byte.</li>
+</ul>
+
+<p>None of these shows up as an error. The agent keeps working and the logs look the same. The only signal is the cache-read share of input tokens dropping in your provider's usage metrics. That is why a silent break is discovered on the invoice rather than in a test.</p>
+
+<h3>Use it</h3>
+
+<p>Read your own prompt assembly as a contract your harness signs every turn. Whatever you place first must stay byte-identical for the life of the session. Anything that must change belongs at the tail. The lab below has you audit one Mission HQ agent against exactly this rule.</p>
+
+<div class="keypoints">
+<p class="remember">Prefix reuse needs byte-identical stability, and one early edit recomputes everything after it.</p>
+<p class="trap">Assuming an unchanged conversation stays cached no matter what; a timestamp in the system prompt recomputes all of it.</p>
+<p class="try">Diff two consecutive prompts from one agent run and find the first byte that differs.</p>
+</div>
+
+<p>You can now predict which prompt-assembly edits force a full reprocess before you ship them. The lab puts that on your own agents. Audit one Mission HQ agent's prompt assembly and mark each part stable or time-varying.</p>
+<h2 data-kind="lab">Fifteen minutes: audit one agent&#x27;s prompt assembly</h2>
+<p>You now know the rule: anything in the prompt that changes between turns invalidates the prefix from that level onward. This lab checks one of your own agents against that rule, and it takes about fifteen minutes.</p>
+
+<div class="lab">
+<p>Pick one Mission HQ agent that talks to a cached model. Open the code that assembles its prompt each turn, not its memory or instructions, just the string-building step.</p>
+
+<ul class="exercises">
+<li><label><input type="checkbox"> <b>L1</b> <span class="tag">offline</span></label> List, in order, every part that goes into the prompt: tool or skill definitions, system prompt and standing instructions, then conversation history. Write it as a one-line-per-part list, in assembly order.</li>
+<li><label><input type="checkbox"> <b>L2</b> <span class="tag">offline</span></label> Mark each part <b>stable</b> or <b>time-varying</b>. A part is time-varying if a date, clock time, run id, or live status appears inside it, or if the code sorts or filters it per turn.</li>
+<li><label><input type="checkbox"> <b>L3</b> <span class="tag">offline</span></label> For each time-varying part, name the level it sits in: tools, system, or messages. That level and everything after it is recomputed on every turn while the agent runs.</li>
+<li><label><input type="checkbox"> <b>L4</b> <span class="tag">offline</span></label> If any time-varying part sits above the conversation, write the fix: move it to the end of the system block, or better, into the newest user message, so it lands in the part that changes anyway.</li>
+<li><label><input type="checkbox"> <b>L5</b> <span class="tag">offline</span></label> If you have logs for a recent long run, compute the cache-read share: cached-read tokens over all input tokens. The Copilot harness held 96.22% across sessions that compacted 647 times; a prefix break shows up here before anywhere else.</li>
+</ul>
+</div>
+
+<div class="callout warn">If every part came back stable, run the assembly twice for the same session state and diff the two outputs. A random id or a set printed in arbitrary order passes a code read and fails the diff.</div>
+
+<p>The audit converts the prefix rule into a per-agent checklist you can re-run after any prompt change. The checkpoint next tests your prediction on a real change. A teammate adds a per-run session id to a nightly agent's system prompt.</p>
+<h2 data-kind="checkpoint">Could you spot a prefix break before the invoice?</h2>
+<p>You audited one agent you can open. Now reverse the direction: someone else's change, and you only see the metrics.</p>
+
+<div class="lab">
+<h4>The scenario</h4>
+<p>A teammate adds two lines to the system prompt of your nightly digest agent: the current date and a per-run session id. The agent runs one long session each night, about 40 turns, and each turn appends tool results to the conversation. Nothing else changed.</p>
+<p>Using the invalidation rule from this phase, answer two questions.</p>
+<ol>
+<li>The system prompt sits before the messages, so it is part of the processed prefix, the part the server has already computed. What fraction of each turn's prompt is now processed fresh?</li>
+<li>Which metric moves first, before the invoice arrives?</li>
+</ol>
+<details class="answer" id="s4-answer">
+<summary>Answer sketch</summary>
+<p><b>Question 1: effectively all of it, every turn.</b> The session id changes once per run, so the first turn of every night is a full fresh process. The date is worse: it is time-varying text inside the system prompt block. The invalidation rule says a change at the system level discards that level and everything after it, and messages come after system. So the whole accumulated conversation, which last night was served as processed prefix, is processed again from token one.</p>
+<p>In numbers from the running case: the Copilot harness held 96.22% of input tokens as prefix reads and 0.71% as fresh input. This change flips the ratio. Every turn now bills the full conversation at fresh-input prices, so the cache-read share drops toward zero and the input bill rises by roughly the read discount, about 10x at Anthropic's 0.1x read price.</p>
+<p><b>Question 2: the cache-read share of input tokens.</b> Cache reads divided by all input tokens is the metric, the same ratio the article reports as 96.22%. It falls within one night's run. Total input tokens per turn also climbs, because last night's conversation is reprocessed instead of read. Cost per run follows both, but it is the last signal to move, not the first.</p>
+</details>
+</div>
+
+<p>The same rule covers both directions. In your audit you searched your own code for unstable prefix items. Here you inferred one from a metric you did not control. In both cases the question is identical: does anything before the newest message ever change?</p>
+
+<p>You can now predict a prefix break from a one-line config diff. The last section turns the two claims of this phase into posts.</p>
+<h2 data-kind="post">Two things worth posting</h2>
+<p>Two posts, each one claim plus the number that makes it yours.</p>
+
+<p><b>One: the prefix did the work.</b> A 136.3-billion-token agent project stayed affordable because 96.22% of input tokens were read as an already-processed prefix, not computed fresh. The reason was harness discipline: tool definitions first, then system prompt, then a conversation that only ever grows at the tail. Your line: "The port did not cost $120k because the model was cheap. It cost $120k because 96% of the prompt was never processed twice."</p>
+
+<details class="evidence"><summary>Evidence</summary>
+<p>Token breakdown and cache-hit rate are author-reported in the GitHub blog post. The 0.1x read price that turns 96% reuse into roughly a 10x saving is from Anthropic's prompt-caching docs, verified 2026-10-15.</p>
+</details>
+
+<p><b>Two: assembly order is a cost decision.</b> The processed prefix follows tools, then system, then messages, and one edit invalidates its level and everything after. Your checklist of the three silent breaks: re-sorted tool definitions, a timestamp in the system prompt, edited mid-session history. Your line: "Prompt assembly order is a correctness-of-cost decision. One stable field moved one position earlier in the string can multiply your input bill by ten."</p>
+<h2 data-kind="sources">Sources</h2>
+<p>Two sources carry this lesson, and they carry different weights: one reports the session numbers, the other verifies the mechanism.</p>
+
+<ul class="sources">
+<li>github.blog/ai-and-ml/migrating-the-github-copilot-runtime-to-rust-using-copilot/ — the experience report behind every session figure here: 136.3B input tokens, the 96.22% cache-read share, the 647 compactions, the $120,000 bill. Single author, private session logs, none of it independently measurable.</li>
+<li>platform.claude.com/docs/en/build-with-claude/prompt-caching — the first-party docs that verify the mechanism: the prefix order tools, then system, then messages, the invalidation of a changed level and everything after it, and cache reads billed at 0.1x base input. Opened and checked 2026-10-15.</li>
+<li>medium.com/airbnb-engineering/accelerating-large-scale-test-migration-with-llms-9565c208023b and arxiv.org/abs/2501.06972 — two independent large-scale migrations that corroborate the shape, not the numbers.</li>
+</ul>
+
+<p>The rule to keep: the harness discipline and the pricing are verified; the session statistics that prove their payoff are one engineer's report.</p>
+</main>
+</div>
+<script>
+(function(){
+  var main=document.querySelector('main'); if(!main) return;
+  // Contents: built from the page's own h2s, so it can never disagree with them.
+  var nav=document.querySelector('nav.toc'), heads=[].slice.call(main.querySelectorAll('h2'));
+  heads.forEach(function(h,i){
+    if(!h.id) h.id='s'+(i+1)+'-'+h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+    if(nav){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;nav.appendChild(a);}
+  });
+  var links=nav?[].slice.call(nav.querySelectorAll('a')):[];
+  var bar=document.getElementById('progress');
+  function onScroll(){
+    var doc=document.documentElement, max=doc.scrollHeight-doc.clientHeight;
+    if(bar) bar.style.width=(max>0?doc.scrollTop/max*100:0)+'%';
+    var cur=0; heads.forEach(function(h,i){ if(h.getBoundingClientRect().top<120) cur=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on',i===cur); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+
+  // Views: one visible at a time, driven by buttons carrying data-show.
+  [].forEach.call(main.querySelectorAll('.toggle-fig'),function(box){
+    var views=[].slice.call(box.querySelectorAll('[data-view]'));
+    var buttons=[].slice.call(box.querySelectorAll('[data-show]'));
+    function pick(name){
+      views.forEach(function(v){ v.classList.toggle('show', v.getAttribute('data-view')===name); });
+      buttons.forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-show')===name); });
+    }
+    buttons.forEach(function(b){ b.onclick=function(){ pick(b.getAttribute('data-show')); }; });
+    if(views.length) pick(views[0].getAttribute('data-view'));
+  });
+  // A link on every heading, so he can send himself back to one section.
+  heads.concat([].slice.call(main.querySelectorAll('h3'))).forEach(function(h){
+    if(!h.id||h.querySelector('a.anchor')) return;
+    var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.textContent='#';
+    a.setAttribute('aria-label','link to this section');h.appendChild(a);
+  });
+  // Copy buttons. The clipboard can be refused inside the sandbox; say so.
+  [].forEach.call(main.querySelectorAll('pre'),function(pre){
+    var code=pre.querySelector('code'); var lang=code&&code.getAttribute('data-lang');
+    if(lang&&!pre.hasAttribute('data-lang')) pre.setAttribute('data-lang',lang);
+    var b=document.createElement('button');b.type='button';b.className='copy';b.textContent='Copy';
+    b.onclick=function(){
+      var t=pre.innerText.replace(/Copy$/,'');
+      try{navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';},function(){b.textContent='Select + copy';});}
+      catch(e){b.textContent='Select + copy';}
+      setTimeout(function(){b.textContent='Copy';},1600);
+    };
+    pre.appendChild(b);
+  });
+  // Bars: the value lives in --v; the <i> is the drawn part.
+  [].forEach.call(main.querySelectorAll('.bar'),function(el){
+    if(!el.querySelector('i')) el.appendChild(document.createElement('i'));
+  });
+  // Steps: one at a time, with a way to see them all.
+  [].forEach.call(main.querySelectorAll('ol.steps'),function(ol){
+    var items=[].slice.call(ol.children); if(items.length<2) return;
+    var i=0, navEl=document.createElement('div'); navEl.className='steps-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);return b;}
+    function show(){items.forEach(function(li,k){li.classList.toggle('show',k<=i);});
+      count.textContent='Step '+(i+1)+' of '+items.length;}
+    ol.classList.add('stepping');
+    btn('Previous',function(){if(i>0){i--;show();}});
+    btn('Next',function(){if(i<items.length-1){i++;show();}});
+    btn('Show all',function(){ol.classList.remove('stepping');navEl.remove();});
+    var count=document.createElement('span');count.style.cssText='font-size:.8rem;color:var(--muted);margin-left:.4rem';
+    navEl.appendChild(count); ol.parentNode.insertBefore(navEl,ol.nextSibling); show();
+  });
+  // Lanes: each row's segments are wrapped once, so the label column holds.
+  // With data-play he walks the steps: the step he is on is outlined, the
+  // ones after it are dimmed, and the note for that step is shown.
+  [].forEach.call(main.querySelectorAll('.lanes'),function(box){
+    var rows=[].slice.call(box.querySelectorAll('.lane'));
+    rows.forEach(function(row){
+      if(row.firstElementChild&&row.firstElementChild.tagName==='DIV') return;
+      var wrap=document.createElement('div');
+      [].slice.call(row.querySelectorAll('i')).forEach(function(s){ wrap.appendChild(s); });
+      row.appendChild(wrap);
+      [].forEach.call(wrap.children,function(s){
+        if(!s.title) s.title=(row.getAttribute('data-label')||'')+': '+(s.getAttribute('data-t')||'');
+      });
+    });
+    if(!box.hasAttribute('data-play')) return;
+    var cols=0; rows.forEach(function(r){ cols=Math.max(cols,r.querySelectorAll('i').length); });
+    if(cols<2) return;
+    var notes=[].slice.call(box.querySelectorAll('.at')), k=-1;
+    var navEl=document.createElement('div'); navEl.className='lanes-nav';
+    function btn(label,fn){var b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;navEl.appendChild(b);}
+    var count=document.createElement('span');
+    function show(){
+      box.classList.toggle('playing',k>=0);
+      rows.forEach(function(r){ [].forEach.call(r.querySelectorAll('i'),function(s,j){
+        s.classList.toggle('later',k>=0&&j>k); s.classList.toggle('now',j===k); }); });
+      notes.forEach(function(n){ n.classList.toggle('show', n.getAttribute('data-step')===String(k+1)); });
+      count.textContent=k<0?'All '+cols+' steps':'Step '+(k+1)+' of '+cols;
+    }
+    btn('Previous step',function(){ if(k>0){k--;show();} });
+    btn('Next step',function(){ if(k<cols-1){k++;show();} });
+    btn('Show all',function(){ k=-1; show(); });
+    navEl.appendChild(count); box.appendChild(navEl); show();
+  });
+  // A stack: the list under the bar is built from the bar, so the two can
+  // never disagree. A part he points at is the one that stays lit.
+  [].forEach.call(main.querySelectorAll('.stack'),function(box){
+    var whole=box.querySelector('.whole'); if(!whole) return;
+    var parts=[].slice.call(whole.querySelectorAll('i')); if(!parts.length) return;
+    var total=0; parts.forEach(function(p){ total+=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0; });
+    var ul=document.createElement('ul');
+    var rows=parts.map(function(p,j){
+      var w=parseFloat(getComputedStyle(p).getPropertyValue('--w'))||0;
+      var li=document.createElement('li'); li.style.setProperty('--c',getComputedStyle(p).getPropertyValue('--c'));
+      var b=document.createElement('b'); b.textContent=p.getAttribute('data-label')||('part '+(j+1));
+      var s=document.createElement('span'); s.textContent=(p.getAttribute('data-value')||window.kit.fmt(w,0))+
+        (total?' · '+Math.round(w/total*100)+'%':'');
+      var e=document.createElement('em'); e.textContent=p.getAttribute('data-note')||'';
+      li.appendChild(b); li.appendChild(s); li.appendChild(e); ul.appendChild(li);
+      p.title=b.textContent+': '+s.textContent;
+      return li;
+    });
+    function pick(j){
+      var same=parts[j].classList.contains('on');
+      parts.forEach(function(p,i){ p.classList.toggle('on',!same&&i===j); rows[i].classList.toggle('on',!same&&i===j); });
+      box.classList.toggle('picked',!same);
+    }
+    parts.forEach(function(p,j){ p.onclick=function(){pick(j);}; rows[j].onclick=function(){pick(j);}; });
+    box.appendChild(ul);
+  });
+  // Tabs: labels come from data-tab.
+  [].forEach.call(main.querySelectorAll('.tabs'),function(box){
+    var panes=[].slice.call(box.children).filter(function(c){return c.hasAttribute('data-tab');});
+    if(!panes.length) return;
+    var navEl=document.createElement('div');navEl.className='tabs-nav';
+    var buttons=panes.map(function(p,k){var b=document.createElement('button');b.type='button';
+      b.textContent=p.getAttribute('data-tab');b.onclick=function(){pick(k);};navEl.appendChild(b);return b;});
+    function pick(k){panes.forEach(function(p,j){p.classList.toggle('show',j===k);});
+      buttons.forEach(function(b,j){b.classList.toggle('on',j===k);});}
+    box.insertBefore(navEl,box.firstChild); box.classList.add('ready'); pick(0);
+  });
+})();
+</script>
+<script data-hq="concept-taps">
+(function(){
+  if(window.__hqTaps) return; window.__hqTaps=true;
+  var list=document.querySelector('ol.concepts'); if(!list) return;
+  var ID=/^c\d{1,2}$/, LABELS=[['got_it','Got it'],['lost_me','Lost me']], boxes={};
+  var css=document.createElement('style');
+  css.textContent='.hq-taps{display:flex;gap:.4rem;margin:.6rem 0 0;flex-wrap:wrap}'+
+    '.hq-taps.after{margin:1.4rem 0 .4rem}'+
+    '.hq-taps button{font:inherit;font-size:.78rem;padding:.2rem .75rem;border-radius:99px;cursor:pointer;'+
+    'border:1px solid var(--line,#ddd);background:var(--bg,#fff);color:var(--muted,#666)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=got_it]{background:var(--ok-soft,#e5f3ea);'+
+    'color:var(--ok,#2f7d4f);border-color:var(--ok,#2f7d4f)}'+
+    '.hq-taps button[aria-pressed=true][data-verdict=lost_me]{background:var(--bad-soft,#fbe9e7);'+
+    'color:var(--bad,#b3261e);border-color:var(--bad,#b3261e)}';
+  document.head.appendChild(css);
+  function mark(c,v){
+    (boxes[c]||[]).forEach(function(box){
+      [].forEach.call(box.querySelectorAll('button'),function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-verdict')===v?'true':'false');
+      });
+    });
+  }
+  function tell(c,v){
+    try{ window.parent.postMessage({hq:'concept',concept:c,verdict:v},'*'); }catch(e){}
+  }
+  function taps(c,after){
+    var box=document.createElement('div'); box.className='hq-taps'+(after?' after':'');
+    box.setAttribute('role','group'); box.setAttribute('aria-label','How did '+c+' land?');
+    LABELS.forEach(function(p){
+      var b=document.createElement('button'); b.type='button'; b.textContent=p[1];
+      b.setAttribute('data-verdict',p[0]); b.setAttribute('aria-pressed','false');
+      b.onclick=function(){ mark(c,p[0]); tell(c,p[0]); };
+      box.appendChild(b);
+    });
+    (boxes[c]=boxes[c]||[]).push(box); return box;
+  }
+  [].forEach.call(list.children,function(li,i){
+    if(li.tagName!=='LI') return;
+    var c=ID.test(li.id||'')?li.id:'c'+(i+1);
+    if(ID.test(c)) li.appendChild(taps(c,false));
+  });
+  // A section ends at the next h2 beside it, or at the end of its parent.
+  [].forEach.call(document.querySelectorAll('h2[data-concept]'),function(h){
+    var c=h.getAttribute('data-concept'); if(!ID.test(c||'')) return;
+    var next=h.nextElementSibling;
+    while(next&&next.tagName!=='H2') next=next.nextElementSibling;
+    h.parentNode.insertBefore(taps(c,true),next);
+  });
+  // The outer page may say what he already chose. Only the frame's parent is heard.
+  window.addEventListener('message',function(e){
+    if(e.source!==window.parent) return;
+    var d=e.data; if(!d||d.hq!=='concept-state'||!d.verdicts||typeof d.verdicts!=='object') return;
+    Object.keys(d.verdicts).forEach(function(c){
+      var v=d.verdicts[c]; if(ID.test(c)&&(v==='got_it'||v==='lost_me')) mark(c,v);
+    });
+  });
+  try{ window.parent.postMessage({hq:'concept-ready'},'*'); }catch(e){}
+})();
+</script>
+</body>
+</html>
