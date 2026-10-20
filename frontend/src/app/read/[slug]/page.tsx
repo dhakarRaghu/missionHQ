@@ -1,8 +1,15 @@
 "use client";
 
-import { use, useEffect, useRef, useState } from "react";
+import { use, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Check, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+  TableOfContents,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 import { ErrorState } from "@/components/error-state";
@@ -106,6 +113,15 @@ export default function ReadLessonPage({
   const at = shelf ? shelf.items.findIndex((i) => i.file === file) : -1;
   const prev = shelf && at > 0 ? shelf.items[at - 1] : null;
   const next = shelf && at >= 0 && at < shelf.items.length - 1 ? shelf.items[at + 1] : null;
+  const [rail, setRail] = usePref("hq:reader:rail");
+  const [contents, setContents] = usePref("hq:reader:contents");
+  const showRail = Boolean(shelf) && rail;
+  const hasContents = Boolean(page.data?.includes('class="toc"'));
+  // The lesson hides its own contents column when told; see READER_KIT in
+  // `scripts/build-reader.mjs`. Sent on every change and on every load.
+  const tellFrame = () =>
+    frame.current?.contentWindow?.postMessage({ type: "hq-reader", contents }, "*");
+  useEffect(tellFrame);
 
   return (
     <div className="flex h-dvh flex-col">
@@ -122,9 +138,10 @@ export default function ReadLessonPage({
             {shelf.title} · {at + 1} of {shelf.items.length}
           </p>
         ) : null}
+        <span className="flex-1" />
         {page.data && answered.length ? (
           <p
-            className="text-muted-foreground ml-auto truncate px-2 text-xs"
+            className="text-muted-foreground hidden min-w-0 truncate px-2 text-xs sm:block"
             title="Your answers, kept on this phone"
           >
             {answered
@@ -132,11 +149,35 @@ export default function ReadLessonPage({
               .join(" · ")}
           </p>
         ) : null}
+        {shelf ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="hidden shrink-0 lg:inline-flex"
+            aria-pressed={rail}
+            onClick={() => setRail(!rail)}
+          >
+            {rail ? <PanelLeftClose aria-hidden data-icon="inline-start" /> : <PanelLeftOpen aria-hidden data-icon="inline-start" />}
+            {rail ? "Hide playlist" : "Playlist"}
+          </Button>
+        ) : null}
+        {hasContents ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0"
+            aria-pressed={contents}
+            onClick={() => setContents(!contents)}
+          >
+            <TableOfContents aria-hidden data-icon="inline-start" />
+            {contents ? "Hide contents" : "Contents"}
+          </Button>
+        ) : null}
       </div>
 
-      <div className="reader-lesson flex-1">
-        {shelf ? <PlaylistRail shelf={shelf} file={file} readHere={readHere} /> : <div className="hidden lg:block" />}
-        <div className="flex min-h-0 flex-col lg:col-start-2">
+      <div className="reader-lesson flex-1" data-rail={showRail ? "on" : "off"}>
+        {shelf && showRail ? <PlaylistRail shelf={shelf} file={file} readHere={readHere} /> : null}
+        <div className="flex min-h-0 flex-col">
           {page.isPending ? (
             <Skeleton className="m-4 flex-1" />
           ) : page.isError ? (
@@ -153,6 +194,7 @@ export default function ReadLessonPage({
                 ref={frame}
                 title="Lesson"
                 srcDoc={page.data}
+                onLoad={tellFrame}
                 sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
                 className="bg-background w-full flex-1 border-0"
               />
@@ -200,6 +242,47 @@ export default function ReadLessonPage({
       </div>
     </div>
   );
+}
+
+/**
+ * A shown/hidden switch kept in this browser's storage. The server render
+ * says "shown"; the client reads storage. Without storage (private mode) the
+ * switch still works for the visit, kept in `memory`.
+ */
+const PREF_EVENT = "hq:reader:pref";
+const memory = new Map<string, boolean>();
+
+function readPref(key: string): boolean {
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (stored !== null) return stored !== "off";
+  } catch {
+    // No storage: fall through to this visit's value.
+  }
+  return memory.get(key) ?? true;
+}
+
+function subscribePref(onChange: () => void) {
+  window.addEventListener(PREF_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(PREF_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+function usePref(key: string): [boolean, (on: boolean) => void] {
+  const on = useSyncExternalStore(subscribePref, () => readPref(key), () => true);
+  const set = (value: boolean) => {
+    memory.set(key, value);
+    try {
+      window.localStorage.setItem(key, value ? "on" : "off");
+    } catch {
+      // Not remembered after this visit.
+    }
+    window.dispatchEvent(new Event(PREF_EVENT));
+  };
+  return [on, set];
 }
 
 /** The course this lesson belongs to, as a playlist beside it. Wide screens only. */

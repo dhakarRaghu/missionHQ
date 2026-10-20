@@ -241,6 +241,11 @@
     .reader-lesson {
       grid-template-columns: 18rem minmax(0, 1fr);
     }
+
+    /* "Hide playlist": the lesson takes the whole width. */
+    .reader-lesson[data-rail="off"] {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 
   /* Three-pane reading workspace (Courses): the syllabus, the lesson itself,

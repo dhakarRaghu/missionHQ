@@ -11,6 +11,7 @@
 //   was rewritten under a newer date, only the newest file is kept.
 // - `<date>-lab-…` files and every other page are articles.
 // - `…-page.html` files are drafts and are left out.
+// - Every shipped page gets the safety tags (see `harden`).
 // - Details the HTML does not carry (reading time, kind, topic, the read
 //   flag from the old Postgres export) are kept from the previous
 //   `index.json` for files that still exist.
@@ -33,6 +34,33 @@ const DATE_RE = /^(\d{4}-\d{2}-\d{2})-/u;
 const ONE_LINER_MAX = 400;
 
 const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+
+// The same walls `harden_page` in `backend/src/hq/api/learning.py` puts on a
+// lesson: the content policy (inline style and script only, nothing loads)
+// and `<base target="_blank">` (a source link must open a new tab, never
+// navigate the lesson frame). Vercel serves these files with no backend in
+// front, so the build is the only place to add them.
+const CSP =
+  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" +
+  " img-src data:; font-src data:; form-action 'none'; base-uri 'none'";
+
+// Lets the reader page hide the lesson's own contents column. The parent
+// posts `{ type: "hq-reader", contents: false }`; only messages from the
+// parent frame count. Lessons without `nav.toc` ignore it.
+const READER_KIT =
+  "<style>html.hq-no-toc nav.toc{display:none!important}" +
+  "@media (min-width:1100px){html.hq-no-toc .layout{grid-template-columns:minmax(0,1fr)!important}" +
+  "html.hq-no-toc main{margin-inline:auto}}</style>" +
+  '<script data-hq="reader-kit">addEventListener("message",function(e){' +
+  'if(e.source!==parent||!e.data||e.data.type!=="hq-reader")return;' +
+  'document.documentElement.classList.toggle("hq-no-toc",e.data.contents===false)});</script>';
+
+function harden(html) {
+  const page = html.replace(/^---\n[\s\S]*?\n---\n/u, "");
+  const head = `<meta http-equiv="Content-Security-Policy" content="${CSP}"><base target="_blank">${READER_KIT}`;
+  const at = page.match(/<head[^>]*>/iu);
+  return at ? page.slice(0, at.index + at[0].length) + head + page.slice(at.index + at[0].length) : head + page;
+}
 
 function decode(text) {
   return text
@@ -157,7 +185,10 @@ function main() {
   fs.rmSync(lessonsOut, { recursive: true, force: true });
   fs.mkdirSync(lessonsOut, { recursive: true });
   const shipped = [...courseList.flatMap((c) => c.phases), ...articles].map((l) => l.file);
-  for (const file of shipped) fs.copyFileSync(path.join(LESSONS, file), path.join(lessonsOut, file));
+  for (const file of shipped) {
+    const html = fs.readFileSync(path.join(LESSONS, file), "utf8");
+    fs.writeFileSync(path.join(lessonsOut, file), harden(html));
+  }
 
   const index = { built_at: new Date().toISOString(), courses: courseList, articles };
   fs.writeFileSync(path.join(OUT, "index.json"), `${JSON.stringify(index, null, 1)}\n`);
