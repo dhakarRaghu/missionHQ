@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template. `ops/grid-env.sh install` substitutes __GRID_API_KEY__ from
+  backend/.env and writes the result, mode 600, to ~/Library/LaunchAgents.
+  The result holds a secret: never commit it, never copy it into the repo.
+
+  It calls /bin/launchctl directly and not a script in this checkout, because
+  launchd may not run /bin/bash on anything under ~/Desktop or ~/Documents
+  ("Operation not permitted", macOS privacy protection).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.missionhq.gridenv</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/launchctl</string>
+    <string>setenv</string>
+    <string>GRID_API_KEY</string>
+    <string>__GRID_API_KEY__</string>
+  </array>
+
+  <!-- One-shot at every login. Not KeepAlive: it sets a variable and exits. -->
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
